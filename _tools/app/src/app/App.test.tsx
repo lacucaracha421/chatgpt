@@ -760,7 +760,7 @@ describe("App", () => {
       await user.keyboard("{Enter}");
       expect(await screen.findByText(query, { selector: "h1, h2, [class*=title]" })).toBeInTheDocument();
     }
-    await user.click(screen.getByRole("button", { name: "검색 해제" }));
+    await user.click(await screen.findByRole("button", { name: "검색 해제" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "검색 해제" })).not.toBeInTheDocument());
     expect(screen.queryByText("눈 내리는 겨울")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
@@ -1777,8 +1777,9 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
     // The full-width list keeps its sections and view controls together.
-    expect(await screen.findByRole("button", { name: /^정렬/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^내 별점/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "보기" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^정렬/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^내 별점/ })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "게임" })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByRole("button", { name: "라이브러리" })).not.toBeInTheDocument();
     // Plain title search still lives in the 찾기 palette.
@@ -1786,8 +1787,9 @@ describe("App", () => {
     await user.keyboard("{Control>}q{/Control}");
     const search = within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox");
     await user.type(search, "nier");
-    expect(screen.getAllByRole("option")[0]).toHaveTextContent(/컬렉션에서 ‘nier’ 검색/);
-    await user.keyboard("{Enter}");
+    // A strong title match is preselected and opened by Enter; the view's own search stays one click away.
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("NieR: Automata");
+    await user.click(screen.getByRole("option", { name: /컬렉션에서 ‘nier’ 검색/ }));
     await user.dblClick(await screen.findByText("NieR: Automata"));
     await user.click(await screen.findByRole("button", { name: "목록으로" }, { timeout: 5_000 }));
     expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();

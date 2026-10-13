@@ -113,12 +113,6 @@ export function originalTitle(item:CollectionSummary){const value=item.originalT
 export const collectionCardCredit=(item:CollectionSummary)=>collectionCredit(item);
 export {collectionCardDate};
 
-export const SORT_LABELS:Record<CollectionFilters['sort'],string>={media_date:'최신순',recent:'최근 추가',name:'제목'};
-/** Direction words follow the sort: dates read newest/oldest, titles read alphabetical/reverse. */
-export function sortDirectionLabels(sort:CollectionFilters['sort']):Record<CollectionFilters['direction'],string> {
-  return sort==='name'?{asc:'가나다순',desc:'역순'}:{desc:'최신순',asc:'오래된순'};
-}
-export const ratingLabel=(rating:CollectionFilters['rating'])=>typeof rating==='number'?`★ ${rating.toFixed(1)}`:rating==='unrated'?'미평가':'전체';
 /** A volume's local release date as `2024.3.5`, or '' when the publication has none. */
 export function volumeReleaseLabel(volume:CollectionVolume) {
   const match=/^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(volume.localReleaseDate?.trim()??'');

@@ -142,8 +142,14 @@ describe("CollectionBrowser", () => {
       return new Promise<never>(() => undefined);
     });
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, fetchLaunchBoxSpines });
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
-    await user.click(await screen.findByRole("menuitem", { name: "책등 받기" }));
+    expect(screen.queryByRole("button", { name: "작품 관리" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(await screen.findByRole("button", { name: "책등 받기" }));
+    // 관리 shows the progress and its own 취소 where the row was.
+    const manage = screen.getByRole("menu").querySelector<HTMLElement>(".collection-view-manage__status")!;
+    expect(manage).toHaveTextContent("12/178");
+    expect(within(screen.getByRole("menu")).getByRole("button", { name: "책등 받기 취소" })).toBeInTheDocument();
+    expect(within(screen.getByRole("menu")).queryByRole("button", { name: "책등 받기" })).not.toBeInTheDocument();
     const status = await waitFor(() => {
       const found = document.querySelector<HTMLElement>(".collection-toolbar__spine-status");
       expect(found).not.toBeNull();
@@ -182,7 +188,7 @@ describe("CollectionBrowser", () => {
     } finally { Reflect.deleteProperty(document, "startViewTransition"); }
   });
 
-  it("puts the types in the section bar with sort, rating and view at its right end", async () => {
+  it("puts the types in the section bar with one 보기 menu at its right end", async () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
@@ -201,13 +207,18 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByRole("tablist", { name: "컬렉션 유형" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "정렬과 필터" })).not.toBeInTheDocument();
     const header = screen.getByRole("toolbar", { name: "컬렉션 도구" });
-    expect(within(bar).getByRole("button", { name: "정렬" })).toBeVisible();
-    expect(within(bar).getByRole("button", { name: "내 별점" })).toBeVisible();
+    // Sort and rating moved into 보기; the trailing group is shortcuts | 보기.
+    expect(within(bar).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
+    expect(within(bar).queryByRole("button", { name: "내 별점" })).not.toBeInTheDocument();
     expect(within(bar).getByRole("button", { name: "보기" })).toBeVisible();
     expect(within(header).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
-    expect(within(header).getByRole("button", { name: "컬렉션 검색" })).toBeVisible();
+    // The top bar keeps an icon-only search; the ⋯ 작품 관리 button is gone.
+    const search = within(header).getByRole("button", { name: "컬렉션 검색" });
+    expect(search).toBeVisible();
+    expect(search).toHaveTextContent("");
+    expect(within(header).queryByRole("button", { name: "작품 관리" })).not.toBeInTheDocument();
     expect(screen.getByTestId("search-label")).toHaveTextContent("제목 검색");
-    await userEvent.click(within(bar).getByRole("button", { name: "내 별점" }));
+    await userEvent.click(within(bar).getByRole("button", { name: "보기" }));
     const rating = screen.getByRole("slider", { name: "내 별점" });
     expect(rating).toHaveValue("0"); expect(rating).toHaveAttribute("aria-valuetext", "전체");
     expect(rating).toHaveAttribute("min", "0"); expect(rating).toHaveAttribute("max", "10");
@@ -234,7 +245,7 @@ describe("CollectionBrowser", () => {
   it("shows a saved rating outside the presets as the selected option", async () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: { ...defaults.game, rating: 0 } });
-    await userEvent.click(screen.getByRole("button", { name: "내 별점" }));
+    await userEvent.click(screen.getByRole("button", { name: "보기" }));
     const rating = screen.getByRole("slider", { name: "내 별점" });
     expect(rating).toHaveAttribute("aria-valuetext", "★ 0.0");
     expect(rating).toHaveValue("1");
@@ -249,14 +260,13 @@ describe("CollectionBrowser", () => {
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
-  it("sets sort and filters rating from the toolbar menus", async () => {
+  it("sets sort and filters rating from the one 보기 menu", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "정렬" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "제목 · 가나다순" }));
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "정렬 기준" })).getByRole("radio", { name: "제목" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, sort: "name", direction: "asc" });
-    await user.click(screen.getByRole("button", { name: "내 별점" }));
     const rating = screen.getByRole("slider", { name: "내 별점" });
     expect(rating).toHaveValue("0");
     fireEvent.change(rating, { target: { value: "9" } });
@@ -271,9 +281,102 @@ describe("CollectionBrowser", () => {
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"unrated"}));
     expect(screen.getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "true");
     expect(rating).toHaveAttribute("aria-valuetext", "미평가");
-    // A set filter offers 초기화 under the controls.
+    // A set filter offers 초기화 in the section label.
     await user.click(screen.getByRole("button", { name: "초기화" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"all"}));
+    expect(screen.queryByRole("button", { name: "초기화" })).not.toBeInTheDocument();
+  });
+
+  const menuTitles = () => [...screen.getByRole("menu").querySelectorAll(".ui-section-label__title")].map(node => node.textContent);
+
+  it("orders the 보기 sections 내 별점, 배치, 정렬 and adds 관리 only for games on the PC", async () => {
+    const user = userEvent.setup();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, fetchLaunchBoxSpines: vi.fn() });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(menuTitles()).toEqual(["내 별점", "배치", "정렬", "관리"]);
+    expect(within(screen.getByRole("menu")).getByRole("button", { name: "책등 받기" })).toBeEnabled();
+    // 초기화 only appears with a filter on.
+    expect(screen.queryByRole("button", { name: "초기화" })).not.toBeInTheDocument();
+    cleanup();
+    renderBrowser({ collections: [{ ...sample, type: "manga" }], typeFilter: "manga", showcase: false, fetchLaunchBoxSpines: vi.fn() });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(menuTitles()).toEqual(["내 별점", "배치", "정렬"]);
+    expect(within(screen.getByRole("radiogroup", { name: "배치" })).getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["격자", "선반", "책장"]);
+    expect(screen.queryByRole("radiogroup", { name: "묶기" })).not.toBeInTheDocument();
+    cleanup();
+    // Without the LaunchBox command (not the PC app) there is nothing to manage.
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(menuTitles()).toEqual(["내 별점", "배치", "정렬"]);
+  });
+
+  it("splits sort into 기준 and 순서 that map to the existing sort values", async () => {
+    const user = userEvent.setup();
+    const onLibraryStateChange = vi.fn();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    const criteria = () => within(screen.getByRole("radiogroup", { name: "정렬 기준" }));
+    const order = () => within(screen.getByRole("radiogroup", { name: "정렬 순서" }));
+    expect(criteria().getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["발매일", "추가일", "제목"]);
+    expect(order().getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["최신순", "오래된순"]);
+    expect(criteria().getByRole("radio", { name: "발매일" })).toHaveAttribute("aria-checked", "true");
+    await user.click(order().getByRole("radio", { name: "오래된순" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "media_date", direction: "asc" }));
+    // 오래된순 stays across the two date criteria.
+    await user.click(criteria().getByRole("radio", { name: "추가일" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "recent", direction: "asc" }));
+    // 제목 reads 가나다순 / 역순 and starts at 가나다순.
+    await user.click(criteria().getByRole("radio", { name: "제목" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "name", direction: "asc" }));
+    expect(order().getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["가나다순", "역순"]);
+    await user.click(order().getByRole("radio", { name: "역순" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "name", direction: "desc" }));
+    // Back to a date criterion restarts at 최신순.
+    await user.click(criteria().getByRole("radio", { name: "발매일" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "media_date", direction: "desc" }));
+  });
+
+  it("groups games from 정렬 and keeps 발매 연도 on the release order", async () => {
+    const user = userEvent.setup();
+    const onLibraryStateChange = vi.fn();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange, libraryState: { ...createDefaultCollectionLibraryState().game, sort: "name", direction: "asc" } });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    const grouping = () => within(screen.getByRole("radiogroup", { name: "묶기" }));
+    expect(grouping().getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["안 묶음", "기기", "발매 연도"]);
+    expect(grouping().getByRole("radio", { name: "기기" })).toHaveAttribute("aria-checked", "true");
+    await user.click(grouping().getByRole("radio", { name: "발매 연도" }));
+    expect(grouping().getByRole("radio", { name: "발매 연도" })).toHaveAttribute("aria-checked", "true");
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "media_date", direction: "desc" }));
+    expect(JSON.parse(localStorage.getItem("lakomics.collections.view.game.v1")!)).toMatchObject({ grouping: "year" });
+    // 발매 연도 needs 발매일, so another 기준 puts it back to 안 묶음; 기기 survives a sort change.
+    await user.click(within(screen.getByRole("radiogroup", { name: "정렬 기준" })).getByRole("radio", { name: "제목" }));
+    expect(grouping().getByRole("radio", { name: "안 묶음" })).toHaveAttribute("aria-checked", "true");
+    await user.click(grouping().getByRole("radio", { name: "기기" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "정렬 순서" })).getByRole("radio", { name: "역순" }));
+    expect(grouping().getByRole("radio", { name: "기기" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("shows the on 내 별점 filter as a chip in the list head that takes it off", async () => {
+    const user = userEvent.setup();
+    const onLibraryStateChange = vi.fn();
+    renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Second", myScore: 4 }], typeFilter: "game", showcase: false, onLibraryStateChange });
+    expect(screen.queryByRole("button", { name: "내 별점 필터 빼기" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    fireEvent.change(screen.getByRole("slider", { name: "내 별점" }), { target: { value: "8" } });
+    await user.keyboard("{Escape}");
+    const chip = screen.getByRole("button", { name: "내 별점 필터 빼기" });
+    expect(chip).toHaveTextContent("내 별점 4.0");
+    expect(chip.closest(".collection-browser__section")).toHaveTextContent("검색 결과");
+    expect(screen.queryByRole("button", { name: /Astral Chain/ })).not.toBeInTheDocument();
+    await user.click(chip);
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ rating: "all" }));
+    expect(screen.queryByRole("button", { name: "내 별점 필터 빼기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
+    // 미평가 reads as its own word.
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("button", { name: "미평가" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "내 별점 필터 빼기" })).toHaveTextContent("내 별점 미평가");
   });
 
   const trackingWith = (items: ReleaseInboxItem[]) => ({ listInbox: vi.fn().mockResolvedValue(items), acknowledge: vi.fn(), setOwnedCount: vi.fn(), listOwnership: vi.fn(), setOwnership: vi.fn() }) as unknown as CollectionTrackingGateway;
@@ -511,7 +614,7 @@ describe("CollectionBrowser", () => {
 
   it("keeps the Showcase count independent of library search and rating", async () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }, { ...sample, id: "other", name: "다른 작품", showcase: true, myScore: 4.5 }], typeFilter: "game", showcase: false });
-    await userEvent.click(screen.getByRole("button", { name: "내 별점" }));
+    await userEvent.click(screen.getByRole("button", { name: "보기" }));
     fireEvent.change(screen.getByRole("slider", { name: "내 별점" }), { target: { value: "10" } });
     expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
@@ -638,7 +741,7 @@ describe("CollectionBrowser", () => {
     fireEvent.click(first);
     fireEvent.scroll(list); expect(first).toHaveAttribute("aria-selected", "true");
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "정렬" }));
+    await user.click(screen.getByRole("button", { name: "컬렉션 검색" }));
     expect(first).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "보기" }));

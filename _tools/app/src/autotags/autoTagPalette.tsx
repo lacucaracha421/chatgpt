@@ -32,6 +32,7 @@ export function useAutoTagPaletteSearch(open: boolean, view: AssetView, onNaviga
       group: "tag",
       label: entry.label,
       context: entry.label === autoTagEnglish(entry.tag) ? undefined : autoTagEnglish(entry.tag),
+      keywords: [autoTagEnglish(entry.tag)],
       count: entry.count,
       icon: <span className="auto-tag-palette-mark" />,
       run: apply(entry.tag, "include"),

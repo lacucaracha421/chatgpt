@@ -40,6 +40,8 @@ export const characterHubApi = {
   allGroups: (): Promise<CharacterGroup[]> => invoke("all_character_groups"),
   /** Stores the order of one series' groups: every group of the series, once each. */
   reorderGroups: (seriesId: string, groupIds: string[]): Promise<void> => invoke("reorder_character_groups", { seriesId, groupIds }),
+  /** Stores the order of one visible band of characters: the series' loose characters (`groupId` null) or one group's members, each once. */
+  reorderCharacters: (seriesId: string, groupId: string | null, targetIds: string[]): Promise<void> => invoke("reorder_character_folders", { seriesId, groupId, targetIds }),
   saveSeries: (request: CharacterSeries): Promise<CharacterSeries> => invoke("save_character_series", { request }),
   browse: ({ view, ...query }: CharacterBrowseQuery): Promise<CharacterBrowsePage> => invoke("browse_character_assets", view ? { query, view } : { query }),
   createManualCharacter: (request: ManualCharacterRequest): Promise<import("./api").CharacterTarget> => invoke("create_manual_character", { request }),

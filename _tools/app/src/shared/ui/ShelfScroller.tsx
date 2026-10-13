@@ -1,6 +1,14 @@
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useHorizontalWheel } from "./useHorizontalWheel";
+
+/**
+ * A shelf whose cards can be carried (the character shelf) shares this with its shelves: while
+ * `locked` the shelf neither starts nor continues its own pointer pan, and `track` is the scrolling
+ * element. Shelves outside a provider are unaffected.
+ */
+export type ShelfBridge = { locked: boolean; track: HTMLElement | null };
+export const ShelfBridgeContext = createContext<ShelfBridge | null>(null);
 
 type ShelfScrollerProps = {
   children: ReactNode;
@@ -11,6 +19,7 @@ type ShelfScrollerProps = {
 
 /** Horizontal shelf with wheel panning, pointer drag, glide, and paging arrows. */
 export function ShelfScroller({ children, previousLabel = "이전 발매 예정", nextLabel = "다음 발매 예정", wholeCards = false }: ShelfScrollerProps) {
+  const bridge = useContext(ShelfBridgeContext);
   const track = useRef<HTMLDivElement>(null);
   const shelf = useRef<HTMLDivElement>(null);
   const cardStep = useRef(0);
@@ -81,21 +90,22 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   });
   const bindTrack = useCallback((node: HTMLDivElement | null) => {
     track.current = node;
+    if (bridge) bridge.track = node;
     const cleanup = bindWheel(node);
-    return () => { cleanup?.(); track.current = null; };
-  }, [bindWheel]);
+    return () => { cleanup?.(); track.current = null; if (bridge && bridge.track === node) bridge.track = null; };
+  }, [bindWheel, bridge]);
 
   const drag = useRef<{ x: number; left: number; moved: boolean; lastX: number; lastT: number; velocity: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const pointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "mouse" || event.button !== 0 || !track.current) return;
+    if (event.pointerType !== "mouse" || event.button !== 0 || !track.current || bridge?.locked) return;
     stop();
     drag.current = { x: event.clientX, left: track.current.scrollLeft, moved: false, lastX: event.clientX, lastT: event.timeStamp, velocity: 0 };
   };
   const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const state = drag.current;
     const node = track.current;
-    if (!state || !node) return;
+    if (!state || !node || bridge?.locked) return;
     const dx = event.clientX - state.x;
     if (!state.moved && Math.abs(dx) < 4) return;
     if (!state.moved) { state.moved = true; setDragging(true); node.setPointerCapture?.(event.pointerId); }

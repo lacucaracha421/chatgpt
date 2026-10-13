@@ -3,12 +3,22 @@ import type { ClassificationDropTarget, InternalDragPayload } from "../shared/in
 
 export type SidebarDropTarget = Exclude<ClassificationDropTarget, { kind: "character" }>;
 
+/** The row without the gap its own drop mark opens above or below it (the rows part there), so the half the pointer is in does not flip while the gap opens. */
+function rowBox(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const style = typeof getComputedStyle === "function" ? getComputedStyle(element) : null;
+  const top = Number.parseFloat(style?.paddingTop ?? "") || 0, bottom = Number.parseFloat(style?.paddingBottom ?? "") || 0;
+  // Only a row showing a drop mark carries the gap; its normal padding is zero vertically.
+  const gap = element.dataset.dropState === "valid" && element.dataset.dropPosition !== "inside";
+  return gap ? { top: rect.top + top, height: rect.height - top - bottom } : { top: rect.top, height: rect.height };
+}
+
 /** A group row is a drop place only for another group of the same series; the upper half drops before it, the lower half after. */
 function groupTargetAt(x: number, y: number, payload: Extract<InternalDragPayload, { kind: "character-group" }>): SidebarDropTarget | null {
   const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-character-group-id]");
   const entryId = element?.dataset.characterGroupId;
   if (!element || !entryId) return null;
-  const rect = element.getBoundingClientRect();
+  const rect = rowBox(element);
   const position = rect.height > 0 && y - rect.top >= rect.height / 2 ? "after" : "before";
   return { kind: "character-group", entryId, position, valid: entryId !== payload.groupId && element.dataset.seriesId === payload.seriesId };
 }
@@ -19,7 +29,7 @@ export function sidebarTargetAt(x: number, y: number, payload: InternalDragPaylo
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
   if (!element || !entryId) return null;
-  const rect = element.getBoundingClientRect();
+  const rect = rowBox(element);
   const fraction = rect.height > 0 ? (y - rect.top) / rect.height : 0.5;
   const position = payload.kind === "classification" && kind === "classification"
     ? fraction < 0.25 ? "before" : fraction > 0.75 ? "after" : "inside"

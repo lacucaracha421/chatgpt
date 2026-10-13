@@ -350,21 +350,23 @@ it("opens the 찾기 palette with Ctrl+Q, filters by name and navigates with Ent
 
   await user.keyboard("{Control>}q{/Control}");
   const palette = screen.getByRole("dialog", { name: "찾기" });
-  const field = within(palette).getByRole("combobox", { name: "작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" });
+  const field = within(palette).getByRole("combobox", { name: "작품, 폴더·캐릭터, 태그, 작가, 메모 또는 메뉴 이름" });
   expect(field).toHaveFocus();
   const groups = within(palette).getAllByRole("group").filter(group => group.hasAttribute("aria-labelledby")).map((group) => group.getAttribute("aria-labelledby") && document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent);
   expect(groups[0]).toBe("확인할 것");
   expect(within(palette).getAllByRole("option")[0]).toHaveAccessibleName("유사 검토 5개");
-  expect(within(palette).queryByRole("option", { name: /설정 · 클라우드/ })).not.toBeInTheDocument();
+  expect(within(palette).queryByRole("option", { name: /설정 › 클라우드/ })).not.toBeInTheDocument();
   expect(within(palette).queryByRole("option", { name: "메모" })).not.toBeInTheDocument();
 
   await user.type(field, "휴지");
   expect(within(palette).getAllByRole("option").map((option) => option.getAttribute("aria-label") ?? option.textContent)).toEqual(["휴지통 1개"]);
   await user.clear(field);
   await user.type(field, "설정");
-  expect(within(palette).getAllByRole("option").map((option) => option.textContent)).toEqual(["설정", "설정 · 자주 쓰는 것", "설정 · 화면", "설정 · 라이브러리", "설정 · 연결", "이동 3개 더 보기"]);
-  await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
-  expect(within(palette).getByRole("option", { name: "설정 · 연결" })).toHaveAttribute("aria-selected", "true");
+  expect(within(palette).getAllByRole("option")[0]).toHaveTextContent("설정");
+  expect(within(palette).getByText("메뉴 2개 더 보기")).toBeVisible();
+  const connectionIndex = within(palette).getAllByRole("option").findIndex(option => option.textContent === "설정 › 연결");
+  for (let at = 0; at < connectionIndex; at += 1) await user.keyboard("{ArrowDown}");
+  expect(within(palette).getByRole("option", { name: "설정 › 연결" })).toHaveAttribute("aria-selected", "true");
   await user.keyboard("{Enter}");
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "connection" });
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
@@ -378,8 +380,21 @@ it("never offers asset text search in the palette", async () => {
   await user.type(screen.getByRole("combobox"), "sunset");
   expect(screen.queryAllByRole("option")).toHaveLength(0);
   expect(screen.getByText("검색 결과 없음")).toBeVisible();
-  expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "작품, 작가, 메모, 폴더 찾기");
+  expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", "캐릭터, 폴더, 태그 찾기");
   expect(screen.queryByText("이 화면은 검색이 없어 이름으로 이동만 합니다")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["발매 캘린더", {kind:"collections",typeFilter:"game",showcase:false,releaseCalendar:true}],
+  ["쇼케이스", {kind:"collections",typeFilter:"game",showcase:true}],
+  ["신간", {kind:"collections",typeFilter:"manga",showcase:false,releaseProvider:"kakao"}],
+] as const)("opens the existing %s view from find",async(label,destination)=>{
+  const user=userEvent.setup(),onNavigate=vi.fn();
+  render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate}/>);
+  await user.click(screen.getByRole("button",{name:"찾기"}));
+  await user.type(screen.getByRole("combobox"),label);
+  expect(screen.getAllByRole("option")[0]).toHaveTextContent(label);
+  await user.keyboard("{Enter}");expect(onNavigate).toHaveBeenLastCalledWith(destination);
 });
 
 it("closes the palette with Escape and returns focus to the rail button", async () => {
@@ -489,22 +504,22 @@ function renderWithView(view: ReactNode) {
   </WorkspaceChromeProvider></BackNavigationProvider>);
 }
 
-it("puts the view's search first while typing and applies it with Enter", async () => {
+it("uses the view's search when no strong name matches and applies it with Enter", async () => {
   const user = userEvent.setup();
   const onApply = vi.fn();
   renderWithView(<SearchableView onApply={onApply} />);
   expect(screen.queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "찾기" }));
-  const field = screen.getByRole("combobox", { name: "작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" });
-  expect(field).toHaveAttribute("placeholder", "작품, 작가, 메모, 폴더 찾기");
+  const field = screen.getByRole("combobox", { name: "작품, 폴더·캐릭터, 태그, 작가, 메모 또는 메뉴 이름" });
+  expect(field).toHaveAttribute("placeholder", "작품 찾기");
   expect(screen.queryByRole("option", { name: /에서 검색/ })).not.toBeInTheDocument();
-  await user.type(field, "설정");
+  await user.type(field, "없는 작품");
   const options = screen.getAllByRole("option");
-  expect(options[0]).toHaveTextContent("게임 컬렉션에서 ‘설정’ 검색");
+  expect(options[0]).toHaveTextContent("게임 컬렉션에서 ‘없는 작품’ 검색");
   expect(options[0]).toHaveAttribute("aria-selected", "true");
-  expect(options[1]).toHaveTextContent("설정");
+  expect(options).toHaveLength(1);
   await user.keyboard("{Enter}");
-  expect(onApply).toHaveBeenLastCalledWith("설정");
+  expect(onApply).toHaveBeenLastCalledWith("없는 작품");
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "찾기" })).toHaveFocus();
   // The active query stays visible with its own clear button.
@@ -612,9 +627,10 @@ it("limits each name group to five matches and lets it expand", async () => {
   await user.click(screen.getByRole("button", { name: "찾기" }));
   await user.type(screen.getByRole("combobox"), "설정");
   const options = screen.getAllByRole("option");
-  expect(options.slice(0, 5).every((option) => option.textContent?.startsWith("설정 폴더"))).toBe(true);
-  expect(options[5]).toHaveTextContent("폴더 7개 더 보기");
-  await user.click(options[5]);
+  // The best match sits alone in the heading-free top row, then the group shows five more.
+  expect(options.slice(0, 6).every((option) => option.textContent?.startsWith("설정 폴더"))).toBe(true);
+  expect(options[6]).toHaveTextContent("폴더·캐릭터 6개 더 보기");
+  await user.click(options[6]);
   expect(screen.getAllByRole("option").filter(option => option.textContent?.startsWith("설정 폴더"))).toHaveLength(12);
 });
 

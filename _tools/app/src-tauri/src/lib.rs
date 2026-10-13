@@ -474,6 +474,7 @@ pub fn run() {
             commands::characters::unlink_character_tagger_tag,
             commands::characters::relink_character_tagger_tag,
             commands::characters::move_character_folder,
+            commands::characters::reorder_character_folders,
             commands::characters::apply_automatic_characters,
             commands::characters::character_series,
             commands::characters::save_character_series,

@@ -212,6 +212,26 @@ describe('plain section bodies', () => {
     const empty = parseMemo('## A');
     expect(memoBody(editSectionBody(empty, empty.lines[0]!.id, '# literal'))).toBe('## A\n\\# literal');
   });
+  it.each(['text', 'todo'] as const)('inserts a %s section below a chosen one, keeping line ends and other ids', mode => {
+    const line = mode === 'todo' ? '- [ ] ' : '';
+    const body = `${line}top\r\n## A\r\n${line}a\r\n## B\r\n${line}b`;
+    const doc = parseMemo(body);
+    const [, a, b] = memoSections(doc);
+    const next = addMemoSection(doc, mode, a!.id);
+    expect(memoBody(next)).toBe(`${line}top\r\n## A\r\n${line}a\r\n## 새 섹션\r\n${mode === 'todo' ? '- [ ]\r\n' : ''}## B\r\n${line}b`);
+    const after = memoSections(next);
+    expect(after.map(section => section.title)).toEqual([null, 'A', '새 섹션', 'B']);
+    expect(after[1]!.id).toBe(a!.id); expect(after[3]!.id).toBe(b!.id);
+    // The last section, an unknown id and no id all append at the end.
+    expect(memoBody(addMemoSection(doc, mode, b!.id))).toBe(memoBody(addMemoSection(doc, mode)));
+    expect(memoBody(addMemoSection(doc, mode, 'nope'))).toBe(memoBody(addMemoSection(doc, mode)));
+  });
+  it('inserts below a heading-only section and keeps unique names', () => {
+    const doc = parseMemo('## 새 섹션\n## B\nb');
+    const next = addMemoSection(doc, 'text', memoSections(doc)[1]!.id);
+    expect(memoBody(next)).toBe('## 새 섹션\n## 새 섹션 2\n## B\nb');
+    expect(memoSections(next).map(section => section.title)).toEqual([null, '새 섹션', '새 섹션 2', 'B']);
+  });
   it.each(['text', 'todo'] as const)('appends a uniquely named %s section without changing old bytes', mode => {
     const body = '## 새 섹션\r\nold\r\n## 새 섹션 2\r\nlast';
     const next = addMemoSection(parseMemo(body), mode);

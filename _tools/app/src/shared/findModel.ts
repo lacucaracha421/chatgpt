@@ -1,41 +1,115 @@
-import { matchesKoreanSearch } from "./koreanSearch";
+import { createKoreanMatcher, normalizeSearchText, matchesKoreanSearch } from "./koreanSearch";
 import type { NavigationEntry, NavigationEntryGroup } from "./findEntries";
 
-export const FIND_SCOPES = ["전체", "작품", "작가", "메모", "폴더", "화면", "명령"] as const;
+export const FIND_SCOPES = ["전체", "작품", "폴더·캐릭터", "태그", "작가", "메모", "메뉴"] as const;
 export type FindScope = typeof FIND_SCOPES[number];
-export const FIND_GROUP_ORDER: NavigationEntryGroup[] = ["content", "search", "work", "artist", "note", "place", "queue", "recent", "go", "action"];
+export type FindTab = "assets" | "home" | "collections" | "manga" | "notes" | "menu";
+export type FindContext = { tab: FindTab; workType?: "game" | "manga" | "movie" | "av" };
 export const GROUP_LIMIT = 5;
 export const RECENT_LIMIT = 5;
 const recentMemory = new Map<string, string[]>();
 const RECENT_STORAGE = "lakomics.find.recent.v1:";
-
+const HOME_ORDER: NavigationEntryGroup[] = ["work", "place", "tag", "artist", "note", "menu"];
+const TAB_ORDER: Record<FindTab, NavigationEntryGroup[]> = {
+  assets: ["place", "tag", "artist", "work", "note", "menu"],
+  home: HOME_ORDER,
+  collections: ["work", "search", "place", "artist", "tag", "note", "menu"],
+  manga: ["work", "search", "menu", "place", "tag", "artist", "note"],
+  notes: ["note", "search", "menu", "work", "place", "tag", "artist"],
+  menu: ["menu", "search", "work", "place", "tag", "artist", "note"],
+};
+export function allowsSceneSearch(tab: FindTab) { return tab === "assets" || tab === "home"; }
+export function findPlaceholder(tab: FindTab) {
+  return { assets: "캐릭터, 폴더, 태그 찾기", collections: "작품 찾기", manga: "망가 제목 찾기", notes: "메모 찾기", home: "작품, 캐릭터, 폴더, 태그 찾기", menu: "메뉴, 작품, 폴더 찾기" }[tab];
+}
+function normalizedGroup(group: NavigationEntryGroup): NavigationEntryGroup {
+  return ["go", "action", "settings", "queue"].includes(group) ? "menu" : group;
+}
 export function entryScope(entry: NavigationEntry): FindScope {
-  if (entry.group === "content") return "전체";
   if (entry.group === "work") return "작품";
   if (entry.group === "artist") return "작가";
   if (entry.group === "note") return "메모";
-  if (entry.group === "place") return "폴더";
-  if (entry.group === "action" || entry.group === "tag") return "명령";
-  return "화면";
+  if (entry.group === "place") return "폴더·캐릭터";
+  if (entry.group === "tag") return "태그";
+  return entry.group === "content" ? "전체" : "메뉴";
 }
-
-export function findGroups(entries: NavigationEntry[], query: string, scope: FindScope, recentIds: string[]) {
+/** Literal name/alias matches are strong; substring and Korean initials remain weak. */
+export function nameMatchRank(entry: NavigationEntry, query: string): number {
+  const needle = normalizeSearchText(query);
+  return Math.min(3, ...[entry.label, ...(entry.keywords ?? [])].map(field => {
+    const value = normalizeSearchText(field);
+    if (value === needle) return 0;
+    if (value.startsWith(needle)) return 1;
+    const words = field.normalize("NFC").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    if (words.some((_, index) => normalizeSearchText(words.slice(index).join(" ")).startsWith(needle))) return 2;
+    return 3;
+  }));
+}
+function placeOrder(entry: NavigationEntry) {
+  if (entry.placeKind) return { character: 0, folder: 1, album: 2 }[entry.placeKind];
+  return entry.id.startsWith("place-character-") ? 0 : entry.id.startsWith("place-folder-") ? 1 : 2;
+}
+export function findGroups(entries: NavigationEntry[], query: string, scope: FindScope, recentIds: string[], context: FindContext = { tab: "home" }) {
   const typed = query.trim();
-  // 내용 검색 searches every image, so it belongs to 전체 only; the view's own search follows every scope.
-  const accepts = (entry: NavigationEntry) => entry.group === "content" ? scope === "전체" : scope === "전체" || entry.group === "search" || entryScope(entry) === scope;
-  const visible = typed
-    ? entries.filter(entry => accepts(entry) && (entry.group === "search" || entry.group === "content" || matchesKoreanSearch([entry.label, ...(entry.keywords ?? [])], typed)))
-    : [...entries.filter(entry => accepts(entry) && (entry.group === "queue" || entry.group === "search")),
-      ...recentIds.flatMap(id => {
-        const entry = entries.find(candidate => candidate.id === id);
-        return entry && accepts(entry) && entry.group !== "queue" ? [{ ...entry, group: "recent" as const }] : [];
-      }).slice(0, RECENT_LIMIT)];
-  const grouped = visible.map(entry => entry.group === "settings" || (typed && entry.group === "queue")
-    ? { ...entry, group: "go" as const } : entry.group === "tag" ? { ...entry, group: "action" as const } : entry);
-  return FIND_GROUP_ORDER.flatMap(group => {
-    const items = grouped.filter(entry => entry.group === group);
-    return items.length ? [{ group, items }] : [];
-  });
+  const accepts = (entry: NavigationEntry) => entry.group === "content"
+    ? scope === "전체" && allowsSceneSearch(context.tab)
+    : scope === "전체" || entry.group === "search" || entryScope(entry) === scope;
+  if (!typed) {
+    const queues = entries.filter(entry => accepts(entry) && (entry.group === "queue" || entry.group === "search"));
+    const recent = recentIds.flatMap(id => {
+      const entry = entries.find(candidate => candidate.id === id);
+      return entry && accepts(entry) && entry.group !== "queue" ? [entry] : [];
+    }).slice(0, RECENT_LIMIT);
+    return ["search", "queue", "recent"].flatMap(group => {
+      const items = group === "recent" ? recent : queues.filter(entry => entry.group === group);
+      return items.length ? [{ group: group as NavigationEntryGroup, items }] : [];
+    });
+  }
+  const order = TAB_ORDER[context.tab];
+  const matcher = createKoreanMatcher(typed);
+  const visible = entries.filter(entry => accepts(entry) && (entry.group === "search" || entry.group === "content" || matcher([entry.label, ...(entry.keywords ?? [])])));
+  const rank = new Map(visible.map(entry => [entry.id, nameMatchRank(entry, typed)]));
+  const groupRank = (entry: NavigationEntry) => {
+    // Only manga works occupy Manga's first priority; other work types follow its menu.
+    if (context.tab === "manga" && entry.group === "work" && entry.workType !== "manga") return 2.5;
+    const at = order.indexOf(normalizedGroup(entry.group));
+    return at < 0 ? order.length : at;
+  };
+  const compare = (a: NavigationEntry, b: NavigationEntry) => {
+    const recentRank = (entry: NavigationEntry) => { const at = recentIds.indexOf(entry.id); return at < 0 ? Infinity : at; };
+    const sameName = normalizeSearchText(a.label) === normalizeSearchText(b.label);
+    return groupRank(a) - groupRank(b)
+      || (context.tab === "collections" && a.group === "work" && b.group === "work" && context.workType ? Number(b.workType === context.workType) - Number(a.workType === context.workType) : 0)
+      || rank.get(a.id)! - rank.get(b.id)!
+      || (context.tab === "assets" && sameName && a.group === "place" && b.group === "place" ? placeOrder(a) - placeOrder(b) : 0)
+      || ((recentRank(a) === recentRank(b)) ? 0 : recentRank(a) < recentRank(b) ? -1 : 1)
+      || (b.count ?? 0) - (a.count ?? 0)
+      || a.label.length - b.label.length
+      || a.label.localeCompare(b.label, "ko");
+  };
+  const names = visible.filter(entry => entry.group !== "content" && entry.group !== "search");
+  const strong = names.filter(entry => rank.get(entry.id)! < 3).sort(compare);
+  const weak = names.filter(entry => rank.get(entry.id)! >= 3).sort(compare);
+  const search = visible.filter(entry => entry.group === "search");
+  const content = visible.filter(entry => entry.group === "content");
+  const screenSearch = search.find(entry => !entry.id.endsWith("clear"));
+  // Asset and Home put the scene search ahead of the view's own search; the other tabs do the reverse.
+  const best = strong[0] ?? (allowsSceneSearch(context.tab) ? content[0] ?? screenSearch : screenSearch ?? content[0]) ?? weak[0];
+  const groups: { group: NavigationEntryGroup; items: NavigationEntry[] }[] = best ? [{ group: "best", items: [best] }] : [];
+  // Keep strength tiers separate so a weak result in the preferred group cannot precede a strong one elsewhere.
+  const append = (rows: NavigationEntry[]) => {
+    for (const entry of rows) {
+      if (entry === best) continue;
+      const group = normalizedGroup(entry.group);
+      const previous = groups[groups.length - 1];
+      if (previous?.group === group) previous.items.push(entry);
+      else groups.push({ group, items: [entry] });
+    }
+  };
+  append([...strong, ...search].sort((a, b) => groupRank(a) - groupRank(b) || (a.group === "search" || b.group === "search" ? 0 : compare(a, b))));
+  append(weak);
+  append(content);
+  return groups;
 }
 
 /** Persist identifiers only. Resolve names and permissions again from the active library. */

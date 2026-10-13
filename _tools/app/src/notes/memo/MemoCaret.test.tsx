@@ -83,17 +83,13 @@ it('leaves tablet typing to the tablet pane (keyboard avoidance) instead of foll
   expect(box.scrollTop).toBe(500);
 });
 
-it('shows 섹션 추가 as its own button after the last section', async () => {
+it('adds a section from each head with no separate 섹션 추가 button', async () => {
   function Harness() {
     const [body, setBody] = useState('top\n## A\na\n## B\nb');
     return <MemoEditor noteId="one" body={body} onChange={next => { setBody(next); }}/>;
   }
   render(<Harness/>);
-  const add = screen.getByRole('button', { name: '섹션 추가' });
-  expect(add).toHaveClass('ui-button--secondary');
-  expect(add.querySelector('svg')).not.toBeNull();
-  const sections = document.querySelectorAll('.memo-section');
-  expect(sections[sections.length - 1]!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  await userEvent.click(add);
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+  await userEvent.click(screen.getAllByRole('button', { name: '아래에 섹션 추가' })[1]!);
   expect(screen.getByRole('textbox', { name: '섹션 이름' })).toBeInTheDocument();
 });

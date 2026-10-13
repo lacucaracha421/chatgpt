@@ -156,6 +156,11 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     { id: "collections", group: "go" as const, label: "컬렉션", icon: <AREA_ICONS.collections />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType, showcase: false }) },
     { id: "manga", group: "go" as const, label: "망가", icon: <AREA_ICONS.manga />, run: () => onNavigate({ kind: "manga" }) },
     ...entries];
+  paletteEntries.push(
+    { id: "release-calendar", group: "go", label: "발매 캘린더", icon: <AREA_ICONS.collections />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType === "movie" ? "movie" : "game", showcase: false, releaseCalendar: true }) },
+    { id: "showcase", group: "go", label: "쇼케이스", icon: <AREA_ICONS.collections />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType, showcase: true }) },
+    { id: "new-releases", group: "go", label: "신간", icon: <AREA_ICONS.collections />, run: () => onNavigate({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" }) },
+  );
   const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
   const libraryGateway = useOptionalLibrary()?.gateway;
   const descriptionSource = useMemo(() => descriptionSearchSource(libraryGateway), [libraryGateway]);
@@ -235,7 +240,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
+    <CommandPalette context={{ tab: area === "manage" || area === "exchange" || area === "private_vault" ? "menu" : area, workType: view.kind === "collection" ? collections.find(work => work.id === view.collectionId)?.type : collectionType }} open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }
 

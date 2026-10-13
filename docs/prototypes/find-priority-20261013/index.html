@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>찾기 우선순위 시안</title>
+<!-- 앱의 실제 폰트, 토큰, 공용 베이스, 컨트롤, 크롬(찾기 팔레트), 찾기 줄, 자동 태그 표식 CSS를 불러온다.
+     페이지 틀, 임시 이미지(그라디언트), 새로 제안하는 '맨 위 한 줄'만 이 파일에 있다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/shared/findEntry.css">
+<link rel="stylesheet" href="../../../_tools/app/src/autotags/autoTags.css">
+<style>
+/* 앱 셸은 html/body 높이를 고정하지만, 이 페이지는 문서처럼 스크롤된다. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0c0d; color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); user-select: text; -webkit-user-select: text; }
+.doc { word-break: keep-all; overflow-wrap: break-word; width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 8px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+h3.sub { margin: 0 0 8px; font-size: var(--type-body); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 110ch; line-height: 1.7; }
+.lead b, .note b { color: var(--color-text); font-weight: 600; }
+.cap { font-size: var(--type-meta); color: var(--color-faint); }
+.cap b { color: var(--color-text); font-weight: 600; }
+.ann { margin: 0; padding-left: 0; list-style: none; font-size: var(--type-meta); color: var(--color-muted); line-height: 1.6; max-width: 640px; }
+.ann li + li { margin-top: 4px; }
+.ann li::before { content: "— "; color: var(--color-faint); }
+.ann b { color: var(--color-text); font-weight: 600; }
+.pair { display: grid; grid-template-columns: 640px 640px; gap: 32px 64px; margin-top: 16px; align-items: start; }
+.pair > section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; font-size: var(--type-meta); font-weight: 600; background: var(--color-surface-elevated); color: var(--color-muted); }
+.tag--rec { background: var(--color-accent); color: var(--color-on-accent); }
+.tag--now { background: transparent; border: 1px solid var(--color-border-strong); }
+table.t { border-collapse: collapse; width: 100%; max-width: 1376px; font-size: var(--type-meta); margin-top: 8px; }
+table.t th, table.t td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--color-border); line-height: 1.6; }
+table.t th { color: var(--color-faint); font-weight: 400; }
+table.t td:first-child { color: var(--color-text); font-weight: 600; white-space: nowrap; }
+table.t td { color: var(--color-muted); }
+table.t td b { color: var(--color-text); font-weight: 600; }
+.bad { color: var(--color-danger); }
+code { font-family: var(--font-ui); font-size: inherit; color: var(--color-text); background: var(--color-surface); padding: 0 4px; border-radius: 2px; }
+
+/* 팔레트를 문서 안에 고정 배치한다(앱에서는 화면 가운데 떠 있다). */
+.stage { position: relative; padding: 24px; background: color-mix(in srgb, var(--color-bg) 60%, #000); }
+.stage .command-palette { position: relative; left: auto; top: auto; transform: none; width: 100%; max-height: none; z-index: auto; }
+.stage .ui-text-input { border-radius: var(--radius-control) var(--radius-control) 0 0; box-shadow: inset 0 -2px 0 var(--color-focus); }
+.stage .ui-text-input svg { width: 16px; height: 16px; color: var(--color-muted); flex: none; }
+.ctx { display: flex; align-items: baseline; gap: 8px; font-size: var(--type-meta); color: var(--color-muted); }
+.ctx b { color: var(--color-text); font-weight: 600; font-size: var(--type-body); }
+
+/* 제안: 맨 위 한 줄(가장 맞는 것). 그룹 제목 없이 맨 위에 있고, 아래 그룹과 1px 선으로 나뉜다. Enter 표시는 오른쪽 끝. */
+.command-palette__best { padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.command-palette__best .command-palette__option { min-height: 48px; }
+.find-kbd { font: inherit; font-size: var(--type-meta); color: var(--color-muted); padding: 1px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); white-space: nowrap; }
+/* 장면 미리보기 칸: 앱의 command-palette__thumb 와 같은 64px 정사각형. */
+.g { display: block; width: 100%; height: 100%; }
+.cover { display: block; width: var(--control-height); height: calc(var(--control-height) * 1.25); border-radius: var(--radius-tile); }
+.chips-demo { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 0; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: var(--type-meta); color: var(--color-muted); }
+.rule { counter-reset: r; list-style: none; padding: 0; margin: 8px 0 0; max-width: 110ch; }
+.rule li { counter-increment: r; display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border); color: var(--color-muted); line-height: 1.7; }
+.rule li::before { content: counter(r); flex: none; width: 24px; color: var(--color-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rule b { color: var(--color-text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="root" class="doc">
+
+<header>
+  <h1>찾기: 이름으로 바로 가기, 탭마다 다른 우선순위</h1>
+  <p class="lead">사용자 의견(2026-10-13, 9번): 자연어 검색은 뒤로. <b>‘레베카’ 입력 후 Enter면 레베카 태그·폴더·캐릭터로 바로 가야 한다.</b> 컬렉션 탭에서는 컬렉션 결과가 먼저, 다른 탭도 같은 방식. 그리고 ‘화면’과 ‘명령’의 차이를 모르겠다.
+  이 시안은 지금 찾기 팔레트(<code>Ctrl+Q</code>, 2026-10-05에 Ctrl+K를 대체)의 그룹·범위·순서와 Enter 처리를 정리하고, 새 순서 규칙과 예시 화면을 보여 준다.</p>
+  <div class="legend"><span><span class="tag tag--now">지금</span> 현재 앱</span><span><span class="tag tag--rec">추천</span> 추천안</span><span><span class="tag">대안</span> 고를 수 있는 다른 안</span></div>
+</header>
+
+<!-- ───────────────────────── 1. 지금 상태 ───────────────────────── -->
+<section>
+  <h2 class="sec">1. 지금 상태</h2>
+  <p class="note">코드 기준: <code>src/shared/findModel.ts</code>(그룹·범위·순서), <code>src/layout/CommandPalette.tsx</code>(행 만들기·Enter), <code>src/shared/findEntries.ts</code>(그룹 이름), <code>layout/navigationEntries.tsx</code>(폴더·앨범·캐릭터, 메뉴 항목), <code>autotags/autoTagPalette.tsx</code>(태그).</p>
+  <table class="t">
+    <tr><th>순서</th><th>그룹 제목</th><th>들어 있는 것</th><th>범위 칩</th><th>문제</th></tr>
+    <tr><td>1</td><td>이미지 내용</td><td>‘…’ 장면 찾기 + 미리보기 6칸 (2글자 이상이면 늘 나옴)</td><td>전체만</td><td class="bad">늘 맨 위라 Enter가 여기로 감</td></tr>
+    <tr><td>2</td><td>이 화면에서</td><td>지금 화면의 자체 검색 (컬렉션·망가·메모), 검색 해제</td><td>모든 범위</td><td>이름 결과보다 위</td></tr>
+    <tr><td>3</td><td>작품</td><td>컬렉션 작품 전체 (게임·만화·영화·AV)</td><td>작품</td><td>앞부분 일치 정렬 없음</td></tr>
+    <tr><td>4</td><td>작가</td><td>에셋 작가</td><td>작가</td><td>정렬 없음</td></tr>
+    <tr><td>5</td><td>메모</td><td>메모 제목</td><td>메모</td><td></td></tr>
+    <tr><td>6</td><td>폴더</td><td>폴더, 앨범, <b>캐릭터</b> (앞부분 일치 → 짧은 이름 순)</td><td>폴더</td><td class="bad">캐릭터가 6번째 그룹</td></tr>
+    <tr><td>7</td><td>확인할 것</td><td>입력이 없을 때만 (유사 검토·미분류·전송 대기)</td><td>화면</td><td></td></tr>
+    <tr><td>8</td><td>최근 연 것</td><td>입력이 없을 때만, 5개</td><td>원래 범위</td><td></td></tr>
+    <tr><td>9</td><td>이동</td><td>홈·에셋·컬렉션·망가·메모·작가·통계·휴지통·설정, <code>설정 · 화면</code> 등 설정 7곳</td><td><b>화면</b></td><td class="bad">칩은 ‘화면’, 그룹은 ‘이동’, 설정에도 ‘화면’이 있음</td></tr>
+    <tr><td>10</td><td>실행</td><td>파일 가져오기, 절약 모드 켜기/끄기, <b>자동 태그 전부</b></td><td><b>명령</b></td><td class="bad">태그가 ‘실행’ 맨 아래에 숨음</td></tr>
+  </table>
+  <ul class="ann" style="margin-top:12px; max-width:110ch">
+    <li><b>Enter</b>는 강조된 줄을 실행하고, 강조는 처음에 늘 첫 줄이다. 그래서 에셋에서 ‘레베카’ Enter → 장면 검색 화면이 열린다. 컬렉션에서도 이미지 내용 줄이 1번이다.</li>
+    <li>그룹 순서가 <b>모든 탭에서 같다.</b> 지금 어느 탭에 있는지는 순서에 영향이 없다. 작품·작가 안에서는 일치 정도로 정렬하지 않는다.</li>
+    <li>칩은 <code>전체 · 작품 · 작가 · 메모 · 폴더 · 화면 · 명령</code>. ‘화면’은 이동할 곳, ‘명령’은 실행할 일 + 태그인데 이름만 봐서는 구분이 안 된다. 태블릿은 ‘명령’ 칩이 이미 없다.</li>
+    <li>발매 캘린더·쇼케이스·신간은 찾기에 없다. 로컬 망가 제목과 AV 배우 이름도 찾기 대상이 아니다(화면 자체 검색 줄로만 닿음).</li>
+  </ul>
+  <div class="pair">
+    <section>
+      <div class="ctx"><span class="tag tag--now">지금</span><b>에셋 탭 · ‘레베카’</b></div>
+      <div class="stage" id="p-now"></div>
+    </section>
+    <section style="padding-top:36px">
+      <ul class="ann">
+        <li>강조(=Enter)가 <b>‘레베카’ 장면 찾기</b>에 있다. 미리보기 6칸이 매번 불려 와 가장 큰 줄이 된다.</li>
+        <li>찾던 캐릭터 레베카는 ‘폴더’ 그룹 안, 화면 가운데쯤.</li>
+        <li>레베카 태그(412장)는 맨 아래 <b>‘실행’</b> 그룹에 있다. 태그라는 말이 화면에 없다.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<!-- ───────────────────────── 2. 새 순서 규칙 ───────────────────────── -->
+<section>
+  <h2 class="sec">2. 새 순서 규칙 <span class="tag tag--rec">추천</span></h2>
+  <p class="note">핵심은 <b>맨 위 한 줄</b>이다. 모든 그룹을 통틀어 가장 맞는 이름 하나를 그룹 제목 없이 맨 위에 두고, 처음부터 강조한다. Enter는 그 줄을 연다. 그 아래 그룹 순서는 지금 탭에 따라 바뀐다.</p>
+  <ol class="rule">
+    <li><span><b>강한 일치가 약한 일치보다 늘 위.</b> 강한 일치 = 이름(또는 원제·영문 태그·별칭)이 입력과 완전히 같음, 앞부분이 같음, 단어 첫머리가 같음. 약한 일치 = 중간에 포함, 초성만 맞음.</span></li>
+    <li><span><b>강한 일치끼리는 지금 탭의 우선 그룹이 위</b>(아래 표). 그래서 컬렉션에서 ‘젤다’는 작품이, 에셋에서 ‘젤다’는 캐릭터가 맨 위다. 지금 탭 그룹에 강한 일치가 없으면 다른 그룹의 강한 일치가 올라온다(컬렉션에서 ‘레베카’ → 캐릭터 레베카).</span></li>
+    <li><span><b>같은 그룹 안에서는</b> 완전히 같음 → 앞부분 같음 → 최근 연 것 → 이미지·작품 수가 많은 것 → 짧은 이름 순. 컬렉션에서는 지금 고른 종류(게임 탭이면 게임)가 먼저.</span></li>
+    <li><span><b>아무 이름도 강하게 맞지 않으면</b> 맨 위 한 줄은 ‘이 화면 검색’(컬렉션·망가·메모) 또는 ‘장면 찾기’(에셋·홈)가 된다. 약한 일치만 있으면 그중 첫 줄이 맨 위.</span></li>
+    <li><span><b>장면 찾기(자연어)</b>는 에셋·홈에서만, 늘 맨 끝 한 줄. 미리보기 6칸은 그 줄로 내려가 강조되었을 때나 맨 위가 되었을 때만 불러온다. <code>Ctrl+Enter</code>는 어느 줄이 강조돼 있든 바로 장면 찾기.</span></li>
+  </ol>
+  <table class="t" style="margin-top:16px">
+    <tr><th>지금 탭</th><th>그룹 순서 (위 → 아래)</th><th>이 화면 검색 줄</th><th>장면 찾기</th><th>입력칸 안내 문구</th></tr>
+    <tr><td>에셋 (폴더·앨범·미분류·작가 페이지 포함)</td><td><b>폴더·캐릭터 → 태그 → 작가</b> → 작품 → 메모 → 메뉴</td><td>없음 (에셋은 자체 검색이 없음)</td><td>맨 끝, Ctrl+Enter</td><td>캐릭터, 폴더, 태그 찾기</td></tr>
+    <tr><td>컬렉션</td><td><b>작품</b>(지금 종류 먼저) → <b>이 화면 검색</b> → 폴더·캐릭터 → 작가 → 태그 → 메모 → 메뉴</td><td>작품 바로 아래</td><td>안 나옴</td><td>작품 찾기</td></tr>
+    <tr><td>망가</td><td><b>만화 작품 → 이 화면 검색</b>(로컬 망가 / 온라인 카탈로그) → 메뉴 → 나머지는 홈 순서</td><td>이름이 안 맞으면 맨 위</td><td>안 나옴</td><td>망가 제목 찾기</td></tr>
+    <tr><td>메모</td><td><b>메모 제목 → 메모 본문 검색</b> → 메뉴 → 나머지는 홈 순서</td><td>제목이 안 맞으면 맨 위</td><td>안 나옴</td><td>메모 찾기</td></tr>
+    <tr><td>홈</td><td>작품 → 폴더·캐릭터 → 태그 → 작가 → 메모 → 메뉴</td><td>없음</td><td>맨 끝</td><td>작품, 캐릭터, 폴더, 태그 찾기</td></tr>
+    <tr><td>설정·통계·휴지통·전송</td><td><b>메뉴</b> → 나머지는 홈 순서</td><td>해당 화면에 있으면 메뉴 아래</td><td>맨 끝</td><td>메뉴, 작품, 폴더 찾기</td></tr>
+  </table>
+  <ul class="ann" style="margin-top:12px; max-width:110ch">
+    <li>범위 칩의 <b>순서는 탭과 상관없이 고정</b>한다(손에 익은 Tab 순서 유지). 바뀌는 것은 ‘전체’ 안의 결과 순서뿐이다.</li>
+    <li>입력이 없을 때(확인할 것 + 최근 연 것 5개)는 지금과 같다.</li>
+    <li>태그 줄의 <code>Shift+Enter</code>(태그 제외)는 그대로 둔다. 태그는 ‘실행’에서 빠져 자기 그룹 ‘태그’로 간다.</li>
+  </ul>
+</section>
+
+<!-- ───────────────────────── 3. 화면 / 명령 ───────────────────────── -->
+<section>
+  <h2 class="sec">3. ‘화면’과 ‘명령’ 대신</h2>
+  <div class="pair">
+    <section>
+      <div class="ctx"><span class="tag tag--rec">추천 A</span><b>하나로 합쳐 ‘메뉴’</b></div>
+      <div class="stage"><div class="command-palette"><div class="command-palette__scopes" style="padding:8px">
+        <button class="ui-filter-chip" aria-pressed="true">전체</button><button class="ui-filter-chip">작품</button><button class="ui-filter-chip">폴더·캐릭터</button><button class="ui-filter-chip">태그</button><button class="ui-filter-chip">작가</button><button class="ui-filter-chip">메모</button><button class="ui-filter-chip">메뉴</button>
+      </div></div></div>
+      <ul class="ann">
+        <li>더보기 패널·레일에 있는 곳, 설정 7곳, 발매 캘린더·쇼케이스·신간(새로 넣음), 파일 가져오기·절약 모드를 모두 <b>‘메뉴’ 한 그룹</b>에 둔다. 앱에 있는 메뉴를 이름으로 고르는 곳이라는 뜻이 바로 읽힌다.</li>
+        <li>줄 이름은 그대로 쓴다: <code>통계</code>, <code>휴지통</code>, <code>설정 › 화면</code>, <code>발매 캘린더</code>, <code>파일 가져오기</code>, <code>절약 모드 켜기</code>. 설정 하위는 <code>설정 · 화면</code> → <code>설정 › 화면</code>(폴더 경로와 같은 기호).</li>
+        <li>태그는 ‘태그’ 칩으로 독립. 칩이 7개로 지금과 같다.</li>
+      </ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag">대안 B</span><b>둘로 두고 이름만 ‘이동’ / ‘실행’</b></div>
+      <div class="stage"><div class="command-palette"><div class="command-palette__scopes" style="padding:8px">
+        <button class="ui-filter-chip" aria-pressed="true">전체</button><button class="ui-filter-chip">작품</button><button class="ui-filter-chip">폴더·캐릭터</button><button class="ui-filter-chip">태그</button><button class="ui-filter-chip">작가</button><button class="ui-filter-chip">메모</button><button class="ui-filter-chip">이동</button><button class="ui-filter-chip">실행</button>
+      </div></div></div>
+      <ul class="ann">
+        <li>칩과 그룹 제목을 같은 말로 맞춘다(지금은 칩 ‘화면’ ↔ 제목 ‘이동’, 칩 ‘명령’ ↔ 제목 ‘실행’).</li>
+        <li>‘실행’에 남는 것은 파일 가져오기·절약 모드 둘뿐이라 칩 하나를 차지할 만큼 크지 않다. 칩이 8개로 늘어난다.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<!-- ───────────────────────── 4. 장면 찾기 위치 ───────────────────────── -->
+<section>
+  <h2 class="sec">4. 장면 찾기(자연어)를 어디에</h2>
+  <div class="pair">
+    <section>
+      <div class="ctx"><span class="tag tag--rec">추천 A</span><b>맨 끝 한 줄 + 필요할 때만 미리보기</b></div>
+      <ul class="ann">
+        <li>에셋·홈의 ‘전체’에서 맨 끝 한 줄 <code>‘레베카’ 장면 찾기</code>, 오른쪽에 <code>Ctrl+Enter</code>. 미리보기 칸이 없어 한 줄 높이다.</li>
+        <li>화살표로 그 줄까지 내려가면 그때 미리보기 6칸을 불러온다(아래로 펼쳐지는 동작은 140ms, 칸은 준비된 뒤 한 번에).</li>
+        <li>이름이 하나도 안 맞으면(예: ‘비 오는 거리’) 이 줄이 맨 위 한 줄이 되고 미리보기를 바로 불러온다.</li>
+        <li>컬렉션·망가·메모에서는 나오지 않는다.</li>
+      </ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag">대안 B</span><b>‘장면’ 칩을 따로 두기</b></div>
+      <div class="stage"><div class="command-palette"><div class="command-palette__scopes" style="padding:8px">
+        <button class="ui-filter-chip">전체</button><button class="ui-filter-chip">작품</button><button class="ui-filter-chip">폴더·캐릭터</button><button class="ui-filter-chip">태그</button><button class="ui-filter-chip">작가</button><button class="ui-filter-chip">메모</button><button class="ui-filter-chip">메뉴</button><button class="ui-filter-chip" aria-pressed="true">장면</button>
+      </div></div></div>
+      <ul class="ann">
+        <li>‘전체’에서는 장면 찾기가 아예 안 보이고, Tab이나 칩으로 ‘장면’을 골라야 나온다. 이름 결과가 가장 깨끗하다.</li>
+        <li>대신 이름이 안 맞는 문장을 쳐도 ‘검색 결과 없음’이 먼저 보인다. 자주 쓰면 한 단계가 늘어난다.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<!-- ───────────────────────── 5. 예시 ───────────────────────── -->
+<section>
+  <h2 class="sec">5. 예시 화면 (추천안 A + A)</h2>
+  <p class="note">맨 위 한 줄이 처음부터 강조되어 있고 Enter로 열린다. 이미지는 자리표시 그라디언트다.</p>
+  <div class="pair">
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>에셋 탭 · ‘레베카’</b></div>
+      <div class="stage" id="p-rebecca"></div>
+      <ul class="ann"><li>캐릭터 레베카가 이름이 완전히 같고 에셋 탭 우선 그룹이라 맨 위. <b>Enter = 레베카 캐릭터 폴더로 이동.</b></li><li>태그는 자기 그룹. Shift+Enter면 레베카 태그 제외.</li><li>장면 찾기는 맨 끝 한 줄, 미리보기 없음.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>에셋 탭 · ‘아스나’ (같은 이름 둘)</b></div>
+      <div class="stage" id="p-asuna"></div>
+      <ul class="ann"><li>두 작품에 같은 이름 캐릭터가 있으면 <b>최근 연 쪽</b>, 그다음 이미지가 많은 쪽이 맨 위. 경로(블루 아카이브 / 소드 아트 온라인)로 구분된다.</li><li>다른 쪽은 ↓ 한 번.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>컬렉션 탭(게임) · ‘젤다’</b></div>
+      <div class="stage" id="p-zelda-col"></div>
+      <ul class="ann"><li>컬렉션에서는 작품이 우선. 앞부분이 같은 작품 넷 중 최근 연 작품이 맨 위.</li><li>‘게임 컬렉션에서 검색’ 줄은 작품 바로 아래. 캐릭터 젤다는 그 아래.</li><li>장면 찾기 없음.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>에셋 탭 · ‘젤다’ (같은 입력, 다른 탭)</b></div>
+      <div class="stage" id="p-zelda-asset"></div>
+      <ul class="ann"><li>에셋에서는 이름이 완전히 같은 캐릭터 젤다가 맨 위, 폴더 ‘젤다의 전설’이 다음.</li><li>작품은 에셋 탭에서 뒤쪽 그룹.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>컬렉션 탭 · ‘발매’</b></div>
+      <div class="stage" id="p-release"></div>
+      <ul class="ann"><li>작품 이름에는 강한 일치가 없어 메뉴의 <b>발매 캘린더</b>(새로 넣는 메뉴 줄)가 맨 위.</li><li>쇼케이스·신간도 같은 방식으로 메뉴에 들어간다. 이름이 맞는 메모 제목도 아래에 보인다.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>망가 탭 · ‘설정’</b></div>
+      <div class="stage" id="p-settings"></div>
+      <ul class="ann"><li>‘설정’이 완전히 같은 메뉴 줄이 맨 위, 설정 하위 7곳은 ‘메뉴’ 그룹에 <code>설정 › …</code>로. 칩 이름과 겹치던 ‘설정 · 화면’ 문제가 사라진다.</li><li>망가 탭이라 ‘로컬 망가에서 검색’ 줄은 메뉴보다 위.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><span class="tag tag--rec">제안</span><b>에셋 탭 · ‘비 오는 거리’ (이름 없음)</b></div>
+      <div class="stage" id="p-scene"></div>
+      <ul class="ann"><li>맞는 이름이 없으니 장면 찾기가 맨 위 한 줄이 되고, 그때 미리보기를 불러온다. 첫 미리보기 전에는 자리표시만, 400ms가 지나야 ‘장면을 찾는 중…’.</li></ul>
+    </section>
+    <section>
+      <div class="ctx"><b>태블릿 (같은 규칙)</b></div>
+      <ul class="ann" style="margin-top:8px">
+        <li>태블릿 찾기 시트(<code>mobile-client/FindSheet.tsx</code>)는 같은 <code>findGroups</code>를 쓰므로 <b>순서 규칙·그룹 이름·칩 이름이 그대로 따라온다.</b> 탭 정보만 넘기면 된다.</li>
+        <li>맨 위 한 줄은 64 높이 두 줄 행. Enter 표시 대신 그냥 누르는 줄이고, 화면 키보드의 검색(Enter) 키가 그 줄을 연다.</li>
+        <li>‘메뉴’ 칩은 태블릿에도 둔다(지금 ‘명령’ 칩만 빠져 있음). 파일 가져오기·절약 모드처럼 PC 전용 줄만 태블릿에서 빠진다.</li>
+        <li>장면 찾기는 같은 맨 끝 한 줄. 태블릿엔 화살표 강조가 없으므로 미리보기는 그 줄이 맨 위일 때만, 아니면 눌러서 바로 연다. Ctrl+Enter는 없음.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<!-- ───────────────────────── 6. 결정 ───────────────────────── -->
+<section>
+  <h2 class="sec">6. 정할 것</h2>
+  <ol class="rule">
+    <li><span><b>화면/명령:</b> 추천 A ‘메뉴’ 하나로 합치기 / 대안 B ‘이동’·‘실행’ 둘로 이름만 맞추기.</span></li>
+    <li><span><b>장면 찾기:</b> 추천 A 맨 끝 한 줄 + 강조될 때만 미리보기 + Ctrl+Enter / 대안 B ‘장면’ 칩에서만.</span></li>
+    <li><span><b>에셋 탭에서 같은 이름이 캐릭터·폴더·태그에 다 있을 때 무엇이 맨 위?</b> 추천: 캐릭터 → 폴더 → 앨범 → 태그(가는 곳이 먼저, 필터는 다음). 태그가 먼저여야 하면 알려 주기.</span></li>
+    <li><span><b>새로 넣을 이름(선택):</b> 발매 캘린더·쇼케이스·신간 메뉴 줄은 추천(이미 있는 화면). 로컬 망가 제목, AV 배우 이름은 기기에 있는 데이터지만 지금 찾기 대상이 아니라 넣으면 범위가 늘어난다 — 이번에 넣을지.</span></li>
+  </ol>
+</section>
+
+</div>
+
+<script>
+/* 정적 시안: 팔레트를 데이터로 그린다. 앱의 실제 클래스(command-palette, find-entry, ui-filter-chip, ui-text-input)를 쓴다. */
+const P = {
+  search: '<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>',
+  user: '<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/>',
+  folder: '<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/>',
+  album: '<path stroke-linecap="round" stroke-linejoin="round" d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/>',
+  photo: '<path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/>',
+  settings: '<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/>',
+  calendar: '<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/>',
+  grid: '<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/>',
+  book: '<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/>',
+  note: '<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/>',
+};
+const svg = k => `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">${P[k]}</svg>`;
+const GR = ['#5b3a6e,#d06a8c', '#203a5a,#4fa3c7', '#2e4a2a,#9bc46a', '#5a3a1e,#e0a050', '#3a2440,#8a6ab0', '#1e3a3a,#6ac0b0', '#4a2020,#c06050', '#2a2a40,#7080c0'];
+const grad = i => `linear-gradient(135deg,${GR[i % GR.length]})`;
+function mark(label, q) {
+  if (!q) return label;
+  const i = label.indexOf(q);
+  return i < 0 ? label : `${label.slice(0, i)}<mark>${q}</mark>${label.slice(i + q.length)}`;
+}
+function media(r) {
+  if (r.tag) return '<span class="auto-tag-palette-mark"></span>';
+  if (r.cover !== undefined) return `<span class="cover" style="background:${grad(r.cover)}"></span>`;
+  return r.icon ? svg(r.icon) : '';
+}
+function row(r, q, sel) {
+  const strip = r.strip === undefined ? '' : `<span class="command-palette__strip-area"><span class="command-palette__strip">${
+    Array.from({ length: 6 }, (_, i) => r.strip === 'skel'
+      ? '<span class="command-palette__thumb ui-skeleton" style="background:color-mix(in srgb,var(--color-surface) 70%,var(--color-bg))"></span>'
+      : `<span class="command-palette__thumb"><span class="g" style="background:${grad(i + r.strip)}"></span></span>`).join('')}</span></span>`;
+  const right = (r.count ? `<span class="find-entry__meta">${r.count}</span>` : '') + (r.kbd ? `<kbd class="find-kbd">${r.kbd}</kbd>` : '') + (r.meta ? `<span class="find-entry__meta">${r.meta}</span>` : '');
+  return `<div class="command-palette__option${strip ? ' command-palette__option--detail' : ''}" role="option" aria-selected="${sel ? 'true' : 'false'}">
+    <span class="find-entry__media">${media(r)}</span>
+    <span class="find-entry__text"><span class="find-entry__label">${r.raw ? r.label : mark(r.label, q)}</span>${r.ctx ? `<span class="find-entry__meta">${r.ctx}</span>` : ''}${strip}</span>${right}</div>`;
+}
+function palette(el, p) {
+  const chips = p.chips.map((c, i) => `<button class="ui-filter-chip" aria-pressed="${i === 0}">${c}</button>`).join('');
+  const best = p.best ? `<div class="command-palette__best"${p.groups.length ? '' : ' style="border:0;margin:0;padding:0"'}>${row(p.best, p.q, true)}</div>` : '';
+  const groups = p.groups.map((g, gi) => `<div class="command-palette__group"><div class="command-palette__heading">${g.h}</div>${
+    g.rows.map((r, ri) => row(r, p.q, !p.best && gi === 0 && ri === 0)).join('')}</div>`).join('');
+  el.innerHTML = `<div class="command-palette">
+    <div class="command-palette__field"><div class="ui-text-input">${svg('search')}<input type="text" value="${p.q}" placeholder="${p.ph}" aria-label="찾기"></div></div>
+    <div class="command-palette__scopes">${chips}</div>
+    <div class="command-palette__list">${best}${groups}</div>
+    <div class="command-palette__foot"><span>${p.foot}</span><span><kbd>Tab</kbd> 범위 바꾸기</span></div></div>`;
+}
+const OLD_CHIPS = ['전체', '작품', '작가', '메모', '폴더', '화면', '명령'];
+const NEW_CHIPS = ['전체', '작품', '폴더·캐릭터', '태그', '작가', '메모', '메뉴'];
+const FOOT_OLD = '<kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기 <kbd>Shift</kbd>+<kbd>Enter</kbd> 태그 제외 <kbd>Esc</kbd> 닫기';
+/* Ctrl+Enter 안내는 장면 찾기 줄 오른쪽에만 둔다(바닥 줄이 넘치지 않게). */
+const FOOT_ASSET = FOOT_OLD;
+const FOOT = '<kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기 <kbd>Esc</kbd> 닫기';
+const sceneRow = q => ({ icon: 'photo', label: `‘${q}’ 장면 찾기`, raw: true, kbd: 'Ctrl+Enter' });
+
+/* 지금 */
+palette(document.getElementById('p-now'), { q: '레베카', ph: '작품, 작가, 메모, 폴더 찾기', chips: OLD_CHIPS, foot: FOOT_OLD, groups: [
+  { h: '이미지 내용', rows: [{ icon: 'photo', label: '‘레베카’ 장면 찾기', raw: true, meta: 'Enter', strip: 0 }] },
+  { h: '폴더', rows: [
+    { icon: 'user', label: '레베카', ctx: '애니 › 사이버펑크 엣지러너' },
+    { icon: 'album', label: '레베카 모음', ctx: '앨범' } ] },
+  { h: '이동', rows: [] },
+  { h: '실행', rows: [{ tag: 1, label: '레베카', ctx: 'rebecca (cyberpunk)', count: '412' }] },
+].filter(g => g.rows.length) });
+
+palette(document.getElementById('p-rebecca'), { q: '레베카', ph: '캐릭터, 폴더, 태그 찾기', chips: NEW_CHIPS, foot: FOOT_ASSET,
+  best: { icon: 'user', label: '레베카', ctx: '캐릭터 · 애니 › 사이버펑크 엣지러너', kbd: 'Enter' },
+  groups: [
+    { h: '폴더·캐릭터', rows: [{ icon: 'album', label: '레베카 모음', ctx: '앨범' }] },
+    { h: '태그', rows: [{ tag: 1, label: '레베카', ctx: 'rebecca (cyberpunk)', count: '412' }] },
+    { h: '장면 찾기', rows: [sceneRow('레베카')] },
+  ] });
+
+palette(document.getElementById('p-asuna'), { q: '아스나', ph: '캐릭터, 폴더, 태그 찾기', chips: NEW_CHIPS, foot: FOOT_ASSET,
+  best: { icon: 'user', label: '아스나', ctx: '캐릭터 · 게임 › 블루 아카이브', kbd: 'Enter' },
+  groups: [
+    { h: '폴더·캐릭터', rows: [{ icon: 'user', label: '아스나', ctx: '캐릭터 · 애니 › 소드 아트 온라인' }] },
+    { h: '태그', rows: [
+      { tag: 1, label: '아스나', ctx: 'ichinose asuna (blue archive)', count: '230' },
+      { tag: 1, label: '아스나', ctx: 'asuna (sao)', count: '188' } ] },
+    { h: '장면 찾기', rows: [sceneRow('아스나')] },
+  ] });
+
+palette(document.getElementById('p-zelda-col'), { q: '젤다', ph: '작품 찾기', chips: NEW_CHIPS, foot: FOOT,
+  best: { cover: 0, label: '젤다의 전설 티어스 오브 더 킹덤', ctx: '작품 · 게임', kbd: 'Enter' },
+  groups: [
+    { h: '작품', rows: [
+      { cover: 1, label: '젤다의 전설 브레스 오브 더 와일드', ctx: '게임' },
+      { cover: 2, label: '젤다의 전설 꿈꾸는 섬', ctx: '게임' },
+      { cover: 3, label: '젤다의 전설 지혜의 재현', ctx: '게임' } ] },
+    { h: '이 화면에서', rows: [{ icon: 'search', label: '게임 컬렉션에서 ‘젤다’ 검색', raw: true }] },
+    { h: '폴더·캐릭터', rows: [
+      { icon: 'user', label: '젤다', ctx: '캐릭터 · 게임 › 젤다의 전설' },
+      { icon: 'folder', label: '젤다의 전설', ctx: '게임' } ] },
+    { h: '태그', rows: [{ tag: 1, label: '젤다', ctx: 'princess zelda', count: '96' }] },
+  ] });
+
+palette(document.getElementById('p-zelda-asset'), { q: '젤다', ph: '캐릭터, 폴더, 태그 찾기', chips: NEW_CHIPS, foot: FOOT_ASSET,
+  best: { icon: 'user', label: '젤다', ctx: '캐릭터 · 게임 › 젤다의 전설', kbd: 'Enter' },
+  groups: [
+    { h: '폴더·캐릭터', rows: [{ icon: 'folder', label: '젤다의 전설', ctx: '게임' }] },
+    { h: '태그', rows: [{ tag: 1, label: '젤다', ctx: 'princess zelda', count: '96' }] },
+    { h: '작품', rows: [
+      { cover: 0, label: '젤다의 전설 티어스 오브 더 킹덤', ctx: '게임' },
+      { cover: 1, label: '젤다의 전설 브레스 오브 더 와일드', ctx: '게임' },
+      { icon: null, label: '작품 2개 더 보기', raw: true } ] },
+    { h: '장면 찾기', rows: [sceneRow('젤다')] },
+  ] });
+
+palette(document.getElementById('p-release'), { q: '발매', ph: '작품 찾기', chips: NEW_CHIPS, foot: FOOT,
+  best: { icon: 'calendar', label: '발매 캘린더', ctx: '메뉴 · 컬렉션', kbd: 'Enter' },
+  groups: [
+    { h: '이 화면에서', rows: [{ icon: 'search', label: '게임 컬렉션에서 ‘발매’ 검색', raw: true }] },
+    { h: '메모', rows: [{ icon: 'note', label: '발매 예정 살 것', ctx: '메모' }] },
+  ] });
+
+palette(document.getElementById('p-settings'), { q: '설정', ph: '망가 제목 찾기', chips: NEW_CHIPS, foot: FOOT,
+  best: { icon: 'settings', label: '설정', ctx: '메뉴', kbd: 'Enter' },
+  groups: [
+    { h: '이 화면에서', rows: [{ icon: 'search', label: '로컬 망가에서 ‘설정’ 검색', raw: true }] },
+    { h: '메뉴', rows: [
+      { icon: 'settings', label: '설정 › 자주 쓰는 것' },
+      { icon: 'settings', label: '설정 › 화면' },
+      { icon: 'settings', label: '설정 › 라이브러리' },
+      { icon: 'settings', label: '설정 › 연결' },
+      { icon: 'settings', label: '설정 › 카탈로그' },
+      { icon: null, label: '메뉴 2개 더 보기', raw: true } ] },
+  ] });
+
+palette(document.getElementById('p-scene'), { q: '비 오는 거리', ph: '캐릭터, 폴더, 태그 찾기', chips: NEW_CHIPS, foot: FOOT_ASSET,
+  best: { icon: 'photo', label: '‘비 오는 거리’ 장면 찾기', raw: true, kbd: 'Enter', strip: 3 },
+  groups: [] });
+
+</script>
+</body>
+</html>

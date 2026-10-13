@@ -3,7 +3,8 @@ import { useMotionSurface } from "./useMotionSurface";
 import { Fragment, type PropsWithChildren, type ReactElement } from "react";
 import type { MenuItem } from "./Menu";
 
-export type ContextMenuItem = MenuItem & { children?: MenuItem[] };
+/** `separatorBefore` draws a divider above the item; `shortcut` is shown dimmed at the end of the row (a hint, not a binding). */
+export type ContextMenuItem = MenuItem & { children?: MenuItem[]; separatorBefore?: boolean; shortcut?: string };
 type ContextMenuProps = PropsWithChildren<{
   children: ReactElement;
   items: ContextMenuItem[];
@@ -17,7 +18,7 @@ export function ContextMenu({ children, items }: ContextMenuProps) {
       <RadixContextMenu.Portal>
         <RadixContextMenu.Content ref={surfaceRef} className="ui-menu">
           {items.map((item, index) => <Fragment key={item.id}>
-            {item.destructive && !items[index - 1]?.destructive && <RadixContextMenu.Separator className="asset-context-menu__separator" />}
+            {((item.destructive && !items[index - 1]?.destructive) || (item.separatorBefore && index > 0)) && <RadixContextMenu.Separator className="asset-context-menu__separator" />}
             {item.children ? <RadixContextMenu.Sub>
               <RadixContextMenu.SubTrigger className="ui-menu__item" disabled={item.disabled}>{item.label}<span aria-hidden="true"> ›</span></RadixContextMenu.SubTrigger>
               <RadixContextMenu.Portal><SubMenuContent>
@@ -34,8 +35,10 @@ export function ContextMenu({ children, items }: ContextMenuProps) {
                 type="button"
                 className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
                 disabled={item.disabled}
+                aria-keyshortcuts={item.shortcut?.replace("←", "ArrowLeft").replace("→", "ArrowRight")}
               >
                 {item.label}
+                {item.shortcut && <span className="ui-menu__shortcut" aria-hidden="true">{item.shortcut}</span>}
               </button>
             </RadixContextMenu.Item>
           )}</Fragment>)}

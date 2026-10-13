@@ -309,8 +309,9 @@ it.each([false, true])('copies a memo section with an accessible icon button (to
 it.each([false, true])('adds sections in plain and todo modes, then focuses their body (todo=%s)', async todo => {
   const changes = surface(todo ? '- [ ] top' : 'top');
   const add = screen.getByRole('button', { name: '섹션 추가' });
-  expect(add).toHaveClass('ui-button--secondary');
+  expect(add).toHaveClass('memo-section-add--quiet'); expect(add).not.toHaveClass('ui-button');
   await userEvent.click(add);
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
   const name = screen.getByRole('textbox', { name: '섹션 이름' });
   expect(name).toHaveFocus(); expect(name).toHaveValue('새 섹션');
   fireEvent.change(name, { target: { value: '내 섹션' } }); fireEvent.keyDown(name, { key: 'Enter' });
@@ -323,7 +324,7 @@ it('hides an empty top body with sections, adds unique names under a filter and 
   surface('## 새 섹션\na\n## B\nb');
   expect(rows()).toHaveLength(2);
   await userEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button', { name: 'B' }));
-  await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
+  await userEvent.click(screen.getByRole('button', { name: '아래에 섹션 추가' }));
   const name = screen.getByRole('textbox', { name: '섹션 이름' });
   expect(name).toHaveValue('새 섹션 2');
   fireEvent.blur(name);
@@ -354,6 +355,7 @@ it('read-only plain bodies have no section add or row controls', () => {
   surface('## A\nfirst\nsecond', { readOnly: true });
   expect(rows()).toHaveLength(1); expect(rows()[0]).toHaveAttribute('readonly');
   expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '아래에 섹션 추가' })).toBeNull();
 });
 
 it('returns to the whole memo when deletion leaves fewer than two section chips', async () => {
@@ -371,4 +373,41 @@ it('preserves the existing fence rule and leaves the body untouched if a section
   await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
   expect(changes).not.toHaveBeenCalled(); expect(body()).toBe('```\n# code');
   expect(screen.getByRole('status')).toHaveTextContent('코드 블록을 닫은 뒤');
+});
+
+it.each([false, true])('puts three quiet icon buttons in one right-aligned head group, add first (touch=%s)', touch => {
+  surface('## A\na\n## B\nb', { touch });
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+  expect(document.querySelector('.memo-section-add')).toBeNull();
+  expect(document.querySelectorAll('.memo-section-actions')).toHaveLength(2);
+  const group = document.querySelector<HTMLElement>('.memo-section-actions')!;
+  const buttons = [...group.querySelectorAll('button')];
+  expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['아래에 섹션 추가', '섹션 복사', 'A 더보기']);
+  expect(buttons.every(button => button.textContent === '' && button.querySelector('svg')?.getAttribute('aria-hidden') === 'true')).toBe(true);
+  expect(group.parentElement).toHaveClass('memo-section-head');
+  // The 44 px touch targets come from the touch modifier class on the editor.
+  if (touch) expect(document.querySelector('.memo-editor')).toHaveClass('memo-editor--touch');
+  else expect(document.querySelector('.memo-editor')).not.toHaveClass('memo-editor--touch');
+});
+it.each(['text', 'todo'] as const)('adds a %s section directly below the one whose plus was pressed', async mode => {
+  const line = mode === 'todo' ? '- [ ] ' : '';
+  const changes = surface(`${line}top\n## A\n${line}a\n## B\n${line}b\n## C\n${line}c`);
+  await userEvent.click(screen.getAllByRole('button', { name: '아래에 섹션 추가' })[0]!);
+  const name = screen.getByRole('textbox', { name: '섹션 이름' });
+  expect(name).toHaveFocus(); expect(name).toHaveValue('새 섹션');
+  expect(body()).toBe(`${line}top\n## A\n${line}a\n## 새 섹션\n${mode === 'todo' ? '- [ ]\n' : ''}## B\n${line}b\n## C\n${line}c`);
+  fireEvent.change(name, { target: { value: '끼움' } }); fireEvent.keyDown(name, { key: 'Enter' });
+  expect([...document.querySelectorAll('.memo-section-head h2')].map(head => head.textContent)).toEqual(['A', '끼움', 'B', 'C']);
+  expect(changes.mock.calls.every(call => call[1] === true)).toBe(true);
+});
+it('adds below the last section at the very end and keeps the stored text compatible', async () => {
+  surface('## A\na\n## B\nb');
+  await userEvent.click(screen.getAllByRole('button', { name: '아래에 섹션 추가' })[1]!);
+  expect(body()).toBe('## A\na\n## B\nb\n## 새 섹션\n');
+});
+it('shows the quiet 섹션 추가 button only while no named section exists', async () => {
+  surface('top');
+  await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '아래에 섹션 추가' })).toHaveLength(1);
 });

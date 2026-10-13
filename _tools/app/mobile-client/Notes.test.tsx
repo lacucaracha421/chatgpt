@@ -6,7 +6,7 @@ import {FindSheet} from './FindSheet';
 import {Notes,type MobileNote} from './Notes';
 function FindHost({children}:{children:ReactNode}){
  const [open,setOpen]=useState(false),[search,setSearch]=useState<ScreenFind>();
- return <FindContext.Provider value={value=>{setSearch(value);setOpen(true);}}>{children}<FindSheet open={open} search={search} onClose={()=>setOpen(false)} entries={[]} endpoint="notes-test" privacy={false}/></FindContext.Provider>;
+ return <FindContext.Provider value={value=>{setSearch(value);setOpen(true);}}>{children}<FindSheet context={{tab:'notes'}} open={open} search={search} onClose={()=>setOpen(false)} entries={[]} endpoint="notes-test" privacy={false}/></FindContext.Provider>;
 }
 const render:typeof renderBase=(ui,options)=>renderBase(ui,{wrapper:FindHost,...options});
 async function searchNotes(value:string){
@@ -507,12 +507,12 @@ it('adds a tablet section under a chip filter and has no bottom quick-add field'
  mock.native.mockImplementation(state([{...note,body:'## 하나\nfirst\n## 둘\nlast'}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();expect(screen.queryByRole('combobox',{name:'넣을 섹션'})).toBeNull();
- // 섹션 추가 is its own button after the sections; the character count is the editor's last line.
+ // Sections are added from the head's ＋ (no separate button); the character count is the editor's last line.
  const footer=document.querySelector('.notes-editor__inner > .notes-memo-footer')!;
  expect(footer.textContent).toMatch(/자$/);expect(footer.parentElement!.lastElementChild).toBe(footer);
- expect(screen.getByRole('button',{name:'섹션 추가'}).compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'섹션 추가'})).toBeNull();
  fireEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button',{name:'하나'}));
- fireEvent.click(screen.getByRole('button',{name:'섹션 추가'}));
+ fireEvent.click(screen.getByRole('button',{name:'아래에 섹션 추가'}));
  const name=screen.getByRole('textbox',{name:'섹션 이름'});expect(document.activeElement).toBe(name);
  fireEvent.change(name,{target:{value:'새 이름'}});fireEvent.keyDown(name,{key:'Enter'});
  expect(rows()).toHaveLength(1);expect(document.activeElement).toBe(rows()[0]);

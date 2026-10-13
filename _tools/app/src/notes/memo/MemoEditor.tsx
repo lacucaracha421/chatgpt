@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { ArrowsRightLeftIcon, ClipboardDocumentIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { ArrowsRightLeftIcon, ClipboardDocumentIcon, EllipsisHorizontalIcon, PlusIcon } from '@heroicons/react/24/outline';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from '../../shared/ui/Button';
 import { Dialog } from '../../shared/ui/Dialog';
@@ -272,6 +272,21 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
       field?.focus(); const at = event.key === 'ArrowUp' ? field?.value.length ?? 0 : 0; field?.setSelectionRange(at, at);
     }
   }
+  /** Adds a section below `afterId` (the end when omitted) and opens its name for typing. */
+  function addSection(afterId?: string) {
+    const current = documentRef.current.doc;
+    const known = new Set(memoSections(current).map(section => section.id));
+    const next = addMemoSection(current, mode, afterId);
+    const added = memoSections(next).find(section => section.heading && !known.has(section.id));
+    if (!added) {
+      setStatus({ id: 'add', text: '코드 블록을 닫은 뒤 섹션을 추가해 주세요.' });
+      clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
+      return;
+    }
+    if (!apply(next)) return;
+    if (activeFilter) setFilter(added.id);
+    setRename(added.id);
+  }
   function finishRename(id: string, title: string) {
     const next = renameMemoSection(documentRef.current.doc, id, title);
     focus(mode === 'text' ? id : memoSections(next).find(section => section.id === id)?.items.find(item => item.task && !item.done)?.id ?? '');
@@ -345,10 +360,15 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setRename(null); }
           }}/> : <h2>{section.title || '제목 없음'}</h2>}
           {mode === 'todo' && <small>{open.length}개 남음</small>}
-          {!readOnly && <><Button type="button" size="icon" variant="ghost" aria-label="섹션 복사" onClick={async () => {
-            try { await copyText(sectionCopy(section, mode)); if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사됨' }); } catch { if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사하지 못했습니다.' }); }
-            clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
-          }}><ClipboardDocumentIcon aria-hidden="true" /></Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
+          {!readOnly && <span className="memo-section-actions">
+            {status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}
+            <Button type="button" size="icon" variant="ghost" aria-label="아래에 섹션 추가" onClick={() => addSection(section.id)}><PlusIcon aria-hidden="true" /></Button>
+            <Button type="button" size="icon" variant="ghost" aria-label="섹션 복사" onClick={async () => {
+              try { await copyText(sectionCopy(section, mode)); if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사됨' }); } catch { if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사하지 못했습니다.' }); }
+              clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
+            }}><ClipboardDocumentIcon aria-hidden="true" /></Button>
+            <Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>
+          </span>}
         </div>}
         {mode === 'todo' ? open.map(row) : <MemoArea id={section.id} text={sectionText(section)} plainBody readOnly={readOnly} follow={!touch}
           register={node => { if (node) areas.current.set(section.id, node); else areas.current.delete(section.id); }}
@@ -361,19 +381,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         {mode === 'todo' && doneOpen.has(section.id) && done.map(row)}
       </section>;
     })}
-    {!readOnly && <Button type="button" className="memo-section-add" onClick={() => {
-      const next = addMemoSection(documentRef.current.doc, mode);
-      const addedSections = memoSections(next).filter(section => section.heading);
-      if (addedSections.length <= named.length) {
-        setStatus({ id: 'add', text: '코드 블록을 닫은 뒤 섹션을 추가해 주세요.' });
-        clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
-        return;
-      }
-      const added = addedSections[addedSections.length - 1]!;
-      if (!apply(next)) return;
-      if (activeFilter) setFilter(added.id);
-      setRename(added.id);
-    }}><PlusIcon aria-hidden="true"/>섹션 추가</Button>}
+    {!readOnly && named.length === 0 && <button type="button" className="memo-section-add--quiet" onClick={() => addSection()}><PlusIcon aria-hidden="true"/>섹션 추가</button>}
     {status?.id === 'add' && <p className="memo-status" role="status">{status.text}</p>}
     {sectionDrag.indicator !== undefined && <div className="memo-section-drop" aria-hidden="true" style={{ top: sectionDrag.indicator }}/>}
     {deleteTarget && <Dialog open title="섹션 삭제" onClose={() => setDeleteTarget(null)}><p>이 섹션과 항목을 삭제할까요?</p><div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setDeleteTarget(null)}>취소</Button><Button variant="danger" onClick={() => { focus(''); apply(deleteMemoSection(doc, deleteTarget)); setDeleteTarget(null); }}>삭제</Button></div></Dialog>}

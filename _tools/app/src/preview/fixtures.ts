@@ -378,7 +378,12 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "encrypted_vault_status": return { state: "absent", vaultId: null, root: null, itemCount: null, trashedCount: null, remembered: false };
     case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: [], incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
     case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, definitionRevision: 0, seriesRevisions: {}, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
-    case "list_character_targets": return previewCharacterTargets;
+    case "list_character_targets": return orderedPreviewTargets();
+    case "reorder_character_folders": {
+      if (new URLSearchParams(window.location.search).get("groupReorder") === "fail") throw "캐릭터 설정이 바뀌었습니다. 새로고침 후 다시 시도해 주세요.";
+      previewTargetOrders.push((args.targetIds as string[] | undefined) ?? []);
+      return null;
+    }
     case "character_series": return [{ classificationId: PREVIEW_CHARACTER_SERIES_ID, heroAssetId: "asset-005", autoClassify: true }];
     case "all_character_groups": return orderedPreviewGroups().map(({ seriesId: _seriesId, ...group }) => ({ ...group, seriesId: PREVIEW_CHARACTER_SERIES_ID }));
     case "character_groups": return orderedPreviewGroups().map(({ seriesId: _seriesId, ...group }) => group);
@@ -426,6 +431,17 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
 
 /** The order a person gave the groups in this preview session (the fixtures list them by their own order until then). */
 let previewGroupOrder: string[] | null = null;
+/** The bands of characters the preview was asked to reorder, oldest first; each listed character keeps the slot it had. */
+const previewTargetOrders: string[][] = [];
+function orderedPreviewTargets() {
+  return previewTargetOrders.reduce((list, ids) => {
+    const byId = new Map(list.map(item => [item.id, item]));
+    const ordered = ids.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
+    const named = new Set(ordered.map(item => item.id));
+    let next = 0;
+    return list.map(item => named.has(item.id) ? ordered[next++]! : item);
+  }, previewCharacterTargets);
+}
 function orderedPreviewGroups() {
   const order = previewGroupOrder;
   return order ? [...previewCharacterGroups].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)) : previewCharacterGroups;

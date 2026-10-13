@@ -72,7 +72,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     }] : []),
   ];
   const settings: NavigationEntry[] = SETTINGS_SECTIONS.map(([section, label]) => ({
-    id: `settings-${section}`, group: "settings", label: `설정 · ${label}`, icon: <AREA_ICONS.settings />, run: go({ kind: "settings", section }),
+    id: `settings-${section}`, group: "settings", label: `설정 › ${label}`, icon: <AREA_ICONS.settings />, run: go({ kind: "settings", section }),
   }));
   return [...queues, ...destinations, ...actions, ...settings];
 }
@@ -119,7 +119,7 @@ export function placeEntries(sources: PlaceSources | undefined, query: string, v
   };
   for (const folder of sources.classifications) {
     add(folder.name, {
-      id: `place-folder-${folder.id}`, group: "place", label: folder.name, icon: <FolderIcon />,
+      id: `place-folder-${folder.id}`, group: "place", count: folder.assetCount, label: folder.name, icon: <FolderIcon />,
       context: ancestorNames(folders, folder.parentId).join(" › ") || "폴더",
       selected: view.kind === "classification" && view.classificationId === folder.id && !view.characterId && !view.characterGroupId,
       run: () => onNavigate({ kind: "classification", classificationId: folder.id }),
@@ -127,7 +127,7 @@ export function placeEntries(sources: PlaceSources | undefined, query: string, v
   }
   for (const album of sources.albums) {
     add(album.name, {
-      id: `place-album-${album.id}`, group: "place", label: album.name, icon: <RectangleStackIcon />,
+      id: `place-album-${album.id}`, group: "place", count: album.assetCount, label: album.name, icon: <RectangleStackIcon />,
       context: ["앨범", ...ancestorNames(albums, album.parentId)].join(" › "),
       selected: view.kind === "album" && view.albumId === album.id,
       run: () => onNavigate({ kind: "album", albumId: album.id }),

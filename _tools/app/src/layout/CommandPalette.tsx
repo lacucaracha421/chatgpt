@@ -16,7 +16,7 @@ import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { TextInput } from "../shared/ui/TextInput";
 import { FilterChip } from "../shared/ui/FilterChip";
-import { FIND_SCOPES, findGroups, GROUP_LIMIT, readRecent, rememberRecent, type FindScope } from "./findModel";
+import { FIND_SCOPES, findGroups, GROUP_LIMIT, readRecent, rememberRecent, type FindScope, type FindContext, allowsSceneSearch, findPlaceholder, nameMatchRank } from "./findModel";
 import { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
 
 export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => void; open: (draft: string) => void };
@@ -24,12 +24,12 @@ export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => 
 export type PaletteDescriptionSearch = { source: DescriptionSearchSource | null; open: (query: string) => void };
 
 /** The "이미지 내용" row: shown in 전체 once a description is typed (descriptionQueryReady) and the search is available. */
-function descriptionEntries(search: PaletteDescriptionSearch | null | undefined, preview: DescriptionPreview, text: string, busy: boolean, privacy: boolean): NavigationEntry[] {
+function descriptionEntries(search: PaletteDescriptionSearch | null | undefined, preview: DescriptionPreview, text: string, busy: boolean, privacy: boolean, showDetail: boolean): NavigationEntry[] {
   const typed = text.trim();
   if (!search || !preview.available || !descriptionQueryReady(typed)) return [];
   // The quiet busy status takes the meta slot: beside a full strip there is no room, and wrapping would make the row jump.
-  return [{ id: "description-search", group: "content", label: `‘${typed}’ 장면 찾기`, icon: <PhotoIcon />, activity: busy ? "장면을 찾는 중…" : "Enter",
-    detail: <DescriptionStrip preview={preview} privacy={privacy} />, run: () => search.open(typed) }];
+  return [{ id: "description-search", group: "content", label: `‘${typed}’ 장면 찾기`, icon: <PhotoIcon />, activity: busy ? "장면을 찾는 중…" : "Ctrl+Enter",
+    detail: showDetail ? <DescriptionStrip preview={preview} privacy={privacy} /> : undefined, run: () => search.open(typed) }];
 }
 
 /** The top matches as small squares. The previous strip stays painted while the next answer loads; placeholders only before the first one. */
@@ -63,8 +63,8 @@ function searchEntries(search: PaletteSearch | null | undefined, text: string): 
 }
 
 /** Device-local names and the current screen's existing search contract. */
-export function CommandPalette({ open, onClose, entries, search, descriptionSearch, findPlaces, findTags, fallbackFocus, recentKey = "workspace", loading = false, error }: {
-  open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null; descriptionSearch?: PaletteDescriptionSearch | null;
+export function CommandPalette({ context = { tab: "home" }, open, onClose, entries, search, descriptionSearch, findPlaces, findTags, fallbackFocus, recentKey = "workspace", loading = false, error }: {
+  context?: FindContext; open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null; descriptionSearch?: PaletteDescriptionSearch | null;
   findPlaces?: (query: string) => NavigationEntry[]; findTags?: (query: string) => NavigationEntry[];
   fallbackFocus?: () => HTMLElement | null; recentKey?: string; loading?: boolean; error?: string | null;
 }) {
@@ -96,16 +96,26 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
 
   // Deferred filtering leaves the last complete list painted while typing stays immediate.
   const filteredQuery = useDeferredValue(query);
-  const preview = useDescriptionPreview({ source: descriptionSearch?.source, open, query, composing, enabled: scope === "전체" });
-  const previewBusy = useDelayedBusy(preview.busy);
-  const groups = useMemo(() => findGroups([
-    ...descriptionEntries(descriptionSearch, preview, filteredQuery, previewBusy, privacyMode),
+  const sceneAllowed = allowsSceneSearch(context.tab);
+  const nameGroups = useMemo(() => findGroups([
     ...searchEntries(search, filteredQuery), ...(findTags?.(filteredQuery) ?? []),
     ...(findPlaces?.(filteredQuery) ?? []), ...entries,
-  ], filteredQuery, scope, recentIds), [entries, search, descriptionSearch, preview, previewBusy, privacyMode, findTags, findPlaces, filteredQuery, scope, recentIds]);
-  const displayed = groups.map(({ group, items }) => ({ group, items: [
+  ], filteredQuery, scope, recentIds, context), [entries, search, findTags, findPlaces, filteredQuery, scope, recentIds, context.tab, context.workType]);
+  const bestName = nameGroups[0]?.group === "best" ? nameGroups[0].items[0] : null;
+  const sceneTop = scope === "전체" && sceneAllowed && !!descriptionSearch && descriptionQueryReady(filteredQuery)
+    && !nameGroups.some(group => group.items.some(entry => entry.group === "search"))
+    && (!bestName || nameMatchRank(bestName, filteredQuery) >= 3);
+  const showPreview = scope === "전체" && sceneAllowed && (activeId === "description-search" || sceneTop);
+  const preview = useDescriptionPreview({ source: sceneAllowed ? descriptionSearch?.source : null, open, query: filteredQuery, composing, enabled: showPreview });
+  const previewBusy = useDelayedBusy(preview.busy);
+  const groups = useMemo(() => findGroups([
+    ...descriptionEntries(sceneAllowed ? descriptionSearch : null, preview, filteredQuery, previewBusy, privacyMode, showPreview),
+    ...searchEntries(search, filteredQuery), ...(findTags?.(filteredQuery) ?? []),
+    ...(findPlaces?.(filteredQuery) ?? []), ...entries,
+  ], filteredQuery, scope, recentIds, context), [context.tab, context.workType, sceneAllowed, showPreview, entries, search, descriptionSearch, preview, previewBusy, privacyMode, findTags, findPlaces, filteredQuery, scope, recentIds]);
+  const displayed = groups.map(({ group, items }, groupIndex) => ({ group, items: [
     ...(expanded.includes(group) ? items : items.slice(0, GROUP_LIMIT)),
-    ...(items.length > GROUP_LIMIT ? [{ id: `find-expand-${group}`, group,
+    ...(items.length > GROUP_LIMIT ? [{ id: `find-expand-${group}-${groupIndex}`, group,
       label: expanded.includes(group) ? "접기" : `${NAVIGATION_GROUP_LABELS[group]} ${items.length - GROUP_LIMIT}개 더 보기`, icon: null,
       run: () => setExpanded(previous => previous.includes(group) ? previous.filter(value => value !== group) : [...previous, group]),
     }] : []),
@@ -130,7 +140,7 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
   const hasAlternate = ordered.some((entry) => entry.runAlternate);
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // Korean IME: Enter or arrows that confirm a composition must not run a command.
-    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (composing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Tab") {
       event.preventDefault();
       setScope(FIND_SCOPES[(FIND_SCOPES.indexOf(scope) + (event.shiftKey ? FIND_SCOPES.length - 1 : 1)) % FIND_SCOPES.length]);
@@ -147,7 +157,10 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
       event.preventDefault(); setActive(Math.max(0, ordered.length - 1));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      run(ordered[current], event.shiftKey);
+      if (event.ctrlKey && sceneAllowed && descriptionSearch && descriptionQueryReady(query)) {
+        if (query !== filteredQuery) return;
+        onClose(); descriptionSearch.open(query.trim());
+      } else run(ordered[current], event.shiftKey);
     }
   };
 
@@ -165,9 +178,9 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
         onEscapeKeyDown={(event) => { event.preventDefault(); if (event.isComposing || event.keyCode === 229) return; onClose(); }}>
         <RadixDialog.Title className="command-palette__title">찾기</RadixDialog.Title>
         <div className="command-palette__field">
-          <TextInput icon={MagnifyingGlassIcon} autoFocus type="text" role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" aria-expanded="true"
+          <TextInput icon={MagnifyingGlassIcon} autoFocus type="text" role="combobox" aria-label="작품, 폴더·캐릭터, 태그, 작가, 메모 또는 메뉴 이름" aria-expanded="true"
             aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={ordered.length ? optionId(current) : undefined}
-            placeholder="작품, 작가, 메모, 폴더 찾기" value={query} spellCheck={false} autoComplete="off"
+            placeholder={findPlaceholder(context.tab)} value={query} spellCheck={false} autoComplete="off"
             onChange={(event) => { setQuery(event.target.value); setExpanded([]); setActiveId(null); }} onKeyDown={onKeyDown}
             onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} />
         </div>
@@ -177,9 +190,9 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
         </div>
         <div ref={listRef} id={`${id}-list`} className="command-palette__list" role="listbox" aria-label="찾기 결과" aria-busy={loading || query !== filteredQuery}>
           <BusyLabel busy={loading && ordered.length === 0} idle={!loading && ordered.length === 0 && <EmptyState inline className="command-palette__empty" title={query.trim() ? "검색 결과 없음" : "최근 항목 없음"} />}><p className="command-palette__empty">이름을 불러오는 중…</p></BusyLabel>
-          {displayed.map(({ group, items }) => {
-            return <div key={group} role="group" aria-labelledby={`${id}-${group}`} className="command-palette__group">
-              <div id={`${id}-${group}`} className="command-palette__heading" role="presentation">{NAVIGATION_GROUP_LABELS[group]}</div>
+          {displayed.map(({ group, items }, groupIndex) => {
+            return <div key={`${group}-${groupIndex}`} role={group === "best" ? undefined : "group"} aria-labelledby={group === "best" ? undefined : `${id}-${group}-${groupIndex}`} className={`command-palette__group${group === "best" ? " command-palette__best" : ""}`}>
+              {group !== "best" && <div id={`${id}-${group}-${groupIndex}`} className="command-palette__heading" role="presentation">{NAVIGATION_GROUP_LABELS[group]}</div>}
               {items.map((entry) => {
                 index += 1;
                 const own = index;
@@ -197,7 +210,7 @@ export function CommandPalette({ open, onClose, entries, search, descriptionSear
         {error && <p role="status" className="command-palette__empty">{error}</p>}
         <div id={`${id}-hint`} className="command-palette__foot">
           <span><kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기{hasAlternate && <> <kbd>Shift</kbd>+<kbd>Enter</kbd> 태그 제외</>} <kbd>Esc</kbd> 닫기</span>
-          <span><kbd>Tab</kbd> 범위 바꾸기</span>
+          <span>{sceneAllowed && descriptionSearch && <><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 장면 찾기 · </>}<kbd>Tab</kbd> 범위 바꾸기</span>
         </div>
       </RadixDialog.Content>
     </RadixDialog.Portal>

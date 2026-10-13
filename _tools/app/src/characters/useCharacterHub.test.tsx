@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCharacterHub } from "./useCharacterHub";
 
 const api = vi.hoisted(() => ({
-  targets: vi.fn(), series: vi.fn(), allGroups: vi.fn(), reorderGroups: vi.fn(),
+  targets: vi.fn(), series: vi.fn(), allGroups: vi.fn(), reorderGroups: vi.fn(), reorderCharacters: vi.fn(),
 }));
 vi.mock("./api", () => ({ characterApi: { targets: api.targets } }));
 vi.mock("./hubApi", () => ({ characterHubApi: api }));
@@ -91,4 +91,35 @@ it("shows a chosen group order at once, keeps it over later reads, and puts the 
   expect(ids()).toEqual(["a", "b", "x"]);
   await act(async () => { fail(new Error("stale")); await second; });
   expect(ids()).toEqual(["b", "a", "x"]);
+});
+
+it("shows a chosen character order at once, hands over to the stored order after the save, and puts the old order back when storing fails", async () => {
+  const person = (id: string, seriesClassificationId: string) => ({ id, seriesClassificationId, role: "character" });
+  const stored = [person("a", "s"), person("b", "s"), person("x", "t"), person("c", "s")];
+  api.targets.mockResolvedValue(stored);
+  api.series.mockResolvedValue([]);
+  api.allGroups.mockResolvedValue([]);
+  let finish!: () => void, fail!: (error: unknown) => void;
+  api.reorderCharacters
+    .mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }))
+    .mockReturnValueOnce(new Promise<void>((_resolve, reject) => { fail = reject; }));
+  const { result } = renderHook(() => useCharacterHub(0));
+  await waitFor(() => expect(result.current.targets).toHaveLength(4));
+  const ids = () => result.current.targets.map(target => target.id);
+  let first!: Promise<void>;
+  act(() => { first = result.current.reorderCharacters("s", null, ["c", "a", "b"]); });
+  // On screen before the command has answered; the other series keeps its place.
+  expect(ids()).toEqual(["c", "a", "x", "b"]);
+  await waitFor(() => expect(api.reorderCharacters).toHaveBeenCalledWith("s", null, ["c", "a", "b"]));
+  // The backend now lists the new order; once a read that started after the save has landed, the shown order is the stored one.
+  api.targets.mockResolvedValue([person("c", "s"), person("a", "s"), person("x", "t"), person("b", "s")]);
+  await act(async () => { finish(); await first; });
+  await waitFor(() => expect(api.targets).toHaveBeenCalledTimes(2));
+  await act(async () => { await Promise.resolve(); });
+  expect(ids()).toEqual(["c", "a", "x", "b"]);
+  let second!: Promise<void>;
+  act(() => { second = result.current.reorderCharacters("s", null, ["b", "c", "a"]).catch(() => undefined); });
+  expect(ids()).toEqual(["b", "c", "x", "a"]);
+  await act(async () => { fail(new Error("stale")); await second; });
+  await waitFor(() => expect(ids()).toEqual(["c", "a", "x", "b"]));
 });

@@ -8,7 +8,7 @@ import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Button,EmptyState,IconButton,TextInput,SectionLabel,Skeleton} from './ui';
 import {FilterChip} from '../src/shared/ui/FilterChip';
 import {FindEntryContent} from '../src/shared/FindEntryContent';
-import {findGroups,GROUP_LIMIT,readRecent,rememberRecent,type FindScope} from '../src/shared/findModel';
+import {findGroups,GROUP_LIMIT,readRecent,rememberRecent,type FindScope,type FindContext,allowsSceneSearch,findPlaceholder,nameMatchRank} from '../src/shared/findModel';
 import {NAVIGATION_GROUP_LABELS,type NavigationEntryGroup} from '../src/shared/findEntries';
 import {TABLET_FIND_SCOPES,useDescriptionStrip,type TabletFindEntry} from './findData';
 import {DescriptionStrip} from './FindDescriptionStrip';
@@ -40,7 +40,7 @@ function FindMedia({entry,cache,signal}:{entry:TabletFindEntry;cache:MediaCache;
   return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:url?<img src={url} alt="" className={entry.avatar?'find-entry__avatar':undefined}/>:entry.icon;
 }
 
-export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry,onDescription,search}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void;search?:ScreenFind;/** Opens the 내용 검색 result state; absent when the screen cannot show one. */onDescription?(query:string):void}) {
+export function FindSheet({context={tab:"home"},open,onClose,entries,endpoint,privacy,loading=false,error,onRetry,onDescription,search}:{context?:FindContext;open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void;search?:ScreenFind;/** Opens the 내용 검색 result state; absent when the screen cannot show one. */onDescription?(query:string):void}) {
   const [nsfwFilter]=useNsfwFilter();
   const [query,setQuery]=useState(''),[scope,setScope]=useState<FindScope>('전체');
   const [expanded,setExpanded]=useState<NavigationEntryGroup[]>([]),[recent,setRecent]=useState<string[]>([]),[activeId,setActiveId]=useState<string|null>(null);
@@ -56,19 +56,19 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
   },[open,recentKey]);
   useEffect(()=>{if(open&&!privacy)setRecent(readRecent(recentKey));},[privacy,open,recentKey]);
   const draft=useDeferredValue(useMemo(()=>({query,scope}),[query,scope]));
-  const strip=useDescriptionStrip({open,endpoint,query:draft.query,enabled:!!onDescription&&draft.scope==='전체',count:DESCRIPTION_PREVIEW_COUNT});
+  const tabletEntries=useMemo(()=>entries.filter(entry=>entry.id!=='import'&&entry.id!=='lightweight'),[entries]);
+  const typed=draft.query.trim();
+  const local:TabletFindEntry[]=search?[{id:'screen-search',group:'search',label:typed?`${search.scope==='메모'?'메모에서':'이 화면에서'} ‘${typed}’`:`${search.scope}에서 찾기`,icon:<MagnifyingGlassIcon/>,destination:{kind:'screen',screen:'assets'},run:()=>search.run(typed)}]:[];
+  const sceneAllowed=allowsSceneSearch(context.tab);
+  const nameGroups=findGroups(tabletEntries,draft.query,draft.scope,privacy?[]:recent,context);
+  const showPreview=sceneAllowed&&!!onDescription&&draft.scope==='전체'&&descriptionQueryReady(typed)&&!nameGroups.some(group=>group.group==='best'&&nameMatchRank(group.items[0],typed)<3);
+  const strip=useDescriptionStrip({open,endpoint,query:draft.query,enabled:showPreview,count:DESCRIPTION_PREVIEW_COUNT});
   const stripBusy=useDelayedBusy(strip.busy);
-  const typed=draft.query.trim(),notReady=strip.shown?.ready===false;
-  const withContent=useMemo(()=>onDescription&&draft.scope==='전체'&&descriptionQueryReady(typed)?[{id:'description-search',group:'content',label:`‘${typed}’ 장면 찾기`,icon:<PhotoIcon/>,activity:stripBusy?'장면을 찾는 중…':notReady?undefined:'Enter',
-    detail:<DescriptionStrip answer={strip.shown} failed={strip.failed} cache={session.cache} signal={session.controller.signal} privacy={privacy}/>,
-    destination:{kind:'screen',screen:'assets'},run:()=>onDescription(typed)} as TabletFindEntry,...entries]:entries,[onDescription,draft.scope,typed,stripBusy,notReady,strip.shown,strip.failed,session,privacy,entries]);
-  const groups=useMemo(()=>{
-    const local:TabletFindEntry[] = search?[{id:'screen-search',group:'search',label:typed?`${search.scope==='메모'?'메모에서':'이 화면에서'} ‘${typed}’`:`${search.scope}에서 찾기`,icon:<MagnifyingGlassIcon/>,destination:{kind:'screen',screen:'assets'},run:()=>search.run(typed)}]:[];
-    const found=findGroups([...local,...withContent],draft.query,draft.scope,privacy?[]:recent);
-    // Until the captions exist the row is informational, so Enter keeps going to the first real match.
-    const appGroups=found.filter(({group})=>group!=='search');
-    return [...found.filter(({group})=>group==='search'),...(notReady?[...appGroups.filter(({group})=>group!=='content'),...appGroups.filter(({group})=>group==='content')]:appGroups)];
-  },[withContent,draft,privacy,recent,notReady,search,typed]);
+  const notReady=strip.shown?.ready===false;
+  const withContent=useMemo(()=>onDescription&&sceneAllowed&&draft.scope==='전체'&&descriptionQueryReady(typed)?[{id:'description-search',group:'content',label:`‘${typed}’ 장면 찾기`,icon:<PhotoIcon/>,activity:stripBusy?'장면을 찾는 중…':notReady?undefined:'Enter',
+    detail:showPreview?<DescriptionStrip answer={strip.shown} failed={strip.failed} cache={session.cache} signal={session.controller.signal} privacy={privacy}/>:undefined,
+    destination:{kind:'screen',screen:'assets'},run:()=>onDescription(typed)} as TabletFindEntry,...tabletEntries]:tabletEntries,[sceneAllowed,showPreview,onDescription,draft.scope,typed,stripBusy,notReady,strip.shown,strip.failed,session,privacy,tabletEntries]);
+  const groups=findGroups([...local,...withContent],draft.query,draft.scope,privacy?[]:recent,context);
   const displayed=groups.map(({group,items})=>({group,items:expanded.includes(group)?items:items.slice(0,GROUP_LIMIT),total:items.length}));
   const ordered=displayed.flatMap(group=>group.items) as TabletFindEntry[];
   const selected=ordered.findIndex(entry=>entry.id===activeId);const current=Math.max(0,selected);
@@ -84,7 +84,7 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
       <RadixDialog.Content className="tablet-find" aria-describedby={undefined} onOpenAutoFocus={event=>{event.preventDefault();field.current?.focus();}} onCloseAutoFocus={event=>{event.preventDefault();if(!picked.current&&opener.current?.isConnected)opener.current.focus();}}
         onEscapeKeyDown={event=>{event.preventDefault();if(!event.isComposing&&event.keyCode!==229&&!(field.current&&editor.isComposing(field.current)))onClose();}}>
         <header className="tablet-find__bar"><RadixDialog.Title>찾기</RadixDialog.Title><IconButton label="찾기 닫기" icon={XMarkIcon} onClick={onClose}/></header>
-        <div className="tablet-find__field"><TextInput icon={MagnifyingGlassIcon} {...editor.bind(query,value=>{setQuery(value);setExpanded([]);setActiveId(null);},field)} autoFocus role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 이름" aria-expanded="true" aria-controls={`${id}-results`} aria-activedescendant={ordered.length?`${id}-option-${current}`:undefined} aria-autocomplete="list" placeholder="작품, 작가, 메모, 폴더 찾기" autoComplete="off" spellCheck={false} enterKeyHint="search"
+        <div className="tablet-find__field"><TextInput icon={MagnifyingGlassIcon} {...editor.bind(query,value=>{setQuery(value);setExpanded([]);setActiveId(null);},field)} autoFocus role="combobox" aria-label="작품, 폴더·캐릭터, 태그, 작가, 메모 또는 메뉴 이름" aria-expanded="true" aria-controls={`${id}-results`} aria-activedescendant={ordered.length?`${id}-option-${current}`:undefined} aria-autocomplete="list" placeholder={findPlaceholder(context.tab)} autoComplete="off" spellCheck={false} enterKeyHint="search"
           onKeyDown={event=>{
             if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.nativeEvent.keyCode===229)return;
             if(event.key==='ArrowDown'||event.key==='ArrowUp'){
@@ -94,8 +94,8 @@ export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,e
         <div className="tablet-find__scopes" role="group" aria-label="찾기 범위">{TABLET_FIND_SCOPES.map(name=><FilterChip key={name} aria-pressed={scope===name} onPointerDown={event=>event.preventDefault()} onClick={()=>{setScope(name);setExpanded([]);setActiveId(null);}}>{name}</FilterChip>)}</div>
         <div className="tablet-find__results" id={`${id}-results`} role="listbox" aria-label="찾기 결과" aria-busy={loading||stale} inert={stale||undefined}>
           {!ordered.length&&(loading?<div className="tablet-find__skeleton"><Skeleton/><Skeleton/><Skeleton/></div>:<EmptyState inline className="tablet-find__empty" title={query.trim()?'검색 결과 없음':privacy?'이름으로 찾기':'최근 항목 없음'} />)}
-          {displayed.map(({group,items,total})=><div key={group} role="group" aria-labelledby={`${id}-${group}`}>
-            <SectionLabel as="h2" id={`${id}-${group}`} title={NAVIGATION_GROUP_LABELS[group]}/>
+          {displayed.map(({group,items,total},groupIndex)=><div key={`${group}-${groupIndex}`} className={group==='best'?'tablet-find__best':undefined} role={group==='best'?undefined:'group'} aria-labelledby={group==='best'?undefined:`${id}-${group}-${groupIndex}`}>
+            {group!=='best'&&<SectionLabel as="h2" id={`${id}-${group}-${groupIndex}`} title={NAVIGATION_GROUP_LABELS[group]}/>}
             {items.map(entry=>{const index=ordered.findIndex(item=>item.id===entry.id);return <div key={entry.id} id={`${id}-option-${index}`} role="option" tabIndex={0} aria-selected={index===current} className="tablet-find__option" onPointerDown={event=>event.preventDefault()} onClick={()=>pick(entry as TabletFindEntry)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();pick(entry as TabletFindEntry);}}}>
               <FindEntryContent entry={entry} query={draft.query} privacy={privacy} media={!privacy?<FindMedia entry={entry as TabletFindEntry} cache={session.cache} signal={session.controller.signal}/>:undefined}/>
             </div>;})}

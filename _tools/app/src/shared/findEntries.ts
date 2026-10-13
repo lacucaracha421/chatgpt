@@ -6,7 +6,7 @@ export const MORE_LABELS = {
 } as const;
 
 /** content: 내용 검색, images that match the typed description (PC palette only, while typing); search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
-export type NavigationEntryGroup = "content" | "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
+export type NavigationEntryGroup = "best" | "menu" | "content" | "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
 
 export type NavigationEntry = {
   id: string;
@@ -14,6 +14,8 @@ export type NavigationEntry = {
   label: string;
   icon: ReactNode;
   count?: number;
+  workType?: "game" | "manga" | "movie" | "av";
+  placeKind?: "character" | "folder" | "album";
   /** Extra names the palette also matches, e.g. an English term or a longer Korean name. */
   keywords?: string[];
   /** Background activity for this destination, e.g. a running Private Vault import. */
@@ -31,14 +33,16 @@ export type NavigationEntry = {
 };
 
 export const NAVIGATION_GROUP_LABELS: Record<NavigationEntryGroup, string> = {
+  best: "",
+  menu: "메뉴",
   content: "이미지 내용",
-  search: "이 화면에서",
+  search: "이 화면 검색",
   work: "작품",
   artist: "작가",
   note: "메모",
   recent: "최근 연 것",
-  tag: "자동 태그",
-  place: "폴더",
+  tag: "태그",
+  place: "폴더·캐릭터",
   queue: "확인할 것",
   go: "이동",
   action: "실행",

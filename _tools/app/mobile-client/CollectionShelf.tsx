@@ -99,7 +99,7 @@ export function ShelfViewSheet({type, view, onChange, onClose}: {type: Collectio
 }
 export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void}) {
   const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(type === 'manga' ? [{value: 'bookcase' as const, label: '책장'}] : [])];
-  return <ViewOptionsSection title="보기">
+  return <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
       <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
       <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p>

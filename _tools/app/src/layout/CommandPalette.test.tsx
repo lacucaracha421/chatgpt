@@ -27,9 +27,9 @@ function data(onNavigate = vi.fn()) {
 describe("device name search", () => {
   it("groups every kind in order, filters scopes, and matches Korean initials", () => {
     const entries = data();
-    expect(findGroups(entries, "ㅂㄱ", "전체", []).map(group => group.group)).toEqual(["work", "artist", "note", "place", "go", "action"]);
-    for (const [scope, group] of [["작품", "work"], ["작가", "artist"], ["메모", "note"], ["폴더", "place"], ["화면", "go"], ["명령", "action"]] as const) {
-      expect(findGroups(entries, "별과", scope, []).map(result => result.group)).toEqual([group]);
+    expect(findGroups(entries, "ㅂㄱ", "전체", []).map(group => group.group)).toEqual(["best", "work", "place", "artist", "note", "menu"]);
+    for (const [scope, group] of [["작품", "work"], ["작가", "artist"], ["메모", "note"], ["폴더·캐릭터", "place"], ["메뉴", "menu"]] as const) {
+      expect(findGroups(entries, "별과", scope, []).every(result => result.group === "best" || result.group === group)).toBe(true);
     }
     expect(matchedSpans("은하 별과 바다", "ㅂㄱ").filter(span => span.matched).map(span => span.text)).toEqual(["별과"]);
   });
@@ -57,18 +57,18 @@ describe("device name search", () => {
       expect(input).toHaveFocus();
     }
     await user.tab({ shift: true });
-    expect(screen.getByRole("button", { name: "명령" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "메뉴" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
   });
-  it("keeps the current screen search first in every scope and applies its draft", async () => {
+  it("places strong names before the current screen search and opens the best match", async () => {
     const user = userEvent.setup();
     const apply = vi.fn();
-    render(<CommandPalette open onClose={vi.fn()} entries={data()} recentKey={nextKey()} search={{ info: { kind: "query", scope: "망가", label: "검색", query: "" }, apply, open: vi.fn() }} />);
+    render(<CommandPalette open onClose={vi.fn()} entries={data()} recentKey={nextKey()} context={{tab:"manga"}} search={{ info: { kind: "query", scope: "망가", label: "검색", query: "" }, apply, open: vi.fn() }} />);
     await user.type(screen.getByRole("combobox"), "별과");
     await user.tab();
-    expect(screen.getAllByRole("option")[0]).toHaveTextContent("망가에서 ‘별과’ 검색");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("별과 manga");
     await user.keyboard("{Enter}");
-    expect(apply).toHaveBeenCalledWith("별과");
+    expect(apply).not.toHaveBeenCalled();
   });
   it.each([
     ["work-game", { kind: "collection", collectionId: "game" }],

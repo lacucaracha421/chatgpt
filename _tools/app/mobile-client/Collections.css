@@ -138,10 +138,8 @@
 /* 정렬 and 내 별점 sit on the 전체 line instead of their own sticky row. */
 .collection-all{min-height:52px}
 .collection-all .collection-chips{position:static;margin:0;padding:0;background:none;overflow:visible}
-/* 내 별점 filter sheet: the slider, then the separate 미평가 toggle. */
-.collection-rating-filter{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-.collection-rating-filter .step-slider{align-self:stretch}
-.collection-rating-filter .step-slider.is-idle input{opacity:.45}
+/* 내 별점 and 정렬 in the 보기 sheet share the PC pieces (collectionViewSections.css); touch targets are 44px. */
+.shelf-view-sheet .collection-rating-filter__row .ui-button,.shelf-view-sheet .ui-section-label__actions .ui-button{min-height:var(--touch-target)}
 /* The showcase switch moves once: the track colour eases with the knob, and the pending slot
    beside it keeps one width whether or not 전송 대기 shows. */
 .collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}

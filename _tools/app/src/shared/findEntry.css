@@ -1,3 +1,4 @@
+.command-palette__best { padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }
 .find-entry__media { display: grid; place-items: center; flex: none; width: var(--control-height); min-height: var(--control-height); color: var(--color-muted); }
 .find-entry__media svg { width: var(--icon-md); height: var(--icon-md); }
 .find-entry__media img { width: var(--control-height); height: calc(var(--control-height) * 1.25); object-fit: cover; border-radius: var(--radius-tile); }

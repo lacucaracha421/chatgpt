@@ -38,31 +38,39 @@ async function selectTile(name: string) { fireEvent.click(await screen.findByRol
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
 afterEach(() => { cleanup(); vi.mocked(tauriCore.invoke).mockReset(); vi.restoreAllMocks(); });
 
-it.each([undefined, "group"])("moves character folders in their full visible scope and refreshes shared data: %s", async groupId => {
+it.each([undefined, "group"])("orders characters inside their visible band from the card menu and refreshes shared data: %s", async groupId => {
   const { changed } = await mount(undefined, false, groupId ? [{ id: groupId, name: "Group", seriesId: "series", revision: 1, targetIds: ["kisaki", "hina"] }] : [], groupId);
   const invoke = vi.mocked(tauriCore.invoke).mockResolvedValue(undefined);
   const user = userEvent.setup();
   fireEvent.contextMenu(await screen.findByRole("button", { name: "히나 열기" }));
-  expect(screen.getByRole("menuitem", { name: "위로 이동" })).toBeDisabled();
-  await user.click(screen.getByRole("menuitem", { name: "아래로 이동" }));
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("move_character_folder", {
-    seriesId: "series", targetId: "hina", groupId: groupId ?? null, direction: 1,
+  expect(screen.getByRole("menuitem", { name: "앞으로" })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "맨 앞으로" })).toBeDisabled();
+  expect(screen.queryByRole("menuitem", { name: "위로 이동" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("menuitem", { name: "뒤로" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("reorder_character_folders", {
+    seriesId: "series", groupId: groupId ?? null, targetIds: ["kisaki", "hina"],
   }));
   await waitFor(() => expect(changed).toHaveBeenCalled());
   fireEvent.contextMenu(screen.getByRole("button", { name: "키사키 열기" }));
-  expect(screen.getByRole("menuitem", { name: "아래로 이동" })).toBeDisabled();
-  await user.click(screen.getByRole("menuitem", { name: "위로 이동" }));
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("move_character_folder", {
-    seriesId: "series", targetId: "kisaki", groupId: groupId ?? null, direction: -1,
+  expect(screen.getByRole("menuitem", { name: "뒤로" })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "맨 뒤로" })).toBeDisabled();
+  await user.click(screen.getByRole("menuitem", { name: "앞으로" }));
+  await waitFor(() => expect(invoke).toHaveBeenLastCalledWith("reorder_character_folders", {
+    seriesId: "series", groupId: groupId ?? null, targetIds: ["kisaki", "hina"],
   }));
+  // The rest of the card menu stays: put-in or take-out, then the series move.
+  fireEvent.contextMenu(screen.getByRole("button", { name: "히나 열기" }));
+  expect(screen.getByRole("menuitem", { name: groupId ? "Group에서 빼기" : /그룹에 넣기/ })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "다른 시리즈로 이동…" })).toBeInTheDocument();
 });
 
-it("shows a failed order save without publishing a shared refresh", async () => {
+it("shows a failed order save as a message with a retry, without publishing a shared refresh", async () => {
   const { changed } = await mount();
   vi.mocked(tauriCore.invoke).mockRejectedValue(new Error("순서 저장 실패"));
   fireEvent.contextMenu(await screen.findByRole("button", { name: "키사키 열기" }));
-  await userEvent.click(screen.getByRole("menuitem", { name: "위로 이동" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("순서 저장 실패");
+  await userEvent.click(screen.getByRole("menuitem", { name: "앞으로" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("순서를 바꾸지 못했습니다");
+  expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
   expect(changed).not.toHaveBeenCalled();
 });
 

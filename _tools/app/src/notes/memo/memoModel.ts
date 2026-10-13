@@ -110,11 +110,22 @@ export function editSectionBody(doc: MemoDocument, id: string, text: string): Me
   const headingEnd = section.heading && start === section.heading.headingRange.end && escaped ? eol : '';
   return parseMemo(body.slice(0, start) + headingEnd + escaped + separator + body.slice(end), doc);
 }
-export function addMemoSection(doc: MemoDocument, mode: MemoMode = memoMode(memoBody(doc))): MemoDocument {
-  const titles = new Set(memoSections(doc).map(section => section.title));
+/** Adds a new section directly below `afterId` (a named section id); without it, or after the last section, it goes to the end. */
+export function addMemoSection(doc: MemoDocument, mode: MemoMode = memoMode(memoBody(doc)), afterId?: string): MemoDocument {
+  const sections = memoSections(doc);
+  const titles = new Set(sections.map(section => section.title));
   let title = '새 섹션', suffix = 2;
   while (titles.has(title)) title = `새 섹션 ${suffix++}`;
-  const body = memoBody(doc), eol = eolOf(doc);
+  const eol = eolOf(doc);
+  const after = afterId === undefined ? -1 : sections.findIndex(section => section.heading && section.id === afterId);
+  if (after >= 0 && after < sections.length - 1) {
+    const lastId = sections[after]!.items[sections[after]!.items.length - 1]?.id ?? sections[after]!.id;
+    const at = doc.lines.findIndex(line => line.id === lastId) + 1;
+    const head = doc.lines.slice(0, at).map(line => line.raw + line.ending).join('');
+    const tail = doc.lines.slice(at).map(line => line.raw + line.ending).join('');
+    return parseMemo(`${head}## ${title}${eol}${mode === 'todo' ? `- [ ]${eol}` : ''}${tail}`, doc);
+  }
+  const body = memoBody(doc);
   const separator = body && (mode === 'text' || !/[\r\n]$/.test(body)) ? eol : '';
   return parseMemo(`${body}${separator}## ${title}${eol}${mode === 'todo' ? '- [ ]' : ''}`, doc);
 }

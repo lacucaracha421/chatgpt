@@ -21,14 +21,14 @@ it.each([
   ['작품','Star Sea','work-w',{kind:'work',id:'w'}],
   ['작가','@night','artist-a',{kind:'artist',artist}],
   ['메모','ㅂㄱ','note-n',{kind:'note',id:'n'}],
-  ['폴더','별과 폴더','place-folder-folder',{kind:'place',view:{tab:'library',classification:'folder',title:'별과 폴더'}}],
-  ['폴더','별과 앨범','place-album-album',{kind:'place',view:{tab:'library',title:'별과 앨범',album:{id:'album',libraryId:'library',epoch:2}}}],
-  ['화면','카탈','screen-catalog',{kind:'screen',screen:'catalog'}],
+  ['폴더·캐릭터','별과 폴더','place-folder-folder',{kind:'place',view:{tab:'library',classification:'folder',title:'별과 폴더'}}],
+  ['폴더·캐릭터','별과 앨범','place-album-album',{kind:'place',view:{tab:'library',title:'별과 앨범',album:{id:'album',libraryId:'library',epoch:2}}}],
+  ['메뉴','카탈','screen-catalog',{kind:'screen',screen:'catalog'}],
 ] as const)('matches and navigates %s / %s', (scope,query,id,destination)=>{
   const navigate=vi.fn();const groups=findGroups(data(navigate),query,scope,[]);
   const found=groups.flatMap(group=>group.items).find(entry=>entry.id===id)!;
   expect(found).toBeTruthy();found.run();expect(navigate).toHaveBeenCalledWith(destination);
-  expect(groups.flatMap(group=>group.items).every(entry=>scope==='폴더'?entry.group==='place':scope==='화면'?entry.group==='go':entry.id.startsWith(scope==='작품'?'work-':scope==='작가'?'artist-':'note-'))).toBe(true);
+  expect(groups.flatMap(group=>group.items).every(entry=>scope==='폴더·캐릭터'?entry.group==='place':scope==='메뉴'?entry.group==='go':entry.id.startsWith(scope==='작품'?'work-':scope==='작가'?'artist-':'note-'))).toBe(true);
 });
 it('finds all kinds together, marks Korean initials, never indexes note bodies or hidden/deleted items',()=>{
   expect(findGroups(data(),'별과','전체',[]).flatMap(group=>group.items)).toHaveLength(5);
@@ -36,6 +36,10 @@ it('finds all kinds together, marks Korean initials, never indexes note bodies o
   expect(data().some(entry=>entry.id.includes('hidden')||entry.id==='note-deleted'||entry.id==='note-month')).toBe(false);
   expect(matchedSpans('별과 바다','ㅂㄱ')).toContainEqual({text:'별과',matched:true});
   expect(data().find(entry=>entry.id==='note-n')?.keywords).toBeUndefined();
+});
+it.each([['발매 캘린더','calendar'],['신간','releases']] as const)('finds the %s shortcut in the menu chip',(label,shortcut)=>{
+  const navigate=vi.fn();const rows=findGroups(data(navigate),label,'메뉴',[]).flatMap(group=>group.items);
+  expect(rows[0].label).toBe(label);rows[0].run();expect(navigate).toHaveBeenCalledWith({kind:'shortcut',shortcut});
 });
 it('loads works lazily across all existing collection types and cursor pages; caches until close',async()=>{
   mocks.api.mockImplementation(async(path:string)=>{const q=new URL(path,'https://test').searchParams;return {ready:true,revision:'r',items:[{...work,id:`${q.get('type')}-${q.get('cursor')??'first'}`}],nextCursor:q.get('type')==='manga'&&!q.get('cursor')?'next':null};});

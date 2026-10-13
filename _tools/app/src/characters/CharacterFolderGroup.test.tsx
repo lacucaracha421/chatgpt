@@ -112,7 +112,7 @@ function props(): ComponentProps<typeof CharacterFolderContent> {
     children: <><MenuSlot /><p>폴더 내용</p></>, view: { kind: "classification", classificationId: "plain" },
     hub: { series: [{ classificationId: "series", heroAssetId: null, autoClassify: true }],
       targets: [], extras: [], groups: [], error: null, refresh: vi.fn(), revision: 0,
-      seriesRevisions: {}, seriesAnalysed: vi.fn(), reorderGroups: vi.fn() },
+      seriesRevisions: {}, seriesAnalysed: vi.fn(), reorderGroups: vi.fn(), reorderCharacters: vi.fn() },
     classifications, galleryLayout: "masonry", onGalleryLayoutChange: vi.fn(), privacyMode: false,
     onPrivacyModeChange: vi.fn(), metadataVisible: true, onMetadataVisibleChange: vi.fn(),
     thumbnailRowHeight: 200, onThumbnailRowHeightChange: vi.fn(), refreshVersion: 0,

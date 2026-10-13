@@ -500,9 +500,13 @@ it('combines sort, personal rating and view groups and applies the selected sort
   const titles=()=>[...list().querySelectorAll('.collection-title')].map(node=>node.textContent);
   expect(titles()).toEqual(['최근 작품','오래된 작품']);
   fireEvent.click(screen.getByRole('button',{name:'보기'}));const sheet=screen.getByRole('dialog',{name:'보기'});
-  expect([...sheet.querySelectorAll('.ui-view-options__section .ui-section-label__title')].map(node=>node.textContent)).toEqual(['정렬','내 별점','보기']);
+  expect([...sheet.querySelectorAll('.ui-view-options__section .ui-section-label__title')].map(node=>node.textContent)).toEqual(['내 별점','배치','정렬']);
   expect(within(sheet).getByRole('slider',{name:'내 별점'})).toBeTruthy();
-  fireEvent.click(within(sheet).getByRole('radio',{name:'최근 추가'}));fireEvent.click(within(sheet).getByRole('radio',{name:'오래된순'}));
+  // 정렬 is the same 묶기 / 기준 / 순서 rows as the PC menu (묶기 for games only).
+  expect(within(sheet).getAllByRole('radiogroup').map(group=>group.getAttribute('aria-label'))).toEqual(['배치','묶기','정렬 기준','정렬 순서']);
+  expect(within(within(sheet).getByRole('radiogroup',{name:'정렬 기준'})).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['발매일','추가일','제목']);
+  expect(within(within(sheet).getByRole('radiogroup',{name:'정렬 순서'})).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['최신순','오래된순']);
+  fireEvent.click(within(sheet).getByRole('radio',{name:'추가일'}));fireEvent.click(within(sheet).getByRole('radio',{name:'오래된순'}));
   await waitFor(()=>expect(titles()).toEqual(['오래된 작품','최근 작품']));
 });
 
@@ -513,22 +517,23 @@ describe('read-only collections',()=>{
     scrollToEnd(list());
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('cursor=page-2'));
     fireEvent.click(screen.getByRole('button',{name:'보기'}));
-    // A slider (전체, 0.5 … 5.0) with 전체 marked as the default, plus a separate 미평가 toggle.
+    // A slider (전체, 0.5 … 5.0), plus a separate 미평가 toggle; 초기화 shows in the label only with a filter on.
+    expect(within(screen.getByRole('dialog')).queryByRole('button',{name:'초기화'})).toBeNull();
     const slider=within(screen.getByRole('dialog')).getByRole('slider',{name:'내 별점'}) as HTMLInputElement;
-    expect(slider.getAttribute('aria-valuetext')).toBe('전체 · 기본');expect(slider.max).toBe('10');
+    expect(slider.getAttribute('aria-valuetext')).toBe('전체');expect(slider.max).toBe('10');
     fireEvent.change(slider,{target:{value:'9'}});expect(slider.getAttribute('aria-valuetext')).toBe('★ 4.5');
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=4.5'));
     expect(mocks.api.mock.calls.at(-1)?.[0]).not.toContain('cursor=');
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=unrated'));
-    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}).getAttribute('aria-pressed')).toBe('true');
+    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가'}).getAttribute('aria-pressed')).toBe('true');
     fireEvent.change(slider,{target:{value:'9'}});
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=4.5'));
-    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}).getAttribute('aria-pressed')).toBe('false');
+    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가'}).getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'닫기'}));
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'보기'}));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'최근 추가'}));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'추가일'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('sort=recent'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'오래된순'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('direction=asc'));

@@ -13,9 +13,9 @@ function show(props:Partial<Parameters<typeof FindSheet>[0]>={}){return render(<
 function type(query:string){fireEvent.change(screen.getByRole('combobox'),{target:{value:query}});}
 beforeEach(()=>{localStorage.clear();media.ticket.mockReset();media.ticket.mockResolvedValue({url:'https://test/cover'});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
-it('preselects the asset screen search ahead of all app results and Enter runs it',async()=>{
- const run=vi.fn(),close=vi.fn();show({search:{scope:'에셋',run},onClose:close});
- expect(screen.getAllByRole('option')[0].textContent).toContain('에셋에서 찾기');
+it('preselects collection screen search when no strong name matches and Enter runs it',async()=>{
+ const run=vi.fn(),close=vi.fn();show({context:{tab:'collections'},entries:[],search:{scope:'컬렉션',run},onClose:close});
+ expect(screen.getAllByRole('option')[0].textContent).toContain('컬렉션에서 찾기');
  type('별과');
  await waitFor(()=>expect(screen.getAllByRole('option')[0].textContent).toContain('이 화면에서 ‘별과’'));
  expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
@@ -23,11 +23,22 @@ it('preselects the asset screen search ahead of all app results and Enter runs i
  expect(run).toHaveBeenCalledWith('별과');expect(close).toHaveBeenCalledOnce();
  expect(readRecent(recentKey)).not.toContain('screen-search');
 });
-it('focuses the field, shares group limits and expands; all six scope chips stay touch controls',async()=>{
+it('uses asset place priority, keeps a heading-free best row and shows a menu chip without PC commands',async()=>{
+  const run=vi.fn();
+  const place:TabletFindEntry={id:'place-character-c',group:'place',label:'레베카',icon:null,destination:{kind:'screen',screen:'assets'},run};
+  const command:TabletFindEntry={...place,id:'import',group:'action',label:'파일 가져오기'};
+  show({context:{tab:'assets'},entries:[{...place,id:'work-w',group:'work',workType:'game',run:vi.fn()},place,command]});type('레베카');
+  await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(2));
+  expect(screen.getAllByRole('option')[0].closest('[role="group"]')).toBeNull();
+  fireEvent.keyDown(screen.getByRole('combobox'),{key:'Enter'});expect(run).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button',{name:'메뉴',exact:true}));type('파일');
+  await waitFor(()=>expect(screen.queryByRole('option')).toBeNull());
+});
+it('focuses the field, shares group limits and expands; all seven scope chips stay touch controls',async()=>{
   show();expect(document.activeElement).toBe(screen.getByRole('combobox'));type('별과');
-  await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(6));
-  expect(screen.getAllByRole('button',{pressed:false})).toHaveLength(5); // five unselected scopes
-  fireEvent.click(screen.getByRole('button',{name:'작품 3개 더 보기'}));expect(screen.getAllByRole('option')).toHaveLength(9);
+  await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(7));
+  expect(screen.getAllByRole('button',{pressed:false})).toHaveLength(6); // six unselected scopes
+  fireEvent.click(screen.getByRole('button',{name:'작품 2개 더 보기'}));expect(screen.getAllByRole('option')).toHaveLength(9);
   fireEvent.click(screen.getByRole('button',{name:'메모',exact:true}));await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(1));
   expect(screen.getByRole('option').textContent).toBe('별과 메모');
   expect(screen.queryByRole('button',{name:'명령',exact:true})).toBeNull();
@@ -59,10 +70,10 @@ it('ignores Enter throughout IME composition and keyCode 229; commits composed t
 });
 it('keeps existing result nodes while data arrives and fetches covers only for displayed rows, once per session',async()=>{
   const items=entries(),view=show({entries:items});type('별과');await screen.findAllByRole('option');
-  await waitFor(()=>expect(media.ticket).toHaveBeenCalledTimes(5));const first=screen.getAllByRole('option')[0];
+  await waitFor(()=>expect(media.ticket).toHaveBeenCalledTimes(6));const first=screen.getAllByRole('option')[0];
   view.rerender(<FindSheet open entries={[...items]} endpoint={endpoint} privacy={false} loading onClose={vi.fn()}/>);
   expect(screen.getAllByRole('option')[0]).toBe(first);expect(within(screen.getByRole('listbox')).queryByLabelText('Loading')).toBeNull();
-  type('별과 0');await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(1));type('별과');await screen.findAllByRole('option');expect(media.ticket).toHaveBeenCalledTimes(5);
+  type('별과 0');await waitFor(()=>expect(screen.getAllByRole('option')).toHaveLength(1));type('별과');await screen.findAllByRole('option');expect(media.ticket).toHaveBeenCalledTimes(6);
   expect(screen.getAllByRole('option')[0].querySelector('img')?.getAttribute('src')).toBe('https://test/cover');
 });
 

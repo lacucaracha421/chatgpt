@@ -19,6 +19,12 @@ it.each([false, true])('retains the closing sheet and scrim after the conditiona
   expect(sheet.dataset.motion).toBe('dialog');
   act(() => vi.advanceTimersByTime(20));
   unmount();
+  if (reduced) {
+    // Reduced motion leaves at once: no retained sheet or scrim (a3797fff).
+    expect(document.querySelector('[data-motion-ghost]')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    return;
+  }
   const ghosts = [...document.querySelectorAll<HTMLElement>('[data-motion-ghost]')];
   expect(ghosts.map(node => node.dataset.motion).sort()).toEqual(['dialog','scrim']);
   expect(ghosts.every(node => node.inert && node.getAttribute('aria-hidden') === 'true')).toBe(true);
@@ -44,11 +50,11 @@ it('uses the same retained selection bar on tablet without painting a zero count
   expect(ghost.isConnected).toBe(false);
 });
 
-it('travels the entire sheet height and shares the opacity-only reduced-motion rule', () => {
+it('travels the entire sheet height and shares the instant reduced-motion rule', () => {
   const sheet = readFileSync('mobile-client/library.css', 'utf8');
   const motion = readFileSync('src/styles/surface-motion.css', 'utf8');
   expect(sheet).toContain('--surface-y: 100%');
-  expect(motion).toContain('translate: none !important; scale: none !important; transition: opacity var(--motion-micro)');
+  expect(motion).toContain('translate: none !important; scale: none !important; transition: none !important;');
 });
 
 it('closes a tall inbox sheet from the header button or a downward header swipe', () => {

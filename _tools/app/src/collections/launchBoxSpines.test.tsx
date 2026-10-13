@@ -24,8 +24,8 @@ function setup() {
 }
 async function start() {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "작품 관리" }));
-  await user.click(screen.getByRole("menuitem", { name: "책등 받기" }));
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  await user.click(screen.getByRole("button", { name: "책등 받기" }));
   return user;
 }
 it("follows the cursor, displays cumulative progress, prevents another batch and summarises", async () => {
@@ -48,8 +48,9 @@ it("follows the cursor, displays cumulative progress, prevents another batch and
   expect(gateway.listCollectionShelfCases.mock.calls.flatMap(args => args[0])).not.toContain("manga");
   act(() => report({ jobId: job, phase: "game_completed", processed: 1, total: 2, outcome: outcome("b", "no_match") }));
   expect(document.querySelector(".collection-toolbar__spine-status")).toHaveTextContent(/^책등 2\/5$/);
-  await user.click(screen.getByRole("button", { name: "작품 관리" }));
-  expect(screen.getByRole("menuitem", { name: "책등 받기" })).toHaveAttribute("aria-disabled", "true");
+  // While it runs, 관리 swaps the row for the progress and its own 취소 (the top bar keeps the indicator).
+  expect(screen.queryByRole("button", { name: "책등 받기" })).toBeNull();
+  expect(screen.getByRole("button", { name: "책등 받기 취소" })).toBeInTheDocument();
   await user.keyboard("{Escape}");
   await act(async () => finish({ jobId: job, outcomes: [outcome("b", "no_match"), outcome("c", "ambiguous"), outcome("d", "failed"), outcome("e", "skipped")], nextCursor: "e", hasMore: false, cancelled: false }));
   expect(screen.getByText("책등 1개 받음 · 못 찾음 1 · 애매함 1 · 실패 1 · 플랫폼 0개 채움")).toBeInTheDocument();

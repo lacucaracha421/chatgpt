@@ -606,6 +606,24 @@ pub async fn move_character_folder(
     .map_err(Into::into)
 }
 
+/// Stores the order of one visible band of a series: the loose characters (`group_id` empty) or the
+/// members of one group (every character of the band, once each).
+#[tauri::command]
+pub async fn reorder_character_folders(
+    series_id: String,
+    group_id: Option<String>,
+    target_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.reorder_character_folders(&series_id, group_id.as_deref(), &target_ids)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
 #[tauri::command]
 pub async fn list_character_targets(
     state: State<'_, AppState>,

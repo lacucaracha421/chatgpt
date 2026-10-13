@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>컬렉션 도구 줄</title>
+<!-- 앱의 실제 폰트, 토큰, 공용 베이스·컨트롤·크롬, 자산 보기 메뉴(asset-view-menu), 컬렉션 화면 CSS를 불러온다.
+     페이지 틀, 임시 표지, 상단 바·레일 흉내, 주석 표식, 새로 제안하는 필터 칩만 이 파일에 있다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/assets/assets.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/CollectionBrowser.css">
+<style>
+/* ---------- 문서 틀 (디자인 대상 아님) ---------- */
+html, body, #root { height: auto !important; overflow: visible !important; overflow-y: auto !important; user-select: text; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0f10; color: var(--color-text); font: 400 var(--type-body) / 1.5 var(--font-ui); }
+h1, h2, h3, p { margin: 0; }
+.doc { word-break: keep-all; overflow-wrap: break-word; width: 1520px; max-width: 100%; padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 48px; }
+.doc > header h1 { font-size: 26px; font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 1100px; margin-top: 8px; line-height: 1.75; }
+.lead b, .note b, .doc li b, td b { color: var(--color-text); font-weight: 600; }
+.variant { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; border-top: 1px solid #2a2b2d; }
+.variant > h2 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.variant > h2::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.variant > h2 small { color: var(--color-faint); font-size: 14px; font-weight: 400; }
+.rec { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; background: var(--color-accent); color: var(--color-on-accent); font-size: 12px; font-weight: 600; }
+.note { max-width: 1100px; color: var(--color-muted); font-size: 14px; line-height: 1.75; }
+.cap { color: var(--color-faint); font-size: 13px; }
+.doc ul.plain { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.85; max-width: 1100px; font-size: 14px; }
+.pair { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+.pair > div { display: flex; flex-direction: column; gap: 8px; }
+table.inv { border-collapse: collapse; width: 1440px; max-width: 100%; font-size: 13px; }
+table.inv th, table.inv td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--color-border); line-height: 1.6; }
+table.inv th { color: var(--color-faint); font-weight: 600; white-space: nowrap; }
+table.inv td { color: var(--color-muted); }
+table.inv td:nth-child(2) { color: var(--color-text); }
+table.inv td.k { color: var(--color-text); }
+table.inv td.mv { color: #d9b45a; }
+.pin { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 2px; background: #c9a24a; color: #1a1408; font: 700 11px/1 var(--font-ui); font-style: normal; }
+table.inv .pin { margin-right: 4px; vertical-align: -3px; }
+
+/* ---------- 화면 틀 ---------- */
+.frame { position: relative; overflow: hidden; background: var(--color-bg); outline: 1px solid #2a2b2d; color: var(--color-text); font-size: var(--type-body); line-height: var(--line-ui); flex: none; }
+.frame--pc { width: 1440px; height: 760px; }
+.frame--pc.short { height: 300px; }
+.frame--pc.mid { height: 600px; }
+.frame--narrow { width: 820px; height: 220px; }
+.frame--tab { width: 800px; height: 1280px; zoom: .75;
+  --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px;
+  --control-height: 44px; --control-height-compact: 36px; --control-height-sm: 36px; --control-height-icon: 44px; --badge-height: 24px;
+  --icon-md: 24px; --icon-sm: 16px; --line-meta: 20px; --line-ui: 24px; --text-md: 17px; --text-sm: 15px; --text-xs: 13px; }
+svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: 16px; height: 16px; }
+.num { font-variant-numeric: tabular-nums; }
+.sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* PC 셸 흉내: 레일 + 상단 바(실제 앱은 workspace 헤더 슬롯) */
+.pc { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-3); background: var(--color-sidebar); border-right: 1px solid var(--color-border); color: var(--color-muted); }
+.rail span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-control); }
+.rail span.on { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+.rail .push { margin-top: auto; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--toolbar-height); padding: 0 0 0 var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.topbar .ttl { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 600; }
+.topbar .ttl svg { width: 16px; height: 16px; color: var(--color-faint); }
+.topbar .grow { flex: 1; }
+.winctl { display: flex; align-self: stretch; align-items: center; gap: 24px; padding: 0 16px 0 12px; color: var(--color-faint); font-size: 13px; }
+.status-chip { color: var(--color-faint); font-size: 12px; }
+.ibtn { display: inline-grid; place-items: center; width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); cursor: pointer; }
+.ibtn:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.ibtn svg { width: 16px; height: 16px; }
+.quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; white-space: nowrap; cursor: pointer; }
+.quiet-menu svg { width: 16px; height: 16px; }
+.quiet-menu[aria-expanded="true"], .quiet-menu:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.count { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.spine-run { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; }
+.scroll { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.ui-section-bar .ui-segmented { position: relative; }
+.is-gone { opacity: .35; text-decoration: line-through; }
+
+/* 목록 시작 줄 ('전체 184') + 새 필터 칩 */
+.cb-head { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; margin: 0 var(--space-6); border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
+.cb-head h3 { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--type-body); font-weight: 600; }
+.cb-head .tot { color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* 제안: 켜진 내 별점 필터를 보여 주는 칩. 회색 면 하나(얇은 요소는 단서 하나), weight 600, ✕로 바로 빼기. */
+.f-chip { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-1) 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: var(--color-filter-selected); color: var(--color-filter-text, var(--color-text)); font: 600 var(--type-meta) / 1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.f-chip svg.star { width: 14px; height: 14px; fill: currentColor; stroke: none; color: var(--color-muted); }
+.f-chip .x { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; color: var(--color-muted); }
+.f-chip .x svg { width: 14px; height: 14px; }
+.f-chip:hover .x { color: var(--color-text); }
+
+/* 임시 표지 (실제 라이브러리 이미지 대신) */
+.cgrid { display: grid; grid-template-columns: repeat(var(--cols, 8), minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.ccard { display: grid; gap: var(--space-2); min-width: 0; }
+.cv { position: relative; display: block; aspect-ratio: 13 / 17; overflow: hidden; border-radius: var(--radius-mark); background: linear-gradient(165deg, hsl(var(--h) 42% 44%), hsl(calc(var(--h) + 30) 36% 18%)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.cv::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,255,255,.10), transparent 6%, transparent 94%, rgba(0,0,0,.25)); }
+.ccard strong { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 정적 메뉴 (실제는 Radix 포털, 버튼에 붙음). 열림/닫힘은 140ms fade + 4px rise. */
+.mock-menu { position: absolute; z-index: 20; display: block; transition: opacity 140ms var(--ease-standard), transform 140ms var(--ease-standard); }
+.mock-menu.is-closed { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+.mock-menu .ui-view-options__content { gap: var(--space-6); }
+.sub { display: grid; gap: var(--space-1); }
+.sub > span { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; }
+.ui-view-options .ui-segmented { height: var(--control-height); }
+.collection-rating-filter .ui-slider { display: flex; width: 100%; }
+.collection-rating-filter .ui-slider input { width: 100%; }
+.manage-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--control-height-menu); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.manage-row:hover { background: var(--color-surface-hover); }
+.manage-row svg { width: 16px; height: 16px; color: var(--color-muted); }
+.manage-row .grow { flex: 1; }
+.manage-row .meta { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.manage-run { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height-menu); padding: 0 var(--space-2); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.manage-run .grow { flex: 1; }
+.menu-solo { position: relative; }
+/* 시안 전용: 앱은 창 너비 1100px 이하에서 바로가기 글자를 숨긴다(viewport 미디어 쿼리). 좁은 창 틀에서 그 상태를 재현한다. */
+.frame--narrow .collection-shortcuts__label { display: none; }
+.menu-solo .mock-menu { position: relative; }
+
+/* 태블릿 흉내 */
+.tab { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tab-top { display: flex; align-items: center; gap: var(--space-2); flex: none; height: 56px; padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab-top .ttl { font-size: var(--type-title); font-weight: 600; }
+.tab-top .grow { flex: 1; }
+.tab .ibtn { width: 44px; height: 44px; }
+.tab .ibtn svg { width: 24px; height: 24px; }
+.tab-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.tab-nav { display: flex; justify-content: space-around; align-items: center; flex: none; height: 64px; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 13px; }
+.tab-nav span.on { color: var(--color-text); }
+.tab-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6); border-bottom: 1px solid var(--color-border); }
+.tab-bar .ui-segmented { height: 44px; }
+.tab-bar .ui-segmented__cell { min-width: 96px; }
+.tab-bar .grow { flex: 1; }
+.tab-tool { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 44px; height: 44px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; }
+.tab-tool svg { width: 24px; height: 24px; }
+.tab-tool .n { color: var(--color-accent); font-size: 13px; font-weight: 600; }
+.tab-div { width: 1px; height: 20px; margin-inline: var(--space-1); background: var(--color-border); }
+.tab .cb-head { margin: 0 var(--space-6); min-height: 56px; }
+.tab .f-chip { height: 36px; padding-left: var(--space-3); }
+.tab .f-chip .x { width: 28px; height: 28px; }
+.tab .cgrid { --cols: 4; padding: var(--space-3) var(--space-6); }
+.t-dim { position: absolute; inset: 0; z-index: 4; background: rgba(0,0,0,.5); }
+.t-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: grid; gap: var(--space-6); padding: var(--space-2) var(--space-6) var(--space-8); background: var(--color-surface-raised); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.t-sheet .grab { width: 40px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--color-border-strong); }
+.t-sheet h3 { font-size: var(--type-title); font-weight: 600; }
+.t-sheet .ui-segmented { height: 44px; }
+.t-sheet .ui-button--secondary { min-height: 44px; }
+.t-sheet .ui-per-row output, .t-sheet .collection-rating-filter__value { font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="doc" id="doc"></div>
+<script>
+const P = {
+  home: 'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  photo: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  doc: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  left: 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18',
+  down: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  link: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244',
+  x: 'M6 18 18 6M6 6l12 12',
+  bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  cal: 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5',
+  grid: 'M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  dl: 'M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3',
+  star: 'M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+const star = `<svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="${P.star}"/></svg>`;
+const pin = n => `<i class="pin">${n}</i>`;
+
+function segmented(cells, active, extra = '') {
+  return `<div class="ui-segmented ${extra}" role="radiogroup"><span class="ui-segmented__thumb ui-segmented__thumb--initial"></span>${cells.map((c, i) => {
+    const [label, count] = Array.isArray(c) ? c : [c];
+    return `<button type="button" class="ui-segmented__cell" ${i === active ? 'data-segmented-active="true"' : ''}><span class="ui-segmented__content"><span class="ui-segmented__label">${label}${count != null ? ` <span class="ui-segmented__count num">${count}</span>` : ''}</span></span></button>`;
+  }).join('')}</div>`;
+}
+function placeThumbs(root = document) {
+  root.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-segmented-active]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!cell || !th) { if (th) th.style.display = 'none'; return; }
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+const label = (title, actions = '') => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span><span class="ui-section-label__rule" aria-hidden="true"></span>${actions ? `<span class="ui-section-label__actions">${actions}</span>` : ''}</div>`;
+const rail = () => `<nav class="rail">${['home', 'photo', 'stack', 'book', 'doc'].map((n, i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}</span>`).join('')}<span class="push">${ic('search')}</span><span>${ic('dots')}</span></nav>`;
+const win = `<span class="status-chip">동기화됨</span><span class="winctl"><span>—</span><span>☐</span><span>✕</span></span>`;
+const TITLES = ['별의 항해자', '어둠 속 정원', '철의 왕관', '바람의 노래 HD', '마지막 기사', '푸른 등대', '시계탑 미궁', '모래의 왕국', '여름 정거장', '붉은 숲', '기계 도시', '은하 우편', '고요한 섬', '검은 고양이 탐정', '얼음 성채', '달빛 서커스'];
+const covers = (n, from = 0) => Array.from({ length: n }, (_, k) => { const i = (k + from) % TITLES.length; return `<div class="ccard"><span class="cv" style="--h:${(i * 47 + 12) % 360}"></span><strong>${TITLES[i]}</strong></div>`; }).join('');
+const ttl = t => `<span class="ttl">${t}${ic('down', 's')}</span>`;
+
+/* ---------- 지금 (현재 코드 그대로) ---------- */
+function currentTop(p = false) {
+  return `<header class="topbar">${ttl('게임')}${p ? pin(1) : ''}<span class="count num">184</span>${p ? pin(2) : ''}<span class="grow"></span>
+    <button class="quiet-menu" type="button">${ic('search', 's')}<span>검색</span></button>${p ? pin(3) : ''}
+    <button class="ibtn" type="button" aria-label="작품 관리">${ic('dots')}</button>${p ? pin(4) : ''}
+    <button class="ibtn" type="button" aria-label="새 컬렉션">${ic('plus')}</button>${p ? pin(5) : ''}${win}</header>`;
+}
+function currentBar(p = false) {
+  return `<div class="ui-section-bar">${segmented(['게임', '만화', '영화', 'AV'], 0)}${p ? pin(6) : ''}
+    <div class="ui-section-bar__trailing">
+      <div class="collection-shortcuts">
+        <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('spark', 's')}<span class="collection-shortcuts__label">쇼케이스</span></button>${p ? pin(7) : ''}
+        <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('cal', 's')}<span class="collection-shortcuts__label">발매 캘린더</span><span class="collection-shortcuts__count is-new num">3</span></button>${p ? pin(8) : ''}
+      </div>
+      <span class="collection-shortcuts__divider"></span>
+      <button class="quiet-menu" type="button">정렬${ic('down', 's')}</button>${p ? pin(9) : ''}
+      <button class="quiet-menu" type="button">내 별점${ic('down', 's')}</button>${p ? pin(10) : ''}
+      <button class="quiet-menu" type="button">${ic('grid', 's')}<span>보기</span></button>${p ? pin(11) : ''}
+    </div></div>`;
+}
+
+/* ---------- 제안 A: 하나로 합친 보기 ---------- */
+function topA({ running = false } = {}) {
+  return `<header class="topbar">${ttl('게임')}<span class="count num">184</span><span class="grow"></span>
+    ${running ? `<span class="spine-run" role="status"><span>책등 받는 중</span><span class="num">12/181</span><button class="ui-button ui-button--quiet ui-button--sm" type="button">취소</button></span>` : ''}
+    <button class="ibtn" type="button" aria-label="제목 검색">${ic('search')}</button>
+    <button class="ibtn" type="button" aria-label="새 컬렉션">${ic('plus')}</button>${win}</header>`;
+}
+function barA({ open = false, type = 0, viewLabel = true } = {}) {
+  const shortcut = type === 1
+    ? `<button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('bell', 's')}<span class="collection-shortcuts__label">신간</span><span class="collection-shortcuts__count is-new num">5</span></button>
+       <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('link', 's')}<span class="collection-shortcuts__label">연결 점검</span><span class="collection-shortcuts__count num">122</span></button>`
+    : type === 3 ? '' : `<button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('cal', 's')}<span class="collection-shortcuts__label">발매 캘린더</span><span class="collection-shortcuts__count is-new num">3</span></button>`;
+  return `<div class="ui-section-bar">${segmented(['게임', '만화', '영화', 'AV'], type)}
+    <div class="ui-section-bar__trailing">
+      <div class="collection-shortcuts">
+        <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('spark', 's')}<span class="collection-shortcuts__label">쇼케이스</span></button>
+        ${shortcut}
+      </div>
+      <span class="collection-shortcuts__divider"></span>
+      <button class="quiet-menu js-view" type="button" aria-expanded="${open}">${ic('grid', 's')}${viewLabel ? '<span>보기</span>' : ''}</button>
+    </div></div>`;
+}
+function ratingSection({ active = true, tablet = false } = {}) {
+  return `<section class="ui-view-options__section">${label('내 별점', active ? `<button class="ui-button ui-button--ghost ui-button--sm" type="button">초기화</button>` : '')}
+    <div class="collection-rating-filter"><label class="ui-slider"><span class="sr">내 별점</span><input type="range" min="0" max="10" step="1" value="${active ? 8 : 0}" aria-label="내 별점"></label>
+      <div class="collection-rating-filter__row"><output class="collection-rating-filter__value">${active ? '★ 4.0' : '전체'}</output><button class="ui-button ui-button--secondary ui-button--sm" type="button" aria-pressed="false">미평가</button></div></div></section>`;
+}
+function layoutSection({ manga = false, perRow = 8 } = {}) {
+  return `<section class="ui-view-options__section">${label('배치')}
+    ${segmented(manga ? ['격자', '선반', '책장'] : ['격자', '선반'], manga ? 1 : 0, 'ui-segmented--full-width')}
+    <div class="ui-per-row"><label class="ui-slider"><span>한 줄에</span><input type="range" min="5" max="12" step="1" value="${perRow}" aria-label="한 줄에"></label><output>${perRow}개</output></div></section>`;
+}
+function sortSection({ game = true, title = false } = {}) {
+  return `<section class="ui-view-options__section">${label('정렬')}
+    ${game ? `<div class="sub"><span>묶기</span>${segmented(['안 묶음', '기기', '발매 연도'], 0, 'ui-segmented--full-width')}</div>` : ''}
+    <div class="sub"><span>기준</span>${segmented(['발매일', '추가일', '제목'], title ? 2 : 0, 'ui-segmented--full-width')}</div>
+    <div class="sub"><span>순서</span>${segmented(title ? ['가나다순', '역순'] : ['최신순', '오래된순'], 0, 'ui-segmented--full-width')}</div></section>`;
+}
+function manageSection({ running = false } = {}) {
+  return `<section class="ui-view-options__section">${label('관리')}
+    ${running
+      ? `<div class="manage-run" role="status"><span>책등 받는 중</span><span class="num">12/181</span><span class="grow"></span><button class="ui-button ui-button--ghost ui-button--sm" type="button">취소</button></div>`
+      : `<button class="manage-row" type="button">${ic('dl', 's')}<span class="grow">책등 받기</span></button>`}</section>`;
+}
+function menuA(opts = {}) {
+  const { style = '', closed = false, manga = false, game = !manga, running = false, rating = true, scope = false, showcaseOn = false } = opts;
+  return `<div class="ui-menu ui-view-options mock-menu ${closed ? 'is-closed' : ''}" style="${style}" role="dialog" aria-label="보기">
+    <div class="ui-view-options__content">
+      ${scope ? `<section class="ui-view-options__section">${label('범위')}${segmented(['전체', ['쇼케이스', 12]], showcaseOn ? 1 : 0, 'ui-segmented--full-width')}</section>` : ''}
+      ${ratingSection({ active: rating })}
+      ${layoutSection({ manga })}
+      ${sortSection({ game })}
+      ${game ? manageSection({ running }) : ''}
+    </div></div>`;
+}
+const head = (filtered = true) => `<div class="cb-head"><h3>${filtered ? '검색 결과' : '전체'}<span class="tot num">${filtered ? 23 : 184}</span></h3>
+  ${filtered ? `<button class="f-chip" type="button" aria-label="내 별점 필터 빼기">${star}<span>내 별점 4.0</span><span class="x">${ic('x')}</span></button>` : ''}</div>`;
+
+/* ---------- 태블릿 ---------- */
+function tablet() {
+  return `<div class="frame frame--tab"><div class="tab">
+    <header class="tab-top"><span class="ttl">컬렉션</span><span class="grow"></span><button class="ibtn" aria-label="찾기">${ic('search')}</button><button class="ibtn" aria-label="더보기">${ic('dots')}</button></header>
+    <div class="tab-body">
+      <div class="tab-bar">${segmented(['게임', '만화', '영화', 'AV'], 0)}<span class="grow"></span>
+        <button class="tab-tool" aria-label="쇼케이스">${ic('spark')}</button>
+        <button class="tab-tool" aria-label="발매 캘린더">${ic('cal')}<span class="n num">3</span></button>
+        <span class="tab-div"></span>
+        <button class="tab-tool" aria-label="보기">${ic('grid')}</button>
+        <button class="tab-tool" aria-label="새 작품">${ic('plus')}</button></div>
+      ${head(true)}
+      <div class="cgrid">${covers(12, 3)}</div>
+      <div class="t-dim"></div>
+      <div class="t-sheet" role="dialog" aria-label="보기"><span class="grab"></span><h3>보기</h3>
+        <div class="ui-view-options__content" style="padding:0">
+          ${ratingSection({ active: true })}
+          ${layoutSection({ perRow: 4 })}
+          ${sortSection({ game: true })}
+        </div></div>
+    </div>
+    <nav class="tab-nav"><span>홈</span><span>에셋</span><span class="on">컬렉션</span><span>망가</span><span>메모</span></nav>
+  </div></div>`;
+}
+
+/* ---------- 문서 ---------- */
+document.getElementById('doc').innerHTML = `
+<header>
+  <h1>컬렉션 도구 줄 — 정렬·내 별점·보기·책등 받기를 보기 하나로</h1>
+  <p class="lead">사용자 의견(2026-10-13, 4번): PC 컬렉션 섹션 바 오른쪽의 <b>정렬 · 내 별점 · 보기</b>를 하나로 합치고, 상단 바 <b>⋯ 안의 책등 받기</b>도 그 안에 넣는다.
+  합치는 그릇은 에셋이 이미 쓰는 공용 <b>보기</b> 메뉴(<code>ViewOptionsMenu</code> · <code>ui-view-options</code>)다. 쇼케이스·발매 캘린더/신간처럼 자주 누르고 새 알림 수가 붙는 바로가기는 한 번에 닿는 자리에 남긴다.
+  이 영역은 2026-10-02 바로가기 한 줄 결정(섹션 바 B안)으로 이미 손본 곳이며, 이번 안은 그 줄의 오른쪽 절반만 다시 정리한다.</p>
+</header>
+
+<section class="variant">
+  <h2>지금 <small>현재 코드(CollectionBrowser.tsx) 그대로, 게임 유형</small></h2>
+  <div class="frame frame--pc short"><div class="pc">${rail()}<div class="main">${currentTop(true)}<div class="scroll">${currentBar(true)}${head(false).replace('</h3>', '</h3>' + pin(12))}<div class="cgrid">${covers(8)}</div></div></div></div></div>
+  <p class="note">오른쪽에 메뉴 버튼이 세 개(정렬·내 별점·보기) 나란히 있고, 모두 "가끔 바꾸는 설정"이다. 책등 받기는 게임에서만 상단 바 ⋯ 안에 따로 숨어 있다. 검색은 상단 바의 "검색" 글자 버튼과 찾기(Ctrl+Q) 팔레트 두 곳에서 열린다.</p>
+  <table class="inv">
+    <thead><tr><th>#</th><th>컨트롤</th><th>지금 위치</th><th>쓰는 빈도</th><th>제안 A (추천)</th><th>제안 B</th></tr></thead>
+    <tbody>
+      <tr><td>${pin(1)}</td><td>제목 "게임"(누르면 섹션 바가 내려옴)</td><td>상단 바</td><td>—</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>${pin(2)}</td><td>작품 수 184</td><td>상단 바</td><td>—</td><td class="k">그대로 (아래 '전체 184'와 겹침 — 범위 밖 관찰)</td><td>그대로</td></tr>
+      <tr><td>${pin(3)}</td><td>검색 (글자 버튼 → 제목 입력 팝오버)</td><td>상단 바</td><td>가끔</td><td class="k">돋보기 아이콘만 남김, 한 번 클릭 그대로</td><td>A와 같음</td></tr>
+      <tr><td>${pin(4)}</td><td>⋯ 작품 관리 → 책등 받기 (게임만)</td><td>상단 바</td><td>드묾</td><td class="mv">보기 → 관리 섹션. ⋯ 버튼은 없어짐</td><td>A와 같음</td></tr>
+      <tr><td>—</td><td>책등 받는 중 12/181 · 취소 (실행 중에만)</td><td>상단 바</td><td>—</td><td class="k">그대로 + 보기 메뉴 관리 섹션에도 같은 진행 표시</td><td>A와 같음</td></tr>
+      <tr><td>—</td><td>검색어 배지 · 검색 해제 (검색어 있을 때만)</td><td>상단 바</td><td>—</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>${pin(5)}</td><td>+ 새 컬렉션 (IGDB/MangaDex/TMDB/직접 입력)</td><td>상단 바</td><td>자주</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>${pin(6)}</td><td>유형 게임/만화/영화/AV</td><td>섹션 바 왼쪽</td><td>매우 자주</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>${pin(7)}</td><td>쇼케이스 (켜고 끄기)</td><td>섹션 바 오른쪽</td><td>자주</td><td class="k">그대로 (한 번 클릭)</td><td class="mv">보기 → 범위 [전체 | 쇼케이스]</td></tr>
+      <tr><td>${pin(8)}</td><td>발매 캘린더 N (게임·영화) / 신간 N (만화)</td><td>섹션 바 오른쪽</td><td>자주, 새 알림 수</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>—</td><td>연결 점검 N (만화, 미연결이 있을 때만)</td><td>섹션 바 오른쪽</td><td>가끔</td><td class="k">그대로</td><td>그대로</td></tr>
+      <tr><td>${pin(9)}</td><td>정렬 메뉴 (게임은 기기·발매 연도 묶기 포함)</td><td>섹션 바 오른쪽</td><td>가끔</td><td class="mv">보기 → 정렬</td><td class="mv">보기 → 정렬</td></tr>
+      <tr><td>${pin(10)}</td><td>내 별점 메뉴 (슬라이더 + 미평가 + 초기화)</td><td>섹션 바 오른쪽</td><td>가끔</td><td class="mv">보기 → 내 별점. 켜져 있으면 목록 첫 줄에 칩</td><td class="mv">A와 같음</td></tr>
+      <tr><td>${pin(11)}</td><td>보기 (배치 격자/선반/책장, 한 줄에 N개)</td><td>섹션 바 오른쪽</td><td>가끔</td><td class="k">이것이 합친 보기가 됨</td><td>같음</td></tr>
+      <tr><td>${pin(12)}</td><td>'전체 184' 줄 (검색·필터 중엔 '검색 결과')</td><td>목록 시작</td><td>—</td><td class="k">그대로 + 켜진 내 별점 필터 칩 자리</td><td>같음</td></tr>
+      <tr><td>—</td><td>품번 받은함 (AV만)</td><td>목록 시작</td><td>—</td><td class="k">그대로</td><td>그대로</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="variant">
+  <h2>제안 A — 바로가기는 그대로, 설정은 보기 하나로 <span class="rec">추천</span></h2>
+  <div class="frame frame--pc"><div class="pc">${rail()}<div class="main">${topA()}<div class="scroll">${barA({ open: true })}${head(true)}<div class="cgrid">${covers(16)}</div>
+    ${menuA({ style: 'right:16px; top:44px;' })}</div></div></div></div>
+  <p class="cap">보기 버튼을 누르면 메뉴가 닫히고 열린다(140ms, 4px 올라오며 나타남). 메뉴를 여닫아도 목록 위치·스크롤은 그대로다.</p>
+  <ul class="plain">
+    <li>섹션 바 오른쪽은 <b>쇼케이스 · 발매 캘린더(또는 신간·연결 점검) | 보기</b> 세 덩어리가 된다. 메뉴 버튼 셋이 하나로 줄어 좁은 창에서도 글자 라벨을 더 오래 지킨다.</li>
+    <li>보기 안의 순서는 에셋 보기와 같은 규칙(2026-10-05, "보이는 것 먼저, 배치와 정렬, 드물게 바꾸는 것은 마지막")을 따른다: <b>내 별점 → 배치 → 정렬 → 관리</b>.</li>
+    <li>정렬은 지금의 6가지 항목 목록을 <b>기준 [발매일 | 추가일 | 제목]</b>과 <b>순서 [최신순 | 오래된순]</b>(제목이면 [가나다순 | 역순]) 두 줄로 나눈다. 태블릿 보기 시트가 이미 쓰는 기준/순서 나눔과 같다. 게임만 위에 <b>묶기 [안 묶음 | 기기 | 발매 연도]</b>가 붙는다(발매 연도를 고르면 지금처럼 발매일 최신순으로 맞춰짐).</li>
+    <li>내 별점 슬라이더 위의 "내 별점" 글자는 섹션 이름과 겹치므로 화면에서 숨기고 접근성 이름으로만 남긴다. 초기화는 필터가 켜졌을 때만 섹션 이름 끝에 나타난다.</li>
+    <li>필터가 메뉴 안으로 들어가면 "왜 작품이 적지?"를 알기 어려우므로, 켜진 내 별점은 목록 첫 줄에 <b>회색 칩 "★ 내 별점 4.0 ✕"</b>로 보인다. ✕ 한 번으로 빠진다(접근성 이름 "내 별점 필터 빼기"). 검색어는 지금처럼 상단 바 검색어 배지가 맡는다.</li>
+    <li>상단 바는 <b>제목 · 수 … 돋보기 · +</b>만 남는다. ⋯ 작품 관리 버튼은 안에 책등 받기 하나뿐이었으므로 사라진다.</li>
+  </ul>
+
+  <h3 style="font-size:15px;font-weight:600;margin-top:8px">책등 받기와 유형별 차이</h3>
+  <div class="pair">
+    <div><div class="menu-solo">${menuA({ running: true, rating: false })}</div><p class="cap">게임 · 책등 받는 중: 관리 섹션이 진행과 취소로 바뀐다.<br>"받는 중" 글자는 400ms 뒤에만 나타난다.</p></div>
+    <div><div class="menu-solo">${menuA({ manga: true, rating: false })}</div><p class="cap">만화: 배치에 책장이 더해지고, 묶기와 관리는 없다.<br>영화·AV도 묶기·관리 없이 같은 모양.</p></div>
+    <div style="gap:12px">
+      <div class="frame" style="width:760px;height:89px"><div class="main" style="height:100%">${topA({ running: true })}${barA()}</div></div>
+      <p class="cap" style="max-width:760px">게임 · 메뉴를 닫아도 실행 중인 책등 받기는 상단 바에 "책등 받는 중 12/181 · 취소"로 계속 보인다(지금과 같음, 좁아지면 숫자 → 작은 표시로 줄어듦).</p>
+      <div class="frame" style="width:760px;height:52px"><div class="main" style="height:100%">${barA({ type: 1 })}</div></div>
+      <p class="cap" style="max-width:760px">만화 섹션 바: 쇼케이스 · 신간 5 · 연결 점검 122 | 보기.</p>
+      <div class="frame frame--narrow"><div class="main" style="height:100%">${topA()}<div class="scroll">${barA()}${head(true)}</div></div></div>
+      <p class="cap" style="max-width:760px">좁은 창(820px): 바로가기는 지금 규칙대로 아이콘 + 수로 줄고, 보기는 글자를 유지한다. 메뉴가 셋에서 하나로 줄어 유형 탭이 밀리지 않는다.</p>
+    </div>
+  </div>
+</section>
+
+<section class="variant">
+  <h2>제안 B — 쇼케이스까지 보기의 '범위'로 <small>에셋 보기의 범위(미분류/전체)와 같은 자리</small></h2>
+  <div class="frame frame--pc"><div class="pc">${rail()}<div class="main">${topA()}<div class="scroll">
+    <div class="ui-section-bar">${segmented(['게임', '만화', '영화', 'AV'], 0)}<div class="ui-section-bar__trailing"><div class="collection-shortcuts"><button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('cal', 's')}<span class="collection-shortcuts__label">발매 캘린더</span><span class="collection-shortcuts__count is-new num">3</span></button></div><span class="collection-shortcuts__divider"></span><button class="quiet-menu" type="button" aria-expanded="true">${ic('grid', 's')}<span>보기</span></button></div></div>
+    ${head(true)}<div class="cgrid">${covers(16, 5)}</div>
+    ${menuA({ style: 'right:16px; top:44px;', scope: true })}</div></div></div></div>
+  <ul class="plain">
+    <li>섹션 바 오른쪽이 <b>발매 캘린더 | 보기</b>로 가장 조용해진다. 보기 맨 위 <b>범위 [전체 | 쇼케이스 12]</b>가 쇼케이스를 맡는다.</li>
+    <li>대신 쇼케이스가 두 번 클릭이 되고, 쇼케이스 화면에서도 보기가 떠 있어야 돌아올 수 있다(지금은 쇼케이스에서 보기가 숨음). 쇼케이스 켜기의 토글 팝 동작도 메뉴 안에서는 쓰지 않는다.</li>
+    <li>2026-10-02에 쇼케이스를 섹션 바의 버튼으로 둔 결정을 되돌리는 셈이라 A를 추천한다.</li>
+  </ul>
+</section>
+
+<section class="variant">
+  <h2>태블릿 — 같은 보기 조각, 시트에 담김 <small>0.9.73 상단 바 하나 규칙은 그대로</small></h2>
+  <div class="pair">
+    ${tablet()}
+    <div style="max-width:620px">
+      <ul class="plain">
+        <li>태블릿은 0.9.73에서 이미 정렬 · 내 별점 · 격자/선반을 <b>보기 시트 하나</b>로 합쳤다. 이번 PC 안은 그 방향을 PC로 가져오는 일이다.</li>
+        <li>상단 바는 <b>제목 · 찾기 · ⋯</b> 그대로(0.9.72/0.9.73 규칙). 섹션 바도 그대로 <b>유형 | 쇼케이스 · 발매 캘린더/신간 | 보기 · +</b>.</li>
+        <li>바뀌는 것은 시트 안 순서뿐이다: 지금 <b>정렬 → 내 별점 → 배치</b>를 PC와 같은 <b>내 별점 → 배치 → 정렬</b>로 맞추고, 정렬은 같은 묶기/기준/순서 세 줄을 44px 분할 컨트롤로 보인다.</li>
+        <li>공유 방식(DESIGN §12): 보기 안의 섹션들(내 별점·배치·정렬)을 공용 조각 하나(<code>src/collections/</code>의 컬렉션 보기 섹션)로 만들고, PC는 <code>ViewOptionsMenu</code> 메뉴에, 태블릿은 <code>BottomSheet</code>에 담는다. 크기 차이는 크기 토큰이 맡는다. 지금 따로 있는 두 별점 슬라이더(PC <code>RatingFilter</code>, 태블릿 <code>RatingFilterSlider</code>)도 이때 하나로 합친다.</li>
+        <li><b>관리(책등 받기)는 PC 전용</b>이다. 책등 받기는 PC 라이브러리 명령이라 태블릿 시트에는 섹션이 없다.</li>
+        <li>켜진 내 별점 칩도 같은 조각으로 두 클라이언트 목록 첫 줄에 나온다(태블릿은 44px 터치 영역).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="variant">
+  <h2>정할 것</h2>
+  <ul class="plain">
+    <li><b>1. 쇼케이스 자리</b> — A: 섹션 바 버튼 그대로(추천) / B: 보기 → 범위로.</li>
+    <li><b>2. 보기 안 순서</b> — 내 별점 → 배치 → 정렬 → 관리(에셋 보기 규칙과 같음, 추천). 태블릿 시트도 이 순서로 바뀐다. 아니면 지금 태블릿처럼 정렬을 맨 위로.</li>
+    <li><b>3. 켜진 내 별점 표시</b> — 목록 첫 줄 칩 + ✕(추천) / 칩 없이 보기 안에서만.</li>
+    <li><b>4. 검색 버튼</b> — 돋보기 아이콘만 남기고 지금 팝오버 그대로(추천) / 태블릿처럼 찾기(Ctrl+Q) 팔레트의 "이 화면에서" 줄로 통일하고 버튼 제거.</li>
+  </ul>
+</section>
+`;
+
+placeThumbs();
+document.querySelectorAll('.js-view').forEach(btn => btn.addEventListener('click', () => {
+  const menu = btn.closest('.scroll')?.querySelector('.mock-menu');
+  if (!menu) return;
+  const closed = menu.classList.toggle('is-closed');
+  btn.setAttribute('aria-expanded', String(!closed));
+  if (!closed) placeThumbs(menu);
+}));
+</script>
+</body>
+</html>

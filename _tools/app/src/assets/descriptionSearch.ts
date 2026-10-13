@@ -4,7 +4,7 @@ import type { DescriptionSearchResult, LibraryGateway } from "../library/types";
 
 /** 내용 검색 (natural-language image search): shared by the 찾기 palette preview and the 에셋 result state. */
 export const DESCRIPTION_SEARCH_LIMIT = 200;
-export const DESCRIPTION_PREVIEW_COUNT = 7;
+export const DESCRIPTION_PREVIEW_COUNT = 6;
 /** Two or more characters, or one complete Hangul syllable (밤, 눈): a lone jamo or Latin letter is not a description. */
 export function descriptionQueryReady(text: string) {
   const typed = text.trim();

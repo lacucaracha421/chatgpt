@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업 패널과 할 일</title>
+<!-- 앱의 실제 폰트·토큰·공용 컨트롤·크롬·상태 패널·메모 CSS를 그대로 읽는다. 아래 <style>은 시안 틀과 새로 제안하는 행 모양만 담는다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/layout/StatusCenter.css">
+<link rel="stylesheet" href="../../../_tools/app/src/layout/PublicationStatus.css">
+<link rel="stylesheet" href="../../../_tools/app/src/notes/notes.css">
+<link rel="stylesheet" href="../../../_tools/app/src/notes/memo/memo.css">
+<style>
+/* 앱 셸은 html/body 높이를 고정하고 패널 안에서 스크롤한다. 이 문서는 문서처럼 스크롤한다. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0f10; color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); word-break: keep-all; }
+button { font-family: inherit; }
+.doc { width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 12px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+h3.sub { margin: 24px 0 8px; font-size: var(--type-body); font-weight: 600; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 110ch; line-height: 1.7; }
+.note b, .lead b { color: var(--color-text); font-weight: 600; }
+.cap { margin: 12px 0 8px; font-size: var(--type-meta); color: var(--color-faint); line-height: 1.6; }
+.rec { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-meta); font-weight: 600; margin-left: 8px; vertical-align: 2px; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-muted); font-size: var(--type-meta); font-weight: 600; }
+.tag--no { color: var(--color-danger); }
+.tag--yes { color: var(--color-success); }
+.tag--part { color: #d8c07a; }
+ul.pts { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; max-width: 110ch; }
+ul.pts b { color: var(--color-text); font-weight: 600; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== 시안 틀: 제목 표시줄 조각 + 그 아래로 떨어진 상태 패널 ===== */
+.stage-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.stage { position: relative; width: 420px; flex: none; }
+.stage__bar { display: flex; align-items: center; justify-content: flex-end; height: var(--chrome-titlebar-height); padding: 0 8px; background: var(--color-toolbar, var(--color-bg)); border: 1px solid var(--color-border); border-bottom: 0; }
+.stage__bar .fake-win { display: flex; gap: 2px; color: var(--color-faint); }
+.stage__bar .fake-win span { width: 36px; height: 28px; display: grid; place-items: center; }
+.stage__body { position: relative; padding: 8px 8px 16px; min-height: 200px; background: linear-gradient(135deg, #1d2024, #15161a 60%); border: 1px solid var(--color-border); }
+/* 실제 패널 클래스를 쓰되 fixed 위치만 시안 틀 안으로 옮긴다. */
+.stage .ui-anchored-panel.status-center__panel { position: relative; top: auto; right: auto; margin-left: auto; max-height: none; width: 380px; }
+.stage__label { margin: 0 0 8px; font-size: var(--type-meta); color: var(--color-faint); }
+.stage__label b { color: var(--color-text); font-weight: 600; }
+.status-center__trigger .spin { width: 12px; height: 12px; flex: none; border: 1.5px solid var(--color-border-strong); border-top-color: var(--color-accent); border-radius: 50%; }
+
+/* ===== 새 작업 행 (제안) ===== */
+.jobs { display: grid; }
+.job { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto auto; align-items: center; column-gap: var(--space-2); min-height: 32px; padding: 2px 0; border-top: 1px solid var(--color-border); color: var(--color-text); }
+.jobs > .job:first-child, .jobs > .jobs-sub + .job { border-top: 0; }
+.job > svg.i { color: var(--color-muted); }
+.job__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-body); line-height: var(--line-ui); }
+.job__name small { display: block; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); overflow: hidden; text-overflow: ellipsis; }
+.job--two { min-height: 48px; }
+.job__detail { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.job__meter { width: 48px; height: 4px; border-radius: 2px; background: var(--color-surface-hover); overflow: hidden; }
+.job__meter > i { display: block; height: 100%; background: var(--color-muted); }
+.job__act.ui-button.ui-button--quiet { width: 28px; padding: 0; }
+.job__act.ui-button.ui-button--quiet svg { width: 16px; height: 16px; }
+.job__act--text.ui-button.ui-button--quiet { width: auto; padding: 0 var(--space-2); font-size: var(--type-meta); }
+.job__gap { width: 0; }
+/* 대기: 같은 행, 글자만 한 단계 흐리게. 진행 막대 없음. */
+.job--queued .job__name { color: var(--color-muted); }
+.job--queued > svg.i { color: var(--color-faint); }
+.job--queued .job__detail { color: var(--color-faint); }
+/* 문제: 빨간 글자와 아이콘. 테두리·띠는 쓰지 않는다. */
+.job--problem, .job--problem > svg.i, .job--problem .job__detail { color: var(--color-danger); }
+/* 끝남: 앞에 시각, 글자는 흐리게. */
+.job--done { grid-template-columns: 40px minmax(0, 1fr) auto auto; }
+.job--done .job__time { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.job--done .job__name { color: var(--color-muted); }
+.jobs-sub { display: flex; align-items: center; gap: var(--space-1); min-height: 28px; margin-top: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--color-faint); font-size: var(--type-meta); text-align: left; cursor: default; }
+.jobs-sub .n { font-variant-numeric: tabular-nums; }
+button.jobs-sub { cursor: pointer; width: 100%; }
+button.jobs-sub:hover { color: var(--color-text); }
+.jobs-sub svg.i { width: 14px; height: 14px; }
+.jobs-sub--open svg.i { transform: rotate(90deg); }
+.jobs-empty { margin: 0; min-height: 28px; display: flex; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* B안: 담당별 묶음 머리 */
+.owner { display: flex; align-items: center; gap: var(--space-2); min-height: 28px; margin-top: var(--space-3); color: var(--color-faint); font-size: var(--type-meta); }
+.owner:first-child { margin-top: 0; }
+.owner .grow { flex: 1; }
+.owner .ui-button.ui-button--quiet { height: 24px; min-height: 24px; font-size: var(--type-meta); }
+.owner .ui-button.ui-button--quiet svg { width: 14px; height: 14px; }
+.jobs--b .job { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.jobs--b .job--done { grid-template-columns: 40px minmax(0, 1fr) auto auto; }
+
+/* 이 PC 블록(절약 모드) 모양 흉내: 실제는 LightweightModeToggle */
+.lw { display: flex; align-items: center; justify-content: space-between; min-height: 32px; font-size: var(--type-body); }
+.lw .sw { width: 32px; height: 18px; border-radius: 9px; background: var(--color-border-strong); position: relative; }
+.lw .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-text); }
+.lw .sw.on { background: var(--color-accent); }
+.lw .sw.on::after { left: 16px; background: var(--color-on-accent, #161718); }
+
+/* 지금 모습 재현에 쓰는 보조 */
+.now .status-center__list > .status-bar { color: var(--color-muted); }
+
+/* 설명 카드 */
+.explain { flex: 1; min-width: 320px; max-width: 560px; }
+.explain ol, .explain ul { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; }
+.explain b { color: var(--color-text); font-weight: 600; }
+.anat { margin: 8px 0 16px; padding: 12px 16px; background: var(--color-bg); border: 1px solid var(--color-border); width: 380px; }
+
+/* 목록 표 */
+table.inv { width: 100%; border-collapse: collapse; font-size: var(--type-meta); line-height: 1.55; }
+table.inv th { text-align: left; color: var(--color-faint); font-weight: 400; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--color-border-strong); white-space: nowrap; }
+table.inv td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--color-border); vertical-align: top; color: var(--color-muted); }
+table.inv td:first-child { color: var(--color-text); font-size: var(--type-body); width: 220px; }
+table.inv td:first-child small { display: block; color: var(--color-faint); font-size: var(--type-meta); }
+table.inv tr.grp td { color: var(--color-faint); padding-top: 20px; border-bottom: 0; font-size: var(--type-meta); }
+table.inv code { font-size: 11px; color: var(--color-faint); }
+
+/* ===== 메모 할 일 시안 ===== */
+.note-row { display: flex; gap: 24px 20px; flex-wrap: wrap; align-items: flex-start; }
+.note-row > div { width: 440px; flex: none; }
+.note-row .stage__label { min-height: 24px; display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; }
+.note-frame { width: 440px; flex: none; background: var(--color-bg); border: 1px solid var(--color-border); }
+.note-frame .notes-editor { width: 100%; padding: 24px 32px 16px; overflow: visible; }
+.note-frame .memo-editor { padding-top: 0; }
+.note-frame .notes-title { padding-bottom: 0; }
+.fake-seg { display: inline-flex; height: 28px; padding: 2px; border-radius: 4px; background: var(--color-surface); flex: none; }
+.fake-seg span { display: grid; place-items: center; padding: 0 12px; font-size: var(--type-body); color: var(--color-muted); border-radius: 2px; }
+.fake-seg span.on { background: var(--color-accent); color: var(--color-on-accent, #161718); font-weight: 600; }
+.memo-item-text { display: block; }
+/* 제안: 머리 오른쪽 묶음. 지금은 .memo-section-head .ui-button 마다 margin-left:auto가 걸려 버튼이 두 개면 벌어진다. 묶음 하나에만 건다. */
+.memo-section-actions { display: inline-flex; align-items: center; gap: 0; margin-left: auto; }
+.memo-section-head .memo-section-actions .ui-button { margin-left: 0; }
+.memo-section-actions .ui-button--icon, .memo-section-actions .ui-menu__trigger { width: 28px; height: 28px; min-height: 28px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); }
+.memo-section-actions svg.i { width: 16px; height: 16px; }
+/* B안: 머리에 포인터·포커스가 있을 때만 */
+.variant-b .memo-section-actions { opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.variant-b .memo-section-head:hover .memo-section-actions, .variant-b .memo-section-head:focus-within .memo-section-actions, .variant-b .memo-section-head.is-hover .memo-section-actions { opacity: 1; }
+.memo-section-head.is-hover { }
+/* 섹션이 없는 메모에서만 쓰는 조용한 추가 줄: .memo-add와 같은 글자 버튼 */
+.memo-section-add--quiet { display: inline-flex; align-items: center; gap: 4px; margin-top: 16px; padding: 0 8px 0 0; min-height: 28px; border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; border-radius: var(--radius-control); }
+.memo-section-add--quiet:hover { color: var(--color-text); }
+.memo-section-add--quiet svg.i { width: 14px; height: 14px; }
+.callout { position: relative; outline: 1px dashed rgba(125, 177, 255, .55); outline-offset: 3px; }
+.pin { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 2px; background: var(--color-focus); color: #0e0f10; font-size: 11px; font-weight: 700; margin-right: 6px; vertical-align: 1px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><path d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+    <symbol id="i-photo" viewBox="0 0 24 24"><path d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></symbol>
+    <symbol id="i-tablet" viewBox="0 0 24 24"><path d="M10.5 19.5h3m-6.75 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-15a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M15.75 5.25v13.5m-7.5-13.5v13.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><path d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3ZM6 6h.008v.008H6V6Z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></symbol>
+    <symbol id="i-stack" viewBox="0 0 24 24"><path d="M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+
+<header>
+  <h1>작업 패널과 할 일 섹션 추가</h1>
+  <p class="lead">사용자 의견(2026-10-13) 2번과 3번에 대한 시안이다. 2번: 제목 표시줄의 상태 버튼 → <b>작업</b> 칸에 지금 도는 일이 다 보이지 않는다. 알림은 필요 없고, 무엇이 돌고 있는지만 알 수 있으면 된다. 3번: 메모 <b>할 일</b>의 "섹션 추가" 버튼을 테마에 맞게 바꾸고 섹션의 복사·더보기 옆으로 옮긴다.</p>
+  <p class="lead">두 화면 모두 <b>이번 계획에 있던 영역</b>이다(작업 칸은 10.12 `1fb7e67d`에서 캐릭터 재검토를 넣은 곳, 할 일은 10.03 섹션 개편 때 만든 버튼). 아래 패널과 메모는 앱의 실제 CSS(`tokens.css`, `controls.css`, `chrome.css`, `StatusCenter.css`, `memo.css`, `notes.css`)를 읽어 그렸다. 숫자와 이름은 예시다.</p>
+</header>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">1. 작업 칸 · 지금</h2>
+  <div class="stage-row">
+    <div class="stage now">
+      <p class="stage__label"><b>지금</b> · 가져오기 하나와 카탈로그 게시가 돌 때</p>
+      <div class="stage__bar">
+        <button type="button" class="status-center__trigger" data-state-tone="active" data-state="open"><span class="spin" aria-hidden="true"></span><span class="status-center__trigger-text">작업 2</span></button>
+        <div class="fake-win"><span>—</span><span>☐</span><span>✕</span></div>
+      </div>
+      <div class="stage__body">
+        <div class="ui-anchored-panel status-center__panel">
+          <div class="ui-anchored-panel__head"><h2>상태</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="ui-anchored-panel__body status-center__body">
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">작업</span><span class="ui-section-label__rule"></span></h3>
+              <div class="status-center__list">
+                <div class="work-tray"><div class="work-tray__row"><span>가져오는 중 128 / 412</span></div></div>
+                <div class="status-bar publication-status"><span>카탈로그 게시 · 업로드 · 12.4 MB / 80.0 MB (15%)</span><progress max="80" value="12"></progress></div>
+                <div class="status-bar publication-status"><span>매일 자동 가져오기 · 태그 1,204개, 설명 380개를 가져왔습니다.</span><button class="ui-button ui-button--secondary ui-button--sm">닫기</button></div>
+                <div class="character-actions series-automation"><p>캐릭터 재검토 · 312개 남음</p><button class="ui-button ui-button--secondary ui-button--sm">일시 정지</button></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="explain">
+      <h3 class="sub" style="margin-top:0">지금 무엇이 문제인가</h3>
+      <ul>
+        <li><b>보이는 것은 일부뿐.</b> 아래 목록의 32개 작업 중 이 칸에 나오는 것은 10개다. 레퍼런스 보강, Claude 자동 판단, 영상 유사 검사, 클라우드 업로드(동기화 칸 한 줄로만), 태블릿용 게시, 신간 확인, 썸네일 채우기 등은 돌아도 흔적이 없다.</li>
+        <li><b>행마다 모양이 다르다.</b> 글 한 줄, 브라우저 기본 진행 막대, 테두리 있는 "닫기", 문단 글이 섞여 있다. 같은 칸인데 네 가지 부품이다.</li>
+        <li><b>끝난 결과가 사라진다.</b> 가져오기 결과는 8초 뒤 저절로 닫히고, 다른 결과는 직접 닫아야 남지 않는다. "방금 뭐가 끝났지"를 볼 곳이 없다.</li>
+        <li><b>멈춤이 따로 논다.</b> 캐릭터 작업의 일시 정지는 재검토·과거 갱신이 있을 때만 버튼이 생긴다. 실제로는 캐릭터 담당자 하나가 보강→분석→재검토→점수→Claude 순서로 일하고, 정지 하나가 그 전부를 멈춘다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">2. 앱이 뒤에서 하는 일 · 전체 목록</h2>
+  <p class="note">코드에서 찾은 배경 작업이다(`src-tauri/src/library/*`, `cloud/*`, `exchange/*`, `src/app/use*.ts`). <b>패널</b> 열은 지금 작업 칸에 보이는지, <b>진행률</b>은 이미 알 수 있는 숫자, <b>멈춤</b>은 지금 있는 조작이다. 제안 열은 새 작업 칸에서 어떻게 보일지다. "1초 넘을 때만"은 짧게 끝나는 일이 깜빡이지 않도록 1초 넘게 걸릴 때만 진행 중에 올린다는 뜻이다.</p>
+  <table class="inv">
+    <thead><tr><th>작업</th><th>언제 도는가</th><th>패널</th><th>진행률</th><th>멈춤</th><th>제안</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="6">이 PC 라이브러리</td></tr>
+      <tr><td>파일 가져오기<small>끌어놓기 · 확장 프로그램 · 메타데이터 폴더</small></td><td>사용자가 시작</td><td><span class="tag tag--yes">보임</span></td><td>n / 전체</td><td>없음</td><td>진행 중 → 끝나면 최근 끝남에 결과 유지(8초 자동 닫힘 없앰)</td></tr>
+      <tr><td>탐색기로 복사</td><td>사용자가 끌어냄</td><td><span class="tag tag--yes">보임</span></td><td>n / 전체</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>미리보기 준비<small>영상 썸네일 · 재생용 준비</small></td><td>가져오기·캡처 뒤 자동</td><td><span class="tag tag--yes">보임</span></td><td>n / 전체</td><td>없음</td><td>진행 중, 실패는 문제 행</td></tr>
+      <tr><td>유사 이미지 준비<small>이미지 해시</small></td><td>새 이미지 뒤 자동</td><td><span class="tag tag--part">글 한 줄</span></td><td>남은 개수</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>영상 유사 검사<small>영상 지문</small></td><td>영상 유사 패널에서 시작</td><td><span class="tag tag--no">안 보임</span></td><td>n / 전체</td><td>취소 · 재개</td><td>진행 중 + 일시 정지</td></tr>
+      <tr><td>작품 아트워크 썸네일 채우기</td><td>앱 시작 뒤 한 번</td><td><span class="tag tag--no">안 보임</span></td><td>남은 개수(추가 필요)</td><td>없음</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr><td>표지 초점 계산<small>컬렉션 표지</small></td><td>자동, 조금씩 이어서</td><td><span class="tag tag--no">안 보임</span></td><td>남은 개수</td><td>없음</td><td>진행 중 / 대기</td></tr>
+      <tr><td>자동 백업 · 휴지통 정리</td><td>하루 한 번, 시작 직후</td><td><span class="tag tag--part">실패만 메시지</span></td><td>없음</td><td>없음</td><td>최근 끝남 한 줄</td></tr>
+      <tr><td>화풍 순위 계산</td><td>작가 화면이 오래된 순위를 읽을 때(약 7초)</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>설명 검색 준비<small>검색 작업자 시작</small></td><td>설명 검색을 쓸 때</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>없음</td><td>진행 중(시작하는 동안만)</td></tr>
+      <tr><td>매일 자동 가져오기<small>자동 태그 · 한국어 설명</small></td><td>매일 밤</td><td><span class="tag tag--part">결과만</span></td><td>없음</td><td>없음</td><td>진행 중 → 최근 끝남</td></tr>
+      <tr><td>비밀 보관함 가져오기 · 내보내기</td><td>사용자가 시작</td><td><span class="tag tag--yes">보임</span></td><td>n / 전체</td><td>없음</td><td>진행 중</td></tr>
+      <tr class="grp"><td colspan="6">캐릭터 · 담당자 하나가 위에서부터 순서대로 일하고, 일시 정지 하나가 전부를 멈춘다. 절약 모드에서는 새 이미지 분석만 천천히 돈다.</td></tr>
+      <tr><td>레퍼런스 보강</td><td>자동, 가장 먼저</td><td><span class="tag tag--no">안 보임</span></td><td>캐릭터 이름</td><td>공용 정지</td><td>진행 중(캐릭터 이름 둘째 줄)</td></tr>
+      <tr><td>새 이미지 분석 · 수동 분석</td><td>새 이미지 · 사용자</td><td><span class="tag tag--yes">보임</span></td><td>남은 개수</td><td>공용 정지(버튼은 지금 없음)</td><td>진행 중 + 일시 정지</td></tr>
+      <tr><td>캐릭터 재검토</td><td>레퍼런스가 바뀐 뒤</td><td><span class="tag tag--yes">보임</span></td><td>남은 개수</td><td>공용 정지</td><td>진행 중 / 대기</td></tr>
+      <tr><td>과거 미분류 갱신</td><td>캐릭터에서 다시 갱신</td><td><span class="tag tag--yes">보임</span></td><td>n / 전체</td><td>공용 정지</td><td>진행 중 / 대기</td></tr>
+      <tr><td>보조 인식 준비</td><td>다른 일이 없을 때</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>공용 정지</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr><td>학습 인식 점수</td><td>다른 일이 없을 때</td><td><span class="tag tag--no">안 보임</span></td><td>남은 개수</td><td>공용 정지</td><td>진행 중 / 대기</td></tr>
+      <tr><td>과거 이미지 점수 채우기</td><td>설정에서 시작</td><td><span class="tag tag--part">설정에서만</span></td><td>n / 전체</td><td>취소</td><td>진행 중</td></tr>
+      <tr><td>Claude 자동 판단</td><td>다른 일이 모두 없을 때, 절약 모드 제외</td><td><span class="tag tag--part">설정에서만</span></td><td>n / 전체, 이번 달 비용</td><td>공용 정지 · 설정에서 끄기</td><td>진행 중 / 대기, 한도에 닿으면 "이번 달 한도" 대기</td></tr>
+      <tr class="grp"><td colspan="6">서버 · 클라우드</td></tr>
+      <tr><td>클라우드 업로드<small>원본 복제</small></td><td>자동</td><td><span class="tag tag--part">동기화 칸 한 줄</span></td><td>남은 개수</td><td>일시 정지</td><td>작업 칸으로 옮김 + 일시 정지. 동기화 칸은 문제·꺼짐일 때만</td></tr>
+      <tr><td>캡처 받기</td><td>서버가 새 캡처를 알릴 때</td><td><span class="tag tag--no">안 보임</span></td><td>개수</td><td>없음</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr><td>서버 변경 주고받기<small>앨범 · 분류 · 휴지통</small></td><td>서버 변경 때</td><td><span class="tag tag--part">문제만</span></td><td>없음</td><td>송신 보류(설정)</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr><td>파일 내려받기<small>서버에서 온 에셋</small></td><td>자동</td><td><span class="tag tag--part">실패만</span></td><td>남은 개수</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>태블릿용 게시<small>캐릭터 · 컬렉션 · 홈 · 자동 태그 · 설명 · 유사 검토 · 신간 · 연결 · 폴더 정보</small></td><td>변경 뒤 30초~5분 모아서</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>없음</td><td>한 행으로 묶음. 모으는 중이면 대기, 보내는 중이면 진행 중. 둘째 줄에 종류</td></tr>
+      <tr><td>카탈로그 게시 · 모바일 캐릭터 업데이트</td><td>설정에서 시작</td><td><span class="tag tag--yes">보임</span></td><td>단계 · n / 전체</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>썸네일 새로고침<small>클라우드</small></td><td>자동</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>없음</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr class="grp"><td colspan="6">수집 정보 갱신</td></tr>
+      <tr><td>온라인 카탈로그 갱신<small>한국어 · 일본어</small></td><td>정해진 간격</td><td><span class="tag tag--part">연결 칸 마지막 결과</span></td><td>페이지</td><td>없음</td><td>진행 중 → 최근 끝남</td></tr>
+      <tr><td>신간 확인<small>카카오 · MangaDex</small></td><td>한 시간마다</td><td><span class="tag tag--no">안 보임</span></td><td>확인 / 남은 수</td><td>없음</td><td>진행 중</td></tr>
+      <tr><td>발매 캘린더 · 위시리스트 확인<small>IGDB · TMDB</small></td><td>정해진 간격</td><td><span class="tag tag--part">연결 칸</span></td><td>없음</td><td>없음</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr><td>카탈로그 북마크 동기화</td><td>정해진 간격</td><td><span class="tag tag--no">안 보임</span></td><td>없음</td><td>없음</td><td>진행 중(1초 넘을 때만)</td></tr>
+      <tr class="grp"><td colspan="6">전송</td></tr>
+      <tr><td>태블릿 전송<small>보내기 · 받기</small></td><td>사용자</td><td><span class="tag tag--part">연결 칸 기기 이름만</span></td><td>바이트</td><td>취소</td><td>진행 중, 누르면 전송 화면</td></tr>
+    </tbody>
+  </table>
+  <p class="cap">빼는 것: 창이 보일 때만 도는 화면 읽기(썸네일 응답, 목록 미리 읽기), 정해진 시각을 기다리는 타이머 자체. 이것들은 "돌고 있는 일"이 아니라 대기 시계라서 넣으면 목록이 늘 차 있게 된다.</p>
+</section>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">3. A안 · 상태별 한 목록 <span class="rec">추천</span></h2>
+  <p class="note">작업 칸 하나 안에 <b>진행 중 → 대기 → 최근 끝남(접힘)</b> 순서로 같은 모양의 행을 쌓는다. 묶음 머리 없이 아이콘이 종류를 알려 준다. 멈출 수 있는 행에만 오른쪽에 일시 정지 아이콘이 있다. 캐릭터 작업은 정지를 공유하므로 캐릭터 행 어디서 멈춰도 캐릭터 대기 행까지 모두 "일시 정지됨"이 된다.</p>
+  <div class="stage-row">
+
+    <div class="stage">
+      <p class="stage__label"><b>바쁠 때</b> · 직접 시작한 일 2개 + 배경 일</p>
+      <div class="stage__bar">
+        <button type="button" class="status-center__trigger" data-state-tone="active" data-state="open"><span class="spin" aria-hidden="true"></span><span class="status-center__trigger-text">작업 2</span></button>
+        <div class="fake-win"><span>—</span><span>☐</span><span>✕</span></div>
+      </div>
+      <div class="stage__body">
+        <div class="ui-anchored-panel status-center__panel">
+          <div class="ui-anchored-panel__head"><h2>상태</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="ui-anchored-panel__body status-center__body">
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">작업</span><span class="ui-section-label__rule"></span></h3>
+              <div class="jobs">
+                <div class="job"><svg class="i"><use href="#i-import"/></svg><span class="job__name">파일 가져오기</span><span class="job__detail">128 / 412</span><span class="job__meter"><i style="width:31%"></i></span><span class="job__gap"></span></div>
+                <div class="job"><svg class="i"><use href="#i-video"/></svg><span class="job__name">영상 유사 검사</span><span class="job__detail">38 / 120</span><span class="job__meter"><i style="width:32%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="영상 유사 검사 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="job job--two"><svg class="i"><use href="#i-person"/></svg><span class="job__name">레퍼런스 보강<small>하츠네 미쿠</small></span><span class="job__detail"></span><span></span><button class="job__act ui-button ui-button--quiet" aria-label="캐릭터 작업 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="job"><svg class="i"><use href="#i-cloud"/></svg><span class="job__name">클라우드 업로드</span><span class="job__detail">1,284개 남음</span><span class="job__meter"><i style="width:64%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="클라우드 업로드 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="jobs-sub">대기 <span class="n">3</span></div>
+                <div class="job job--queued"><svg class="i"><use href="#i-person"/></svg><span class="job__name">캐릭터 재검토</span><span class="job__detail">312개</span><span></span><span></span></div>
+                <div class="job job--queued"><svg class="i"><use href="#i-sparkles"/></svg><span class="job__name">Claude 자동 판단</span><span class="job__detail">48쌍</span><span></span><span></span></div>
+                <div class="job job--queued job--two"><svg class="i"><use href="#i-tablet"/></svg><span class="job__name">태블릿용 게시<small>캐릭터 · 컬렉션</small></span><span class="job__detail"></span><span></span><span></span></div>
+                <button type="button" class="jobs-sub" aria-expanded="false"><svg class="i"><use href="#i-chev"/></svg>최근 끝남 <span class="n">5</span></button>
+              </div>
+            </section>
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">확인할 것</span><span class="ui-section-label__rule"></span></h3>
+              <button type="button" class="status-center__queue"><span class="status-center__queue-icon"><svg class="i"><use href="#i-stack"/></svg></span><span class="status-center__queue-label">유사 이미지 검토</span><span class="status-center__queue-count">14</span><svg class="i status-center__queue-arrow"><use href="#i-chev"/></svg></button>
+            </section>
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">이 PC</span><span class="ui-section-label__rule"></span></h3>
+              <div class="lw"><span>일반 모드</span><span class="sw"></span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <p class="stage__label"><b>평소</b> · 직접 시작한 일 없음, 배경 일만</p>
+      <div class="stage__bar">
+        <button type="button" class="status-center__trigger" data-state-tone="idle" data-state="open"><svg class="i"><use href="#i-chart"/></svg><span class="status-center__trigger-text">상태</span></button>
+        <div class="fake-win"><span>—</span><span>☐</span><span>✕</span></div>
+      </div>
+      <div class="stage__body">
+        <div class="ui-anchored-panel status-center__panel">
+          <div class="ui-anchored-panel__head"><h2>상태</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="ui-anchored-panel__body status-center__body">
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">작업</span><span class="ui-section-label__rule"></span></h3>
+              <div class="jobs">
+                <div class="job"><svg class="i"><use href="#i-person"/></svg><span class="job__name">캐릭터 재검토</span><span class="job__detail">1,204 / 1,516</span><span class="job__meter"><i style="width:79%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="캐릭터 작업 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="jobs-sub">대기 <span class="n">1</span></div>
+                <div class="job job--queued"><svg class="i"><use href="#i-sparkles"/></svg><span class="job__name">Claude 자동 판단</span><span class="job__detail">48쌍</span><span></span><span></span></div>
+                <button type="button" class="jobs-sub" aria-expanded="false"><svg class="i"><use href="#i-chev"/></svg>최근 끝남 <span class="n">3</span></button>
+              </div>
+            </section>
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">이 PC</span><span class="ui-section-label__rule"></span></h3>
+              <div class="lw"><span>일반 모드</span><span class="sw"></span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <p class="cap">머리 버튼은 지금처럼 <b>직접 시작한 일만</b> 센다. 배경 일만 돌 때는 "상태" 그대로이고, 열면 무엇이 도는지 보인다. 알림·토스트·자동 열림은 없다.</p>
+    </div>
+
+    <div class="stage">
+      <p class="stage__label"><b>문제 · 절약 모드 · 최근 끝남 펼침</b></p>
+      <div class="stage__bar">
+        <button type="button" class="status-center__trigger" data-state-tone="attention" data-state="open"><svg class="i"><use href="#i-chart"/></svg><span class="status-center__trigger-text">문제 1</span></button>
+        <div class="fake-win"><span>—</span><span>☐</span><span>✕</span></div>
+      </div>
+      <div class="stage__body">
+        <div class="ui-anchored-panel status-center__panel">
+          <div class="ui-anchored-panel__head"><h2>상태</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="ui-anchored-panel__body status-center__body">
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">작업</span><span class="ui-section-label__rule"></span></h3>
+              <div class="jobs">
+                <div class="job job--problem"><svg class="i"><use href="#i-warn"/></svg><span class="job__name">미리보기 준비 실패</span><span class="job__detail">2개</span><span></span><button class="job__act job__act--text ui-button ui-button--quiet">다시 시도</button></div>
+                <div class="jobs-sub">대기 <span class="n">2</span></div>
+                <div class="job job--queued"><svg class="i"><use href="#i-person"/></svg><span class="job__name">캐릭터 재검토</span><span class="job__detail">312개 · 절약 모드</span><span></span><span></span></div>
+                <div class="job job--queued"><svg class="i"><use href="#i-sparkles"/></svg><span class="job__name">Claude 자동 판단</span><span class="job__detail">48쌍 · 절약 모드</span><span></span><span></span></div>
+                <button type="button" class="jobs-sub jobs-sub--open" aria-expanded="true"><svg class="i"><use href="#i-chev"/></svg>최근 끝남 <span class="n">5</span></button>
+                <div class="job job--done"><span class="job__time">21:40</span><span class="job__name">파일 가져오기 · 추가 40 · 중복 2</span><button class="job__act ui-button ui-button--quiet" aria-label="가져오기 결과 열기"><svg class="i"><use href="#i-chev"/></svg></button><span></span></div>
+                <div class="job job--done"><span class="job__time">21:31</span><span class="job__name">태블릿용 게시 · 캐릭터</span><span></span><span></span></div>
+                <div class="job job--done"><span class="job__time">21:12</span><span class="job__name">신간 확인 · 3종 새 권</span><span></span><span></span></div>
+                <div class="job job--done"><span class="job__time">20:58</span><span class="job__name">매일 자동 가져오기 · 태그 1,204</span><span></span><span></span></div>
+                <div class="job job--done"><span class="job__time">20:41</span><span class="job__name">자동 백업</span><span></span><span></span></div>
+              </div>
+            </section>
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">이 PC</span><span class="ui-section-label__rule"></span></h3>
+              <div class="lw"><span>절약 모드</span><span class="sw on"></span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <p class="cap">진행 중인 일이 없으면 그 자리를 비우고 대기부터 보인다. 대기도 끝남도 없을 때만 "진행 중인 작업 없음" 한 줄. 실패는 문제 행으로 맨 위에 남고 다시 시도하거나 닫을 때까지 접히지 않는다.</p>
+    </div>
+  </div>
+
+  <h3 class="sub">행 하나의 모양</h3>
+  <div class="stage-row">
+    <div>
+      <div class="anat"><div class="jobs">
+        <div class="job"><svg class="i"><use href="#i-cloud"/></svg><span class="job__name">클라우드 업로드</span><span class="job__detail">1,284개 남음</span><span class="job__meter"><i style="width:64%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+        <div class="job"><svg class="i"><use href="#i-cloud"/></svg><span class="job__name">클라우드 업로드</span><span class="job__detail">1,284개 · 일시 정지됨</span><span></span><button class="job__act ui-button ui-button--quiet" aria-label="재개"><svg class="i"><use href="#i-play"/></svg></button></div>
+      </div></div>
+      <p class="cap">위: 진행 중 · 아래: 일시 정지됨(막대를 빼고 재개 아이콘)</p>
+    </div>
+    <div class="explain" style="max-width:720px">
+      <ul>
+        <li><b>한 줄 32px, 둘째 줄이 있으면 48px</b>(§12 목록 행). 아이콘 16 · 이름 body 15 · 숫자 meta 12 표 숫자 · 막대 48×4 · 정지 28 아이콘 버튼. 행 사이는 1px 선.</li>
+        <li><b>막대는 전체를 알 때만.</b> 회색(`--color-muted`) 채움, 아이보리 쓰지 않음. 전체를 모르면 막대 없이 "처리 1,204개"처럼 숫자만. 행마다 도는 스피너나 반복 움직임은 없다(머리 버튼의 스피너 하나만).</li>
+        <li><b>나타나고 사라지기.</b> 짧은 일이 깜빡이지 않게 1초 넘게 걸릴 때만 진행 중에 올리고, 올라간 뒤에는 적어도 1초 머문다(공용 지연 표시 도우미와 같은 규칙). 행이 들어오고 나갈 때는 높이와 투명도가 140ms에 걸쳐 바뀌고 다른 행은 밀려 움직인다. 숫자만 바뀔 때는 행이 그대로다.</li>
+        <li><b>대기</b>는 일이 남아 있지만 차례를 기다리는 것만. 정해진 시각을 기다리는 타이머는 넣지 않는다. 절약 모드나 일시 정지로 쉬는 일은 대기에 남고 숫자 옆에 이유를 붙인다.</li>
+        <li><b>최근 끝남</b>은 이 실행 동안 최근 1시간, 많아야 10개. 기본은 접힘이고 펼침 여부는 기억한다. 결과에 갈 곳이 있으면(가져오기 결과, 검토 대기) 오른쪽 › 로 연다. 성공 표시 색이나 체크 애니메이션은 쓰지 않는다.</li>
+        <li><b>동기화 칸 정리.</b> "동기화 중 · N개 남음"은 작업 칸의 클라우드 업로드 행으로 옮기고, 동기화 칸은 문제·꺼짐·일시 정지일 때만 남긴다. 같은 일을 두 곳에 쓰지 않는다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">4. B안 · 담당별 묶음</h2>
+  <p class="note">같은 행을 <b>이 PC · 캐릭터 · 서버 · 갱신</b> 묶음으로 나눈다. 묶음 머리에 정지가 있어 "캐릭터 일을 통째로 멈춘다"가 눈에 바로 보이고, 캐릭터 일이 왜 줄 서 있는지(담당자 하나가 순서대로) 읽힌다. 대신 머리가 늘어나 같은 양의 일이 더 길어지고, 지금 무엇이 실제로 돌고 있는지는 묶음 안을 훑어야 보인다.</p>
+  <div class="stage-row">
+    <div class="stage">
+      <p class="stage__label"><b>바쁠 때</b> · A안 첫 그림과 같은 일</p>
+      <div class="stage__bar">
+        <button type="button" class="status-center__trigger" data-state-tone="active" data-state="open"><span class="spin" aria-hidden="true"></span><span class="status-center__trigger-text">작업 2</span></button>
+        <div class="fake-win"><span>—</span><span>☐</span><span>✕</span></div>
+      </div>
+      <div class="stage__body">
+        <div class="ui-anchored-panel status-center__panel">
+          <div class="ui-anchored-panel__head"><h2>상태</h2><button class="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="ui-anchored-panel__body status-center__body">
+            <section class="status-center__block">
+              <h3 class="ui-section-label status-center__heading"><span class="ui-section-label__title">작업</span><span class="ui-section-label__rule"></span></h3>
+              <div class="jobs jobs--b">
+                <div class="owner"><span class="grow">이 PC</span></div>
+                <div class="job" style="border-top:0"><span class="job__name">파일 가져오기</span><span class="job__detail">128 / 412</span><span class="job__meter"><i style="width:31%"></i></span><span></span></div>
+                <div class="job"><span class="job__name">영상 유사 검사</span><span class="job__detail">38 / 120</span><span class="job__meter"><i style="width:32%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="영상 유사 검사 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="owner"><span class="grow">캐릭터</span><button class="ui-button ui-button--quiet"><svg class="i"><use href="#i-pause"/></svg>일시 정지</button></div>
+                <div class="job job--two" style="border-top:0"><span class="job__name">레퍼런스 보강<small>하츠네 미쿠</small></span><span class="job__detail"></span><span></span><span></span></div>
+                <div class="job job--queued"><span class="job__name">캐릭터 재검토</span><span class="job__detail">대기 · 312개</span><span></span><span></span></div>
+                <div class="job job--queued"><span class="job__name">Claude 자동 판단</span><span class="job__detail">대기 · 48쌍</span><span></span><span></span></div>
+                <div class="owner"><span class="grow">서버</span></div>
+                <div class="job" style="border-top:0"><span class="job__name">클라우드 업로드</span><span class="job__detail">1,284개 남음</span><span class="job__meter"><i style="width:64%"></i></span><button class="job__act ui-button ui-button--quiet" aria-label="클라우드 업로드 일시 정지"><svg class="i"><use href="#i-pause"/></svg></button></div>
+                <div class="job job--queued job--two"><span class="job__name">태블릿용 게시<small>캐릭터 · 컬렉션</small></span><span class="job__detail">대기</span><span></span><span></span></div>
+                <button type="button" class="jobs-sub" aria-expanded="false" style="margin-top:12px"><svg class="i"><use href="#i-chev"/></svg>최근 끝남 <span class="n">5</span></button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="explain">
+      <h3 class="sub" style="margin-top:0">A와 B 비교</h3>
+      <ul>
+        <li><b>A</b>는 "지금 뭐가 돌지?"에 첫 줄부터 답한다. 같은 일이면 B보다 3~4줄 짧다. 캐릭터 정지가 공유된다는 것은 행 하나를 멈추면 다른 캐릭터 행이 함께 "일시 정지됨"으로 바뀌는 것으로 알려 준다.</li>
+        <li><b>B</b>는 일의 주인과 순서가 잘 보이고 정지 단위가 정확하다. 대신 묶음 머리 4개가 늘 생기고, 일이 하나뿐일 때도 머리가 붙어 조용함이 덜하다.</li>
+        <li>둘 다 행 부품, 1초 규칙, 최근 끝남, 동기화 칸 정리는 같다. B를 고르면 묶음 안에서 아이콘을 뺀다(머리가 종류를 말하므로).</li>
+      </ul>
+      <p class="note" style="margin-top:12px"><b>추천은 A.</b> 사용자가 원한 것은 "무엇이 돌고 있는지 알 수 있게"이고, A가 그 답을 가장 적은 글로 준다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">5. 메모 할 일 · 섹션 추가</h2>
+  <p class="note">지금은 마지막 섹션 아래에 테두리와 면이 있는 보통 버튼(secondary)이 혼자 놓여 있다. 메모 안의 다른 조작(＋ 항목 추가, 완료 접기, 복사, ⋯)은 모두 면 없는 조용한 모양이라 이 버튼만 튄다. 두 안 모두 이 버튼을 없애고 섹션 머리의 복사·⋯ 옆에 같은 크기의 <b>＋ 아이콘</b>을 둔다. 덤으로 ⋯도 글자(⋯) 대신 아이콘으로 맞춘다.</p>
+  <div class="note-row">
+
+    <div>
+      <p class="stage__label"><b>지금</b></p>
+      <div class="note-frame">
+        <article class="notes-editor">
+          <div class="notes-title-row"><input class="notes-title" value="이번 주" readonly><span class="fake-seg"><span>글</span><span class="on">할 일</span></span></div>
+          <div class="memo-editor">
+            <section class="memo-section">
+              <div class="memo-section-head"><h2>장보기</h2><small>2개 남음</small><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" style="width:28px;height:28px;border:0;border-radius:4px">⋯</button></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">우유</span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">달걀 한 판</span></div>
+              <button class="memo-add">+</button>
+              <button class="memo-done-fold">▸ 완료 3</button>
+            </section>
+            <section class="memo-section">
+              <div class="memo-section-head"><h2>정리</h2><small>1개 남음</small><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" style="width:28px;height:28px;border:0;border-radius:4px">⋯</button></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">게임 케이스 사진 찍기</span></div>
+              <button class="memo-add">+</button>
+            </section>
+            <button class="ui-button ui-button--secondary ui-button--md memo-section-add callout"><svg class="i"><use href="#i-plus"/></svg>섹션 추가</button>
+          </div>
+        </article>
+      </div>
+      <p class="cap">점선: 지금 따로 떨어져 있는 섹션 추가 버튼(면 + 테두리).</p>
+    </div>
+
+    <div>
+      <p class="stage__label"><b>A안 · 머리에 ＋ · 복사 · ⋯ 항상 보임</b> <span class="rec">추천</span></p>
+      <div class="note-frame">
+        <article class="notes-editor">
+          <div class="notes-title-row"><input class="notes-title" value="이번 주" readonly><span class="fake-seg"><span>글</span><span class="on">할 일</span></span></div>
+          <div class="memo-editor">
+            <section class="memo-section">
+              <div class="memo-section-head"><h2>장보기</h2><small>2개 남음</small>
+                <span class="memo-section-actions callout"><button class="ui-button ui-button--ghost ui-button--icon" aria-label="아래에 섹션 추가"><svg class="i"><use href="#i-plus"/></svg></button><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" aria-label="장보기 더보기"><svg class="i"><use href="#i-dots"/></svg></button></span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">우유</span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">달걀 한 판</span></div>
+              <button class="memo-add">+</button>
+              <button class="memo-done-fold">▸ 완료 3</button>
+            </section>
+            <section class="memo-section">
+              <div class="memo-section-head"><h2>정리</h2><small>1개 남음</small>
+                <span class="memo-section-actions"><button class="ui-button ui-button--ghost ui-button--icon" aria-label="아래에 섹션 추가"><svg class="i"><use href="#i-plus"/></svg></button><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" aria-label="정리 더보기"><svg class="i"><use href="#i-dots"/></svg></button></span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">게임 케이스 사진 찍기</span></div>
+              <button class="memo-add">+</button>
+            </section>
+          </div>
+        </article>
+      </div>
+      <p class="cap">＋는 <b>그 섹션 바로 아래</b>에 새 섹션을 만들고 이름 입력을 연다(마지막 섹션에서 누르면 지금과 같은 결과). 세 버튼 모두 28px, 면·테두리 없음, 아이콘은 muted, 올리면 면이 밝아진다.</p>
+    </div>
+
+    <div>
+      <p class="stage__label"><b>B안 · 같은 세 아이콘, 머리에 포인터·포커스가 있을 때만</b></p>
+      <div class="note-frame variant-b">
+        <article class="notes-editor">
+          <div class="notes-title-row"><input class="notes-title" value="이번 주" readonly><span class="fake-seg"><span>글</span><span class="on">할 일</span></span></div>
+          <div class="memo-editor">
+            <section class="memo-section">
+              <div class="memo-section-head is-hover"><h2>장보기</h2><small>2개 남음</small>
+                <span class="memo-section-actions"><button class="ui-button ui-button--ghost ui-button--icon" aria-label="아래에 섹션 추가"><svg class="i"><use href="#i-plus"/></svg></button><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" aria-label="장보기 더보기"><svg class="i"><use href="#i-dots"/></svg></button></span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">우유</span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">달걀 한 판</span></div>
+              <button class="memo-add">+</button>
+              <button class="memo-done-fold">▸ 완료 3</button>
+            </section>
+            <section class="memo-section">
+              <div class="memo-section-head"><h2>정리</h2><small>1개 남음</small>
+                <span class="memo-section-actions"><button class="ui-button ui-button--ghost ui-button--icon" aria-label="아래에 섹션 추가"><svg class="i"><use href="#i-plus"/></svg></button><button class="ui-button ui-button--ghost ui-button--icon" aria-label="섹션 복사"><svg class="i"><use href="#i-clip"/></svg></button><button class="ui-menu__trigger" aria-label="정리 더보기"><svg class="i"><use href="#i-dots"/></svg></button></span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">게임 케이스 사진 찍기</span></div>
+              <button class="memo-add">+</button>
+            </section>
+          </div>
+        </article>
+      </div>
+      <p class="cap">위 섹션은 포인터가 머리에 있는 상태, 아래 섹션은 쉬는 상태. 끌기 손잡이(⠿)와 같은 90ms 페이드. 메모가 가장 조용하지만, 지금 늘 보이던 복사·⋯도 숨게 된다. 태블릿은 늘 보임.</p>
+    </div>
+
+    <div>
+      <p class="stage__label"><b>공통 · 이름 있는 섹션이 아직 없는 메모</b></p>
+      <div class="note-frame">
+        <article class="notes-editor">
+          <div class="notes-title-row"><input class="notes-title" value="주말" readonly><span class="fake-seg"><span>글</span><span class="on">할 일</span></span></div>
+          <div class="memo-editor">
+            <section class="memo-section">
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">세탁소</span></div>
+              <div class="memo-item"><button class="memo-tick" aria-pressed="false"></button><span class="memo-item-text">책 반납</span></div>
+              <button class="memo-add">+</button>
+            </section>
+            <button class="memo-section-add--quiet callout"><svg class="i"><use href="#i-plus"/></svg>섹션 추가</button>
+          </div>
+        </article>
+      </div>
+      <p class="cap">머리가 없으니 복사·⋯도 없다. 첫 섹션을 만들 길로 ＋ 항목 추가와 같은 조용한 글자 버튼 하나만 남긴다(면·테두리 없음, faint, meta 12). 첫 섹션이 생기면 이 줄은 사라지고 머리의 ＋로 넘어간다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+  <h2 class="sec">6. 태블릿</h2>
+  <ul class="pts">
+    <li><b>작업 칸:</b> 이 목록의 일은 모두 PC에서만 돈다. 태블릿에는 상태 패널이 없고 서버를 읽기만 하므로 이번 라운드에 태블릿 화면은 바뀌지 않는다. 행 부품(아이콘 · 이름 · 숫자 · 막대 · 정지)은 공용 조각으로 만들어 두어, 나중에 태블릿이 서버 쪽 일(캡처 처리, 신간 확인 등)을 보여 줄 때 그대로 쓴다.</li>
+    <li><b>할 일:</b> 태블릿 메모도 같은 `MemoEditor`를 쓰므로 같은 라운드에 같이 바뀐다. 차이는 크기뿐: 세 아이콘은 44 터치 영역(보이는 아이콘 24), B안을 골라도 태블릿에서는 늘 보임, 섹션이 없는 메모의 "섹션 추가" 줄은 높이 44.</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="sec">7. 정할 것</h2>
+  <ol class="pts">
+    <li><b>작업 칸 A안(상태별 한 목록) / B안(담당별 묶음)</b> — 추천 A.</li>
+    <li><b>머리 버튼 숫자</b>: 지금처럼 직접 시작한 일만 셀까(추천), 배경 일까지 셀까. 배경까지 세면 거의 늘 "작업 N"이 떠 있게 된다.</li>
+    <li><b>최근 끝남</b>을 둘까(추천: 이 실행 동안 1시간 · 10개, 기본 접힘), 아예 뺄까.</li>
+    <li><b>동기화 칸의 "동기화 중 · N개 남음"을 작업 칸으로 옮기기</b> — 추천 옮김.</li>
+    <li><b>할 일 A안(늘 보임) / B안(머리에 포인터가 있을 때만)</b> — 추천 A.</li>
+    <li><b>＋의 위치</b>: 누른 섹션 바로 아래(추천) / 늘 맨 끝(지금 동작).</li>
+  </ol>
+</section>
+
+</div>
+</body>
+</html>

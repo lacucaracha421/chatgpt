@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CommandPalette, type PaletteDescriptionSearch } from "./CommandPalette";
 import { readRecent, findGroups } from "./findModel";
 import type { NavigationEntry } from "./navigationEntries";
@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 const status = (available = true): DescriptionSearchStatus => ({ available, indexed: 10, qwenIndexed: 10, precise: true, worker: "ready" });
 const result = (...assetIds: string[]): DescriptionSearchResult => ({ route: "cosine", assetIds, precise: true });
-const entries: NavigationEntry[] = [{ id: "place", group: "place", label: "눈 내리는 폴더", icon: null, run: vi.fn() }];
+const entries: NavigationEntry[] = [{ id: "place", group: "place", label: "첫눈내리는폴더", icon: null, run: vi.fn() }];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -48,16 +48,16 @@ describe("이미지 내용 palette group", () => {
       expect(screen.queryByRole("group", { name: "이미지 내용" })).toBeNull();
     }
     type(input, "밤");
-    expect(within(screen.getByRole("group", { name: "이미지 내용" })).getByRole("option")).toHaveTextContent("‘밤’ 장면 찾기");
+    expect(screen.getByRole("option", { name: /장면 찾기/ })).toHaveTextContent("‘밤’ 장면 찾기");
     type(input, "눈 내리는");
-    const group = screen.getByRole("group", { name: "이미지 내용" });
-    expect(within(screen.getByRole("listbox")).getAllByRole("group")[0]).toBe(group);
-    expect(within(group).getByRole("option")).toHaveTextContent("‘눈 내리는’ 장면 찾기");
-    expect(within(group).getByRole("option")).toHaveTextContent("Enter");
+    const group = screen.getByRole("option", { name: /장면 찾기/ });
+    expect(screen.getAllByRole("option")[0]).toBe(group);
+    expect(group).toHaveTextContent("‘눈 내리는’ 장면 찾기");
+    expect(group).toHaveTextContent("Enter");
     fireEvent.click(screen.getByRole("button", { name: "작품" }));
     expect(screen.queryByRole("group", { name: "이미지 내용" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "전체" }));
-    expect(screen.getByRole("group", { name: "이미지 내용" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /장면 찾기/ })).toBeInTheDocument();
   });
 
   it("stays hidden when the status says unavailable or the gateway has no search", async () => {
@@ -66,7 +66,7 @@ describe("이미지 내용 palette group", () => {
     expect(source.prewarm).not.toHaveBeenCalled();
     type(input, "눈 내리는");
     expect(screen.queryByRole("group", { name: "이미지 내용" })).toBeNull();
-    expect(screen.getByRole("option")).toHaveTextContent("눈 내리는 폴더");
+    expect(screen.getByRole("option")).toHaveTextContent("첫눈내리는폴더");
     cleanup();
     render(<CommandPalette open onClose={vi.fn()} entries={entries} recentKey={nextKey()} descriptionSearch={null} />);
     type(screen.getByRole("combobox"), "눈 내리는");
@@ -107,7 +107,7 @@ describe("이미지 내용 palette group", () => {
     expect(search).toHaveBeenCalledTimes(2);
     expect(thumbs()).toEqual(["snow-1", "snow-2"]);
     await pause(1000);
-    expect(screen.getByRole("group", { name: "이미지 내용" })).toHaveTextContent("장면을 찾는 중…");
+    expect(screen.getByRole("option", { name: /장면 찾기/ })).toHaveTextContent("장면을 찾는 중…");
     expect(thumbs()).toEqual(["snow-1", "snow-2"]);
     await act(async () => { next.resolve(result("rain-1")); await ticks(); });
     // Each slot loads the next thumbnail beside the current one and swaps once it has decoded.
@@ -142,8 +142,8 @@ describe("이미지 내용 palette group", () => {
     await flush();
     type(input, "눈 내리는");
     await pause(400);
-    expect(screen.getByRole("group", { name: "이미지 내용" })).toHaveTextContent("내용 검색을 할 수 없습니다: 모델이 없습니다");
-    expect(screen.getByRole("option", { name: /눈 내리는 폴더/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /장면 찾기/ })).toHaveTextContent("내용 검색을 할 수 없습니다: 모델이 없습니다");
+    expect(screen.getByRole("option", { name: /첫눈내리는폴더/ })).toBeInTheDocument();
   });
 
   it("shows a no match answer as one muted line in the strip area and never forces the search", async () => {
@@ -153,7 +153,7 @@ describe("이미지 내용 palette group", () => {
     await flush();
     type(input, "ㅁㄴㅇㄹ");
     await pause(400);
-    const group = screen.getByRole("group", { name: "이미지 내용" });
+    const group = screen.getByRole("option", { name: /장면 찾기/ });
     expect(group.querySelector(".command-palette__strip-status")).toHaveTextContent("검색 결과 없음");
     expect(thumbs()).toEqual([]);
     expect(search).toHaveBeenCalledExactlyOnceWith("ㅁㄴㅇㄹ", DESCRIPTION_SEARCH_LIMIT);
@@ -170,10 +170,10 @@ describe("이미지 내용 palette group", () => {
     expect(readRecent(recentKey)).not.toContain("description-search");
   });
 
-  it("orders the group before every other group and keeps it to 전체", () => {
+  it("places scene search last after strong names and keeps it to 전체", () => {
     const row = (id: string, group: NavigationEntry["group"]): NavigationEntry => ({ id, group, label: "별과 " + id, icon: null, run: vi.fn() });
     const list = [row("go", "go"), row("search", "search"), row("content", "content"), row("work", "work")];
-    expect(findGroups(list, "별과", "전체", []).map(group => group.group)).toEqual(["content", "search", "work", "go"]);
-    expect(findGroups(list, "별과", "작품", []).map(group => group.group)).toEqual(["search", "work"]);
+    expect(findGroups(list, "별과", "전체", []).map(group => group.group)).toEqual(["best", "menu", "search", "content"]);
+    expect(findGroups(list, "별과", "작품", []).map(group => group.group)).toEqual(["best", "search"]);
   });
 });

@@ -43,7 +43,8 @@ describe('full-screen layers', () => {
     const view = render(<Layered open onPage={onPage}/>);
     const layer = document.querySelector<HTMLElement>('.settings-layer')!;
     expect(layer.dataset.motion).toBe('layer');
-    expect(layer.hasAttribute('data-motion-entering')).toBe(true);
+    // Reduced motion paints the layer in place: no entering frame, no leaving copy.
+    expect(layer.hasAttribute('data-motion-entering')).toBe(!reduced);
     act(() => vi.advanceTimersToNextFrame());
     expect(layer.hasAttribute('data-motion-entering')).toBe(false);
     vi.spyOn(layer, 'getBoundingClientRect').mockReturnValue({width: 800, height: 1200} as DOMRect);
@@ -51,6 +52,12 @@ describe('full-screen layers', () => {
     view.rerender(<Layered open={false} onPage={onPage}/>);
     // The real layer is gone at once: its handlers, focus and Back no longer apply.
     expect(screen.queryByRole('button', {name: 'inside'})).toBeNull();
+    if (reduced) {
+      expect(document.querySelector('[data-motion-ghost]')).toBeNull();
+      fireEvent.click(screen.getByRole('button', {name: 'page'}));
+      expect(onPage).toHaveBeenCalledTimes(1);
+      return;
+    }
     const ghost = document.querySelector<HTMLElement>('.settings-layer[data-motion-ghost]')!;
     expect(ghost).not.toBeNull();
     expect(ghost.inert).toBe(true);
@@ -66,7 +73,7 @@ describe('full-screen layers', () => {
 
     act(() => vi.advanceTimersToNextFrame());
     expect(ghost.dataset.state).toBe('closed');
-    const exit = reduced ? motionDefaults.micro : motionSpring('gentle').duration * .7;
+    const exit = motionSpring('gentle').duration * .7;
     act(() => vi.advanceTimersByTime(exit - 1));
     expect(ghost.isConnected).toBe(true);
     act(() => vi.advanceTimersByTime(1));

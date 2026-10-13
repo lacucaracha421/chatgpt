@@ -3,6 +3,7 @@ import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { EyeSlashIcon, PhotoIcon, PlusIcon, UserIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
+import { Badge } from "../shared/ui/Badge";
 import { TextField } from "../shared/ui/TextField";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ReferenceRegionChoices, ReferenceCheckSlot, AUTOMATIC_CHARACTER_REFERENCE_COUNT, currentReferenceCrop, isUsableReferenceRegion, referenceNeedsPerson, referenceRegionStatus, useReferenceRegionInspection, usableReferenceCount, type ReferenceRegionInspection, type ReferenceRequest, type ReferenceWorkflow } from "./ReferenceRegionChoices";
@@ -147,15 +148,15 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
               onClick={() => setFocusRequest(old => ({ assetId, key: (old?.key ?? 0) + 1 }))}><ReferenceThumb assetId={assetId} region={region} privacyMode={privacyMode} /></button>
             : <button type="button" className="character-reference-tile__open" disabled={busy || !onOpenReference} aria-label={`레퍼런스 ${index + 1} 원본 보기`} aria-description={status}
               onClick={() => onOpenReference?.(assetId)}><ReferenceThumb assetId={assetId} region={region} privacyMode={privacyMode} /></button>}
-          {needsPerson && <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><UserIcon /></span>}
-          {unusable && <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><EyeSlashIcon /></span>}
+          {needsPerson && <Badge variant="scrim" icon={UserIcon} className="character-reference-tile__mark" aria-label="인물 선택 필요" aria-hidden="true" />}
+          {unusable && <Badge variant="scrim" icon={EyeSlashIcon} className="character-reference-tile__mark" aria-label="사용할 수 없음" aria-hidden="true" />}
           <Button size="icon" variant="ghost" className="character-reference-tile__remove" disabled={busy} aria-label={`레퍼런스 ${index + 1} 제거`}
             onClick={() => onChange(updateCharacterReferences(draft, draft.references.filter(id => id !== assetId)))}><XMarkIcon aria-hidden="true" /></Button>
         </div>;
       })}{ghosts.map((ghost, index) => <div className="character-reference-tile character-reference-tile--ghost" key={`ghost-${ghost.assetId}`}>
         <button type="button" className="character-reference-tile__open" disabled={busy} aria-label={`추천 레퍼런스 ${index + 1} 추가`} onClick={() => addGhosts([ghost])}>
           <AssetImage loading="lazy" src={thumbnailUrl(ghost.assetId)} className={privacyMode ? "character-private" : undefined} alt="" /></button>
-        <span className="character-reference-tile__mark ui-badge ui-badge--icon ui-badge--scrim" aria-hidden="true"><PlusIcon /></span>
+        <Badge variant="scrim" icon={PlusIcon} className="character-reference-tile__mark" aria-label="추천 추가" aria-hidden="true" />
       </div>)}</section> : !shortfall && <p className="character-message">레퍼런스가 없습니다.</p>}
       {run && <p className="character-reinforce-line" onMouseEnter={() => setLit(true)} onMouseLeave={() => setLit(false)} onFocus={() => setLit(true)} onBlur={() => setLit(false)}>
         <span>{run.assetIds.length.toLocaleString()}장 보강됨</span><span aria-hidden="true">·</span>

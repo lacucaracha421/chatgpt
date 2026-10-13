@@ -328,17 +328,16 @@ it("opens a legacy checklist without writing and converts on its first edit",asy
   expect(store.snapshot().notes[0]!.body).toBe("- [ ] open\n- [x] done");
 });
 
-it('keeps 섹션 추가 after the sections and the character count as the editor\'s last line', async () => {
+it('has no separate 섹션 추가 button once a section exists and keeps the character count as the editor\'s last line', async () => {
   const fake = backend([base('note', { title: 'Sections', body: 'top\n## A\na' })]);
   surface(new NotesStore(fake.request));
   await userEvent.click(await screen.findByRole('button', { name: /Sections/ }));
-  const add = screen.getByRole('button', { name: '섹션 추가' });
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+  const add = screen.getByRole('button', { name: '아래에 섹션 추가' });
   const footer = document.querySelector('.notes-editor > .notes-editor-footer')!;
   expect(footer.textContent).toContain('10자');
   expect(footer.parentElement!.lastElementChild).toBe(footer);
-  const sections = document.querySelectorAll('.memo-section');
-  expect(sections[sections.length - 1]!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(add.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(add.closest('.memo-section-head')).not.toBeNull();
 });
 
 it('undoes section creation and naming separately from plain body typing', async () => {

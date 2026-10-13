@@ -52,9 +52,8 @@ import {ReleaseCalendar} from './ReleaseCalendar';
 import {TopBar,TopBarSearch} from './TopBar';
 
 import {SectionTool} from './SectionTool';
-import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 import {PlusIcon} from '@heroicons/react/24/outline';
-import {StepSlider} from './StepSlider';
+import {CollectionRatingSection, CollectionSortSection} from '../src/collections/CollectionViewSections';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
 import {PhysicalCover} from '../src/collections/physical/PhysicalCover';
@@ -65,7 +64,7 @@ import type {ScrubberSort} from './scrubberModel';
 
 import {api, errorText} from './transport';
 import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkMissing, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
-import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
+import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import {AvCast, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
@@ -373,29 +372,6 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
 }
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
-/** 내 별점 filter stops: 전체, then 0.5 … 5.0 (exact match, as the server applies it). */
-const RATING_STEPS:Filters['rating'][]=['all',.5,1,1.5,2,2.5,3,3.5,4,4.5,5];
-/**
- * The 내 별점 filter: a stepped slider plus a separate 미평가 toggle (never both). Dragging
- * settles for a moment before the list reloads, so one gesture is one request.
- */
-function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(value:Filters['rating']):void}) {
-  const step=typeof value==='number'?Math.min(10,Math.max(1,Math.round(value*2))):0;
-  const [draft,setDraft]=useState(step);
-  const commit=useRef(onChange);commit.current=onChange;
-  useEffect(()=>{setDraft(step);},[step,value]);
-  useEffect(()=>{
-    if(draft===step)return;
-    const timer=window.setTimeout(()=>commit.current(RATING_STEPS[draft]),250);
-    return()=>clearTimeout(timer);
-  },[draft,step]);
-  const text=(index:number)=>index===step?ratingLabel(value):ratingLabel(RATING_STEPS[index]);
-  return <div className="collection-rating-filter">
-    <StepSlider label="내 별점" count={RATING_STEPS.length} index={draft} defaultIndex={0} valueText={text} className={value==='unrated'?'is-idle':undefined} onChange={setDraft}/>
-    <button className={`filter-chip${value==='unrated'?' selected':''}`} aria-pressed={value==='unrated'} onClick={()=>onChange(value==='unrated'?'all':'unrated')}>미평가만</button>
-    <p className="hint">고른 별점과 같은 작품만 보여 줍니다.</p>
-  </div>;
-}
 /** A place another tab asks Collections to show (Home's 신간 and 발매 예정); `key` makes a repeat ask count. */
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
@@ -802,13 +778,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
     {sheet==='view'&&(performer&&!selected?<ShelfViewSheet type="av" view={avPerformerView(viewOf('av'))} onChange={patch=>patchView('av',patch)} onClose={()=>setSheet(null)}/>:<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content shelf-view-sheet">
-      <ViewOptionsSection title="정렬">
-        {type==='game'&&<><p className="collection-sheet-label">묶기</p><div role="radiogroup" aria-label="묶기">{([['device','기기'],['year','발매 연도']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={viewOf(type).grouping===value} onClick={()=>{patchView(type,{grouping:value});if(value==='year')changeFilters({...filters,sort:'media_date',direction:'desc'});}}>{label}<span className="radio-dot"/></button>)}</div></>}
-      <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>{patchView(type,{grouping:'sort'});changeFilters({...filters,sort:value});}}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
-      <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>{patchView(type,{grouping:'sort'});changeFilters({...filters,direction:value});}}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>
-      </ViewOptionsSection>
-      <ViewOptionsSection title="내 별점"><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/>{filters.rating!=='all'&&<Button variant="quiet" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</Button>}</ViewOptionsSection>
+      <CollectionRatingSection rating={filters.rating} onChange={rating=>changeFilters({...filters,rating})} settleMs={250}/>
       <ShelfViewSection type={type} view={viewOf(type)} onChange={patch=>patchView(type,patch)}/>
+      <CollectionSortSection sort={filters.sort} direction={filters.direction} onSortChange={next=>changeFilters({...filters,...next})}
+        grouping={type==='game'?viewOf(type).grouping??'sort':undefined} onGroupingChange={type==='game'?grouping=>patchView(type,{grouping}):undefined}/>
     </div></BottomSheet>)}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>

@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캐릭터 순서 시안</title>
+<!-- 앱의 실제 폰트, 토큰, 공용 베이스, 컨트롤, 크롬, 폴더 선반, 시리즈 화면 CSS를 불러온다.
+     페이지 틀, 임시 이미지, 새로 제안하는 요소(빈자리, 끄는 카드, 그룹에 넣기 면, 빼기 카드, 순서 편집 패널)만 이 파일에 있다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/assets/folder-shelf.css">
+<link rel="stylesheet" href="../../../_tools/app/src/characters/SeriesBrowser.css">
+<link rel="stylesheet" href="../../../_tools/app/src/characters/CharacterExtras.css">
+<style>
+/* 앱 셸은 html/body 높이를 고정하지만, 이 페이지는 문서처럼 스크롤된다. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0c0d; color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); user-select: text; -webkit-user-select: text; }
+.doc { word-break: keep-all; overflow-wrap: break-word; width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 8px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+h3.sub { margin: 24px 0 8px; font-size: var(--type-body); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 110ch; line-height: 1.7; }
+.lead b, .note b { color: var(--color-text); font-weight: 600; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; font-size: var(--type-meta); font-weight: 600; background: var(--color-surface-elevated); color: var(--color-muted); }
+.tag--rec { background: var(--color-accent); color: var(--color-on-accent); }
+.ann { margin: 0; padding-left: 0; list-style: none; font-size: var(--type-meta); color: var(--color-muted); line-height: 1.65; }
+.ann li + li { margin-top: 6px; }
+.ann li::before { content: "— "; color: var(--color-faint); }
+.ann li.n::before { content: none; }
+.ann b { color: var(--color-text); font-weight: 600; }
+.ann kbd, .note kbd, td kbd { display: inline-block; min-width: 18px; padding: 0 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; font: 600 11px/16px var(--font-ui); color: var(--color-text); text-align: center; }
+table.cmp { table-layout: fixed; border-collapse: collapse; width: 100%; margin-top: 16px; font-size: var(--type-meta); }
+table.cmp th, table.cmp td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--color-border); line-height: 1.6; }
+table.cmp th { color: var(--color-faint); font-weight: 600; }
+table.cmp td:first-child { color: var(--color-text); width: 220px; }
+table.cmp td { color: var(--color-muted); }
+table.cmp td b { color: var(--color-text); font-weight: 600; }
+.decisions { margin: 8px 0 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; max-width: 120ch; }
+.decisions b { color: var(--color-text); }
+
+/* ===== 장면 틀: 왼쪽 앱 화면 1040px, 오른쪽 설명 ===== */
+.scene { display: grid; grid-template-columns: 1040px 1fr; gap: 32px; align-items: start; margin-top: 16px; }
+.scene__cap { font-size: var(--type-meta); color: var(--color-faint); margin: 0 0 8px; font-variant-numeric: tabular-nums; }
+.scene__cap b { color: var(--color-text); font-weight: 600; }
+.mk-wrap { position: relative; }
+.mk-pane { position: relative; width: 1040px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; }
+.mk-toolbar { display: flex; align-items: center; gap: 8px; height: var(--toolbar-height); padding: 0 16px; border-bottom: 1px solid var(--color-border); font-size: var(--type-body); font-weight: 600; }
+.mk-toolbar .series-breadcrumb { font-weight: 600; }
+.mk-toolbar .series-breadcrumb > button { font-weight: 400; }
+.mk-toolbar .grow { flex: 1; }
+.mk-toolbar .ui-menu__trigger { min-height: 28px; width: 28px; padding: 0; }
+.mk-body { padding: 16px 16px 0; }
+.mk-body .folder-shelf { margin-bottom: 16px; }
+.mk-gallery { display: flex; gap: 2px; height: 72px; overflow: hidden; margin: 0 -16px; padding: 0 16px; opacity: 1; }
+.mk-gallery > span { flex: none; height: 120px; border-radius: 0; }
+.mk-filter { height: 28px; width: 148px; margin: 0 0 12px; border-radius: 4px; background: var(--color-surface); }
+svg.ic { width: 16px; height: 16px; flex: none; }
+
+/* ===== 임시 이미지 (실제 라이브러리 이미지를 쓰지 않음) ===== */
+.art.art { position: relative; background:
+  radial-gradient(circle at 50% 34%, rgba(240,226,214,.46) 0 15%, transparent 16%),
+  radial-gradient(ellipse 44% 30% at 50% 96%, rgba(240,226,214,.2) 0 97%, transparent 100%),
+  linear-gradient(160deg, var(--a), var(--b)); }
+.h1 { --a: #5d4c6e; --b: #2a2331; } .h2 { --a: #6e5c49; --b: #2c251e; } .h3 { --a: #48626e; --b: #1e292e; }
+.h4 { --a: #6e4a53; --b: #2e1f23; } .h5 { --a: #4f6e53; --b: #202d22; } .h6 { --a: #69634b; --b: #2a281f; }
+.h7 { --a: #4b536e; --b: #1f222e; } .h8 { --a: #6e5763; --b: #2e2529; }
+.hf.art.art { background: linear-gradient(150deg, #3d4247, #222527); }
+/* 선반 카드의 자리표시 바탕(앱의 --color-surface)을 임시 그림으로 덮는다. */
+.folder-shelf .series-character__open > .series-character__placeholder.art { background:
+  radial-gradient(circle at 50% 34%, rgba(240,226,214,.46) 0 15%, transparent 16%),
+  radial-gradient(ellipse 44% 30% at 50% 96%, rgba(240,226,214,.2) 0 97%, transparent 100%),
+  linear-gradient(160deg, var(--a), var(--b)); }
+.folder-shelf .series-character__open > .series-character__placeholder.art.hf { background: linear-gradient(150deg, #3d4247, #222527); }
+.hx.art.art { background: linear-gradient(160deg, #3a3a3c, #252527); }
+
+/* ===== 제안하는 요소 ===== */
+/* 빈자리: 놓일 자리만큼 카드들이 벌어지고, 그 자리에 바탕보다 조금 밝은 면이 남는다. 테두리·색 줄 없음. */
+.mk-slot { height: 170px; border-radius: 2px; background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); }
+/* 끄는 카드: 실제로 떠 있는 물건이므로 그림자를 쓴다. 크기 변화 없음, 살짝 투명. */
+.mk-ghost { position: absolute; z-index: 5; width: 132px; pointer-events: none; opacity: .94; }
+.mk-ghost .series-character__open > .art,
+.mk-ghost .character-group-card__mosaic { box-shadow: var(--shadow-floating); }
+.mk-ghost .series-character__open { cursor: grabbing; }
+/* 놓을 대상(그룹 카드, 빼기 자리) 위에서는 끄는 카드가 반쯤 투명해져 대상의 면이 비친다. */
+.mk-ghost.is-over { opacity: .6; }
+/* 그룹에 넣기: 그룹 카드 그림 위에 어두운 면과 문구 하나. 테두리나 색 줄은 쓰지 않는다. */
+/* 끄는 카드가 그룹 가운데를 덮으므로 문구는 위쪽에 둔다. */
+.mk-into-face { position: absolute; left: 0; top: 0; width: 132px; height: 170px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 16px; gap: 4px; border-radius: 2px; background: rgb(0 0 0 / 62%); color: #fff; font-size: var(--type-meta); font-weight: 600; }
+.mk-into-face svg { width: 20px; height: 20px; }
+/* 그룹 화면에서 끄는 동안만 맨 앞에 나타나는 빼기 자리. 평소에는 없다. */
+.mk-out { height: 170px; }
+.mk-out__face { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 16px; gap: 4px; width: 132px; height: 170px; border-radius: 2px; background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); color: var(--color-muted); font-size: var(--type-meta); }
+.mk-out__face svg { width: 20px; height: 20px; }
+.mk-out.is-on .mk-out__face { background: var(--color-surface-hover); color: var(--color-text); font-weight: 600; }
+/* 키보드 초점은 파란 선(앱 규칙 그대로). */
+.mk-focus .series-character__open > .art { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.mk-lifting .series-character__open > .art { opacity: 0; }
+/* 정지 메뉴 견본 */
+.mk-menu.ui-menu { position: absolute; z-index: 6; width: 220px; }
+.mk-menu--static.ui-menu { position: relative; }
+.mk-menu .ui-menu__item { width: 100%; font: inherit; font-size: var(--type-body); }
+.mk-menu .ui-menu__item[aria-disabled="true"] { color: var(--color-faint); }
+.mk-kbd { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.mk-sep { height: 1px; margin: 4px 0; background: var(--color-border); }
+.mk-sub { margin-left: auto; color: var(--color-muted); }
+/* 토스트 견본 */
+.mk-toast.ui-toast { position: absolute; z-index: 6; right: 16px; bottom: 16px; width: max-content; padding: 12px; background: var(--color-surface-raised); border: 1px solid var(--color-border); box-shadow: var(--shadow-floating); color: var(--color-text); font-size: var(--type-body); }
+.mk-toast .ui-button { min-height: 28px; }
+
+/* 설명용 표시(앱 화면 아님): 주황 번호와 점선 */
+.co { position: absolute; z-index: 8; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; background: #d6964a; color: #1a1208; font: 700 12px/1 var(--font-ui); }
+.co-zone { position: absolute; z-index: 7; border: 1px dashed #d6964a; pointer-events: none; }
+.ann li.n { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+.ann .num { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; background: #d6964a; color: #1a1208; font: 700 12px/1 var(--font-ui); }
+
+/* 순서 구간 도식 */
+.lane { display: flex; align-items: flex-end; gap: 4px; margin: 8px 0 4px; }
+.lane > i { display: grid; place-items: center; width: 28px; height: 36px; border-radius: 2px; font: 600 11px/1 var(--font-ui); font-style: normal; color: var(--color-text); }
+.lane > i.g { background: #4a4552; } .lane > i.c { background: #3c4650; } .lane > i.x { background: #333436; color: var(--color-muted); }
+.lane > i.f { background: #2c2f31; color: var(--color-muted); }
+.lane > i.ghost { box-shadow: var(--shadow-floating); transform: translateY(-8px); }
+.lane > .bar { width: 1px; height: 44px; margin: 0 6px; background: var(--color-border-strong); }
+.lane > .lbl { align-self: center; margin-left: 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.pair2 { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.pair2 > div { padding: 16px; background: var(--color-bg); border: 1px solid var(--color-border); }
+.specimens { display: flex; gap: 24px; align-items: flex-start; }
+.specimens figure { margin: 0; display: flex; flex-direction: column; gap: 8px; width: 132px; }
+.specimens figcaption { font-size: var(--type-meta); color: var(--color-muted); line-height: 1.5; }
+.specimens .folder-shelf { margin: 0; }
+.specimens .series-character, .specimens .mk-slot { width: 132px; }
+
+/* 사이드바 조각(간략) */
+.mk-side { width: 260px; padding: 8px 0; background: var(--color-sidebar); border: 1px solid var(--color-border); }
+.mk-side__row { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; color: var(--color-text); font-size: var(--type-body); }
+.mk-side__row svg { width: 16px; height: 16px; color: var(--color-muted); }
+.mk-side__row.l1 { padding-left: 32px; }
+.mk-side__row .cnt { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.mk-side__row.moved { background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+
+/* ===== 안 B: 순서 편집 패널 ===== */
+.ord { padding: 0 0 16px; }
+.ord .ui-section-label__actions { gap: 4px; }
+.ord .ui-button { min-height: 28px; }
+.ord__sub { margin: 12px 0 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.ord__groups { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.ord__cluster { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 12px; border-radius: 4px; background: color-mix(in srgb, var(--color-surface) 55%, var(--color-bg)); }
+.ord__cluster.is-target { background: var(--color-surface); }
+.ord__head { display: flex; align-items: center; gap: 4px; height: 28px; font-weight: 600; cursor: grab; }
+.ord__head svg { width: 16px; height: 16px; color: var(--color-muted); }
+.ord__head small { margin-left: 4px; color: var(--color-faint); font-size: var(--type-meta); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ord__members, .ord__loose { position: relative; display: flex; flex-wrap: wrap; gap: 12px; }
+.ord__mini { width: 88px; display: flex; flex-direction: column; gap: 4px; cursor: grab; }
+.ord__mini > span.art, .ord__mini > span.slot { display: block; width: 88px; height: 114px; border-radius: 2px; }
+.ord__mini > span.slot { background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); }
+.ord__cluster .ord__mini > span.slot { background: var(--color-bg); }
+.ord__mini > b { font-weight: 500; font-size: var(--type-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ord__mini.ghost { position: absolute; z-index: 5; opacity: .94; pointer-events: none; }
+.ord__mini.ghost > span.art { box-shadow: var(--shadow-floating); }
+.ord__mini.focus > span.art { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.ord__fixed { display: flex; gap: 12px; margin-top: 12px; color: var(--color-faint); font-size: var(--type-meta); align-items: center; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-user" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></symbol>
+  <symbol id="i-group" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+  <symbol id="i-uturn" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></symbol>
+  <symbol id="i-arrows" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></symbol>
+  <symbol id="i-extras" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/></symbol>
+</svg>
+
+<div class="doc">
+
+<header>
+  <h1>캐릭터·그룹 순서 바꾸기</h1>
+  <p class="lead">PC 시리즈 폴더 맨 위 선반에서 캐릭터와 그룹의 순서를 쉽게 바꾸는 방법을 정하는 시안이다. 지금 상태를 먼저 보이고, 두 안(A: 선반에서 바로 끌기, B: 순서 편집 모드)을 나란히 둔다. <b>추천은 A</b>다. 오른쪽 주황 번호와 점선은 설명용 표시이고 앱 화면이 아니다.</p>
+</header>
+
+<!-- ===================== 1. 지금 ===================== -->
+<section>
+  <h2 class="sec">지금 선반</h2>
+  <p class="note">그룹 카드가 항상 먼저, 그 뒤에 그룹 밖 캐릭터, 기타, 제안, 하위 폴더 순으로 놓인다. 캐릭터 카드의 우클릭 메뉴로 한 칸씩만 옮길 수 있다.</p>
+  <div class="scene">
+    <div class="mk-wrap">
+      <div class="mk-pane">
+        <div class="mk-toolbar">별빛 학원<span class="grow"></span><span class="ui-menu__trigger"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-dots"/></svg></span></div>
+        <div class="mk-body">
+          <div data-shelf="g|학생회|h1,h2,h3 ; g|밴드부|h4,h5 ; c|하루|h6 ; c|유키|h7 ; c|미오|h8 ; c|렌|h2 ; c|소라|h3 ; c|카나|h1 ; c|리코|h5 ; x ; f|설정 자료" data-arrow="next"></div>
+          <div class="mk-filter"></div>
+          <div data-gallery></div>
+        </div>
+      </div>
+      <div class="mk-menu ui-menu" style="left: 470px; top: 150px;">
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">위로 이동</span></button>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">아래로 이동</span></button>
+        <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">다른 시리즈로 이동…</span></button>
+      </div>
+      <span class="co" style="left: 452px; top: 140px;">1</span>
+      <span class="co" style="left: 24px; top: 92px;">2</span>
+      <span class="co" style="left: 1008px; top: 160px;">3</span>
+    </div>
+    <ul class="ann">
+      <li class="n"><span class="num">1</span><span>우클릭 메뉴는 <b>한 칸씩</b>만 옮긴다. 리코를 맨 앞으로 보내려면 메뉴를 여섯 번 연다. 선반은 가로인데 문구는 <b>위로/아래로</b>다.</span></li>
+      <li class="n"><span class="num">2</span><span>그룹 카드에는 순서 메뉴가 없다. 그룹 순서는 <b>사이드바</b>(끌기, <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>, 메뉴)에서만 바꾼다. 그룹은 언제나 캐릭터보다 앞이다.</span></li>
+      <li class="n"><span class="num">3</span><span>선반을 마우스로 끌면 <b>가로로 밀린다</b>(관성 포함). 그래서 지금은 카드를 끌어 옮기는 동작이 없다.</span></li>
+      <li>캐릭터를 그룹에 넣고 빼는 방법은 <b>그룹 편집</b> 대화상자의 체크박스뿐이다.</li>
+      <li>저장: 캐릭터는 <code>character_folder_order.position</code>, 그룹은 <code>character_groups.position</code>. 사이드바 그룹 행과 태블릿 고르기 화면이 같은 순서를 읽는다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 2. 공통 ===================== -->
+<section>
+  <h2 class="sec">두 안이 함께 쓰는 규칙</h2>
+
+  <h3 class="sub">순서 구간 — 그룹과 캐릭터가 섞이는가</h3>
+  <p class="note">선반은 구간 다섯 개로 나뉜다. 순서를 바꿀 수 있는 것은 앞의 두 구간(그룹, 그룹 밖 캐릭터)이고, 기타·제안·하위 폴더는 지금 자리에 고정된다. 그룹과 캐릭터를 한 줄에서 자유롭게 섞을지가 첫 번째 결정이다.</p>
+  <div class="pair2">
+    <div>
+      <p class="scene__cap"><span class="tag tag--rec">추천</span> <b>① 그룹 먼저, 구간 안에서만</b></p>
+      <div class="lane"><i class="g">G</i><i class="g">G</i><span class="bar"></span><i class="c">C</i><i class="c">C</i><i class="c">C</i><i class="c">C</i><i class="c">C</i><span class="bar"></span><i class="x">기타</i><i class="x">제안</i><i class="f">폴더</i></div>
+      <div class="lane"><i class="g">G</i><i class="g ghost">G</i><span class="bar"></span><i class="c">C</i><i class="c">C</i><span class="lbl">← 그룹을 끌면 빈자리는 그룹 구간 끝에서 멈춤</span></div>
+      <ul class="ann" style="margin-top:8px">
+        <li>지금 데이터(두 순서 표)를 그대로 쓴다. 저장 형식이 바뀌지 않는다.</li>
+        <li>사이드바는 시리즈 아래에 그룹 행만 두므로(캐릭터 행 없음) 선반과 사이드바가 같은 모양이 된다.</li>
+        <li>그룹을 캐릭터 구간으로 끌어도 빈자리는 경계를 넘지 않는다. 캐릭터를 그룹 구간으로 끌면 그룹 카드 위에서 <b>그룹에 넣기</b>로 바뀐다.</li>
+      </ul>
+    </div>
+    <div>
+      <p class="scene__cap"><b>② 한 줄에서 자유롭게 섞기</b></p>
+      <div class="lane"><i class="c">C</i><i class="g">G</i><i class="c">C</i><i class="c">C</i><i class="g">G</i><i class="c">C</i><i class="c">C</i><span class="bar"></span><i class="x">기타</i><i class="x">제안</i><i class="f">폴더</i></div>
+      <ul class="ann" style="margin-top:8px">
+        <li>좋아하는 캐릭터를 그룹보다 앞에 둘 수 있다.</li>
+        <li>그룹과 캐릭터가 하나의 순서를 공유해야 해서 <b>저장 형식이 바뀐다</b>(마이그레이션, 태블릿 읽기 경로 변경).</li>
+        <li>사이드바에는 캐릭터 행이 없어서 선반과 사이드바의 모양이 어긋난다.</li>
+        <li>그룹 카드 가장자리(자리)와 가운데(넣기)를 구분하는 판정이 더 자주 필요해 실수가 늘어난다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub">끄는 동안의 표시 — 줄 대신 빈자리와 떠 있는 카드</h3>
+  <div class="specimens">
+    <figure>
+      <div class="folder-shelf"><div class="mk-slot"></div></div>
+      <figcaption><b style="color:var(--color-text)">빈자리</b> 놓일 곳만큼 이웃 카드가 140ms에 벌어지고, 바탕보다 조금 밝은 면이 남는다. 테두리·아이보리 선 없음.</figcaption>
+    </figure>
+    <figure>
+      <div class="folder-shelf" style="position:relative;height:200px"><div class="mk-ghost" style="left:0;top:4px" data-card="c|소라|h3"></div></div>
+      <figcaption><b style="color:var(--color-text)">끄는 카드</b> 같은 크기 그대로 떠서 포인터를 따라온다. 떠 있는 물건이라 그림자만 붙고 확대는 없다.</figcaption>
+    </figure>
+    <figure>
+      <div class="folder-shelf"><div data-card="g|밴드부|h4,h5|into"></div></div>
+      <figcaption><b style="color:var(--color-text)">그룹에 넣기</b> 캐릭터를 그룹 카드 가운데에 올리면 그림이 어두워지고 문구 하나가 뜬다. 이때 빈자리는 닫힌다.</figcaption>
+    </figure>
+    <figure>
+      <div class="folder-shelf"><div data-card="out|on"></div></div>
+      <figcaption><b style="color:var(--color-text)">그룹에서 빼기</b> 그룹 화면에서 끄는 동안만 선반 맨 앞에 나타나는 자리. 끌기를 끝내면 사라진다.</figcaption>
+    </figure>
+    <ul class="ann" style="flex:1; max-width: 520px">
+      <li>그룹 카드 위 판정: 가운데 60%는 <b>넣기</b>, 양쪽 20%는 그 앞·뒤 <b>자리</b>. 그룹을 끌 때는 넣기가 없다.</li>
+      <li>놓을 대상(그룹 카드, 빼기 자리) 위에서는 끄는 카드가 반쯤 투명해져 아래 면의 문구가 비친다. 문구는 끄는 카드에 덜 가리도록 카드 위쪽에 둔다.</li>
+      <li>놓으면 끄는 카드가 빈자리로 200ms(<code>--ease-sheet</code>) 미끄러져 들어가고 그대로 카드가 된다. 다른 카드는 다시 그려지지 않는다(깜빡임 없음).</li>
+      <li><kbd>Esc</kbd>는 취소: 카드가 원래 자리로 돌아간다. 동작 줄이기 설정에서는 벌어짐·미끄러짐 없이 바로 바뀐다.</li>
+      <li>순서는 놓는 즉시 화면에 반영되고 뒤에서 저장된다. 성공 알림은 없다. 저장 실패 시 원래 순서로 돌아가고 한 줄 토스트 “순서를 바꾸지 못했습니다” + 다시 시도.</li>
+      <li>그룹에 넣기·빼기는 카드가 다른 화면으로 사라지므로 토스트 “밴드부에 넣음 · 되돌리기”를 한 번 띄운다(되돌릴 수 있는 동작의 예외 규칙).</li>
+    </ul>
+  </div>
+
+  <h3 class="sub">사이드바도 같은 순서</h3>
+  <div style="display:flex; gap:32px; align-items:flex-start">
+    <div class="mk-side">
+      <div class="mk-side__row"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-folder"/></svg>별빛 학원<span class="cnt">1,284</span></div>
+      <div class="mk-side__row l1 moved"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-group"/></svg>밴드부</div>
+      <div class="mk-side__row l1"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-group"/></svg>학생회</div>
+      <div class="mk-side__row l1"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-folder"/></svg>설정 자료</div>
+    </div>
+    <ul class="ann" style="max-width: 760px">
+      <li>선반에서 밴드부를 학생회 앞으로 끌면 같은 순간 사이드바의 그룹 행도 바뀐다(같은 그룹 목록을 공유하고, 지금도 바로 반영 후 실패 시 되돌린다). 바뀐 행은 성공 표시 규칙대로 잠깐 초록빛으로 물들었다가 사라진다.</li>
+      <li>캐릭터는 사이드바에 행이 없으므로 캐릭터 순서는 선반에서만 보인다. 태블릿 고르기 화면은 다음 동기화 때 같은 순서를 받는다.</li>
+      <li>사이드바의 그룹 행 끌기는 지금 <b>2px 아이보리 줄</b>로 놓일 곳을 표시한다. 가장자리 줄 규칙과 어긋나므로, 이번 라운드에 같은 “빈자리(행이 벌어짐)” 표시로 맞출지 정한다(결정 4).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 3. 안 A ===================== -->
+<section>
+  <h2 class="sec">안 A — 선반에서 바로 끌기 <span class="tag tag--rec">추천</span></h2>
+  <p class="note">평소 선반 그대로 카드를 <b>0.25초 누르고 있으면</b> 카드가 들리고, 그대로 끌어 옮긴다. 누르자마자 움직이면 지금처럼 선반이 가로로 밀린다. 따로 모드에 들어가지 않는다.</p>
+
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>A1 · 집기</b> — 소라 카드를 누른 채 0.25초</p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar">별빛 학원</div>
+          <div class="mk-body">
+            <div data-shelf="g|학생회|h1,h2,h3 ; g|밴드부|h4,h5 ; c|하루|h6 ; c|유키|h7 ; c|미오|h8 ; c|렌|h2 ; slot ; c|카나|h1 ; c|리코|h5" data-arrow="next" data-ghost="c|소라|h3" data-ghost-at="864,-6"></div>
+          </div>
+        </div>
+        <span class="co" style="left: 990px; top: 52px;">1</span>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>카드는 제자리에서 4–6px 떠오르며 그림자가 붙고, 원래 자리는 빈자리 면으로 바뀐다(90ms, 투명도만). 확대·흔들림 없음. 커서는 <b>grabbing</b>.</span></li>
+      <li>0.25초 전에 4px 이상 움직이면 지금과 같은 가로 밀기다. 짧게 누르고 떼면 지금처럼 캐릭터가 열린다.</li>
+      <li>집는 동안 아무 문구도 띄우지 않는다. 처음 쓰는 방법은 우클릭 메뉴의 <b>앞으로/뒤로</b> 옆에서 자연스럽게 알게 된다.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>A2 · 끄는 중</b> — 하루와 유키 사이로</p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar">별빛 학원</div>
+          <div class="mk-body">
+            <div data-shelf="g|학생회|h1,h2,h3 ; g|밴드부|h4,h5 ; c|하루|h6 ; slot ; c|유키|h7 ; c|미오|h8 ; c|렌|h2 ; c|카나|h1 ; c|리코|h5" data-arrow="next" data-ghost="c|소라|h3" data-ghost-at="452,-8"></div>
+          </div>
+        </div>
+        <span class="co-zone" style="left: 977px; top: 58px; width: 48px; height: 200px;"></span>
+        <span class="co" style="left: 420px; top: 52px;">1</span>
+        <span class="co" style="left: 990px; top: 270px;">2</span>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>포인터가 지나가는 자리마다 이웃 카드가 140ms에 비켜서 빈자리가 생긴다. 원래 자리(소라)는 닫힌다.</span></li>
+      <li class="n"><span class="num">2</span><span>선반 양 끝 48px(점선)에 머물면 선반이 그쪽으로 천천히 흐른다. 끄는 중에도 <b>휠</b>은 지금처럼 선반을 민다(선반이 휠을 먹는 동작 유지). 멀리 옮길 때 편하다.</span></li>
+      <li>위·아래로 선반을 벗어나 놓으면 취소로 본다(카드가 원래 자리로 돌아감). 갤러리나 사이드바에 떨어뜨려도 아무 일도 일어나지 않는다.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>A3 · 그룹에 넣기</b> — 소라를 밴드부 카드 가운데에 올림</p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar">별빛 학원</div>
+          <div class="mk-body" style="padding-bottom: 72px">
+            <div data-shelf="g|학생회|h1,h2,h3 ; g|밴드부|h4,h5|into ; c|하루|h6 ; c|유키|h7 ; c|미오|h8 ; c|렌|h2 ; c|카나|h1 ; c|리코|h5" data-arrow="next" data-ghost="c|소라|h3" data-ghost-at="186,60" data-ghost-over></div>
+          </div>
+          <div class="ui-toast mk-toast"><span class="ui-toast__message">밴드부에 넣음</span><button class="ui-button ui-button--ghost ui-button--sm" type="button">되돌리기</button></div>
+        </div>
+        <span class="co" style="left: 140px; top: 52px;">1</span>
+        <span class="co" style="left: 990px; top: 300px;">2</span>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>캐릭터가 그룹 카드 가운데 60%에 들어오면 빈자리가 닫히고 그룹 카드가 <b>그룹에 넣기</b> 면으로 바뀐다. 놓으면 소라는 밴드부의 맨 뒤 멤버가 되고, 그룹 카드 모자이크는 다음 그리기 때 자연스럽게 바뀐다.</span></li>
+      <li class="n"><span class="num">2</span><span>카드가 선반에서 사라지므로 “밴드부에 넣음 · 되돌리기” 토스트를 한 번 띄운다.</span></li>
+      <li>시리즈 소속, 이미지 분류, 분석 범위는 바뀌지 않는다(지금 그룹 편집과 같은 뜻).</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>A4 · 그룹에서 빼기</b> — 밴드부 화면에서 소라를 맨 앞 빼기 자리로</p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar"><span class="series-breadcrumb"><button type="button">별빛 학원</button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-chev"/></svg><span>밴드부</span></span></div>
+          <div class="mk-body">
+            <div data-shelf="out|on ; c|나기|h4 ; c|츠바사|h5 ; x" data-label="캐릭터 2 · 기타" data-ghost="c|소라|h3" data-ghost-at="30,60" data-ghost-over></div>
+          </div>
+        </div>
+        <span class="co" style="left: 4px; top: 52px;">1</span>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>그룹 화면에서 카드를 집으면 선반 맨 앞에 <b>그룹에서 빼기</b> 자리가 페이드로 나타난다(140ms). 끌기를 끝내면 다시 사라지고 선반은 원래 폭으로 돌아온다.</span></li>
+      <li>놓으면 소라는 그룹 밖 캐릭터로 돌아간다. 시리즈 선반에서는 그룹 밖 캐릭터의 맨 뒤에 놓인다. “밴드부에서 뺌 · 되돌리기”.</li>
+      <li>그룹 화면 안에서의 순서 바꾸기는 시리즈 선반과 똑같다(멤버끼리만).</li>
+      <li>빵부스러기의 “별빛 학원”을 놓을 곳으로 쓰는 방법도 있지만 대상이 작고 멀어서 쓰지 않는다.</li>
+    </ul>
+  </div>
+
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>A5 · 키보드와 메뉴</b> — 유키에 초점, <kbd>Alt</kbd>+<kbd>←</kbd></p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar">별빛 학원</div>
+          <div class="mk-body">
+            <div data-shelf="g|학생회|h1,h2,h3 ; g|밴드부|h4,h5 ; c|유키|h7|focus ; c|하루|h6 ; c|미오|h8 ; c|렌|h2 ; c|소라|h3 ; c|카나|h1 ; c|리코|h5" data-arrow="next"></div>
+          </div>
+        </div>
+        <span class="co" style="left: 296px; top: 52px;">1</span>
+      </div>
+      <div style="display:flex; gap:32px; margin-top:16px; align-items:flex-start">
+        <div>
+          <p class="scene__cap"><b>캐릭터 카드 우클릭</b> (시리즈 선반)</p>
+          <div class="mk-menu mk-menu--static ui-menu">
+            <button class="ui-menu__item" type="button" aria-disabled="true"><span class="ui-menu__item-label">앞으로</span><span class="mk-kbd">Alt+←</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">뒤로</span><span class="mk-kbd">Alt+→</span></button>
+            <button class="ui-menu__item" type="button" aria-disabled="true"><span class="ui-menu__item-label">맨 앞으로</span><span class="mk-kbd">Alt+Home</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">맨 뒤로</span><span class="mk-kbd">Alt+End</span></button>
+            <div class="mk-sep"></div>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">그룹에 넣기</span><span class="mk-sub">›</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">다른 시리즈로 이동…</span></button>
+          </div>
+        </div>
+        <div>
+          <p class="scene__cap"><b>그룹 화면의 캐릭터 카드</b></p>
+          <div class="mk-menu mk-menu--static ui-menu">
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">앞으로</span><span class="mk-kbd">Alt+←</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">뒤로</span><span class="mk-kbd">Alt+→</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">맨 앞으로</span><span class="mk-kbd">Alt+Home</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">맨 뒤로</span><span class="mk-kbd">Alt+End</span></button>
+            <div class="mk-sep"></div>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">밴드부에서 빼기</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">다른 시리즈로 이동…</span></button>
+          </div>
+        </div>
+        <div>
+          <p class="scene__cap"><b>그룹 카드 우클릭</b> (새로 생김)</p>
+          <div class="mk-menu mk-menu--static ui-menu">
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">앞으로</span><span class="mk-kbd">Alt+←</span></button>
+            <button class="ui-menu__item" type="button" aria-disabled="true"><span class="ui-menu__item-label">뒤로</span><span class="mk-kbd">Alt+→</span></button>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">맨 앞으로</span><span class="mk-kbd">Alt+Home</span></button>
+            <button class="ui-menu__item" type="button" aria-disabled="true"><span class="ui-menu__item-label">맨 뒤로</span><span class="mk-kbd">Alt+End</span></button>
+            <div class="mk-sep"></div>
+            <button class="ui-menu__item" type="button"><span class="ui-menu__item-label">그룹 편집</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>초점이 있는 카드에서 <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd>는 한 칸, <kbd>Alt</kbd>+<kbd>Home</kbd>/<kbd>End</kbd>는 구간의 맨 앞·맨 뒤. 사이드바 그룹 행의 <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>와 같은 짝이다. 초점은 옮긴 카드에 남고, 선반은 그 카드가 보이도록 흐른다.</span></li>
+      <li>스크린 리더에는 “유키, 캐릭터 1번째” 같은 한 줄을 알린다(화면에는 글자 없음).</li>
+      <li>메뉴 문구는 가로 선반에 맞춰 <b>위로/아래로 → 앞으로/뒤로</b>로 바꾼다. 세로 목록인 사이드바는 위로/아래로를 유지한다.</li>
+      <li>끝에 있어 움직일 수 없는 항목은 흐린 글자(비활성)로 남겨 메뉴 길이가 흔들리지 않게 한다.</li>
+      <li>그룹에 넣기 하위 메뉴에는 이 시리즈의 그룹 이름이 순서대로 나온다. 키보드만으로도 넣기·빼기가 된다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 4. 안 B ===================== -->
+<section>
+  <h2 class="sec">안 B — 순서 편집 모드</h2>
+  <p class="note">시리즈 더보기 메뉴(또는 카드 우클릭)의 <b>순서 편집</b>으로 들어간다. 선반 자리가 줄바꿈 격자로 펼쳐져 모든 그룹(멤버 포함)과 캐릭터가 한눈에 보이고, 끌어서 정리한 뒤 <b>완료</b>로 한 번에 저장한다. 평소 선반의 끌기·휠 동작은 전혀 바뀌지 않는다.</p>
+  <div class="scene">
+    <div>
+      <p class="scene__cap"><b>B1 · 편집 중</b> — 소라를 밴드부 안 나기와 츠바사 사이로</p>
+      <div class="mk-wrap">
+        <div class="mk-pane">
+          <div class="mk-toolbar">별빛 학원<span class="grow"></span><span class="ui-menu__trigger"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-dots"/></svg></span></div>
+          <div class="mk-body">
+            <section class="folder-shelf ord">
+              <div class="folder-shelf__label-row character-group-heading">
+                <h3 class="ui-section-label folder-shelf__label character-group-heading"><span class="ui-section-label__title">순서 편집</span><span class="ui-section-label__rule"></span>
+                  <span class="ui-section-label__actions">
+                    <button class="ui-section-label__open" type="button" aria-label="순서 편집 설명"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-info"/></svg></button>
+                    <button class="ui-button ui-button--ghost ui-button--sm" type="button">취소</button>
+                    <button class="ui-button ui-button--primary ui-button--sm" type="button">완료</button>
+                  </span></h3>
+              </div>
+              <div class="ord__sub">그룹</div>
+              <div class="ord__groups">
+                <div class="ord__cluster">
+                  <div class="ord__head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-group"/></svg>학생회<small>3</small></div>
+                  <div class="ord__members">
+                    <div class="ord__mini"><span class="art h1"></span><b>아오이</b></div>
+                    <div class="ord__mini"><span class="art h2"></span><b>시온</b></div>
+                    <div class="ord__mini"><span class="art h3"></span><b>마히로</b></div>
+                  </div>
+                </div>
+                <div class="ord__cluster is-target">
+                  <div class="ord__head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-group"/></svg>밴드부<small>2</small></div>
+                  <div class="ord__members">
+                    <div class="ord__mini"><span class="art h4"></span><b>나기</b></div>
+                    <div class="ord__mini"><span class="slot"></span><b>&nbsp;</b></div>
+                    <div class="ord__mini"><span class="art h5"></span><b>츠바사</b></div>
+                    <div class="ord__mini ghost" style="left: 108px; top: -10px;"><span class="art h3"></span><b>소라</b></div>
+                  </div>
+                </div>
+              </div>
+              <div class="ord__sub">그룹 밖 캐릭터</div>
+              <div class="ord__loose">
+                <div class="ord__mini"><span class="art h6"></span><b>하루</b></div>
+                <div class="ord__mini focus"><span class="art h7"></span><b>유키</b></div>
+                <div class="ord__mini"><span class="art h8"></span><b>미오</b></div>
+                <div class="ord__mini"><span class="art h2"></span><b>렌</b></div>
+                <div class="ord__mini"><span class="art h1"></span><b>카나</b></div>
+                <div class="ord__mini"><span class="art h5"></span><b>리코</b></div>
+              </div>
+            </section>
+            <div class="mk-filter"></div>
+            <div data-gallery></div>
+          </div>
+        </div>
+        <span class="co" style="left: 872px; top: 56px;">1</span>
+        <span class="co" style="left: 150px; top: 126px;">2</span>
+        <span class="co" style="left: 104px; top: 336px;">3</span>
+      </div>
+    </div>
+    <ul class="ann" style="padding-top: 24px">
+      <li class="n"><span class="num">1</span><span>완료(아이보리, 화면에 하나)와 취소. 바꾼 내용은 완료 때 한 번에 저장되고, 취소나 <kbd>Esc</kbd>는 모두 버린다. 설명(조작법)은 ⓘ 뒤에 둔다.</span></li>
+      <li class="n"><span class="num">2</span><span>그룹은 멤버가 펼쳐진 묶음으로 보인다. 묶음 제목을 끌면 그룹 순서, 작은 카드를 끌면 멤버 순서·다른 그룹으로 옮기기·그룹 밖으로 빼기가 모두 한 곳에서 된다.</span></li>
+      <li class="n"><span class="num">3</span><span>키보드: <kbd>Space</kbd>로 집고, 방향키로 옮기고(묶음 사이도 이동), <kbd>Space</kbd>로 놓는다. 집은 카드는 그림자가 붙는다.</span></li>
+      <li>기타·제안·하위 폴더는 편집에 나오지 않는다(고정). 아래 갤러리는 그대로 보이되 편집 중에는 누를 수 없다(흐리게 하지 않음).</li>
+      <li>들어갈 때 선반 높이가 바뀌므로 200ms에 펼쳐지고, 완료 후 원래 가로 선반으로 접힌다. 선반은 새 순서로 한 번에 바뀐다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 5. 비교 ===================== -->
+<section>
+  <h2 class="sec">비교와 추천</h2>
+  <table class="cmp">
+    <thead><tr><th></th><th>안 A — 선반에서 바로 끌기 (추천)</th><th>안 B — 순서 편집 모드</th></tr></thead>
+    <tbody>
+      <tr><td>한두 칸 옮기기</td><td><b>가장 빠름.</b> 누르고 끌어 놓으면 끝.</td><td>모드에 들어가고 완료까지 세 단계.</td></tr>
+      <tr><td>멀리 옮기기 (10칸 이상)</td><td>가장자리 자동 흐름·휠, 또는 메뉴의 맨 앞으로/맨 뒤로.</td><td><b>가장 쉬움.</b> 모두 한눈에 보여 바로 놓는다.</td></tr>
+      <tr><td>그룹에 넣기 / 빼기</td><td>그룹 카드에 올리기 / 그룹 화면의 빼기 자리. 메뉴로도 됨.</td><td><b>한 화면에서</b> 넣기·빼기·그룹 간 이동.</td></tr>
+      <tr><td>지금 선반 동작과의 관계</td><td>“누르고 0.25초”를 새로 구분해야 한다. 바로 끌면 지금처럼 밀린다.</td><td>평소 선반은 전혀 바뀌지 않는다.</td></tr>
+      <tr><td>화면 변화</td><td>없음. 끄는 동안 이웃 카드만 비킨다.</td><td>선반이 격자로 펼쳐졌다가 접힌다.</td></tr>
+      <tr><td>저장</td><td>놓을 때마다 바로(실패 시 되돌림).</td><td>완료 때 한 번(취소 가능).</td></tr>
+      <tr><td>태블릿</td><td>길게 누르기 → 끌기로 그대로 옮겨진다(할 일 항목 이동과 같은 손짓).</td><td>시트 안의 같은 격자. 화면이 좁아 묶음이 길어진다.</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:16px"><b>추천: 안 A + 규칙 ①(그룹 먼저).</b> 사용자가 말한 “쉽게”는 보이는 카드를 그 자리에서 바로 옮기는 것에 가장 가깝고, 화면이 바뀌지 않아 조용하다. 멀리 옮기기는 맨 앞으로/맨 뒤로와 자동 흐름으로 메운다. 캐릭터가 아주 많은 시리즈(30명 이상)에서 정리가 답답하면 그때 안 B를 “크게 정리할 때”의 보조 도구로 더할 수 있다. 두 안은 같은 저장 방식과 표시(빈자리·떠 있는 카드)를 쓰므로 나중에 더해도 버리는 작업이 없다.</p>
+</section>
+
+<!-- ===================== 6. 태블릿 ===================== -->
+<section>
+  <h2 class="sec">태블릿에서는</h2>
+  <ul class="ann" style="font-size: var(--type-body); max-width: 120ch">
+    <li><b>같은 것:</b> 순서 구간 규칙(그룹 먼저), 빈자리·떠 있는 카드·그룹에 넣기 면·빼기 자리의 모양, 앞으로/뒤로/맨 앞으로/맨 뒤로/그룹에 넣기 문구, 실패 시 되돌림과 되돌리기 토스트. 표시 부품은 공용 컴포넌트로 만들어 PC와 태블릿이 같이 쓴다.</li>
+    <li><b>다른 것:</b> 집기는 <b>길게 누르기(0.5초)</b>, 손가락을 떼지 않고 끌기. 짧게 밀면 지금처럼 선반이 밀린다. 메뉴는 카드 길게 누르기 후 움직이지 않고 떼면 아래 시트로 연다. 키보드 조작은 없다. 가장자리 자동 흐름 폭은 터치에 맞춰 64px.</li>
+    <li><b>데이터:</b> 태블릿은 서버를 통해 순서를 쓰게 되므로 서버 쓰기 경로와 앱 네트워크 허용 목록 추가가 필요하다(PC 구현 뒤 같은 라운드에서).</li>
+  </ul>
+</section>
+
+<!-- ===================== 7. 결정 ===================== -->
+<section>
+  <h2 class="sec">정할 것</h2>
+  <ol class="decisions">
+    <li><b>방식:</b> 안 A(선반에서 바로 끌기, 추천) / 안 B(순서 편집 모드) / A 먼저, 나중에 B 보조.</li>
+    <li><b>그룹과 캐릭터:</b> ① 그룹 먼저, 구간 안에서만(추천, 저장 형식 그대로) / ② 한 줄에서 자유롭게 섞기(저장 형식 변경).</li>
+    <li><b>집는 손짓(안 A):</b> 0.25초 누르고 있기(추천) — 또는 더 짧게/길게. 카드를 위·아래로 살짝 빼내면 바로 집히는 방식을 함께 둘지.</li>
+    <li><b>사이드바 그룹 행:</b> 지금의 2px 아이보리 줄 표시를 이번에 같은 “빈자리(행이 벌어짐)”로 바꿀지(추천: 바꿈).</li>
+    <li><b>그룹에 넣은 캐릭터의 자리:</b> 그룹 멤버의 맨 뒤(추천) / 맨 앞.</li>
+  </ol>
+</section>
+
+</div>
+
+<script>
+// 시안용: 카드 마크업을 짧은 표기에서 만든다. 클래스는 앱의 실제 선반 카드와 같다.
+const ic = (name, cls = "ic") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+function card(spec) {
+  const [t, a = "", b = "", f = ""] = spec.trim().split("|");
+  const flags = f.split(",");
+  if (t === "slot") return `<div class="mk-slot" aria-hidden="true"></div>`;
+  if (t === "out") return `<article class="series-character folder-shelf__card mk-out${a === "on" ? " is-on" : ""}"><div class="mk-out__face">${ic("uturn")}<span>그룹에서 빼기</span></div></article>`;
+  if (t === "c") return `<article class="series-character folder-shelf__card${flags.includes("focus") ? " mk-focus" : ""}"><button class="series-character__open" type="button" tabindex="-1"><span class="series-character__placeholder art ${b}"></span><strong>${ic("user", "ic folder-shelf__icon")}<span class="series-character__name">${a}</span></strong></button></article>`;
+  if (t === "g") {
+    const hs = b.split(",");
+    const into = flags.includes("into");
+    return `<article class="series-character folder-shelf__card series-character--group"><button class="series-character__open" type="button" tabindex="-1"><span class="character-group-card__mosaic" data-count="${hs.length}">${hs.map(h => `<span class="character-group-card__slot art ${h}"></span>`).join("")}</span><strong>${ic("group", "ic character-group-card__icon")}<span class="series-character__name">${a}</span></strong>${into ? `<span class="mk-into-face">${ic("group")}<span>그룹에 넣기</span></span>` : ""}</button></article>`;
+  }
+  if (t === "x") return `<article class="series-character folder-shelf__card series-character--extras"><button class="series-character__open" type="button" tabindex="-1"><span class="character-group-card__mosaic" data-count="2"><span class="character-group-card__slot art hx"></span><span class="character-group-card__slot art hx"></span></span><strong>${ic("extras", "ic folder-shelf__icon")}<span class="series-character__name">기타</span></strong></button></article>`;
+  if (t === "f") return `<article class="series-character folder-shelf__card"><button class="series-character__open" type="button" tabindex="-1"><span class="series-character__placeholder art hf"></span><strong>${ic("folder", "ic character-group-card__icon")}<span class="series-character__name">${a}</span></strong></button></article>`;
+  return "";
+}
+function labelFor(specs) {
+  const c = specs.filter(s => s.startsWith("c|")).length, g = specs.filter(s => s.startsWith("g|")).length;
+  const x = specs.some(s => s === "x"), fo = specs.filter(s => s.startsWith("f|")).length;
+  return [c && `캐릭터 ${c}`, g && `그룹 ${g}`, x && "기타", fo && `폴더 ${fo}`].filter(Boolean).join(" · ");
+}
+document.querySelectorAll("[data-shelf]").forEach(host => {
+  const specs = host.dataset.shelf.split(";").map(s => s.trim());
+  let label = host.dataset.label || labelFor(specs);
+  // 끄는 중인 카드도 개수에 넣는다(선반 밖에 떠 있을 뿐).
+  if (!host.dataset.label && host.dataset.ghost && host.dataset.ghost.startsWith("c|")) label = label.replace(/캐릭터 (\d+)/, (m, n) => `캐릭터 ${+n + 1}`);
+  const ghost = host.dataset.ghost ? (() => { const [x, y] = host.dataset.ghostAt.split(",").map(Number); return `<div class="mk-ghost${host.hasAttribute("data-ghost-over") ? " is-over" : ""}" style="left:${x}px;top:${y}px">${card(host.dataset.ghost)}</div>`; })() : "";
+  const arrow = host.dataset.arrow === "next" ? `<button type="button" class="home-shelf__arrow home-shelf__arrow--next" aria-label="다음 항목">${ic("chev")}</button>` : "";
+  host.outerHTML = `<section class="folder-shelf series-characters" aria-label="${label}"><div class="folder-shelf__label-row character-group-heading"><h3 class="ui-section-label folder-shelf__label character-group-heading"><span class="ui-section-label__title">${label}</span><span class="ui-section-label__rule" aria-hidden="true"></span></h3></div><div class="home-shelf"><div class="home-shelf__track">${specs.map(card).join("")}</div>${arrow}${ghost}</div></section>`;
+});
+document.querySelectorAll("[data-card]").forEach(host => { host.innerHTML = card(host.dataset.card); if (!host.classList.contains("mk-ghost")) host.outerHTML = host.innerHTML; });
+const hues = ["h1","h2","h3","h4","h5","h6","h7","h8"]; const widths = [96, 150, 120, 84, 160, 110, 132, 92, 140, 104, 126, 88];
+document.querySelectorAll("[data-gallery]").forEach(host => {
+  host.outerHTML = `<div class="mk-gallery" aria-hidden="true">${widths.map((w, i) => `<span class="art ${hues[i % 8]}" style="width:${w}px"></span>`).join("")}</div>`;
+});
+</script>
+</body>
+</html>

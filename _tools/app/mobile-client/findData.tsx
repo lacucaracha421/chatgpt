@@ -12,18 +12,20 @@ import type {View} from './types';
 import {DESCRIPTION_TYPING_PAUSE_MS,cachedDescription,descriptionQueryReady,readDescription,type DescriptionAnswer} from './descriptionSearch';
 import {artistName,searchValues,type LibraryArtist} from './artistsModel';
 
-export const TABLET_FIND_SCOPES=FIND_SCOPES.filter(scope=>scope!=='명령');
-export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
+export const TABLET_FIND_SCOPES=FIND_SCOPES;
+export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'shortcut';shortcut:'calendar'|'releases'}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
 export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{item:CollectionSummary;revision:string};assetId?:string;contentRating?:import("../src/shared/privacy/contentMask").ContentRating|null};
 
 /** Project titles only, including concealed and locked secret notes' public titles. */
 export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:{works:{item:CollectionSummary;revision:string}[];artists:LibraryArtist[];notes:Pick<Note,'id'|'title'|'type'|'deleted'>[];folders:Entry[];albums:AlbumTree|null;navigate(destination:FindDestination):void}):TabletFindEntry[] {
   const entry=(id:string,group:NavigationEntry['group'],label:string,destination:FindDestination,extra:Partial<TabletFindEntry>={}):TabletFindEntry=>({id,group,label,icon:null,...extra,destination,run:()=>navigate(destination)});
   return [
-    ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
-    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
+    entry('release-calendar','go','발매 캘린더',{kind:'shortcut',shortcut:'calendar'},{icon:<AREA_ICONS.collections/>}),
+    entry('new-releases','go','신간',{kind:'shortcut',shortcut:'releases'},{icon:<AREA_ICONS.collections/>}),
+    ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{workType:work.item.type,keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
+    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{count:artist.assetCount,keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
     ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month').map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),
-    ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
+    ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{placeKind:folder.characterKind==='character'?'character':'folder',count:folder.asset_count,context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
     ...(albums?.adopted?albums.albums.map(album=>entry(`place-album-${album.id}`,'place',album.name,{kind:'place',view:albumView(albums,album)},{context:'앨범',icon:<RectangleStackIcon/>})):[]),
     ...([['home','홈',AREA_ICONS.home],['assets','에셋',AREA_ICONS.assets],['collections','컬렉션',AREA_ICONS.collections],['catalog','카탈로그',AREA_ICONS.manga],['notes','메모',AREA_ICONS.notes],['settings','설정',AREA_ICONS.settings]] as const).map(([screen,label,Icon])=>entry(`screen-${screen}`,'go',label,{kind:'screen',screen},{icon:<Icon/>})),
   ];

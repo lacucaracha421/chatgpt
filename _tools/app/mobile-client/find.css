@@ -14,6 +14,7 @@
 .tablet-find__option:active { background: var(--color-surface-pressed); }
 .tablet-find__option:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .tablet-find__more { width: 100%; margin-top: var(--space-2); }
+.tablet-find__best { margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }
 /* 이미지 내용 row: the squares sit under the label like the PC palette's strip, and keep their pictures between answers. */
 .tablet-find__strip-area { display: flex; min-width: 0; margin-top: var(--space-1); }
 .tablet-find__strip { display: flex; gap: var(--space-1); min-width: 0; overflow: hidden; }

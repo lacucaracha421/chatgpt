@@ -17,14 +17,14 @@ export function noteTitleEntries(notes: Pick<Note, "id" | "title" | "type" | "de
 }
 export function workEntries(works: CollectionSummary[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return works.map(work => ({
-    id: `work-${work.id}`, group: "work", label: work.name, keywords: work.originalTitle ? [work.originalTitle] : [],
+    id: `work-${work.id}`, group: "work", workType: work.type, count: work.assetCount, label: work.name, keywords: work.originalTitle ? [work.originalTitle] : [],
     context: FIND_WORK_TYPE_LABEL[work.type], icon: <AREA_ICONS.collections />, thumbnail: work.coverAssetId ? thumbnailUrl(work.coverAssetId) : undefined,
     run: () => onNavigate({ kind: "collection", collectionId: work.id }),
   }));
 }
 export function artistEntries(artists: ArtistSummary[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return artists.filter(artist => !artist.hidden).map(artist => ({
-    id: `artist-${artist.id}`, group: "artist", label: artist.label,
+    id: `artist-${artist.id}`, group: "artist", label: artist.label, count: artist.assetCount,
     keywords: [artist.displayName ?? "", artist.sourceName ?? "", ...artist.keys],
     context: `에셋 ${artist.assetCount.toLocaleString("ko-KR")}장`, icon: <AREA_ICONS.artists />, avatar: true,
     thumbnail: artist.coverAssetIds[0] ? thumbnailUrl(artist.coverAssetIds[0]) : undefined,

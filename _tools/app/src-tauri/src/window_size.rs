@@ -3,11 +3,8 @@
 
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-    },
-    time::{Duration, Instant},
+    sync::{mpsc, Mutex, OnceLock},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -16,9 +13,10 @@ use tauri::{LogicalSize, Manager, WebviewWindow};
 const FILE: &str = "window-size.json";
 /// The window's configured minimum (tauri.conf.json); a stored size never goes below it.
 const MIN: (f64, f64) = (960.0, 640.0);
-/// Resize events arrive continuously while dragging; the size is written at most this often,
-/// and once more when the window closes.
+/// Save after a resize burst settles, and flush before the window closes.
 const WRITE_EVERY: Duration = Duration::from_millis(400);
+/// Closing never waits longer than this for the final write.
+const FLUSH_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Stored {
@@ -28,10 +26,64 @@ pub(crate) struct Stored {
     pub maximized: bool,
 }
 
-/// A trailing write is pending after a burst of resize events.
-static FLUSH_SCHEDULED: AtomicBool = AtomicBool::new(false);
-/// The latest size, the size last written to disk, and when that write happened.
-static LAST: Mutex<Option<(Stored, Option<Stored>, Instant)>> = Mutex::new(None);
+/// The latest size, including the last normal dimensions while maximized.
+static LAST: Mutex<Option<Stored>> = Mutex::new(None);
+type SaveRequest = (Stored, Option<mpsc::Sender<()>>);
+static WRITER: OnceLock<mpsc::Sender<SaveRequest>> = OnceLock::new();
+
+/// Owns disk writes only: never query a Tauri window from this thread. Window getters
+/// wait for the event loop, so doing that while holding LAST can deadlock a resize.
+fn save_requests(
+    receiver: mpsc::Receiver<SaveRequest>,
+    delay: Duration,
+    mut write: impl FnMut(Stored) -> bool,
+) {
+    let mut pending = None;
+    let mut written = None;
+    loop {
+        let request = if pending.is_some() {
+            receiver.recv_timeout(delay)
+        } else {
+            receiver
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+        };
+        let (flush, finished) = match request {
+            Ok((next, acknowledgement)) => {
+                pending = Some(next);
+                if acknowledgement.is_none() {
+                    continue;
+                }
+                (acknowledgement, false)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => (None, false),
+            Err(mpsc::RecvTimeoutError::Disconnected) => (None, true),
+        };
+        if let Some(next) = pending.take() {
+            if written != Some(next) && write(next) {
+                written = Some(next);
+            }
+        }
+        if let Some(acknowledgement) = flush {
+            let _ = acknowledgement.send(());
+        }
+        if finished {
+            return;
+        }
+    }
+}
+
+fn write_size(path: &std::path::Path, next: Stored) -> bool {
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    let Ok(text) = serde_json::to_string(&next) else {
+        return false;
+    };
+    std::fs::create_dir_all(dir)
+        .and_then(|_| std::fs::write(path, text))
+        .is_ok()
+}
 
 fn path(window: &WebviewWindow) -> Option<PathBuf> {
     window
@@ -72,29 +124,30 @@ pub(crate) fn restore(window: &WebviewWindow) {
     }
     *LAST
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some((stored, Some(stored), Instant::now()));
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(stored);
 }
 
-/// Records the current size; `force` writes even inside the throttle window (on close).
+/// Capture native state before locking; resize persistence never blocks the event loop.
+/// `force` waits (bounded) for the disk-only worker on close so the final size survives exit.
 pub(crate) fn remember(window: &WebviewWindow, force: bool) {
     let maximized = window.is_maximized().unwrap_or(false);
+    let size = window.inner_size().ok().map(|size| {
+        let scale = window.scale_factor().unwrap_or(1.0).max(0.1);
+        (
+            f64::from(size.width) / scale,
+            f64::from(size.height) / scale,
+        )
+    });
     let mut last = LAST
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // While maximized, keep the last normal size so un-maximizing next launch restores it.
     let (width, height) = match (maximized, *last) {
-        (true, Some((previous, _, _))) => (previous.width, previous.height),
-        _ => {
-            let Ok(size) = window.inner_size() else {
-                return;
-            };
-            let scale = window.scale_factor().unwrap_or(1.0).max(0.1);
-            (
-                f64::from(size.width) / scale,
-                f64::from(size.height) / scale,
-            )
-        }
+        (true, Some(previous)) => (previous.width, previous.height),
+        _ => match size {
+            Some(size) => size,
+            None => return,
+        },
     };
     if width < 1.0 || height < 1.0 {
         return; // minimized
@@ -104,38 +157,126 @@ pub(crate) fn remember(window: &WebviewWindow, force: bool) {
         height: height.round(),
         maximized,
     };
-    if let Some((_, written, at)) = *last {
-        // Nothing new on disk to write, or a write happened moments ago: keep the latest size
-        // in memory; a trailing write (or closing the window) puts it on disk.
-        if written == Some(next) || (!force && at.elapsed() < WRITE_EVERY) {
-            *last = Some((next, written, at));
-            // The last resize of a drag must still reach the disk even if no event follows.
-            if written != Some(next) && !FLUSH_SCHEDULED.swap(true, Ordering::SeqCst) {
-                let window = window.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(WRITE_EVERY);
-                    FLUSH_SCHEDULED.store(false, Ordering::SeqCst);
-                    remember(&window, true);
-                });
-            }
-            return;
-        }
+    if *last == Some(next) && !force {
+        return;
     }
-    *last = Some((next, Some(next), Instant::now()));
+    *last = Some(next);
     drop(last);
-    if let Some(path) = path(window) {
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+    let writer = match WRITER.get() {
+        Some(writer) => writer,
+        None => {
+            let Some(path) = path(window) else { return };
+            WRITER.get_or_init(|| {
+                let (sender, receiver) = mpsc::channel();
+                std::thread::spawn(move || {
+                    save_requests(receiver, WRITE_EVERY, |next| write_size(&path, next))
+                });
+                sender
+            })
         }
-        if let Ok(text) = serde_json::to_string(&next) {
-            let _ = std::fs::write(path, text);
+    };
+    if force {
+        let (sender, receiver) = mpsc::channel();
+        if writer.send((next, Some(sender))).is_ok() {
+            let _ = receiver.recv_timeout(FLUSH_WAIT);
         }
+    } else {
+        let _ = writer.send((next, None));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn size(width: f64) -> Stored {
+        Stored {
+            width,
+            height: 900.0,
+            maximized: false,
+        }
+    }
+
+    #[test]
+    fn resize_burst_saves_only_the_final_size_without_another_event() {
+        let (sender, receiver) = mpsc::channel();
+        let (saved, writes) = mpsc::channel();
+        // Queue the whole burst before starting the worker; no timing-dependent producer race.
+        for width in 1000..1200 {
+            sender.send((size(f64::from(width)), None)).unwrap();
+        }
+        let worker = std::thread::spawn(move || {
+            save_requests(receiver, Duration::from_millis(20), |next| {
+                saved.send(next).unwrap();
+                true
+            })
+        });
+        let result = writes.recv_timeout(Duration::from_secs(2));
+        drop(sender);
+        worker.join().unwrap();
+        assert_eq!(result.unwrap(), size(1199.0));
+        assert!(writes.try_recv().is_err());
+    }
+
+    #[test]
+    fn close_flushes_the_latest_size_without_waiting_for_the_event_loop_or_debounce() {
+        let (sender, receiver) = mpsc::channel();
+        let (saved, writes) = mpsc::channel();
+        let (acknowledgement, completed) = mpsc::channel();
+        sender.send((size(1000.0), None)).unwrap();
+        let next = Stored {
+            maximized: true,
+            ..size(1400.0)
+        };
+        sender.send((next, Some(acknowledgement))).unwrap();
+        // Simulate the event loop owning LAST while the persistence worker runs.
+        let guard = LAST.lock().unwrap();
+        let worker = std::thread::spawn(move || {
+            save_requests(receiver, Duration::from_secs(60), |next| {
+                saved.send(next).unwrap();
+                true
+            })
+        });
+        let result = completed.recv_timeout(Duration::from_secs(2));
+        drop(guard);
+        drop(sender);
+        worker.join().unwrap();
+        result.unwrap();
+        assert_eq!(writes.recv().unwrap(), next);
+        assert!(writes.try_recv().is_err());
+    }
+
+    #[test]
+    fn resize_recording_does_not_wait_for_a_slow_write_and_close_cannot_be_overwritten() {
+        let (sender, receiver) = mpsc::channel();
+        let (saved, writes) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            save_requests(receiver, Duration::from_millis(20), |next| {
+                saved.send(next).unwrap();
+                if next == size(1000.0) {
+                    blocked.recv_timeout(Duration::from_secs(2)).unwrap();
+                }
+                true
+            })
+        });
+        sender.send((size(1000.0), None)).unwrap();
+        let first = writes.recv_timeout(Duration::from_secs(2));
+        // A resize is queued while the previous filesystem write is still blocked.
+        sender.send((size(1100.0), None)).unwrap();
+        let (acknowledgement, completed) = mpsc::channel();
+        sender.send((size(1200.0), Some(acknowledgement))).unwrap();
+        release.send(()).unwrap();
+        let result = completed.recv_timeout(Duration::from_secs(2));
+        // An unchanged resize after close must not write an older or duplicate snapshot.
+        sender.send((size(1200.0), None)).unwrap();
+        drop(sender);
+        worker.join().unwrap();
+        assert_eq!(first.unwrap(), size(1000.0));
+        result.unwrap();
+        assert_eq!(writes.recv().unwrap(), size(1200.0));
+        assert!(writes.try_recv().is_err());
+    }
 
     #[test]
     fn stored_sizes_are_read_leniently_and_clamped_to_the_minimum() {

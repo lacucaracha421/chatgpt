@@ -1,5 +1,5 @@
-import { ArrowLeftIcon, ChevronDownIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon } from "@heroicons/react/24/outline";
-import { SparklesIcon as SparklesSolidIcon } from "@heroicons/react/24/solid";
+import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { SparklesIcon as SparklesSolidIcon, StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -13,6 +13,9 @@ import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { useScrubberList } from "../shared/ui/scrubber/useScrubberList";
 import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
+import { ViewOptionsSection } from "../shared/ui/ViewOptionsSection";
+import { BusyLabel } from "../shared/ui/BusyLabel";
+import { CollectionRatingSection, CollectionSortSection } from "./CollectionViewSections";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
 import { useShelfPutDown } from "./useShelfPutDown";
@@ -20,7 +23,6 @@ import { MangaShelfList } from "./MangaShelfList";
 import type { MangaShelfPick } from "./MangaShelfRow";
 import { requestMangaVolume } from "./work/mangaVolumeRequest";
 import { TextInput } from "../shared/ui/TextInput";
-import { Slider } from "../shared/ui/Slider";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -83,8 +85,8 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 }
 
 /**
- * The Collections browser. The section bar under the top bar holds the types with sort, rating and
- * shortcuts followed by view controls at its right end. The list spans the workspace
+ * The Collections browser. The section bar under the top bar holds the types with the shortcuts, then one
+ * 보기 menu (내 별점, 배치, 정렬, 관리) at its right end. The list spans the workspace
  * beside the rail; shortcuts open the existing news views and paged Showcase exhibition.
  */
 export function CollectionBrowser({
@@ -329,34 +331,41 @@ export function CollectionBrowser({
 
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
+    {libraryState.rating !== "all" && <button type="button" className="collection-filter-chip" aria-label="내 별점 필터 빼기" onClick={() => patchLibraryState({ rating: "all" })}>
+      <StarSolidIcon className="collection-filter-chip__star" aria-hidden="true" /><span>내 별점 {ratingLabel(libraryState.rating)}</span>
+      <span className="collection-filter-chip__x"><XMarkIcon aria-hidden="true" /></span>
+    </button>}
   </div>;
   const leading = <>{typeFilter === "av" && <AvLinkInbox items={avInbox.items} collections={collections} api={avLinkApi} error={avInbox.error}
     onRefresh={avInbox.refresh} onCollectionsChanged={onChanged} />}{sectionRow}</>;
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품 없음"><p>검색어나 내 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
     : <EmptyState title="컬렉션 없음"><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 
-  const viewControls = libraryView ? <>
-    <Menu label="정렬" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>정렬<ChevronDownIcon aria-hidden="true" /></>} items={[
-      ...(typeFilter === "game" ? ([['device', '기기'], ['year', '발매 연도']] as const).map(([grouping, label]) => ({ id: grouping, label, group: "grouping", selected: viewSettings.grouping === grouping,
-        onSelect: () => { patchViewSettings({ grouping }); if (grouping === "year") patchLibraryState({ sort: "media_date", direction: "desc" }); } })) : []),
-      ...SORT_OPTIONS.map(([sort, direction, label]) => ({ id: `${sort}:${direction}`, label, group: "sort", selected: libraryState.sort === sort && libraryState.direction === direction,
-        onSelect: () => { patchLibraryState({ sort, direction }); patchViewSettings({ grouping: "sort" }); } })),
-    ]} />
-    <Menu label="내 별점" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>내 별점<ChevronDownIcon aria-hidden="true" /></>}
-      content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}><RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
-        {libraryState.rating !== "all" && <Button size="sm" variant="ghost" onClick={() => patchLibraryState({ rating: "all" })}>초기화</Button>}
-      </div>} />
-    <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(typeFilter === "manga" ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
-      onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })} />
-  </> : undefined;
+  // 관리 (games, PC only): 책등 받기; while it runs, its progress and 취소 take the row's place.
+  const manageSection = typeFilter === "game" && gateway.fetchLaunchBoxSpines ? <ViewOptionsSection title="관리">
+    {spineBatch.running
+      ? <div className="collection-view-manage__run">
+        <span role="status" className="collection-view-manage__status"><BusyLabel busy delay={400}>{spineBatch.phase} 받는 중 </BusyLabel><span>{spineBatch.processed}/{spineBatch.total}</span></span>
+        <span className="collection-view-manage__grow" />
+        <Button variant="ghost" size="sm" aria-label="책등 받기 취소" disabled={spineBatch.cancelling} onClick={() => void spineBatch.cancel()}>취소</Button>
+      </div>
+      : <button type="button" className="collection-view-manage__row" onClick={() => void spineBatch.run(collections, onChanged)}>
+        <ArrowDownTrayIcon aria-hidden="true" /><span>책등 받기</span>
+      </button>}
+  </ViewOptionsSection> : null;
+  // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
+  const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(typeFilter === "manga" ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
+    onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
+    leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
+    <CollectionSortSection sort={libraryState.sort} direction={libraryState.direction} onSortChange={next => patchLibraryState(next)}
+      grouping={typeFilter === "game" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" ? grouping => patchViewSettings({ grouping }) : undefined} />
+    {manageSection}
+  </ViewOptionsMenu> : undefined;
   const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
-    <Menu label="컬렉션 검색" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></>}
+    <Menu label="컬렉션 검색" align="end" trigger={<MagnifyingGlassIcon aria-hidden="true" />}
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
         <TextInput type="search" aria-label="제목 검색" placeholder="작품 제목 검색" autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
       </div>} />
-    {typeFilter === "game" && gateway.fetchLaunchBoxSpines && <Menu label="작품 관리" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
-      { id: "spines", label: "책등 받기", disabled: spineBatch.running, onSelect: () => void spineBatch.run(collections, onChanged) },
-    ]} />}
     {typeFilter === "game" && spineBatch.running && <span className="collection-toolbar__spine-progress">
       <span role="status" className="collection-toolbar__spine-status">
         <span className="collection-toolbar__spine-spinner" aria-hidden="true" />
@@ -517,33 +526,6 @@ function sortLabel(sort: CollectionLibrarySort, direction: "asc" | "desc"): stri
   return SORT_OPTIONS.find(([value, order]) => value === sort && order === direction)?.[2] ?? "최근 추가";
 }
 
-/** Slider stops: 전체, then 0.5 … 5.0. 미평가 is a separate toggle, never a stop. */
-const RATING_STEPS: Array<CollectionLibraryState["rating"]> = ["all", 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
-
 function ratingLabel(rating: CollectionLibraryState["rating"]): string {
   return rating === "all" ? "전체" : rating === "unrated" ? "미평가" : rating.toFixed(1);
-}
-
-/** The slider stop for a filter; a saved score between stops (for example 0.0) sits on the nearest. */
-function ratingStep(rating: CollectionLibraryState["rating"]): number {
-  if (typeof rating !== "number") return 0;
-  return Math.min(10, Math.max(1, Math.round(rating * 2)));
-}
-
-function RatingFilter({ rating, onChange }: { rating: CollectionLibraryState["rating"]; onChange: (rating: CollectionLibraryState["rating"]) => void }) {
-  // Exact match (collectionLibrary `matchesRating`): the slider picks one score, and 미평가 is
-  // its own toggle, so the two can never be combined.
-  const shown = typeof rating === "number" ? `★ ${rating.toFixed(1)}` : ratingLabel(rating);
-  return <div className="collection-rating-filter">
-    <Slider label="내 별점" min={0} max={RATING_STEPS.length - 1} step={1} value={rating === "unrated" ? 0 : ratingStep(rating)} aria-valuetext={shown}
-      className={rating === "unrated" ? "is-idle" : undefined}
-      onChange={event => {
-        const next = RATING_STEPS[Number(event.target.value)] ?? "all";
-        if (next !== rating) onChange(next);
-      }} />
-    <div className="collection-rating-filter__row">
-      <output className="collection-rating-filter__value">{shown}</output>
-      <Button size="sm" variant="secondary" aria-pressed={rating === "unrated"} onClick={() => onChange(rating === "unrated" ? "all" : "unrated")}>미평가</Button>
-    </div>
-  </div>;
 }

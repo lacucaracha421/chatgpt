@@ -57,21 +57,15 @@ it('Android Back closes find first, preserves Home, then the usual back chain wo
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
   expect(nav('홈').getAttribute('aria-current')).toBe('page');expect(mocks.native.mock.calls.some(([op])=>op==='finish')).toBe(false);
 });
-it('runs the existing asset search from the preselected local Find row',async()=>{
+it('preselects a strong asset place ahead of scene search and opens it with Enter',async()=>{
   render(<App/>);fireEvent.click(nav('에셋'));await screen.findByRole('heading',{name:'에셋'});
   fireEvent.click(screen.getByRole('button',{name:'찾기'}));
   const field=screen.getByRole('combobox');fireEvent.change(field,{target:{value:'별과'}});
-  await waitFor(()=>expect(screen.getAllByRole('option')[0].textContent).toContain('이 화면에서 ‘별과’'));
+  await waitFor(()=>expect(screen.getAllByRole('option')[0].textContent).toContain('별과 폴더'));
   expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
   fireEvent.keyDown(field,{key:'Enter'});
   expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull();
-  expect((screen.getByRole('searchbox',{name:'에셋 찾기'}) as HTMLInputElement).value).toBe('별과');
-  expect(await screen.findByRole('button',{name:/^별과 폴더/})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'찾기'}));
-  const nextField=screen.getByRole('combobox');fireEvent.change(nextField,{target:{value:'다른 검색'}});
-  await screen.findByRole('option',{name:/이 화면에서 ‘다른 검색’/});
-  fireEvent.keyDown(nextField,{key:'Enter'});
-  expect((screen.getByRole('searchbox',{name:'에셋 찾기'}) as HTMLInputElement).value).toBe('다른 검색');
+  expect((await screen.findByLabelText('gallery-content')).textContent).toContain('folder-image');
 });
 
 it.each(['홈','에셋'])('find opens the %s tab',async(name)=>{
