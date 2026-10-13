@@ -237,25 +237,34 @@ ul.ideas { margin: 0; padding-left: 20px; color: var(--c-muted); line-height: 1.
 ul.ideas li { margin: 4px 0; }
 ul.ideas li::marker { color: var(--c-faint); }
 
+/* Featured: artwork picker */
+.picks { display: flex; flex-wrap: wrap; gap: 8px; max-width: 520px; }
+.picks button { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 4px; border: 1px solid var(--c-border); border-radius: var(--r-ctl);
+  background: var(--c-control); color: var(--c-muted); font: 500 13px/1 var(--f-ui); cursor: pointer; }
+.picks button img { width: 32px; height: 32px; object-fit: cover; border-radius: 2px; background: #333; }
+.picks button[aria-checked="true"] { color: var(--c-text); border-color: var(--c-accent); }
+.imgbar .note2 { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--c-muted); }
+
 /* =====================================================================================
-   CARD — every size below is in cqw (percent of card width), so a card scales as one object.
-   Ratio 63:88 · corners 4.5% of width.
+   CARD — sizes are in cqw (percent of card width), so a card scales as one object. Ratio 63:88.
+   Layer order (bottom → top): background art · foil sheen · window shade · frame · glitter canvas
+   · window rim · subject (may break the frame) · name · text box · footer · glare · edge bevel.
+   Window: top 15cqw, sides 6.6cqw, bottom 80cqw. Card height = 139.68cqw.
    ===================================================================================== */
-.card { --mx: 34%; --my: 24%; --o: .5; --ang: 35deg; --rx: 0deg; --ry: 0deg;
+.card { --mx: 30%; --my: 22%; --o: .5; --ang: 35deg; --rx: 0deg; --ry: 0deg; --tint: #6a3aa8;
   position: relative; z-index: 0; container-type: inline-size; aspect-ratio: 63 / 88; perspective: 1100px; -webkit-user-select: none; user-select: none;
   touch-action: pan-y; transition: --mx .6s var(--ease), --my .6s var(--ease), --rx .7s var(--ease), --ry .7s var(--ease), --o .6s var(--ease), --ang .6s var(--ease); }
 .card.active { transition: --mx .07s linear, --my .07s linear, --rx .1s linear, --ry .1s linear, --o .2s linear, --ang .07s linear; }
 .card.demo { transition: none; }
 .card::before { content: ""; display: none; position: absolute; inset: -16% -22%; z-index: -1; pointer-events: none; opacity: 0; border-radius: 50%;
-  background: radial-gradient(closest-side, var(--glow, #fff) 0%, var(--glow, #fff) 42%, color-mix(in srgb, var(--glow, #fff) 40%, transparent) 62%, transparent 85%);
-  transition: opacity .35s ease; }
+  background: radial-gradient(closest-side, var(--glow, #fff) 0%, var(--glow, #fff) 42%, color-mix(in srgb, var(--glow, #fff) 40%, transparent) 62%, transparent 85%); transition: opacity .35s ease; }
 .card[data-glow="rainbow"]::before { background: conic-gradient(from 0deg, #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9);
   -webkit-mask: radial-gradient(closest-side, #000 40%, transparent 85%); mask: radial-gradient(closest-side, #000 40%, transparent 85%); }
 .card.charge::before, .card.revealed::before { display: block; }
 .card.charge::before { opacity: .9; animation: pulse .42s ease-in-out infinite alternate; }
+.card.charge.big::before { inset: -40% -50%; }
 .card.charge .back { box-shadow: 0 0 0 .7cqw var(--glow), 0 0 7cqw 2.5cqw var(--glow), 0 2cqw 6cqw rgba(0, 0, 0, .55); }
 .card.charge[data-glow="rainbow"] .back { box-shadow: 0 0 0 .7cqw #fff, -3cqw -3cqw 8cqw 2cqw #ff7ba9, 3cqw -3cqw 8cqw 2cqw #ffe17a, 3cqw 3cqw 8cqw 2cqw #7cc8ff, -3cqw 3cqw 8cqw 2cqw #c49bff; }
-.card.charge.big::before { inset: -40% -50%; }
 @keyframes pulse { from { transform: scale(.9); } to { transform: scale(1.08); } }
 .card.revealed[data-tier="sr"]::before { opacity: .22; }
 .card.revealed[data-tier="ssr"]::before, .card.revealed[data-tier="ur"]::before { opacity: .32; }
@@ -276,190 +285,138 @@ ul.ideas li::marker { color: var(--c-faint); }
 .back { transform: rotateY(180deg); }
 .face > * { position: absolute; }
 
-/* Shared front parts — framed layout (N / R / SR) */
-.front { --ink: #2a2622; --ink2: #5b554c; --box: #f6f3ec; --boxline: #bdb5a6; background: #d6d0c2; color: var(--ink); }
-.f-plate { inset: 3.4cqw; border-radius: 2.6cqw; background: #efebe2; }
-.f-name { top: 5.6cqw; left: 6.6cqw; right: 6cqw; height: 8.4cqw; display: flex; align-items: center; gap: 2cqw; }
-.f-title { flex: 1; min-width: 0; font-size: 5.3cqw; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+/* --- shared front parts --- */
+.front { --ink: #2a2622; --ink2: #5b554c; background: #15131c; color: var(--ink); }
+.f-bg { inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--bgpos, 50% 50%); display: block; }
+.f-sheen { inset: 0; pointer-events: none; opacity: 0; -webkit-mask-image: var(--lum, none); mask-image: var(--lum, none); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
+.f-shade { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 65cqw; pointer-events: none; box-shadow: inset 0 0 2.4cqw rgba(0, 0, 0, .45); }
+.f-frame { inset: 0; padding: 15cqw 6.6cqw 59.68cqw; border-radius: inherit; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.f-frame::after { content: ""; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+.f-glit { inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; mix-blend-mode: plus-lighter; }
+.f-rim { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 65cqw; padding: .55cqw; pointer-events: none; background: #3d372f;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.f-subjwrap { inset: 0; pointer-events: none; clip-path: inset(15cqw 6.6cqw 59.68cqw 6.6cqw); }
+.f-subj { position: absolute; left: var(--sx, 0%); top: var(--sy, 0%); width: var(--sw, 100%); height: auto; max-width: none; display: block;
+  -webkit-mask-image: var(--sfade, none); mask-image: var(--sfade, none); }
+.card[data-subj="0"] .f-subjwrap { display: none; }
+.f-name { top: 4.6cqw; left: 6.6cqw; right: 6cqw; height: 9cqw; display: flex; align-items: center; gap: 2cqw; }
+.f-title { flex: 1; min-width: 0; font-size: 5.5cqw; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; padding: .3cqw 0; }
 .f-type { flex: none; width: 7.6cqw; height: 7.6cqw; border-radius: 50%; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .5cqw rgba(0, 0, 0, .18), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .55), 0 0 0 .8cqw rgba(0, 0, 0, .35), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); }
 .f-type svg { width: 4.6cqw; height: 4.6cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); }
-.f-art { top: 15cqw; left: 6.6cqw; right: 6.6cqw; height: 64cqw; overflow: hidden; background: #222; box-shadow: 0 0 0 .55cqw #4a453e, 0 0 0 .9cqw rgba(255, 255, 255, .5); }
-.f-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 46%; display: block; }
-.f-artholo { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
-.f-band { display: none; }
-.f-illus { top: 80.2cqw; left: 6.6cqw; right: 6.6cqw; height: 4cqw; font-size: 2.35cqw; line-height: 4cqw; text-align: right; color: var(--ink2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .01em; }
-.f-typeline { top: 85.2cqw; left: 7cqw; right: 7cqw; font-size: 3cqw; font-weight: 700; line-height: 4.4cqw; color: var(--ink); white-space: nowrap; overflow: hidden; }
-.f-text { top: 90.4cqw; left: 6.6cqw; right: 6.6cqw; height: 34.6cqw; padding: 2.6cqw 3.2cqw 2.2cqw; display: flex; flex-direction: column;
-  background: var(--box); border: .45cqw solid var(--boxline); border-radius: 1cqw; }
-.f-flavor { flex: 1; margin: 0; font-size: 3.4cqw; line-height: 1.55; color: var(--ink); word-break: keep-all; }
-.f-stats { display: flex; align-items: center; gap: 3.4cqw; padding-top: 1.8cqw; border-top: .3cqw solid var(--boxline); font-size: 2.8cqw; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.f-illus { top: 81cqw; left: 6.6cqw; right: 6.6cqw; height: 4cqw; font-size: 2.35cqw; line-height: 4cqw; text-align: right; color: var(--ink2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-text { top: 86cqw; left: 6.6cqw; right: 6.6cqw; height: 39.5cqw; padding: 2.2cqw 3cqw 2cqw; display: flex; flex-direction: column; gap: 1.2cqw;
+  background: #f6f2e9; border: .4cqw solid #b9b09e; border-radius: .8cqw; color: var(--ink); }
+.f-typeline { font-size: 3cqw; font-weight: 700; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-flavor { flex: 1; margin: 0; font-size: 3.35cqw; line-height: 1.55; word-break: keep-all; }
+.f-stats { display: flex; align-items: center; gap: 3.4cqw; padding-top: 1.6cqw; border-top: .3cqw solid currentColor; border-top-color: color-mix(in srgb, currentColor 30%, transparent);
+  font-size: 2.8cqw; color: var(--ink2); font-variant-numeric: tabular-nums; }
 .f-stats b { color: var(--ink); font-weight: 700; margin-left: .8cqw; }
 .f-stats .fav { margin-left: auto; display: inline-flex; }
-.f-stats .fav svg { width: 3.4cqw; height: 3.4cqw; fill: #e5484d; }
-.f-foot { left: 7cqw; right: 7cqw; bottom: 4.5cqw; height: 4.6cqw; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; font-size: 2.4cqw; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.f-stats .fav svg { width: 3.4cqw; height: 3.4cqw; fill: #d8343c; }
+.f-foot { left: 7cqw; right: 7cqw; bottom: 4.3cqw; height: 4.6cqw; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; font-size: 2.4cqw; color: var(--ink2); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 .f-no { display: inline-flex; align-items: center; gap: 1cqw; white-space: nowrap; }
-.f-no svg { width: 2.6cqw; height: 3cqw; color: currentColor; }
+.f-no svg { width: 2.6cqw; height: 3cqw; }
 .f-rar { display: inline-flex; align-items: center; gap: .6cqw; font-weight: 800; letter-spacing: .06em; color: var(--ink); }
 .f-rar svg { width: 2.8cqw; height: 2.8cqw; fill: currentColor; }
 .f-serial { justify-self: end; white-space: nowrap; font-weight: 700; }
-.f-foil, .f-sparkle, .f-glare, .f-edge { inset: 0; pointer-events: none; border-radius: inherit; }
-.f-foil, .f-sparkle { opacity: 0; }
-.f-glare { mix-blend-mode: soft-light; opacity: calc(var(--o) * .9);
-  background: radial-gradient(farthest-corner circle at var(--mx) var(--my), rgba(255, 255, 255, .85) 8%, rgba(255, 255, 255, .45) 24%, rgba(0, 0, 0, .35) 90%); }
-.f-edge { box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .25); }
+.f-glare, .f-edge { inset: 0; pointer-events: none; border-radius: inherit; }
+.f-glare { mix-blend-mode: soft-light; opacity: calc(var(--o) * .75);
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .6) 0%, rgba(255, 255, 255, .2) 22%, transparent 50%); }
+.f-edge { box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .2); }
 
-/* N · 일반: paper frame, no foil */
-.card[data-tier="n"] .front { background: #cfc9bb var(--tex-paper); }
-.card[data-tier="n"] .f-plate { background: #efebe2 var(--tex-paper); }
+/* metallic name letters (foil): base metal + a highlight band that slides with the light; dark outline for legibility */
+.card .f-title.metal { color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), var(--metal);
+  background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0; }
+.card .f-name.outlined { filter: drop-shadow(0 0 .2cqw #000) drop-shadow(0 0 .2cqw rgba(0, 0, 0, .95)) drop-shadow(0 0 .25cqw rgba(0, 0, 0, .8)) drop-shadow(0 .45cqw .45cqw rgba(0, 0, 0, .55)); }
+.card { --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
+  --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
+  --prism: linear-gradient(180deg, #ffffff 0%, #ffe6f2 24%, #8f9bc4 50%, #d8fff0 70%, #fff7e0 100%); }
+/* parchment text box (overframe / full-art tiers) */
+.parch .f-text { background: linear-gradient(180deg, rgba(252, 242, 220, .80), rgba(240, 224, 190, .74)); border: .35cqw solid rgba(120, 82, 30, .85);
+  box-shadow: inset 0 0 0 .5cqw rgba(255, 246, 220, .35), inset 0 0 0 .8cqw rgba(168, 122, 48, .55), 0 .4cqw 1.2cqw rgba(0, 0, 0, .35); color: #2a1c0c; --ink: #2a1c0c; --ink2: #5a4128; }
+.parch .f-typeline { color: #2a1c0c; }
 
-/* R · 레어: silver frame + silver name plate, light sweeps the frame */
-.card[data-tier="r"] .front { background: linear-gradient(135deg, #8b9198 0%, #e9edf0 20%, #9aa1a8 38%, #f7f8f9 52%, #7d848b 72%, #dfe3e6 88%, #9aa1a8 100%); }
-.card[data-tier="r"] .f-plate { background: #eeece7 var(--tex-paper); box-shadow: 0 0 0 .3cqw rgba(0, 0, 0, .25); }
-.card[data-tier="r"] .f-name { left: 5.4cqw; right: 5.4cqw; padding: 0 1.4cqw 0 2.4cqw; border-radius: 1.2cqw;
-  background: linear-gradient(180deg, #fbfcfd 0%, #c3c9cf 46%, #eef1f3 54%, #a9b0b7 100%); box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .6), 0 .3cqw .6cqw rgba(0, 0, 0, .25); }
-.card[data-tier="r"] .f-name::after { content: ""; position: absolute; inset: 0; border-radius: inherit; mix-blend-mode: overlay; pointer-events: none;
-  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .95) 46%, transparent 62%); background-size: 300% 100%; background-position: calc(100% - var(--mx)) 0; }
-.card[data-tier="r"] .f-art { box-shadow: 0 0 0 .55cqw #6d747b, 0 0 0 1cqw #e6e9ec; }
-.card[data-tier="r"] .f-foil { opacity: 1; padding: 3.4cqw; mix-blend-mode: overlay;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  background: linear-gradient(115deg, transparent 25%, rgba(255, 255, 255, .95) 45%, rgba(255, 255, 255, .2) 52%, transparent 65%); background-size: 280% 280%;
-  background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
+/* N · 일반 — paper frame */
+.card[data-tier="n"] .f-frame { background: #e9e3d4 var(--tex-paper); box-shadow: inset 0 0 0 .4cqw rgba(0, 0, 0, .12); }
+.card[data-tier="n"] .f-shade { box-shadow: inset 0 0 1.4cqw rgba(0, 0, 0, .3); }
 
-/* SR · 홀로 레어: dark metal frame, rainbow holo on the art window only */
-.card[data-tier="sr"] .front { --ink: #f1f2ff; --ink2: #aeb3d6; --box: rgba(255, 255, 255, .05); --boxline: rgba(196, 204, 255, .28);
-  background: linear-gradient(160deg, #3a4280 0%, #1a1f42 32%, #2f3570 64%, #121531 100%); }
-.card[data-tier="sr"] .f-plate { background: radial-gradient(120% 70% at 50% 0%, #20264d 0%, #0f1229 70%); box-shadow: 0 0 0 .35cqw rgba(200, 208, 255, .35); }
-.card[data-tier="sr"] .f-title { background: linear-gradient(180deg, #ffffff, #cfd5ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.card[data-tier="sr"] .f-art { box-shadow: 0 0 0 .55cqw #c9cfe6, 0 0 0 1cqw #0a0c1c; }
-.card[data-tier="sr"] .f-artholo { opacity: calc(.12 + var(--o) * .5); mix-blend-mode: color-dodge; filter: brightness(.5) contrast(1.5) saturate(1.3);
-  background:
-    repeating-linear-gradient(115deg, hsl(0 90% 62%) 0%, hsl(50 95% 62%) 4%, hsl(110 85% 60%) 8%, hsl(185 90% 64%) 12%, hsl(230 90% 66%) 16%, hsl(290 85% 64%) 20%, hsl(360 90% 62%) 24%),
-    repeating-linear-gradient(-45deg, #0b0e24 0%, #7b8fa8 3%, #b8d5e0 3.6%, #7b8fa8 4.2%, #0b0e24 8%);
-  background-blend-mode: overlay; background-size: 260% 260%, 220% 220%;
-  background-position: calc(50% + (var(--mx) - 50%) * 1.6) calc(50% + (var(--my) - 50%) * 1.6), var(--mx) var(--my); }
-.card[data-tier="sr"] .f-foil { opacity: calc(var(--o) * .7); padding: 3.4cqw; mix-blend-mode: overlay;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  background: linear-gradient(115deg, transparent 30%, rgba(220, 225, 255, .9) 46%, transparent 62%); background-size: 280% 280%; background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
+/* R · 레어 — brushed silver frame, silver name */
+.card[data-tier="r"] .front { --ink2: #4c535c; }
+.card[data-tier="r"] .f-frame { background: var(--tex-brush), linear-gradient(135deg, #8e959d 0%, #eef1f4 22%, #a1a8b0 40%, #fbfcfd 55%, #868d95 74%, #e3e7ea 100%); }
+.card[data-tier="r"] .f-frame::after { opacity: calc(var(--o) * .8); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .95), transparent 40%); }
+.card[data-tier="r"] .f-rim { padding: .8cqw; background: linear-gradient(135deg, #5b636c, #f6f8fa 35%, #7c848d 60%, #e9edf0); }
+.card[data-tier="r"] .f-text { background: #f2f3f5; border-color: #9aa1aa; }
 
-/* Full-art layout (SSR / UR / LR): art fills the card, text sits on glass bands */
-.card[data-layout="full"] .front { --ink: #ffffff; --ink2: rgba(255, 255, 255, .78); background: #111; }
-.card[data-layout="full"] .f-plate { display: none; }
-.card[data-layout="full"] .f-art { inset: 0; box-shadow: none; height: auto; }
-.card[data-layout="full"] .f-art img { object-position: 50% 50%; }
-.card[data-layout="full"] .f-band { display: block; left: 3.6cqw; right: 3.6cqw; border-radius: 2.4cqw;
-  background: linear-gradient(180deg, rgba(14, 14, 24, .34), rgba(14, 14, 24, .5)); -webkit-backdrop-filter: blur(1.6cqw) saturate(1.25); backdrop-filter: blur(1.6cqw) saturate(1.25);
-  box-shadow: inset 0 0 0 .3cqw rgba(255, 255, 255, .28), inset 0 .3cqw 0 rgba(255, 255, 255, .25); }
-.card[data-layout="full"] .f-band.top { top: 3.6cqw; height: 12.2cqw; }
-.card[data-layout="full"] .f-band.bot { bottom: 3.6cqw; height: 45cqw; }
-.card[data-layout="full"] .f-name { top: 5.5cqw; left: 7cqw; right: 6cqw; }
-.card[data-layout="full"] .f-title { text-shadow: 0 .3cqw 1cqw rgba(0, 0, 0, .55); }
-.card[data-layout="full"] .f-illus { top: 85.6cqw; right: 6cqw; left: 6cqw; color: rgba(255, 255, 255, .9); text-shadow: 0 .2cqw .8cqw rgba(0, 0, 0, .8); }
-.card[data-layout="full"] .f-typeline { top: 94.4cqw; color: #fff; }
-.card[data-layout="full"] .f-text { top: 99.4cqw; height: 25cqw; background: none; border: 0; padding: 0 1.4cqw; left: 5.6cqw; right: 5.6cqw; }
-.card[data-layout="full"] .f-flavor { color: rgba(255, 255, 255, .92); text-shadow: 0 .2cqw .6cqw rgba(0, 0, 0, .5); }
-.card[data-layout="full"] .f-stats { border-top-color: rgba(255, 255, 255, .25); }
-.card[data-layout="full"] .f-foot { bottom: 5.6cqw; color: rgba(255, 255, 255, .8); }
-.card[data-layout="full"] .f-rar { color: #fff; }
-.card[data-layout="full"] .f-edge { box-shadow: inset 0 0 0 .45cqw rgba(255, 255, 255, .35), inset 0 0 0 1.1cqw rgba(0, 0, 0, .18); }
+/* SR · 홀로 레어 — navy metal frame; thin-film holo only on the background, never on the subject */
+.card[data-tier="sr"] .front { --ink: #eef0ff; --ink2: #b3b9dc; }
+.card[data-tier="sr"] .f-frame { background: var(--tex-brush), linear-gradient(160deg, #3b4380 0%, #171c3e 35%, #2d3372 65%, #0f1230 100%); }
+.card[data-tier="sr"] .f-frame::after { opacity: calc(var(--o) * .7); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(220, 228, 255, .9), transparent 42%); }
+.card[data-tier="sr"] .f-rim { padding: .8cqw; background: linear-gradient(135deg, #6d7690, #f4f6ff 35%, #8890ad 60%, #e6e9f6); }
+.card[data-tier="sr"] .f-sheen { opacity: calc(.18 + var(--o) * .42); mix-blend-mode: color-dodge; filter: saturate(.75) brightness(.72);
+  background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); }
+.card[data-tier="sr"] .f-text { background: rgba(14, 18, 46, .82); border-color: rgba(190, 200, 240, .45); }
 
-/* SSR · 풀아트: etched crosshatch foil, visible only near the light, plus a radial grain */
-.card[data-tier="ssr"] .f-foil { opacity: calc(var(--o) * 1.1); mix-blend-mode: color-dodge; filter: brightness(.75) contrast(1.4) saturate(1.4);
-  background: repeating-linear-gradient(125deg, hsl(0 95% 66%) 0%, hsl(55 95% 64%) 5%, hsl(120 85% 62%) 10%, hsl(190 95% 66%) 15%, hsl(250 90% 70%) 20%, hsl(310 90% 68%) 25%, hsl(360 95% 66%) 30%);
-  background-size: 300% 300%; background-position: calc(50% + (var(--mx) - 50%) * 1.8) calc(50% + (var(--my) - 50%) * 1.8);
-  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .55) 30%, transparent 62%), var(--tex-hatch);
-  -webkit-mask-size: 100% 100%, 2.2cqw 2.2cqw; -webkit-mask-composite: source-in;
-  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .55) 30%, transparent 62%), var(--tex-hatch);
-  mask-size: 100% 100%, 2.2cqw 2.2cqw; mask-composite: intersect; }
-.card[data-tier="ssr"] .f-sparkle { opacity: calc(var(--o) * .3); mix-blend-mode: overlay;
-  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, transparent 55%); mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, transparent 55%);
-  background: repeating-conic-gradient(from var(--ang) at 50% 42%, rgba(255, 255, 255, 0) 0deg 1.4deg, rgba(255, 255, 255, .55) 1.6deg 2deg, rgba(255, 255, 255, 0) 2.2deg 3.6deg); }
-.card[data-tier="ssr"] .f-edge { box-shadow: inset 0 0 0 .45cqw rgba(255, 255, 255, .5), inset 0 0 0 1.1cqw rgba(0, 0, 0, .18); }
+/* SSR · 오버프레임 — lacquer frame with gold bevel; the subject breaks the window and the frame */
+.card[data-tier="ssr"] .f-frame { background: var(--tex-brush), linear-gradient(165deg, color-mix(in srgb, var(--tint) 62%, #1a0c22) 0%, #150b1e 50%, color-mix(in srgb, var(--tint) 45%, #0a0610) 100%);
+  box-shadow: inset 0 0 0 .55cqw #c9a14a, inset 0 0 0 .9cqw rgba(30, 14, 4, .8), inset 0 0 0 1.2cqw rgba(233, 196, 110, .45); }
+.card[data-tier="ssr"] .f-frame::after { opacity: calc(var(--o) * .9); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 228, 170, .85), transparent 45%); }
+.card[data-tier="ssr"] .f-rim { padding: 1cqw; background: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 20%, #b8862b 40%, #fff3c8 58%, #8a5a12 78%, #f0cf7c 100%); }
+.card[data-tier="ssr"] .f-sheen { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 240, 210, .75), transparent 46%); }
+.card[data-tier="ssr"] .f-subjwrap, .card[data-tier="ur"] .f-subjwrap, .card[data-tier="lr"] .f-subjwrap { clip-path: none; }
+.card[data-tier="ssr"] .f-subj, .card[data-tier="ur"] .f-subj, .card[data-tier="lr"] .f-subj { filter: drop-shadow(0 1cqw 1.2cqw rgba(0, 0, 0, .45)); }
+.card[data-tier="ssr"] .f-illus, .card[data-tier="ur"] .f-illus, .card[data-tier="lr"] .f-illus { color: rgba(255, 255, 255, .92); text-shadow: 0 0 .5cqw rgba(0, 0, 0, .9), 0 0 .2cqw #000; }
+.card[data-tier="ssr"] .f-foot, .card[data-tier="ur"] .f-foot, .card[data-tier="lr"] .f-foot { color: rgba(255, 248, 230, .92); text-shadow: 0 0 .4cqw rgba(0, 0, 0, .9); }
+.card[data-tier="ssr"] .f-rar, .card[data-tier="ur"] .f-rar, .card[data-tier="lr"] .f-rar { color: #fff; }
+.card[data-tier="ssr"] .f-edge { box-shadow: inset .4cqw .4cqw .6cqw rgba(255, 240, 200, .35), inset -.4cqw -.4cqw .7cqw rgba(0, 0, 0, .5); }
 
-/* UR · 골드 시크릿: gold-toned art, gold frame and type, glitter that twinkles as the light moves */
-.card[data-tier="ur"] .front { --ink: #ffe9a8; --ink2: rgba(255, 228, 160, .82); }
-.card[data-tier="ur"] .f-art img { filter: sepia(.6) saturate(1.5) hue-rotate(-8deg) contrast(1.06) brightness(1.04); }
-.card[data-tier="ur"] .f-artholo { opacity: .55; mix-blend-mode: color; background: linear-gradient(165deg, #fff3c4 0%, #e3ae45 40%, #a8701c 75%, #4d3008 100%); }
-.card[data-tier="ur"] .f-band { background: linear-gradient(180deg, rgba(48, 30, 4, .38), rgba(36, 22, 2, .58));
-  box-shadow: inset 0 0 0 .3cqw rgba(255, 216, 128, .55), inset 0 .3cqw 0 rgba(255, 240, 200, .35); }
-.card[data-tier="ur"] .f-title, .card[data-tier="ur"] .f-typeline, .card[data-tier="ur"] .f-rar, .card[data-tier="ur"] .f-serial {
-  background: linear-gradient(100deg, #b37a1a 0%, #fff1b8 22%, #d9a03a 40%, #fff6d0 58%, #c58a24 80%, #fff0b0 100%); background-size: 220% 100%;
-  background-position: calc(100% - var(--mx)) 0; -webkit-background-clip: text; background-clip: text; color: transparent; }
-.card[data-tier="ur"] .f-title { text-shadow: none; filter: drop-shadow(0 .3cqw .5cqw rgba(0, 0, 0, .55)); }
-.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
-.card[data-tier="ur"] .f-type { background: radial-gradient(circle at 35% 30%, #fff8dc 0%, #e8b24a 40%, #8a5a12 100%); }
-.card[data-tier="ur"] .f-foil { opacity: 1; padding: 2.2cqw;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  background: linear-gradient(135deg, #8a5a12 0%, #ffe9a6 18%, #c88d2a 34%, #fff7d6 50%, #a8701c 66%, #ffe08a 82%, #7a4c0c 100%); background-size: 200% 200%;
-  background-position: var(--mx) var(--my); }
-.card[data-tier="ur"] .f-sparkle { opacity: calc(.25 + var(--o) * .9); mix-blend-mode: color-dodge;
-  background-image: var(--tex-glitter), var(--tex-glitter2); background-size: 34cqw 34cqw, 47cqw 47cqw; background-color: rgba(120, 80, 10, .35);
-  background-position: calc(var(--mx) * .4) calc(var(--my) * .4), calc(100% - var(--mx) * .5) calc(100% - var(--my) * .5);
-  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .35) 35%, transparent 75%), var(--tex-glitter2);
-  -webkit-mask-size: 100% 100%, 41cqw 41cqw; -webkit-mask-position: 0 0, calc(var(--mx) * -.9) calc(var(--my) * .7); -webkit-mask-composite: source-in;
-  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .35) 35%, transparent 75%), var(--tex-glitter2);
-  mask-size: 100% 100%, 41cqw 41cqw; mask-position: 0 0, calc(var(--mx) * -.9) calc(var(--my) * .7); mask-composite: intersect; }
-.card[data-tier="ur"] .f-glare { mix-blend-mode: overlay; background: radial-gradient(farthest-corner circle at var(--mx) var(--my), rgba(255, 244, 210, .9) 6%, rgba(255, 220, 140, .35) 26%, rgba(30, 15, 0, .45) 90%); }
-.card[data-tier="ur"] .f-edge { box-shadow: inset 0 0 0 2.2cqw transparent, inset 0 0 0 2.6cqw rgba(60, 35, 0, .55); }
+/* UR · 골드 풀아트 — gold sunburst behind the subject, gold bevel band, silver name */
+.card[data-tier="ur"] .f-frame, .card[data-tier="lr"] .f-frame { padding: 2.6cqw; }
+.card[data-tier="ur"] .f-frame { background: linear-gradient(135deg, #7a4c10 0%, #ffe9a6 16%, #c88d2a 32%, #fff6d6 48%, #a8701c 64%, #ffe08a 82%, #6e4309 100%);
+  box-shadow: inset .5cqw .5cqw .6cqw rgba(255, 250, 225, .7), inset -.5cqw -.5cqw .7cqw rgba(60, 30, 0, .6); }
+.card[data-tier="ur"] .f-frame::after { opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); }
+.card[data-tier="ur"] .f-rim { padding: .6cqw; background: linear-gradient(135deg, #8a5a12, #fff3c8 30%, #b8862b 55%, #fff0b0 80%, #8a5a12); opacity: .9; }
+.card[data-tier="ur"] .f-shade, .card[data-tier="lr"] .f-shade { display: none; }
+.card[data-cut="0"][data-tier="ur"] .f-rim, .card[data-cut="0"][data-tier="lr"] .f-rim { display: none; }
+.card[data-tier="ur"] .f-sheen { opacity: calc(.25 + var(--o) * .75); mix-blend-mode: color-dodge;
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 236, 180, .85) 0%, rgba(255, 200, 110, .35) 28%, transparent 60%); }
+.card[data-tier="ur"][data-cut="0"] .f-sheen { background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 226, 150, .95) 0%, rgba(255, 190, 90, .55) 35%, rgba(200, 140, 40, .25) 70%); }
 
-/* LR · 별빛 한정: prism starlight field, rainbow border, serial 1/1 */
-.card[data-tier="lr"] .f-artholo { opacity: calc(.25 + var(--o) * .3); mix-blend-mode: soft-light;
-  background: linear-gradient(var(--ang), #ff6fa5, #ffd86b, #6dffb8, #6cc4ff, #b98aff, #ff6fa5); }
-.card[data-tier="lr"] .f-band { background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(20, 16, 40, .42)); }
-.card[data-tier="lr"] .f-title { background: linear-gradient(100deg, #ffffff 0%, #ffd3ea 18%, #fff6c9 34%, #c9ffe6 50%, #cfe8ff 66%, #ead6ff 82%, #ffffff 100%);
-  background-size: 240% 100%; background-position: calc(100% - var(--mx)) 0; -webkit-background-clip: text; background-clip: text; color: transparent;
-  text-shadow: none; filter: drop-shadow(0 .3cqw .6cqw rgba(0, 0, 0, .55)); }
-.card[data-tier="lr"] .f-type { background: conic-gradient(from var(--ang), #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9); }
-.card[data-tier="lr"] .f-foil { opacity: calc(.15 + var(--o) * 1.1); mix-blend-mode: color-dodge; filter: saturate(1.4) brightness(.9);
-  background: conic-gradient(from var(--ang) at var(--mx) var(--my), #ff5c93, #ffd64d, #4dffa6, #4dc3ff, #a46bff, #ff5c93);
-  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .45) 40%, rgba(0, 0, 0, .12) 80%), var(--tex-stars);
-  -webkit-mask-size: 100% 100%, 46cqw 46cqw; -webkit-mask-position: 0 0, calc(var(--mx) * .3) calc(var(--my) * .3); -webkit-mask-composite: source-in;
-  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, .45) 40%, rgba(0, 0, 0, .12) 80%), var(--tex-stars);
-  mask-size: 100% 100%, 46cqw 46cqw; mask-position: 0 0, calc(var(--mx) * .3) calc(var(--my) * .3); mask-composite: intersect; }
-.card[data-tier="lr"] .f-sparkle { opacity: calc(.2 + var(--o) * .7); mix-blend-mode: color-dodge;
-  background-image: var(--tex-glitter), var(--tex-glitter2); background-size: 30cqw 30cqw, 43cqw 43cqw; background-color: rgba(60, 50, 90, .3);
-  background-position: calc(var(--mx) * -.4) calc(var(--my) * .5), calc(var(--mx) * .6) calc(var(--my) * -.4);
-  -webkit-mask-image: var(--tex-glitter2); -webkit-mask-size: 37cqw 37cqw; -webkit-mask-position: calc(var(--my) * .8) calc(var(--mx) * -.8);
-  mask-image: var(--tex-glitter2); mask-size: 37cqw 37cqw; mask-position: calc(var(--my) * .8) calc(var(--mx) * -.8); }
-.card[data-tier="lr"] .f-edge { padding: 1.5cqw; box-shadow: none;
-  background: conic-gradient(from var(--ang), #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.card[data-tier="lr"] .f-serial { color: #fff; padding: .4cqw 1.2cqw; border-radius: .8cqw; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .5); }
+/* LR · 별빛 한정 — starlight sunburst, pale prism band and letters, white/pastel glitter, serial */
+.card[data-tier="lr"] .f-frame { background: conic-gradient(from var(--ang), #f2d6e6, #f8eccc, #d4f2e6, #d2e2f8, #e2d8f8, #f2d6e6);
+  box-shadow: inset .5cqw .5cqw .6cqw rgba(255, 255, 255, .8), inset -.5cqw -.5cqw .7cqw rgba(40, 40, 80, .45); }
+.card[data-tier="lr"] .f-rim { padding: .6cqw; background: linear-gradient(135deg, #8d95b5, #ffffff 30%, #a7b0d0 55%, #f4f0ff 80%, #8d95b5); }
+.card[data-tier="lr"] .f-sheen { opacity: calc(.1 + var(--o) * .32); mix-blend-mode: color-dodge; filter: saturate(.7) brightness(.8);
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .7), transparent 45%), linear-gradient(var(--ang), #ffb8d6, #ffe9b0, #b8f7dc, #b6d8ff, #dcc6ff, #ffb8d6); background-size: 100% 100%, 220% 220%; background-position: 0 0, var(--mx) var(--my); }
+.card[data-tier="lr"] .f-serial { color: #fff; padding: .4cqw 1.2cqw; border-radius: .8cqw; background: rgba(255, 255, 255, .16); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .55); }
 .card[data-tier="lr"] .f-rar svg { fill: url(#prismFill); }
+.card[data-tier="ur"] .f-rar svg { fill: #f3c869; }
 
 /* Effects off (comparison toggle) */
-.plain .f-foil, .plain .f-sparkle, .plain .f-glare, .plain .f-artholo { display: none; }
-.plain .card[data-tier="ur"] .f-artholo { display: block; }
+.plain .f-sheen, .plain .f-glit, .plain .f-glare, .plain .f-frame::after { display: none; }
 
-/* Card back: symmetric Lakomics foil */
+/* Card back */
 .back { background: radial-gradient(90% 70% at 50% 50%, #1f2645 0%, #0d1022 60%, #070914 100%); }
 .b-frame { inset: 4cqw; border-radius: 3cqw; overflow: hidden;
-  background:
-    repeating-conic-gradient(from 0deg at 50% 50%, rgba(221, 205, 160, .13) 0deg .8deg, transparent .8deg 7.5deg),
-    repeating-radial-gradient(circle at 50% 50%, rgba(221, 205, 160, .1) 0 .35cqw, transparent .35cqw 2.8cqw);
+  background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(221, 205, 160, .13) 0deg .8deg, transparent .8deg 7.5deg), repeating-radial-gradient(circle at 50% 50%, rgba(221, 205, 160, .1) 0 .35cqw, transparent .35cqw 2.8cqw);
   box-shadow: inset 0 0 0 .55cqw #cdb57a, inset 0 0 0 1.5cqw #0d1022, inset 0 0 0 1.85cqw rgba(205, 181, 122, .65); }
 .b-emblem { left: 50%; top: 50%; width: 34cqw; height: 34cqw; margin: -17cqw 0 0 -17cqw; transform: rotate(45deg); border: .7cqw solid #d8c48f;
   background: radial-gradient(circle, #232a50 0%, #0d1022 80%); box-shadow: 0 0 0 1.6cqw #0d1022, 0 0 0 1.9cqw rgba(216, 196, 143, .6), 0 0 8cqw rgba(216, 196, 143, .25); }
 .b-mark { left: 50%; top: 50%; width: 13cqw; height: 15cqw; margin: -7.5cqw 0 0 -6.5cqw; color: #ecdcab; }
 .b-word { left: 0; right: 0; text-align: center; font: 700 4.2cqw/1 var(--f-ui); letter-spacing: 1.6em; padding-left: 1.6em; color: #e3cf96; }
-.b-word.t { top: 20cqw; }
-.b-word.b { bottom: 20cqw; transform: rotate(180deg); }
+.b-word.t { top: 20cqw; } .b-word.b { bottom: 20cqw; transform: rotate(180deg); }
 .b-sub { left: 0; right: 0; text-align: center; font: 600 2.4cqw/1 var(--f-ui); letter-spacing: .6em; padding-left: .6em; color: rgba(227, 207, 150, .7); }
-.b-sub.t { top: 27cqw; }
-.b-sub.b { bottom: 27cqw; transform: rotate(180deg); }
+.b-sub.t { top: 27cqw; } .b-sub.b { bottom: 27cqw; transform: rotate(180deg); }
 .b-corner { width: 6cqw; height: 6cqw; border: .5cqw solid #cdb57a; }
-.b-corner.tl { top: 8.5cqw; left: 8.5cqw; border-right: 0; border-bottom: 0; }
-.b-corner.tr { top: 8.5cqw; right: 8.5cqw; border-left: 0; border-bottom: 0; }
-.b-corner.bl { bottom: 8.5cqw; left: 8.5cqw; border-right: 0; border-top: 0; }
-.b-corner.br { bottom: 8.5cqw; right: 8.5cqw; border-left: 0; border-top: 0; }
+.b-corner.tl { top: 8.5cqw; left: 8.5cqw; border-right: 0; border-bottom: 0; } .b-corner.tr { top: 8.5cqw; right: 8.5cqw; border-left: 0; border-bottom: 0; }
+.b-corner.bl { bottom: 8.5cqw; left: 8.5cqw; border-right: 0; border-top: 0; } .b-corner.br { bottom: 8.5cqw; right: 8.5cqw; border-left: 0; border-top: 0; }
 .b-sheen { inset: 0; mix-blend-mode: color-dodge; opacity: calc(var(--o) * .7); pointer-events: none;
   background: linear-gradient(120deg, transparent 32%, rgba(255, 214, 140, .35) 45%, rgba(255, 236, 190, .55) 50%, rgba(255, 214, 140, .35) 55%, transparent 68%);
   background-size: 260% 260%; background-position: calc(100% - var(--mx)) calc(100% - var(--my)); }
-
-/* Rarity glyph defs (hidden svg) */
 .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-/* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .pack.idle, .pack-body::before, .pack-top::before { animation: none; }
   .card, .card.active { transition: none; }
@@ -484,7 +441,7 @@ ul.ideas li::marker { color: var(--c-faint); }
 <main class="doc">
   <header class="top">
     <h1>에셋 카드 뽑기 · 카드 시안</h1>
-    <p class="lead">모아 둔 에셋 그림을 <b>트레이딩 카드</b>로 만들어 뽑는 기능의 시안입니다. 등급이 오를수록 테두리, 광택, 반짝임이 한 단계씩 화려해지고, 상위 등급은 그림이 카드 전체를 채우는 <b>풀아트</b>입니다. 카드를 마우스로 움직이거나 손가락으로 끌면 빛이 따라옵니다.</p>
+    <p class="lead">모아 둔 에셋 그림을 <b>트레이딩 카드</b>로 만들어 뽑는 기능의 시안입니다. 2차에서는 효과를 그림 위에 덮지 않고 <b>그림 뒤와 틀에만</b> 두었습니다. 인물은 원래 색 그대로 두고, 금박·은박 배경과 반짝이가 그 뒤에서 빛을 받습니다. 상위 등급은 인물이 그림 창과 틀을 넘어 <b>튀어나옵니다</b>.</p>
   </header>
 
   <div class="imgbar" id="imgbar">
@@ -492,15 +449,19 @@ ul.ideas li::marker { color: var(--c-faint); }
       <svg viewBox="0 0 24 24"><path d="M4 16l4.5-4.5a2 2 0 0 1 2.8 0L16 16m-2-2 1.5-1.5a2 2 0 0 1 2.8 0L20 14M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><circle cx="9" cy="8.5" r="1.2"/></svg>
       내 이미지로 바꿔보기</label>
     <input id="file" class="sr-only" type="file" accept="image/*" tabindex="-1">
+    <label class="btn" for="fileFg" tabindex="0" id="fileFgBtn">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12m0-12 4 4m-4-4L8 7M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg>
+      튀어나올 부분 (투명 PNG)</label>
+    <input id="fileFg" class="sr-only" type="file" accept="image/png,image/webp" tabindex="-1">
     <button class="btn" id="resetArt" type="button" hidden>원래 그림으로</button>
-    <span class="hint">모든 카드에 적용됩니다 · 카드 위에 이미지를 끌어다 놓으면 그 카드만 바뀝니다</span>
+    <span class="hint">카드 위에 이미지를 끌어다 놓으면 그 카드만 바뀝니다</span>
     <span class="state" id="artState" aria-live="polite"></span>
+    <p class="note2" id="fgNote" hidden>투명 PNG가 없으면 튀어나오는 효과 없이 일반 풀아트로 보입니다. 금박·반짝이는 그림의 밝은 곳을 따라갑니다.</p>
   </div>
 
-  <!-- 1. Rarity ladder -->
   <section aria-labelledby="s1">
     <h2 class="sec" id="s1">등급 사다리 <span class="num">6단계</span></h2>
-    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. 앞의 세 등급은 테두리가 있는 카드, 뒤의 세 등급은 그림이 카드 전체를 덮는 풀아트입니다.</p>
+    <p class="note">같은 그림 한 장이 등급마다 어떻게 달라지는지입니다. N·R·SR은 그림 창 안에 머물고, <b>SSR부터 인물이 틀 밖으로</b> 나옵니다. UR·LR은 배경 전체가 금박·별빛 박입니다.</p>
     <div class="ladder" id="ladder"></div>
     <p class="slabel">카드 뒷면 · 모든 등급 공통</p>
     <div class="backrow">
@@ -509,7 +470,6 @@ ul.ideas li::marker { color: var(--c-faint); }
     </div>
   </section>
 
-  <!-- 2. Featured -->
   <section aria-labelledby="s2">
     <h2 class="sec" id="s2">크게 보기</h2>
     <div class="feat">
@@ -518,6 +478,9 @@ ul.ideas li::marker { color: var(--c-faint); }
         <p class="tip" id="featTip">카드 위에서 움직이거나 끌어 보세요</p>
       </div>
       <div class="feat-info">
+        <p class="slabel">그림</p>
+        <div class="picks" role="radiogroup" aria-label="그림" id="picks"></div>
+        <p class="slabel">등급</p>
         <div class="seg" role="radiogroup" aria-label="등급" id="tierSeg"></div>
         <div class="tier-head"><span class="code" id="fCode"></span><h3 id="fName"></h3><span class="o" id="fOdds"></span></div>
         <p class="note" id="fDesc"></p>
@@ -532,10 +495,9 @@ ul.ideas li::marker { color: var(--c-faint); }
     </div>
   </section>
 
-  <!-- 3. Gacha -->
   <section aria-labelledby="s3">
     <h2 class="sec" id="s3">뽑기</h2>
-    <p class="note">팩을 뜯는 순간 틈새 빛의 색으로 이번 팩의 최고 등급을 살짝 알려 줍니다. 흰색 → 파랑 → 보라 → 금색 → 무지개 순. 풀아트 이상이 나오면 화면이 번쩍이고 빛줄기와 불꽃이 터집니다.</p>
+    <p class="note">팩을 뜯는 순간 틈새 빛의 색으로 이번 팩의 최고 등급을 살짝 알려 줍니다. 흰색 → 파랑 → 보라 → 금색 → 무지개 순. 오버프레임 이상이 나오면 화면이 번쩍이고 빛줄기와 불꽃이 터집니다.</p>
     <div class="gacha">
       <div class="stage" id="stage">
         <div class="st-rays"></div>
@@ -565,7 +527,6 @@ ul.ideas li::marker { color: var(--c-faint); }
     </div>
   </section>
 
-  <!-- 4. Anatomy -->
   <section aria-labelledby="s4">
     <h2 class="sec" id="s4">카드 해부도</h2>
     <p class="note">카드의 칸마다 에셋의 어떤 정보가 들어가는지입니다. 원본 파일과 정보는 그대로 두고, 카드는 그것을 읽어서 보여 주기만 합니다.</p>
@@ -575,15 +536,14 @@ ul.ideas li::marker { color: var(--c-faint); }
     </div>
   </section>
 
-  <!-- 5. Next -->
   <section aria-labelledby="s5">
     <h2 class="sec" id="s5">다음 단계 아이디어</h2>
     <ul class="ideas">
-      <li><b>등급 정하기</b> — 등급은 뽑을 때 확률로 정하고, 어떤 그림이 나올지는 즐겨찾기와 감상 횟수가 많을수록 조금 더 잘 나오게. 좋아하는 그림이 풀아트로 나오는 순간이 가장 기쁘도록.</li>
-      <li><b>중복 카드</b> — 같은 그림·같은 등급이 또 나오면 겹침 수(×3)만 올리고, 5장이 모이면 한 단계 위 등급으로 바꿀 수 있게.</li>
-      <li><b>카드 도감</b> — 작가별·속성별 바인더 화면. 아직 못 뽑은 칸은 흐린 실루엣, 풀아트는 바인더 안에서도 반짝임 유지.</li>
-      <li><b>뽑기권</b> — 하루 무료 1회, 새 에셋을 수집할 때마다 1장. 수집하는 습관이 그대로 보상이 되도록.</li>
-      <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음. 에셋을 지우면 카드는 "사라진 그림"으로 남김.</li>
+      <li><b>튀어나올 부분 만들기</b> — 흰 배경 그림은 배경을 지운 투명 레이어를 한 번 만들어 두면 오버프레임 카드가 됩니다. 앱이 자동으로 따거나, 직접 넣은 투명 PNG를 에셋에 붙여 두는 방식.</li>
+      <li><b>등급 정하기</b> — 등급은 뽑을 때 확률로, 어떤 그림이 나올지는 즐겨찾기와 감상 횟수가 많을수록 조금 더 잘 나오게.</li>
+      <li><b>중복 카드</b> — 같은 그림·같은 등급이 또 나오면 겹침 수(×3)만 올리고, 5장이 모이면 한 단계 위 등급으로.</li>
+      <li><b>카드 도감</b> — 작가별·속성별 바인더 화면. 못 뽑은 칸은 흐린 실루엣, 상위 등급은 바인더 안에서도 반짝임 유지.</li>
+      <li><b>원본은 그대로</b> — 카드는 에셋을 가리키기만 하고 파일을 복사하거나 바꾸지 않음.</li>
     </ul>
   </section>
 </main>
@@ -599,70 +559,15 @@ ul.ideas li::marker { color: var(--c-faint); }
 'use strict';
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = (s, r = document) => r.querySelector(s);
+const DPR = Math.min(2, window.devicePixelRatio || 1);
 
-/* ------------------------------------------------------------------ data */
-const TIERS = [
-  { k: 'n',   code: 'N',   name: '일반',        odds: 55,  glow: '#e9edf3', sym: ['dot'],
-    desc: '깨끗한 종이 프레임. 광택 없이 그림과 글만.',
-    layers: [['종이 프레임', '미세한 종이 결'], ['그림 창', '얇은 먹선 테두리'], ['반사광', '아주 약하게']] },
-  { k: 'r',   code: 'R',   name: '레어',        odds: 25,  glow: '#5aa8ff', sym: ['dia'],
-    desc: '은박 테두리와 은박 이름판. 기울이면 빛줄기가 테두리를 훑고 지나갑니다.',
-    layers: [['은박 프레임', '금속 그러데이션'], ['움직이는 광택', '테두리에만'], ['은박 이름판', '따로 반짝임'], ['반사광', '']] },
-  { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
-    desc: '어두운 금속 프레임에, 그림 창에만 무지개 홀로. 각도에 따라 색 띠가 흐릅니다.',
-    layers: [['남색 금속 프레임', ''], ['그림 창 홀로', '무지개 + 사선 결'], ['테두리 광택', ''], ['반사광', '']] },
-  { k: 'ssr', code: 'SSR', name: '풀아트',      odds: 5,   glow: '#ffd25a', sym: ['star'],
-    desc: '그림이 카드 전체로. 글자는 반투명 유리 띠 위에, 빛이 닿는 곳에만 식각 무늬가 무지개로 떠오릅니다.',
-    layers: [['그림 전체', '테두리 없음'], ['유리 띠', '흐림 + 얇은 하이라이트'], ['식각 무지개', '빛 근처에만 보임'], ['방사형 결', '그림 중심에서 퍼짐'], ['반사광', '']] },
-  { k: 'ur',  code: 'UR',  name: '골드 시크릿', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
-    desc: '그림 전체가 금빛으로 물든 풀아트. 금박 테두리와 금박 글자, 빛을 따라 반짝이는 금가루.',
-    layers: [['금빛 톤 그림', ''], ['금박 테두리', ''], ['금박 글자', '빛 따라 흐름'], ['금가루', '움직일 때 반짝임'], ['반사광', '따뜻한 색']] },
-  { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
-    desc: '그림마다 단 1장. 프리즘 별빛이 카드 전체에 흩어지고 테두리는 무지개, 시리얼 번호 1 / 1.',
-    layers: [['그림 전체', '옅은 프리즘 물결'], ['별빛 무늬', '빛 방향 따라 색이 돎'], ['무지개 테두리', ''], ['반짝이 가루', ''], ['시리얼', 'No. 1 / 1']] },
-];
-const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
-const FULL = new Set(['ssr', 'ur', 'lr']);
-
-const ATTR = [
-  { name: '황혼', c1: '#ffb36b', c2: '#d9466e', icon: '<circle cx="12" cy="13" r="4"/><path d="M12 4v2M5.6 6.6 7 8M18.4 6.6 17 8M3 17h18M6 20h12"/>' },
-  { name: '심해', c1: '#6fd6ff', c2: '#1a5fb4', icon: '<path d="M3 10c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/>' },
-  { name: '별밤', c1: '#c3b0ff', c2: '#4b2fa8', icon: '<path d="M12 3.5l2.4 5 5.4.6-4 3.7 1.1 5.3L12 15.4 7.1 18.1l1.1-5.3-4-3.7 5.4-.6z"/>' },
-  { name: '숲',   c1: '#c3ec92', c2: '#2f7a3a', icon: '<path d="M5 19C5 10 11 5 19 5c0 8-5 14-14 14zM5 19l8-8"/>' },
-  { name: '오로라', c1: '#86ffd6', c2: '#1b7f8a', icon: '<path d="M3 17c3-9 5 0 9-7s5 4 9-5M3 21c4-6 6 0 9-4s6 2 9-2"/>' },
-  { name: '꽃',   c1: '#ffc7dc', c2: '#d95b8f', icon: '<circle cx="12" cy="12" r="2"/><path d="M12 10c-2-3 0-6 0-6s2 3 0 6zM14 12c3-2 6 0 6 0s-3 2-6 0zM12 14c2 3 0 6 0 6s-2-3 0-6zM10 12c-3 2-6 0-6 0s3-2 6 0z"/>' },
-];
-const ASSETS = [
-  { id: 427,  title: '노을 옥상의 약속', handle: '@yunseul_art',  site: 'pixiv',      date: '2026.04.27', attr: 0, tags: ['풍경', '인물'], flavor: '해가 지는 옥상에서, 내일 또 오자고 했다.', views: 2431, albums: 3, fav: true },
-  { id: 112,  title: '심해의 등불',      handle: '@haemu_ink',    site: 'X',          date: '2026.01.12', attr: 1, tags: ['바다', '환상'], flavor: '빛이 닿지 않는 곳에도 등불은 떠다닌다.', views: 986, albums: 1, fav: false },
-  { id: 1038, title: '별이 내리는 언덕', handle: '@dawn_ink',     site: 'pixiv',      date: '2026.10.03', attr: 2, tags: ['밤하늘', '인물'], flavor: '언덕 위로 별이 쏟아지던 밤의 기록.', views: 5120, albums: 4, fav: true },
-  { id: 731,  title: '숲의 오후',        handle: '@ondam_studio', site: 'Bluesky',    date: '2026.07.31', attr: 3, tags: ['숲', '빛'], flavor: '오후의 빛이 나뭇잎 사이로 천천히 내려앉는다.', views: 744, albums: 2, fav: false },
-  { id: 904,  title: '오로라 설원',      handle: '@kiri_paints',  site: 'ArtStation', date: '2026.09.04', attr: 4, tags: ['설경', '밤'], flavor: '얼어붙은 하늘에 초록 커튼이 걸렸다.', views: 1873, albums: 2, fav: true },
-  { id: 215,  title: '꽃잎 정류장',      handle: '@ppurin_draws', site: 'pixiv',      date: '2026.02.15', attr: 5, tags: ['봄', '일상'], flavor: '꽃잎이 버스보다 먼저 도착했다.', views: 3302, albums: 5, fav: true },
-];
-
-/* --------------------------------------------------------------- textures */
-const svgURL = s => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
-function seeded(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-(function textures() {
-  const root = document.documentElement.style;
-  root.setProperty('--tex-hatch', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><path d='M-2.5 2.5l5-5M0 10L10 0M7.5 12.5l5-5' stroke='#fff' stroke-width='1.6'/><path d='M-2.5 7.5l5 5M0 0l10 10M7.5-2.5l5 5' stroke='#fff' stroke-width='.8' opacity='.7'/></svg>`));
-  const glit = (seed, freq) => svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='${freq}' numOctaves='2' seed='${seed}' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 26 -18.2'/></filter><rect width='160' height='160' filter='url(#f)'/></svg>`);
-  root.setProperty('--tex-glitter', glit(3, .82));
-  root.setProperty('--tex-glitter2', glit(11, .7));
-  root.setProperty('--tex-paper', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' seed='4'/><feColorMatrix values='0 0 0 0 .3  0 0 0 0 .27  0 0 0 0 .22  0 0 0 .09 0'/></filter><rect width='120' height='120' filter='url(#p)'/></svg>`));
-  const R = seeded(77); let p = '';
-  for (let i = 0; i < 46; i++) {
-    const x = (R() * 200).toFixed(1), y = (R() * 200).toFixed(1), s = (1.5 + R() ** 2 * 7).toFixed(2);
-    p += `<path transform='translate(${x} ${y}) scale(${s})' d='M0-1Q.12-.12 1 0Q.12.12 0 1Q-.12.12-1 0Q-.12-.12 0-1z'/>`;
-  }
-  for (let i = 0; i < 70; i++) p += `<circle cx='${(R() * 200).toFixed(1)}' cy='${(R() * 200).toFixed(1)}' r='${(.4 + R() * .9).toFixed(2)}'/>`;
-  root.setProperty('--tex-stars', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' fill='#fff'>${p}</svg>`));
-})();
-
-/* ------------------------------------------------------- procedural art */
+/* ------------------------------------------------------- procedural art
+   Every scene is two layers at card size (600×840): a background and a transparent subject.
+   Card geometry in canvas px: art window x 40–560, y 90–475; name bar y 34–84; text box y 510–750. */
 const W = 600, H = 840;
+function seeded(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };
+const newCanvas = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 function sky(c, stops) { const g = c.createLinearGradient(0, 0, 0, H); stops.forEach(([o, col]) => g.addColorStop(o, col)); c.fillStyle = g; c.fillRect(0, 0, W, H); }
 function glow(c, x, y, r, hex, a = 1, op = 'lighter') {
   c.save(); c.globalCompositeOperation = op; const g = c.createRadialGradient(x, y, 0, x, y, r);
@@ -707,45 +612,10 @@ function peaks(c, R, base, amp, n, col, snow) {
   c.beginPath(); c.moveTo(-20, H); pts.forEach(([x, y]) => c.lineTo(x, y)); c.lineTo(W + 20, H); c.closePath(); c.fillStyle = col; c.fill();
   if (snow) { c.save(); c.clip(); const g = c.createLinearGradient(0, base - amp, 0, base); g.addColorStop(0, snow); g.addColorStop(.55, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, base - amp, W, amp); c.restore(); }
 }
-function skyline(c, R, base, h0, h1, col, win) {
-  let x = -10;
-  while (x < W) {
-    const w = 26 + R() * 58, h = h0 + R() * (h1 - h0); c.fillStyle = col; c.fillRect(x, base - h, w + 1, H);
-    if (R() < .35) c.fillRect(x + w * .5, base - h - 16 - R() * 26, 2, 40);
-    if (win) { c.fillStyle = win; for (let y = base - h + 8; y < base - 4; y += 10) for (let xx = x + 5; xx < x + w - 5; xx += 8) if (R() < .16) c.fillRect(xx, y, 3, 4); }
-    x += w + R() * 5;
-  }
-}
-function figure(c, x, y, s, col, wind = 1, extra) {
-  c.save(); c.translate(x, y); c.scale(s, s); c.fillStyle = col; c.strokeStyle = col;
-  c.fillRect(-5, -31, 3.2, 31); c.fillRect(1.8, -31, 3.2, 31);
-  c.beginPath(); c.moveTo(-7, -70); c.lineTo(7, -70); c.quadraticCurveTo(12, -50, 15 + wind * 3, -30); c.lineTo(-14 + wind, -30); c.quadraticCurveTo(-11, -50, -7, -70); c.fill();
-  c.beginPath(); c.moveTo(-8.5, -74); c.quadraticCurveTo(0, -80, 8.5, -74); c.lineTo(7, -62); c.lineTo(-7, -62); c.closePath(); c.fill();
-  c.lineWidth = 3.2; c.lineCap = 'round'; c.beginPath(); c.moveTo(-8, -73); c.lineTo(-11, -50);
-  if (extra === 'up') { c.moveTo(8, -73); c.lineTo(14, -92); } else { c.moveTo(8, -73); c.lineTo(11, -50); } c.stroke();
-  c.fillRect(-1.7, -81, 3.4, 7);
-  c.beginPath(); c.ellipse(0, -87, 6.6, 7.4, 0, 0, 7); c.fill();
-  c.beginPath(); c.moveTo(-6.8, -90); c.quadraticCurveTo(0, -98, 6.8, -90); c.bezierCurveTo(11 * wind + 2, -86, 18 * wind, -78, 27 * wind, -72);
-  c.bezierCurveTo(17 * wind, -75, 9 * wind, -72, 5, -78); c.lineTo(-6.5, -79); c.closePath(); c.fill();
-  if (extra === 'umbrella') { c.lineWidth = 1.6; c.beginPath(); c.moveTo(11, -50); c.lineTo(16, -118); c.stroke(); c.beginPath(); c.moveTo(-14, -112); c.quadraticCurveTo(16, -150, 46, -112); c.quadraticCurveTo(38, -118, 31, -112); c.quadraticCurveTo(24, -118, 16, -112); c.quadraticCurveTo(8, -118, 1, -112); c.quadraticCurveTo(-6, -118, -14, -112); c.fill(); }
-  c.restore();
-}
-function tree(c, R, x, y, s, col) {
-  c.save(); c.fillStyle = col; c.beginPath(); c.moveTo(x - 5 * s, y); c.quadraticCurveTo(x - 2 * s, y - 40 * s, x - 1.5 * s, y - 70 * s); c.lineTo(x + 1.5 * s, y - 70 * s); c.quadraticCurveTo(x + 2 * s, y - 40 * s, x + 5 * s, y); c.fill();
-  c.strokeStyle = col; c.lineWidth = 2 * s; c.beginPath(); c.moveTo(x, y - 45 * s); c.quadraticCurveTo(x + 14 * s, y - 60 * s, x + 26 * s, y - 70 * s); c.moveTo(x, y - 52 * s); c.quadraticCurveTo(x - 12 * s, y - 64 * s, x - 22 * s, y - 72 * s); c.stroke();
-  for (let i = 0; i < 46; i++) { const a = R() * Math.PI * 2, d = R() ** .6 * 34 * s; c.beginPath(); c.arc(x + Math.cos(a) * d * 1.3, y - 84 * s + Math.sin(a) * d * .8, (7 + R() * 9) * s, 0, 7); c.fill(); }
-  c.restore();
-}
-function moon(c, x, y, r) {
-  glow(c, x, y, r * 6, '#cdd6ff', .35);
-  const m = document.createElement('canvas'); m.width = m.height = r * 2 + 4; const g = m.getContext('2d');
-  g.fillStyle = '#fff4dc'; g.beginPath(); g.arc(r + 2, r + 2, r, 0, 7); g.fill(); g.globalCompositeOperation = 'destination-out';
-  g.beginPath(); g.arc(r + 2 + r * .5, r + 2 - r * .28, r * .88, 0, 7); g.fill(); c.drawImage(m, x - r - 2, y - r - 2);
-}
 function stars(c, R, n, y1, bright) {
   for (let i = 0; i < n; i++) { const s = R() ** 3 * 1.8 + .4; c.fillStyle = `rgba(255,255,255,${(.25 + R() * .75).toFixed(2)})`; c.fillRect(R() * W, R() * y1, s, s); }
   for (let i = 0; i < bright; i++) {
-    const x = R() * W, y = R() * y1 * .9, l = 6 + R() * 12; glow(c, x, y, l * 1.6, '#dfe6ff', .6);
+    const x = R() * W, y = R() * y1 * .9, l = 5 + R() * 10; glow(c, x, y, l * 1.6, '#dfe6ff', .6);
     c.save(); c.globalCompositeOperation = 'lighter'; c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x - l, y); c.lineTo(x + l, y); c.moveTo(x, y - l); c.lineTo(x, y + l); c.stroke(); c.restore();
   }
 }
@@ -758,117 +628,425 @@ function aurora(c, R, y0, amp, top, bot, a) {
   }
   c.restore();
 }
-function jelly(c, R, x, y, r, hex) {
-  glow(c, x, y, r * 4, hex, .3);
-  c.save(); c.globalCompositeOperation = 'lighter';
-  c.lineWidth = 1.6; for (let i = 0; i < 8; i++) { const sx = x - r * .8 + i * r * .23; c.strokeStyle = hexA(hex, .3 + R() * .2); c.beginPath(); c.moveTo(sx, y); c.bezierCurveTo(sx + (R() - .5) * r, y + r, sx + (R() - .5) * r * 1.4, y + r * 2, sx + (R() - .5) * r, y + r * (2.6 + R())); c.stroke(); }
-  const g = c.createRadialGradient(x, y - r * .3, 0, x, y, r); g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(.45, hexA(hex, .65)); g.addColorStop(1, hexA(hex, .08));
-  c.fillStyle = g; c.beginPath(); c.ellipse(x, y, r, r * .8, 0, Math.PI, 0); c.quadraticCurveTo(x, y + r * .3, x - r, y); c.fill(); c.restore();
-}
-function petals(c, R, n, hexes, big) {
-  for (let i = 0; i < n; i++) {
-    const near = big && R() < .12, s = near ? 14 + R() * 18 : 3 + R() * 6; c.save(); c.translate(R() * W, R() * H); c.rotate(R() * 6.3);
-    if (near && 'filter' in c) c.filter = 'blur(4px)'; c.globalAlpha = near ? .55 : .55 + R() * .4; c.fillStyle = hexes[R() * hexes.length | 0];
-    c.beginPath(); c.ellipse(0, 0, s, s * .58, 0, 0, 7); c.fill(); c.restore();
-  }
-}
-function finish(c, R, vig = .5) {
-  const g = c.createRadialGradient(W / 2, H * .48, H * .25, W / 2, H * .5, H * .8); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${vig})`);
-  c.fillStyle = g; c.fillRect(0, 0, W, H);
-  const n = document.createElement('canvas'); n.width = n.height = 128; const nc = n.getContext('2d'), id = nc.createImageData(128, 128);
+function grain(c, R, a = .06) {
+  const n = newCanvas(128, 128), nc = n.getContext('2d'), id = nc.createImageData(128, 128);
   for (let i = 0; i < id.data.length; i += 4) { const v = R() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
-  nc.putImageData(id, 0, 0); c.save(); c.globalAlpha = .07; c.globalCompositeOperation = 'overlay'; c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, W, H); c.restore();
+  nc.putImageData(id, 0, 0); c.save(); c.globalAlpha = a; c.globalCompositeOperation = 'overlay'; c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, W, H); c.restore();
 }
-const PAINT = [
-  (c, R) => { // 0 dusk rooftop — subject sits in the upper 2/3 so full-art bands do not hide it
-    sky(c, [[0, '#1b1340'], [.2, '#4a2466'], [.38, '#a63f6e'], [.5, '#ec7a52'], [.6, '#ffbb6e'], [.68, '#ffe1a6'], [1, '#ffe1a6']]);
-    dabs(c, R, 240, ['#ff9a7a', '#ffc49a', '#c86a9a', '#8a4a8a'], 90, 420, 40, 140, .13, 'source-over', 0, .12);
-    glow(c, 380, 470, 330, '#ffae5a', .55); glow(c, 380, 470, 90, '#fff2cc', 1);
-    c.fillStyle = '#fff6dc'; c.beginPath(); c.arc(380, 470, 44, 0, 7); c.fill();
-    rays(c, R, 380, 470, 26, -Math.PI / 2, Math.PI * 1.2, 650, '#ffd7a0', .09);
-    skyline(c, R, 520, 30, 120, '#6e2f5e', null); skyline(c, R, 566, 40, 170, '#2b1531', '#ffcf86');
-    c.fillStyle = '#150a19'; c.fillRect(0, 596, W, H); c.fillStyle = '#24122a'; c.fillRect(0, 596, W, 5);
-    c.strokeStyle = '#150a19'; c.lineWidth = 3; c.beginPath(); c.moveTo(0, 566); c.lineTo(W, 566); for (let x = 10; x < W; x += 34) { c.moveTo(x, 566); c.lineTo(x, 596); } c.stroke();
-    figure(c, 214, 596, 1.75, '#150a19', 1.1);
-    c.strokeStyle = 'rgba(40,16,40,.8)'; c.lineWidth = 2; for (let i = 0; i < 5; i++) { const bx = 120 + R() * 360, by = 170 + R() * 140, s = 6 + R() * 6; c.beginPath(); c.moveTo(bx - s, by - s * .4); c.quadraticCurveTo(bx - s * .3, by - s * .6, bx, by); c.quadraticCurveTo(bx + s * .3, by - s * .6, bx + s, by - s * .4); c.stroke(); }
-    glow(c, 300, 600, 300, '#ff8a5a', .12);
-    bokeh(c, R, 30, ['#ffcf86', '#ff9a6a'], 600, 840, 4, 22, .3);
-    finish(c, R, .45);
+function vignette(c, a) { const g = c.createRadialGradient(W / 2, H * .42, H * .2, W / 2, H * .45, H * .78); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${a})`); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+const P = (c, pts) => { c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); };
+function lin(c, x0, y0, x1, y1, stops) { const g = c.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
+const bez = (p0, p1, p2, p3, t) => { const u = 1 - t; return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]; };
+
+/* Subject finishing: crisp dark outline, warm/cool rim light on one side, soft shade on the other. */
+function finishSubject(src, rimHex, dx, dy, outline = '#0b0d1a') {
+  const shape = (fill, ox, oy, cut) => {
+    const m = newCanvas(), mc = m.getContext('2d'); mc.drawImage(src, 0, 0);
+    if (cut) { mc.globalCompositeOperation = 'destination-out'; mc.drawImage(src, ox, oy); }
+    mc.globalCompositeOperation = 'source-in'; mc.fillStyle = fill; mc.fillRect(0, 0, W, H); return m;
+  };
+  const out = newCanvas(), oc = out.getContext('2d');
+  const sil = shape(outline, 0, 0, false);
+  for (let a = 0; a < 8; a++) oc.drawImage(sil, Math.cos(a * Math.PI / 4) * 2.2, Math.sin(a * Math.PI / 4) * 2.2);
+  oc.drawImage(src, 0, 0);
+  oc.save(); oc.globalCompositeOperation = 'source-atop'; oc.globalAlpha = .5; oc.drawImage(shape('#000', -dx * 2.5, -dy * 2.5, true), 0, 0); oc.restore();
+  oc.save(); oc.globalCompositeOperation = 'source-atop'; oc.globalAlpha = .95; oc.filter = 'blur(.6px)'; oc.drawImage(shape(rimHex, dx, dy, true), 0, 0); oc.restore();
+  return out;
+}
+
+/* ---------- backgrounds ---------- */
+const BG = [
+  (c, R) => { // dusk sky behind the crystal dragon
+    sky(c, [[0, '#1d1446'], [.22, '#4b2a6e'], [.4, '#a94a74'], [.55, '#ef8a58'], [.66, '#ffc77e'], [.74, '#ffe6b4'], [1, '#f4b98a']]);
+    dabs(c, R, 260, ['#ff9a7a', '#ffc49a', '#c86a9a', '#8a4a8a', '#ffe0c0'], 120, 520, 40, 150, .14, 'source-over', 0, .12);
+    glow(c, 300, 560, 360, '#ffb35c', .55); glow(c, 300, 560, 80, '#fff2cc', 1);
+    rays(c, R, 300, 560, 30, -Math.PI / 2, Math.PI * 1.3, 700, '#ffd7a0', .1);
+    ridge(c, R, 600, 26, .008, '#7a3a63'); ridge(c, R, 640, 20, .014, '#4a2047'); ridge(c, R, 690, 16, .02, '#2a1230');
+    grain(c, R); vignette(c, .35);
   },
-  (c, R) => { // 1 deep sea
-    sky(c, [[0, '#3aa9bb'], [.16, '#127090'], [.45, '#073657'], [1, '#020a18']]);
-    rays(c, R, 300, -160, 34, Math.PI / 2, 1.1, 950, '#b8f4ff', .08);
-    dabs(c, R, 220, ['#bff6ff', '#6fd6e8'], 0, 140, 20, 70, .12, 'overlay', 0, .6);
-    c.save(); c.globalAlpha = .28; c.fillStyle = '#021624'; c.beginPath(); c.ellipse(170, 210, 120, 32, -.08, 0, 7); c.fill();
-    c.beginPath(); c.moveTo(60, 210); c.lineTo(10, 178); c.lineTo(22, 212); c.lineTo(8, 242); c.closePath(); c.fill(); c.restore();
-    jelly(c, R, 330, 360, 66, '#8de9ff'); jelly(c, R, 170, 470, 30, '#ff9bd2'); jelly(c, R, 470, 240, 22, '#b4a6ff'); jelly(c, R, 480, 500, 18, '#8de9ff');
-    c.save(); c.strokeStyle = 'rgba(200,245,255,.5)'; c.lineWidth = 1.2; for (let i = 0; i < 40; i++) { c.beginPath(); c.arc(R() * W, 120 + R() * 560, 1.5 + R() ** 2 * 7, 0, 7); c.stroke(); } c.restore();
-    ridge(c, R, 610, 26, .012, '#041a2a'); ridge(c, R, 660, 22, .02, '#020d17');
-    c.strokeStyle = '#03141f'; c.lineWidth = 6; c.lineCap = 'round'; for (let i = 0; i < 9; i++) { const kx = R() * W; c.beginPath(); c.moveTo(kx, H); c.bezierCurveTo(kx + 20, 640, kx - 20, 600, kx + (R() - .5) * 30, 520 + R() * 60); c.stroke(); }
-    bokeh(c, R, 50, ['#8de9ff', '#c0b4ff', '#ffffff'], 80, 820, 2, 12, .45);
-    finish(c, R, .55);
+  (c, R) => { // deep sea
+    sky(c, [[0, '#46b5c4'], [.14, '#167894'], [.42, '#08395b'], [1, '#020a18']]);
+    rays(c, R, 300, -160, 40, Math.PI / 2, 1.2, 1000, '#c8f6ff', .09);
+    dabs(c, R, 220, ['#bff6ff', '#6fd6e8'], 0, 150, 20, 70, .14, 'overlay', 0, .6);
+    c.save(); c.globalAlpha = .22; c.fillStyle = '#021624'; c.beginPath(); c.ellipse(120, 300, 110, 28, -.08, 0, 7); c.fill(); c.restore();
+    c.save(); c.strokeStyle = 'rgba(200,245,255,.45)'; c.lineWidth = 1.2; for (let i = 0; i < 50; i++) { c.beginPath(); c.arc(R() * W, 100 + R() * 640, 1.5 + R() ** 2 * 6, 0, 7); c.stroke(); } c.restore();
+    ridge(c, R, 640, 26, .012, '#041a2a'); ridge(c, R, 690, 22, .02, '#020d17');
+    bokeh(c, R, 60, ['#8de9ff', '#c0b4ff', '#ffffff'], 60, 820, 2, 10, .45);
+    grain(c, R); vignette(c, .45);
   },
-  (c, R) => { // 2 star hill
-    sky(c, [[0, '#05061a'], [.3, '#16194e'], [.52, '#43307a'], [.66, '#9a5a9e'], [.74, '#e7a0b3'], [1, '#e7a0b3']]);
-    c.save(); c.translate(300, 290); c.rotate(-.55); dabs(c, R, 380, ['#c9b8ff', '#ffd6f0', '#9ab8ff'], -60, 60, 30, 90, .07, 'lighter', 0, .25); c.restore();
-    c.save(); c.translate(300, 290); c.rotate(-.55); for (let i = 0; i < 500; i++) { const s = R() ** 3 * 1.6 + .4; c.fillStyle = `rgba(255,255,255,${(.3 + R() * .7).toFixed(2)})`; c.fillRect((R() - .5) * 900, (R() - .5) * 120 * (R() + .3), s, s); } c.restore();
-    stars(c, R, 420, 520, 10); moon(c, 470, 140, 30);
-    c.save(); c.globalCompositeOperation = 'lighter'; const sg = c.createLinearGradient(110, 120, 250, 200); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(1, 'rgba(255,255,255,.9)'); c.strokeStyle = sg; c.lineWidth = 2; c.beginPath(); c.moveTo(110, 120); c.lineTo(250, 200); c.stroke(); c.restore();
-    glow(c, 300, 600, 420, '#ff9fc0', .25);
-    ridge(c, R, 586, 18, .006, '#2a1b48');
-    c.fillStyle = '#0b0a1f'; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 610); c.quadraticCurveTo(260, 500, 600, 570); c.lineTo(600, H); c.fill();
-    tree(c, R, 470, 560, 1.25, '#0b0a1f'); figure(c, 270, 548, 1.45, '#0b0a1f', -.6, 'up');
-    bokeh(c, R, 26, ['#e2c8ff', '#ffc8e2'], 600, 840, 3, 14, .3);
-    finish(c, R, .4);
+  (c, R) => { // star night behind the winged guardian
+    sky(c, [[0, '#04051a'], [.35, '#141a4e'], [.6, '#3d2f7a'], [.78, '#8a5aa0'], [1, '#d88fae']]);
+    c.save(); c.translate(300, 330); c.rotate(-.6); dabs(c, R, 420, ['#c9b8ff', '#ffd6f0', '#9ab8ff'], -70, 70, 30, 100, .08, 'lighter', 0, .25);
+    for (let i = 0; i < 700; i++) { const s = R() ** 3 * 1.6 + .4; c.fillStyle = `rgba(255,255,255,${(.3 + R() * .7).toFixed(2)})`; c.fillRect((R() - .5) * 1000, (R() - .5) * 140 * (R() + .3), s, s); } c.restore();
+    stars(c, R, 500, 700, 12);
+    glow(c, 300, 700, 420, '#ff9fc0', .25);
+    ridge(c, R, 680, 18, .006, '#2a1b48'); ridge(c, R, 720, 14, .01, '#120f2c');
+    grain(c, R); vignette(c, .3);
   },
-  (c, R) => { // 3 forest afternoon
-    sky(c, [[0, '#f4f8cf'], [.25, '#bfdc8c'], [.52, '#5e9c54'], [.8, '#163720'], [1, '#0e2616']]);
-    for (let i = 0; i < 14; i++) { const x = R() * W, w = 6 + R() * 10; c.fillStyle = hexA('#7fa877', .55); c.fillRect(x, 0, w, H); }
-    rays(c, R, 60, -80, 30, 1.0, .5, 1100, '#fff4b0', .1);
-    for (let i = 0; i < 9; i++) { const x = R() * W, w = 14 + R() * 18; c.fillStyle = '#3c6a3f'; c.fillRect(x, 0, w, H); }
-    dabs(c, R, 520, ['#1c3f22', '#2f5f30', '#4f8a3e'], -40, 160, 20, 60, .5, 'source-over', 0, 3);
-    ridge(c, R, 600, 14, .01, '#1f4524'); ridge(c, R, 632, 10, .02, '#12301a');
-    c.fillStyle = '#0d2414'; c.fillRect(-10, 0, 66, H); c.fillRect(520, 0, 60, H); c.fillRect(470, 0, 22, H);
-    figure(c, 300, 618, 1.2, '#12301a', .4);
-    glow(c, 300, 520, 140, '#fff6c0', .25);
-    bokeh(c, R, 70, ['#fff2a0', '#e8ff9a'], 160, 700, 2, 9, .7);
-    bokeh(c, R, 10, ['#fff7c8'], 0, 840, 30, 60, .12);
-    finish(c, R, .45);
-  },
-  (c, R) => { // 4 aurora snowfield
-    sky(c, [[0, '#020812'], [.38, '#07202f'], [.6, '#0f3a48'], [.7, '#1d5360'], [1, '#1d5360']]);
-    stars(c, R, 380, 430, 6);
-    aurora(c, R, 230, 55, '#5effb3', '#c9fff0', .35); aurora(c, R, 160, 36, '#c56bff', '#ff9de0', .18); aurora(c, R, 280, 28, '#45d6ff', '#9ff7ff', .2);
-    peaks(c, R, 490, 170, 4, '#1e4256', 'rgba(220,245,255,.55)'); peaks(c, R, 535, 110, 6, '#0d2433', 'rgba(200,235,255,.3)');
-    const g = c.createLinearGradient(0, 520, 0, H); g.addColorStop(0, '#a8cdd8'); g.addColorStop(.35, '#4c7584'); g.addColorStop(1, '#0d1d27'); c.fillStyle = g;
-    c.beginPath(); c.moveTo(0, H); c.lineTo(0, 545); c.quadraticCurveTo(300, 515, 600, 550); c.lineTo(600, H); c.fill();
-    c.fillStyle = '#0a1720'; c.fillRect(400, 566, 54, 34); c.beginPath(); c.moveTo(394, 568); c.lineTo(427, 544); c.lineTo(460, 568); c.fill();
-    glow(c, 414, 584, 50, '#ffc56b', .9); c.fillStyle = '#ffd890'; c.fillRect(410, 578, 9, 9);
-    figure(c, 250, 624, 1.15, '#0a1720', .5); glow(c, 264, 566, 34, '#ffc56b', .9);
-    bokeh(c, R, 60, ['#ffffff'], 0, 840, 1, 4, .7);
-    finish(c, R, .5);
-  },
-  (c, R) => { // 5 sakura bus stop
-    sky(c, [[0, '#9fb0ee'], [.34, '#e7b4d6'], [.6, '#ffd6dc'], [.68, '#fff1e6'], [1, '#fff1e6']]);
-    glow(c, 170, 200, 300, '#ffffff', .5);
-    dabs(c, R, 200, ['#ffffff', '#ffe1ea', '#f4c4e0'], 80, 420, 30, 110, .16, 'source-over', 0, .2);
-    const g = c.createLinearGradient(0, 572, 0, H); g.addColorStop(0, '#e9a9c1'); g.addColorStop(1, '#a96a90'); c.fillStyle = g; c.fillRect(0, 572, W, H);
-    c.fillStyle = '#6b4468'; c.fillRect(445, 400, 5, 174); c.beginPath(); c.arc(447, 396, 18, 0, 7); c.fill(); c.fillRect(400, 540, 40, 5); c.fillRect(402, 544, 3, 30); c.fillRect(436, 544, 3, 30);
-    c.fillStyle = '#ffe8f0'; c.beginPath(); c.arc(447, 396, 11, 0, 7); c.fill();
-    figure(c, 300, 578, 1.7, '#5a3557', .7, 'umbrella');
-    c.strokeStyle = '#4b2b44'; c.lineCap = 'round';
-    const branch = (x0, y0, x1, y1, w) => { c.lineWidth = w; c.beginPath(); c.moveTo(x0, y0); c.quadraticCurveTo((x0 + x1) / 2 + 30, (y0 + y1) / 2 + 40, x1, y1); c.stroke(); };
-    branch(-20, 40, 260, 150, 14); branch(120, 100, 230, 50, 6); branch(60, 70, 140, 210, 6); branch(620, 10, 380, 110, 12); branch(500, 50, 470, 180, 5);
-    c.save(); for (let i = 0; i < 260; i++) { const t = R(); const left = R() < .55; const bx = left ? -10 + t * 280 : 380 + t * 240, by = left ? 30 + R() * 190 : R() * 190; c.globalAlpha = .6 + R() * .4; c.fillStyle = R() < .5 ? '#ffb3cf' : '#ffd9e6'; c.beginPath(); c.arc(bx, by, 4 + R() * 8, 0, 7); c.fill(); } c.restore();
-    petals(c, R, 140, ['#ffb3cf', '#ffd2e2', '#ff9cc0'], true);
-    finish(c, R, .3);
+  (c, R) => { // aurora behind the crystal sword
+    sky(c, [[0, '#020812'], [.42, '#07202f'], [.66, '#0f3a48'], [1, '#1d5360']]);
+    stars(c, R, 420, 500, 8);
+    aurora(c, R, 250, 60, '#5effb3', '#c9fff0', .38); aurora(c, R, 170, 40, '#c56bff', '#ff9de0', .2); aurora(c, R, 320, 30, '#45d6ff', '#9ff7ff', .22);
+    peaks(c, R, 560, 180, 4, '#1e4256', 'rgba(220,245,255,.55)'); peaks(c, R, 610, 120, 6, '#0d2433', 'rgba(200,235,255,.3)');
+    const g = lin(c, 0, 600, 0, H, [[0, '#a8cdd8'], [.35, '#4c7584'], [1, '#0d1d27']]); c.fillStyle = g;
+    c.beginPath(); c.moveTo(0, H); c.lineTo(0, 620); c.quadraticCurveTo(300, 590, 600, 625); c.lineTo(600, H); c.fill();
+    bokeh(c, R, 60, ['#ffffff'], 0, 840, 1, 3, .7);
+    grain(c, R); vignette(c, .4);
   },
 ];
-const ART = PAINT.map((fn, i) => {
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d');
-  try { fn(c, seeded(1000 + i * 17)); } catch (e) { console.warn('art', i, e); }
-  return cv.toDataURL('image/jpeg', .9);
-});
+
+/* Foil backgrounds for the gold and starlight tiers: a sunburst with uneven ray widths so it never reads as stripes. */
+function sunburst(c, R, cx, cy, base, rayHex, n, a) {
+  c.fillStyle = base; c.fillRect(0, 0, W, H);
+  c.save(); c.globalCompositeOperation = 'lighter';
+  let ang = R() * .2;
+  while (ang < Math.PI * 2) {
+    const w = .02 + R() * .07, len = 900, al = a * (.25 + R() * .75);
+    const g = c.createRadialGradient(cx, cy, 0, cx, cy, len); g.addColorStop(0, hexA(rayHex, al)); g.addColorStop(.55, hexA(rayHex, al * .55)); g.addColorStop(1, hexA(rayHex, 0));
+    c.fillStyle = g; c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, len, ang, ang + w); c.closePath(); c.fill();
+    ang += w + .015 + R() * .06;
+  }
+  c.restore();
+}
+function fineRays(c, R, cx, cy, hex, a, n = 320) {
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) { const ang = R() * Math.PI * 2, w = .002 + R() * .006, len = 500 + R() * 400, al = a * R() ** 2;
+    const g = c.createRadialGradient(cx, cy, 0, cx, cy, len); g.addColorStop(0, hexA(hex, al)); g.addColorStop(1, hexA(hex, 0));
+    c.fillStyle = g; c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, len, ang, ang + w); c.closePath(); c.fill(); }
+  c.restore();
+}
+function goldBG() {
+  const cv = newCanvas(), c = cv.getContext('2d'), R = seeded(4242);
+  const base = c.createRadialGradient(300, 330, 20, 300, 380, 640); base.addColorStop(0, '#fff3c2'); base.addColorStop(.25, '#f1c45e'); base.addColorStop(.6, '#b67a1f'); base.addColorStop(1, '#5a3608');
+  sunburst(c, R, 300, 330, base, '#fff0b8', 0, .55);
+  c.save(); c.globalCompositeOperation = 'multiply'; c.globalAlpha = .35; sunburst(c, R, 300, 330, '#ffffff', '#c98a2a', 0, .0); c.restore();
+  fineRays(c, R, 300, 330, '#fff7d6', .5);
+  glow(c, 300, 330, 260, '#fff6d8', .55);
+  dabs(c, R, 160, ['#fff4cc', '#ffe08a'], 0, H, 30, 120, .08, 'overlay', 0, 6);
+  grain(c, R, .08); vignette(c, .25);
+  return cv;
+}
+function starBG() {
+  const cv = newCanvas(), c = cv.getContext('2d'), R = seeded(777);
+  const base = c.createRadialGradient(300, 330, 10, 300, 400, 680); base.addColorStop(0, '#eceaff'); base.addColorStop(.1, '#a9aade'); base.addColorStop(.3, '#45468a'); base.addColorStop(.62, '#191944'); base.addColorStop(1, '#06061a');
+  sunburst(c, R, 300, 330, base, '#e8ecff', 0, .3);
+  fineRays(c, R, 300, 330, '#ffffff', .35, 420);
+  c.save(); c.globalCompositeOperation = 'soft-light'; c.globalAlpha = .6;
+  const tf = c.createLinearGradient(0, 0, W, H); ['#ff9cc8', '#ffe39a', '#9cffd6', '#9cc8ff', '#c9a6ff', '#ff9cc8'].forEach((col, i) => tf.addColorStop(i / 5, col));
+  c.fillStyle = tf; c.fillRect(0, 0, W, H); c.restore();
+  stars(c, R, 700, H, 22);
+  glow(c, 300, 330, 220, '#ffffff', .45);
+  grain(c, R, .07); vignette(c, .45);
+  return cv;
+}
+
+/* ---------- subjects (transparent) ---------- */
+function plates(c, p0, p1, p2, p3, r0, r1, n, light, dark, rim) {
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, [x, y] = bez(p0, p1, p2, p3, t), r = r0 + (r1 - r0) * t;
+    const g = c.createRadialGradient(x - r * .35, y - r * .45, r * .1, x, y, r * 1.05); g.addColorStop(0, light); g.addColorStop(.7, dark); g.addColorStop(1, dark);
+    c.fillStyle = g; c.beginPath(); c.ellipse(x, y, r, r * .86, 0, 0, 7); c.fill();
+    c.strokeStyle = rim; c.lineWidth = 1.4; c.beginPath(); c.ellipse(x, y, r * .92, r * .78, 0, Math.PI * 1.05, Math.PI * 1.75); c.stroke();
+  }
+}
+function wing(c, R, S, E, T, tips, flip) {
+  const f = p => flip ? [600 - p[0], p[1]] : p; S = f(S); E = f(E); T = f(T); tips = tips.map(f);
+  // membrane
+  c.save();
+  c.beginPath(); c.moveTo(...S); c.lineTo(...E); c.lineTo(...T);
+  let prev = T; tips.forEach((tp, i) => { const ctl = [(prev[0] + tp[0]) / 2 + (T[0] - (prev[0] + tp[0]) / 2) * .28, (prev[1] + tp[1]) / 2 + (T[1] - (prev[1] + tp[1]) / 2) * .28]; if (i === 0) c.lineTo(...tp); else c.quadraticCurveTo(...ctl, ...tp); prev = tp; });
+  c.quadraticCurveTo(S[0] + (flip ? -10 : 10), S[1] + 120, S[0], S[1] + 70); c.closePath();
+  const g = c.createRadialGradient(T[0], T[1], 20, T[0], T[1], 520); g.addColorStop(0, 'rgba(236,248,255,.97)'); g.addColorStop(.35, 'rgba(150,196,255,.93)'); g.addColorStop(.75, 'rgba(70,96,200,.9)'); g.addColorStop(1, 'rgba(40,40,140,.9)');
+  c.fillStyle = g; c.fill(); c.clip();
+  // crystal facets inside the membrane
+  for (let i = 0; i < tips.length; i++) {
+    const a = tips[i], b = tips[i + 1] || S;
+    c.fillStyle = `rgba(255,255,255,${(.06 + R() * .14).toFixed(2)})`; P(c, [T, a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]]); c.fill();
+    c.fillStyle = `rgba(20,30,110,${(.08 + R() * .14).toFixed(2)})`; P(c, [T, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], b]); c.fill();
+  }
+  c.restore();
+  // finger bones
+  tips.forEach(tp => { c.strokeStyle = lin(c, ...T, ...tp, [[0, '#f4fbff'], [1, '#6e86d8']]); c.lineWidth = 6; c.lineCap = 'round'; c.beginPath(); c.moveTo(...T); c.lineTo(...tp); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.8)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(T[0], T[1] - 2); c.lineTo(tp[0], tp[1] - 2); c.stroke(); });
+  // arm
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.strokeStyle = '#3f55a8'; c.lineWidth = 20; c.beginPath(); c.moveTo(...S); c.lineTo(...E); c.lineTo(...T); c.stroke();
+  c.strokeStyle = lin(c, ...S, ...T, [[0, '#a9c8ff'], [1, '#f2f9ff']]); c.lineWidth = 13; c.beginPath(); c.moveTo(...S); c.lineTo(...E); c.lineTo(...T); c.stroke();
+  c.fillStyle = '#eaf6ff'; c.beginPath(); c.arc(...E, 10, 0, 7); c.fill();
+  // claw spike at the wrist
+  P(c, [[T[0] - 6, T[1] + 4], [T[0] + (flip ? -18 : 18), T[1] - 40], [T[0] + 6, T[1] - 4]]); c.fillStyle = '#f6fbff'; c.fill();
+}
+const SUBJ = [
+  (c, R) => { // crystal dragon, wings past the frame, horns into the name bar
+    wing(c, R, [250, 250], [140, 130], [20, 30], [[-40, 170], [-10, 290], [50, 380], [150, 400]], false);
+    wing(c, R, [350, 250], [470, 120], [610, 10], [[650, 160], [620, 290], [560, 390], [455, 410]], false);
+    // tail
+    plates(c, [250, 470], [160, 560], [60, 520], [-20, 640], 30, 10, 18, '#e3f1ff', '#4a64c0', 'rgba(255,255,255,.7)');
+    // body
+    P(c, [[255, 240], [345, 240], [380, 330], [360, 450], [300, 500], [235, 450], [220, 330]]);
+    c.fillStyle = lin(c, 220, 240, 380, 500, [[0, '#f0f8ff'], [.45, '#90b3f0'], [1, '#33479e']]); c.fill();
+    for (let i = 0; i < 6; i++) { const y = 300 + i * 30, w = 64 - Math.abs(i - 2) * 6; P(c, [[300 - w / 2, y], [300 + w / 2, y], [300 + w / 2 - 6, y + 24], [300 - w / 2 + 6, y + 24]]); c.fillStyle = i % 2 ? 'rgba(255,255,255,.35)' : 'rgba(20,30,100,.18)'; c.fill(); }
+    // chest gem
+    glow(c, 300, 300, 70, '#7fd0ff', .9); P(c, [[300, 270], [324, 300], [300, 334], [276, 300]]); c.fillStyle = lin(c, 280, 270, 320, 330, [[0, '#ffffff'], [.4, '#79c8ff'], [1, '#2a53d6']]); c.fill();
+    // legs and claws
+    [[235, 440, 170, 500], [365, 440, 430, 500]].forEach(([x0, y0, x1, y1]) => {
+      c.strokeStyle = '#3f55a8'; c.lineWidth = 34; c.lineCap = 'round'; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+      c.strokeStyle = '#b7d2ff'; c.lineWidth = 24; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
+      for (let k = -1; k <= 1; k++) { P(c, [[x1 + k * 12 - 5, y1 + 6], [x1 + k * 16, y1 + 34], [x1 + k * 12 + 5, y1 + 6]]); c.fillStyle = '#f4faff'; c.fill(); }
+    });
+    // neck spines
+    for (let i = 1; i < 9; i++) { const [x, y] = bez([300, 250], [300, 180], [360, 160], [395, 130], i / 9); P(c, [[x - 12, y - 4], [x - 30, y - 40 + i], [x + 4, y - 14]]); c.fillStyle = '#e9f4ff'; c.fill(); }
+    // neck
+    plates(c, [300, 250], [300, 180], [360, 160], [395, 130], 38, 22, 12, '#f2f9ff', '#5570c8', 'rgba(255,255,255,.8)');
+    c.save(); c.translate(390, 140); c.scale(1.35, 1.35); c.translate(-390, -140);
+    // head
+    P(c, [[372, 128], [402, 92], [450, 86], [512, 104], [520, 116], [478, 128], [500, 140], [458, 150], [410, 156]]);
+    c.fillStyle = lin(c, 380, 86, 480, 160, [[0, '#ffffff'], [.5, '#a8c6ff'], [1, '#3a50aa']]); c.fill();
+    P(c, [[402, 92], [450, 86], [512, 104], [440, 110]]); c.fillStyle = 'rgba(255,255,255,.55)'; c.fill();
+    // horns
+    [[[400, 98], [338, 8], [412, 92]], [[420, 92], [372, 20], [432, 90]], [[392, 118], [330, 70], [398, 110]]].forEach(h => { P(c, h); c.fillStyle = lin(c, h[0][0], h[0][1], h[1][0], h[1][1], [[0, '#c8dcff'], [1, '#ffffff']]); c.fill(); });
+    // eye
+    glow(c, 462, 106, 26, '#8ff4ff', 1); P(c, [[450, 104], [474, 102], [466, 110]]); c.fillStyle = '#e8ffff'; c.fill();
+    // teeth
+    for (let i = 0; i < 4; i++) { P(c, [[488 - i * 12, 126], [482 - i * 12, 138], [478 - i * 12, 126]]); c.fillStyle = '#fff'; c.fill(); }
+    c.restore();
+  },
+  (c, R) => { // giant lantern jellyfish, bell above the window, tentacles over the frame
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 34; i++) {
+      const sx = 90 + i * 12.5, len = 420 + R() * 340, sway = (R() - .5) * 260, side = (i - 17) * 9;
+      c.strokeStyle = `rgba(${150 + R() * 100 | 0},${200 + R() * 55 | 0},255,${(.25 + R() * .3).toFixed(2)})`; c.lineWidth = 1.2 + R() * 2;
+      c.beginPath(); c.moveTo(sx, 300); c.bezierCurveTo(sx + side, 300 + len * .35, sx + sway + side * 1.6, 300 + len * .7, sx + sway * 1.4 + side * 2.4, 300 + len); c.stroke();
+    }
+    c.restore();
+    // oral arms: frilly ribbons
+    for (let k = 0; k < 4; k++) {
+      const x0 = 250 + k * 33, sw = (k - 1.5) * 50;
+      for (let t = 0; t < 1; t += .012) {
+        const y = 300 + t * 520, x = x0 + Math.sin(t * 9 + k) * 22 + sw * t * 1.4, r = 16 * (1 - t * .7);
+        c.fillStyle = `rgba(255,${170 + 60 * t | 0},${220},${(.16 - t * .1).toFixed(3)})`; c.beginPath(); c.ellipse(x, y, r, r * .5, Math.sin(t * 12) * .8, 0, 7); c.fill();
+      }
+    }
+    // bell
+    c.save();
+    c.beginPath(); c.moveTo(60, 300); c.bezierCurveTo(60, 120, 170, 20, 300, 20); c.bezierCurveTo(430, 20, 540, 120, 540, 300);
+    for (let i = 0; i <= 16; i++) { const x = 540 - i * 30; c.quadraticCurveTo(x - 15, 322 + (i % 2) * 6, x - 30, 300); }
+    c.closePath();
+    const g = c.createRadialGradient(300, 130, 20, 300, 220, 300); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(.3, 'rgba(180,240,255,.85)'); g.addColorStop(.7, 'rgba(90,170,240,.75)'); g.addColorStop(1, 'rgba(150,110,255,.8)');
+    c.fillStyle = g; c.fill(); c.clip();
+    c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 26; i++) { const a = Math.PI + i / 25 * Math.PI; c.strokeStyle = 'rgba(255,255,255,.28)'; c.lineWidth = 2; c.beginPath(); c.moveTo(300, 60); c.quadraticCurveTo(300 + Math.cos(a) * 140, 160 + Math.sin(a) * -20, 300 + Math.cos(a) * 260, 310); c.stroke(); }
+    [[250, 200], [350, 200], [270, 250], [330, 250]].forEach(([x, y]) => { c.strokeStyle = 'rgba(255,160,220,.85)'; c.lineWidth = 7; c.beginPath(); c.ellipse(x, y, 34, 22, 0, 0, 7); c.stroke(); glow(c, x, y, 40, '#ff9fd8', .5); });
+    c.restore();
+    // rim frills
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 60; i++) { const x = 64 + i * 8; c.fillStyle = `rgba(255,190,240,${(.4 + R() * .4).toFixed(2)})`; c.beginPath(); c.arc(x, 304 + Math.sin(i) * 4, 3 + R() * 2, 0, 7); c.fill(); }
+    c.restore();
+    // highlight on the bell top
+    c.save(); c.globalCompositeOperation = 'lighter'; c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = 5; c.lineCap = 'round'; c.beginPath(); c.arc(300, 300, 250, Math.PI * 1.18, Math.PI * 1.42); c.stroke(); c.restore();
+  },
+  (c, R) => { // winged guardian with a star: wings arch past the frame top and sides
+    const feather = (x, y, ang, len, wdt, cA, cB, edge) => {
+      c.save(); c.translate(x, y); c.rotate(ang);
+      c.beginPath(); c.moveTo(0, -wdt * .35); c.bezierCurveTo(len * .35, -wdt * .62, len * .8, -wdt * .4, len, 0); c.bezierCurveTo(len * .8, wdt * .45, len * .35, wdt * .6, 0, wdt * .35); c.closePath();
+      c.fillStyle = lin(c, 0, 0, len, 0, [[0, cA], [.7, cB], [1, edge]]); c.fill();
+      c.strokeStyle = 'rgba(150,130,190,.35)'; c.lineWidth = 1; c.stroke();
+      c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(2, 0); c.lineTo(len * .95, 0); c.stroke();
+      c.restore();
+    };
+    const wingSide = s => {
+      const m = p => [300 + s * (p[0] - 300), p[1]];
+      const S = m([335, 250]), C1 = m([400, 110]), C2 = m([500, 40]), T = m([630, 30]);
+      const rows = [ // [length at shoulder, length at tip, width, count, colour]
+        [150, 360, 40, 26, '#f4efff', '#ffffff', '#d8c8ff'],
+        [110, 250, 34, 22, '#fffaf0', '#ffffff', '#ffe2a0'],
+        [70, 150, 28, 18, '#ffffff', '#fff8ec', '#f0e4ff'],
+        [36, 70, 22, 14, '#fff7e6', '#ffffff', '#ffe9c0'],
+      ];
+      rows.forEach(([l0, l1, w, n, cA, cB, ce], row) => {
+        for (let i = n - 1; i >= 0; i--) {
+          const t = i / (n - 1), A = bez(S, C1, C2, T, t * (1 - row * .12));
+          const dirDown = Math.PI / 2 - s * (.12 + t * 1.15);
+          feather(A[0], A[1], dirDown + (R() - .5) * .06, (l0 + (l1 - l0) * t) * (.95 + R() * .1), w * (1 - t * .25), cA, cB, ce);
+        }
+      });
+      c.strokeStyle = lin(c, ...S, ...T, [[0, '#fff3c8'], [1, '#ffffff']]); c.lineWidth = 10; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(...S); c.bezierCurveTo(...C1, ...C2, ...T); c.stroke();
+      c.strokeStyle = '#c99a3a'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(S[0], S[1] - 4); c.bezierCurveTo(C1[0], C1[1] - 4, C2[0], C2[1] - 4, T[0], T[1] - 4); c.stroke();
+    };
+    wingSide(-1); wingSide(1);
+    // halo
+    c.save(); c.globalCompositeOperation = 'lighter'; glow(c, 300, 175, 140, '#ffe6a0', .5);
+    c.strokeStyle = 'rgba(255,226,150,.95)'; c.lineWidth = 5; c.beginPath(); c.ellipse(300, 148, 64, 17, 0, 0, 7); c.stroke(); c.restore();
+    // hair behind
+    c.lineCap = 'round';
+    for (let i = 0; i < 60; i++) {
+      const sx = 300 + (R() - .5) * 44, side = sx < 300 ? -1 : 1, ex = 300 + side * (40 + R() * 80), ey = 330 + R() * 110;
+      c.strokeStyle = lin(c, sx, 180, ex, ey, [[0, '#fff2c0'], [1, i % 3 ? '#d9a443' : '#f6d27c']]); c.lineWidth = 3 + R() * 4;
+      c.beginPath(); c.moveTo(sx, 190); c.bezierCurveTo(sx + side * 30, 250, ex - side * 30, ey - 80, ex, ey); c.stroke();
+    }
+    // dress with sleeves
+    c.beginPath(); c.moveTo(270, 245); c.lineTo(330, 245); c.bezierCurveTo(372, 300, 380, 420, 420, 560); c.bezierCurveTo(450, 660, 480, 760, 500, 840); c.lineTo(100, 840); c.bezierCurveTo(120, 760, 150, 660, 180, 560); c.bezierCurveTo(220, 420, 228, 300, 270, 245); c.closePath();
+    c.fillStyle = lin(c, 200, 240, 420, 840, [[0, '#ffffff'], [.35, '#e7e2ff'], [.75, '#a79cdf'], [1, '#5a4fa8']]); c.fill();
+    c.strokeStyle = 'rgba(90,80,160,.28)'; c.lineWidth = 3;
+    for (let i = 0; i < 8; i++) { const x = 300 + (i - 3.5) * 22; c.beginPath(); c.moveTo(300 + (x - 300) * .25, 400); c.quadraticCurveTo(x * 1 + (x - 300) * .6, 600, 300 + (x - 300) * 2.6, 840); c.stroke(); }
+    P(c, [[262, 340], [338, 340], [334, 360], [266, 360]]); c.fillStyle = lin(c, 262, 340, 338, 360, [[0, '#b8862b'], [.5, '#fff0b8'], [1, '#b8862b']]); c.fill();
+    P(c, [[284, 248], [316, 248], [300, 286]]); c.fillStyle = '#f6e2d4'; c.fill();
+    // sleeves reaching to the star
+    [[-1], [1]].forEach(([s]) => {
+      c.beginPath(); c.moveTo(300 + s * 32, 252); c.bezierCurveTo(300 + s * 70, 300, 300 + s * 60, 360, 300 + s * 18, 386); c.lineTo(300 + s * 6, 372); c.bezierCurveTo(300 + s * 30, 340, 300 + s * 30, 300, 300 + s * 14, 262); c.closePath();
+      c.fillStyle = lin(c, 300, 250, 300 + s * 70, 390, [[0, '#ffffff'], [1, '#c9c0f2']]); c.fill();
+    });
+    glow(c, 300, 386, 110, '#fff3c4', .55); glow(c, 300, 386, 36, '#ffffff', .8);
+    c.save(); c.globalCompositeOperation = 'lighter'; c.fillStyle = '#fffbe8'; c.beginPath(); c.moveTo(300, 340); c.quadraticCurveTo(304, 382, 346, 386); c.quadraticCurveTo(304, 390, 300, 432); c.quadraticCurveTo(296, 390, 254, 386); c.quadraticCurveTo(296, 382, 300, 340); c.fill(); c.restore();
+    // face and fringe
+    c.fillStyle = '#f7e4d6'; c.beginPath(); c.ellipse(300, 206, 25, 31, 0, 0, 7); c.fill();
+    c.fillStyle = lin(c, 270, 170, 330, 220, [[0, '#fff6d6'], [1, '#e2b25a']]);
+    c.beginPath(); c.moveTo(274, 214); c.bezierCurveTo(268, 170, 290, 168, 300, 170); c.bezierCurveTo(314, 168, 334, 176, 327, 214); c.bezierCurveTo(318, 196, 306, 192, 300, 200); c.bezierCurveTo(292, 192, 282, 198, 274, 214); c.fill();
+    c.strokeStyle = 'rgba(80,50,60,.7)'; c.lineWidth = 2; c.beginPath(); c.moveTo(287, 214); c.quadraticCurveTo(292, 218, 297, 214); c.moveTo(303, 214); c.quadraticCurveTo(308, 218, 313, 214); c.stroke();
+  },
+  (c, R) => { // crystal sword with orbiting shards
+    // aurora ribbons around the blade (behind)
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 3; k++) { c.strokeStyle = ['rgba(110,255,190,.35)', 'rgba(120,200,255,.3)', 'rgba(220,140,255,.28)'][k]; c.lineWidth = 16 - k * 4;
+      c.beginPath(); for (let t = 0; t <= 1; t += .01) { const y = 40 + t * 520, x = 300 + Math.sin(t * 7 + k * 2) * (140 + k * 30) * (1 - t * .3); t ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); }
+    c.restore();
+    // blade
+    P(c, [[300, -10], [338, 70], [334, 470], [266, 470], [262, 70]]); c.fillStyle = lin(c, 262, 0, 338, 0, [[0, '#e9fbff'], [.48, '#ffffff'], [.52, '#7fb8e0'], [1, '#2f5f9a']]); c.fill();
+    P(c, [[300, -10], [300, 470], [266, 470], [262, 70]]); c.fillStyle = 'rgba(255,255,255,.25)'; c.fill();
+    for (let i = 0; i < 9; i++) { const y = 80 + i * 44; P(c, [[300, y], [336, y + 20], [300, y + 40]]); c.fillStyle = `rgba(20,60,140,${(.1 + R() * .15).toFixed(2)})`; c.fill(); }
+    c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 2; c.beginPath(); c.moveTo(300, -10); c.lineTo(300, 470); c.stroke();
+    glow(c, 300, 40, 60, '#e6fbff', .8);
+    // guard
+    P(c, [[300, 455], [420, 420], [470, 380], [452, 440], [360, 500], [300, 510], [240, 500], [148, 440], [130, 380], [180, 420]]);
+    c.fillStyle = lin(c, 130, 380, 470, 510, [[0, '#7a4c10'], [.3, '#ffe9a6'], [.5, '#c88d2a'], [.7, '#fff3c8'], [1, '#7a4c10']]); c.fill();
+    glow(c, 300, 478, 50, '#7dffd0', .9); P(c, [[300, 458], [318, 478], [300, 498], [282, 478]]); c.fillStyle = lin(c, 282, 458, 318, 498, [[0, '#ffffff'], [.5, '#5effb3'], [1, '#0d7a5a']]); c.fill();
+    // grip and pommel
+    c.fillStyle = lin(c, 284, 0, 316, 0, [[0, '#2a1d38'], [.5, '#5a4378'], [1, '#2a1d38']]); c.fillRect(286, 508, 28, 120);
+    c.strokeStyle = '#d9a64a'; c.lineWidth = 2; for (let y = 514; y < 628; y += 10) { c.beginPath(); c.moveTo(286, y); c.lineTo(314, y + 6); c.stroke(); }
+    c.fillStyle = lin(c, 280, 630, 320, 660, [[0, '#ffe9a6'], [1, '#8a5a12']]); c.beginPath(); c.arc(300, 642, 16, 0, 7); c.fill();
+    // shards
+    for (let i = 0; i < 16; i++) {
+      const a = R() * Math.PI * 2, d = 150 + R() * 200, x = 300 + Math.cos(a) * d * 1.2, y = 270 + Math.sin(a) * d * .9, s = 14 + R() * 30, rot = R() * 6;
+      c.save(); c.translate(x, y); c.rotate(rot);
+      P(c, [[0, -s], [s * .45, 0], [0, s * .9], [-s * .45, 0]]); c.fillStyle = lin(c, -s, -s, s, s, [[0, '#ffffff'], [.5, '#9ad6ff'], [1, '#3a62c4']]); c.fill();
+      P(c, [[0, -s], [s * .45, 0], [0, 0]]); c.fillStyle = 'rgba(255,255,255,.5)'; c.fill(); c.restore();
+    }
+  },
+];
+const RIM = [['#ffcf8a', 3, -3], ['#c8fbff', 0, -3], ['#ffe9b0', 2, -3], ['#c8fff0', -3, -2]];
+function buildArt() {
+  const out = { bg: [], subj: [], gold: goldBG().toDataURL('image/jpeg', .9), star: starBG().toDataURL('image/jpeg', .9) };
+  BG.forEach((fn, i) => { const cv = newCanvas(); fn(cv.getContext('2d'), seeded(1000 + i * 17)); out.bg.push(cv.toDataURL('image/jpeg', .9)); });
+  SUBJ.forEach((fn, i) => { const cv = newCanvas(); fn(cv.getContext('2d'), seeded(500 + i * 31)); const [h, dx, dy] = RIM[i]; out.subj.push(finishSubject(cv, h, dx, dy).toDataURL('image/png')); });
+  return out;
+}
+
+
+/* ------------------------------------------------------------------ data */
+const TIERS = [
+  { k: 'n',   code: 'N',   name: '일반',        odds: 55,  glow: '#e9edf3', sym: ['dot'],
+    desc: '종이 프레임. 그림은 그림 창 안에만, 광택 없이.',
+    layers: [['종이 프레임', '미세한 종이 결'], ['그림 창', '얇은 먹선 테두리'], ['반사광', '아주 약하게']] },
+  { k: 'r',   code: 'R',   name: '레어',        odds: 25,  glow: '#5aa8ff', sym: ['dia'],
+    desc: '헤어라인 은박 프레임과 은박 이름. 기울이면 프레임에만 빛이 맺힙니다.',
+    layers: [['은박 프레임', '헤어라인 결 + 베벨'], ['은박 이름', '빛 따라 하이라이트'], ['그림 창', '은색 테두리']] },
+  { k: 'sr',  code: 'SR',  name: '홀로 레어',   odds: 13,  glow: '#b46bff', sym: ['dia', 'dia'],
+    desc: '그림 창의 배경에만 옅은 무지개 박막. 인물은 원래 색 그대로.',
+    layers: [['남색 금속 프레임', ''], ['배경 홀로', '채도 낮은 박막, 인물 뒤에만'], ['은가루', '배경에 드문드문'], ['은박 이름', '']] },
+  { k: 'ssr', code: 'SSR', name: '오버프레임',  odds: 5,   glow: '#ffd25a', sym: ['star'],
+    desc: '인물이 그림 창과 틀을 넘어 이름줄·글상자 위까지 튀어나옵니다. 금박 베벨 틀, 반투명 양피지 글상자.',
+    layers: [['배경', '틀 색 선버스트'], ['칠기 틀 + 금박 베벨', '틀에 금가루'], ['인물 층', '창과 틀 밖으로'], ['금박 이름', '어두운 외곽선'], ['양피지 글상자', '인물이 비침']] },
+  { k: 'ur',  code: 'UR',  name: '골드 풀아트', odds: 1.8, glow: '#ffb21e', sym: ['star', 'star'],
+    desc: '금박 선버스트 위에 인물. 금가루는 배경과 틀에만 촘촘하고, 빛 방향에 따라 다른 알갱이가 반짝입니다.',
+    layers: [['금박 선버스트', '빛 받는 곳이 밝아짐'], ['금가루', '알갱이마다 면 방향이 다름'], ['안쪽 금테', '인물이 넘어감'], ['은박 이름', ''], ['양피지 글상자', '']] },
+  { k: 'lr',  code: 'LR',  name: '별빛 한정',   odds: .2,  glow: 'rainbow', sym: ['spark'],
+    desc: '그림마다 단 1장. 은빛 별빛 선버스트와 옅은 무지개 박막, 별 모양으로 반짝이는 가루, 시리얼 1 / 1.',
+    layers: [['별빛 선버스트', '옅은 박막색'], ['별가루', '큰 알갱이는 십자 빛'], ['무지갯빛 은테', ''], ['프리즘 이름', ''], ['시리얼', 'No. 1 / 1']] },
+];
+const TI = Object.fromEntries(TIERS.map((t, i) => [t.k, i]));
+const PREMIUM = new Set(['ssr', 'ur', 'lr']);
+const ATTR = [
+  { name: '빛',   c1: '#ffe39a', c2: '#c98a1c', icon: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>' },
+  { name: '어둠', c1: '#c7a6ff', c2: '#3a1c78', icon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>' },
+  { name: '불꽃', c1: '#ffb08a', c2: '#c92a4a', icon: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.6-5.6 3.6-8.8 1.6 1.5 2.2 3 2.2 4.6 1.2-1 1.8-2.4 1.9-4.1 2.6 2.2 5.3 5.1 5.3 8.6 0 3.4-2.6 5.9-6.5 5.9z"/>' },
+  { name: '물결', c1: '#8fe2ff', c2: '#1a5fb4', icon: '<path d="M3 10c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 16c3 0 3-3 6-3s3 3 6 3 3-3 6-3"/>' },
+  { name: '바람', c1: '#c3f2b0', c2: '#2f7a5a', icon: '<path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h7"/>' },
+  { name: '별',   c1: '#e2d6ff', c2: '#5a4fb0', icon: '<path d="M12 3.5l2.4 5 5.4.6-4 3.7 1.1 5.3L12 15.4 7.1 18.1l1.1-5.3-4-3.7 5.4-.6z"/>' },
+];
+// Real samples (scratch testing only; never committed). They load from ./samples/ next to the page and fall back silently.
+const SAMPLE_DEFS = [
+  { key: 's1', art: 'samples/art1.jpg', cut: 'samples/cut1.webp', fit: [-14, -1.2, 124], tint: '#b0246e', best: 'ur', id: 1013,
+    title: '사탕과 주먹', credit: '@loped00', date: '2026.10.13', attr: 2, tags: ['격투', '인물'], flavor: '사탕을 문 채로, 먼저 덤비라고 손짓했다.', views: 4210, albums: 3, fav: true },
+  { key: 's2', art: 'samples/art2.jpg', cut: 'samples/cut2.webp', fit: [-24, -1.6, 148], tint: '#a3203c', best: 'ssr', id: 1014,
+    title: '방울창의 여우', credit: '작가 미상', date: '2026.10.13', attr: 4, tags: ['여우귀', '창'], flavor: '방울 소리가 들렸다면, 이미 늦었다.', views: 1877, albums: 2, fav: true },
+  { key: 's3', art: 'samples/art3.jpg', pos: '50% 40%', protect: [.57, .42, .2, .19], best: 'ur', id: 1015,
+    title: '가면 아래의 노장', credit: '작가 미상', date: '2026.10.13', attr: 0, tags: ['초상', '유화풍'], flavor: '반쯤 깨진 가면 너머로 오래된 빛이 남아 있다.', views: 962, albums: 1, fav: false },
+  { key: 's4', art: 'samples/art4.jpg', pos: '68% 50%', protect: [.58, .33, .2, .13], best: 'lr', id: 1016,
+    title: '나비가 깨운 관', credit: '@moudanji', date: '2026.10.13', attr: 1, tags: ['고딕', '나비'], flavor: '나비 한 마리가 날아든 밤, 관 뚜껑이 열렸다.', views: 3305, albums: 4, fav: true },
+];
+const PROC_DEFS = [
+  { key: 'p0', proc: 0, best: 'ur', id: 427, title: '여명의 수정룡', credit: '@yunseul_art', date: '2026.04.27', attr: 5, tags: ['용', '수정'], flavor: '해가 뜨는 쪽으로, 수정 날개가 먼저 빛났다.', views: 2431, albums: 3, fav: true },
+  { key: 'p1', proc: 1, best: 'lr', id: 112, title: '심해의 등불', credit: '@haemu_ink', date: '2026.01.12', attr: 3, tags: ['바다', '환상'], flavor: '빛이 닿지 않는 곳에도 등불은 떠다닌다.', views: 986, albums: 1, fav: false },
+  { key: 'p2', proc: 2, best: 'ssr', id: 1038, title: '별을 지키는 날개', credit: '@dawn_ink', date: '2026.10.03', attr: 0, tags: ['천사', '별'], flavor: '별 하나를 품고, 밤새 날개를 접지 않았다.', views: 5120, albums: 4, fav: true },
+  { key: 'p3', proc: 3, best: 'ur', id: 904, title: '오로라를 벤 검', credit: '@kiri_paints', date: '2026.09.04', attr: 4, tags: ['검', '오로라'], flavor: '검이 지나간 자리마다 하늘이 초록으로 갈라졌다.', views: 1873, albums: 2, fav: true },
+];
+let ASSETS = [];
+
+/* --------------------------------------------------------------- textures */
+const svgURL = s => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+(function textures() {
+  const root = document.documentElement.style;
+  root.setProperty('--tex-paper', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' seed='4'/><feColorMatrix values='0 0 0 0 .3  0 0 0 0 .27  0 0 0 0 .22  0 0 0 .09 0'/></filter><rect width='120' height='120' filter='url(#p)'/></svg>`));
+  root.setProperty('--tex-brush', svgURL(`<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='b'><feTurbulence type='fractalNoise' baseFrequency='.004 .9' numOctaves='2' seed='9'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .22 -.04'/></filter><rect width='240' height='240' filter='url(#b)'/></svg>`));
+})();
+
+/* ------------------------------------------------- backdrops behind cutouts */
+const mixHex = (a, b, t) => { const p = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; const A = p(a), B = p(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
+const BD = {};
+function backdrop(kind, tint) {
+  const key = kind + tint; if (BD[key]) return BD[key];
+  const cv = newCanvas(), c = cv.getContext('2d'), R = seeded(kind.length * 97 + parseInt(tint.slice(1), 16) % 1000);
+  const rad = (stops, cx = 300, cy = 320, r = 640) => { const g = c.createRadialGradient(cx, cy, 10, cx, cy + 60, r); stops.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
+  if (kind === 'paper') { c.fillStyle = rad([[0, '#fffaf0'], [.6, mixHex('#efe6d2', tint, .12)], [1, mixHex('#d8ccb2', tint, .2)]]); c.fillRect(0, 0, W, H); sunburst(c, R, 300, 320, 'rgba(0,0,0,0)', mixHex('#ffffff', tint, .15), 0, .12); }
+  else if (kind === 'silver') { sunburst(c, R, 300, 320, rad([[0, '#ffffff'], [.35, '#d5dbe3'], [1, '#6f7a88']]), '#ffffff', 0, .35); }
+  else if (kind === 'holo') { sunburst(c, R, 300, 320, rad([[0, '#c9d2ff'], [.3, '#4a58a8'], [1, '#0c1030']]), '#c7d0ff', 0, .3); stars(c, R, 160, H, 4); }
+  else if (kind === 'deep') { sunburst(c, R, 300, 320, rad([[0, mixHex(tint, '#ffffff', .75)], [.25, mixHex(tint, '#ffffff', .15)], [.6, mixHex(tint, '#000000', .45)], [1, mixHex(tint, '#000000', .8)]]), mixHex(tint, '#ffffff', .6), 0, .4); }
+  else if (kind === 'gold') return BD[key] = ART.gold;
+  else if (kind === 'star') return BD[key] = ART.star;
+  grain(c, R, .06); vignette(c, .25);
+  return BD[key] = cv.toDataURL('image/jpeg', .9);
+}
+const BACKDROP_OF = { n: 'paper', r: 'silver', sr: 'holo', ssr: 'deep', ur: 'gold', lr: 'star' };
+
+/* ------------------------------------------------- luminance maps (no-cutout art)
+   Foil and glitter follow the picture's own light; an optional ellipse keeps them off the face. */
+const LUM = new Map();
+function lumMap(src, pos, protect) {
+  const key = src + pos + (protect || ''); if (LUM.has(key)) return LUM.get(key);
+  const p = new Promise(res => {
+    const im = new Image(); im.onload = () => {
+      try {
+        const w = 90, h = 126, cv = newCanvas(w, h), c = cv.getContext('2d', { willReadFrequently: true });
+        const [px, py] = (pos || '50% 50%').split(' ').map(v => parseFloat(v) / 100), ia = im.width / im.height, ca = 63 / 88;
+        let sx = 0, sy = 0, sw = im.width, sh = im.height;
+        if (ia > ca) { sw = im.height * ca; sx = (im.width - sw) * px; } else { sh = im.width / ca; sy = (im.height - sh) * py; }
+        c.drawImage(im, sx, sy, sw, sh, 0, 0, w, h);
+        const d = c.getImageData(0, 0, w, h), wt = new Float32Array(w * h);
+        for (let i = 0; i < w * h; i++) {
+          const r = d.data[i * 4], g = d.data[i * 4 + 1], b = d.data[i * 4 + 2], l = (.299 * r + .587 * g + .114 * b) / 255;
+          let v = Math.min(1, Math.max(0, (l - .42) / .4)); v = v * v * (3 - 2 * v);
+          if (protect) { const x = (i % w) / w, y = (i / w | 0) / h, e = ((x - protect[0]) / protect[2]) ** 2 + ((y - protect[1]) / protect[3]) ** 2; v *= Math.min(1, Math.max(0, (e - .6) / .8)); }
+          wt[i] = v; d.data[i * 4] = d.data[i * 4 + 1] = d.data[i * 4 + 2] = 255; d.data[i * 4 + 3] = v * 255;
+        }
+        c.putImageData(d, 0, 0);
+        res({ w, h, wt, mask: `url("${cv.toDataURL('image/png')}")` });
+      } catch (e) { res(null); } // a file:// page cannot read pixels; effects then stay unmasked and light
+    };
+    im.onerror = () => res(null); im.src = src;
+  });
+  LUM.set(key, p); return p;
+}
 
 /* ------------------------------------------------------------ card build */
 const SYM = {
@@ -880,23 +1058,26 @@ const SYM = {
 const HEART = '<svg viewBox="0 0 24 24"><path d="M12 20.3 4.6 13a4.6 4.6 0 0 1 6.5-6.5l.9.9.9-.9a4.6 4.6 0 0 1 6.5 6.5z"/></svg>';
 const pad = n => String(n).padStart(4, '0');
 const fmt = n => n.toLocaleString('ko-KR');
-let userArt = null; const madeURLs = [];
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+let userBg = null, userFg = null; const madeURLs = [];
+const cards = new Set();
 
 function makeCard(a, tier, opts = {}) {
-  const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial;
+  const el = document.createElement('div'); el.className = 'card'; el._asset = a; el._serial = opts.serial; el._live = !!opts.live;
   const at = ATTR[a.attr];
   el.innerHTML = `<div class="card__flip"><div class="card__tilt">
     <div class="face front">
-      <div class="f-plate"></div>
-      <div class="f-art"><img class="art" alt="" draggable="false" decoding="async"><div class="f-artholo"></div></div>
-      <div class="f-band top"></div><div class="f-band bot"></div>
-      <div class="f-name"><span class="f-title">${a.title}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
-      <div class="f-illus">Illus. ${a.handle} · ${a.site} · ${a.date}</div>
-      <div class="f-typeline">[${at.name} / ${a.tags.join(' · ')}]</div>
-      <div class="f-text"><p class="f-flavor">${a.flavor}</p>
+      <img class="f-bg" alt="" draggable="false" decoding="async">
+      <div class="f-sheen"></div><div class="f-shade"></div><div class="f-frame"></div>
+      <canvas class="f-glit"></canvas>
+      <div class="f-rim"></div>
+      <div class="f-subjwrap"><img class="f-subj" alt="" draggable="false" decoding="async"></div>
+      <div class="f-name"><span class="f-title">${esc(a.title)}</span><span class="f-type" style="--c1:${at.c1};--c2:${at.c2}" title="속성 ${at.name}"><svg viewBox="0 0 24 24">${at.icon}</svg></span></div>
+      <div class="f-illus">Illus. ${esc(a.credit)} · 수집 ${a.date}</div>
+      <div class="f-text"><div class="f-typeline">[${at.name} / ${a.tags.join(' · ')}]</div><p class="f-flavor">${esc(a.flavor)}</p>
         <div class="f-stats"><span>감상<b>${fmt(a.views)}</b></span><span>앨범<b>${a.albums}</b></span>${a.fav ? `<span class="fav" title="즐겨찾기">${HEART}</span>` : ''}</div></div>
       <div class="f-foot"><span class="f-no"><svg viewBox="0 0 32 36"><use href="#mk"/></svg>LK-${pad(a.id)}</span><span class="f-rar"></span><span class="f-serial"></span></div>
-      <div class="f-foil"></div><div class="f-sparkle"></div><div class="f-glare"></div><div class="f-edge"></div>
+      <div class="f-glare"></div><div class="f-edge"></div>
     </div>
     <div class="face back">
       <div class="b-frame"></div><div class="b-corner tl"></div><div class="b-corner tr"></div><div class="b-corner bl"></div><div class="b-corner br"></div>
@@ -904,31 +1085,122 @@ function makeCard(a, tier, opts = {}) {
       <div class="b-emblem"></div><svg class="b-mark" viewBox="0 0 32 36"><use href="#mk"/></svg>
       <div class="b-sheen"></div>
     </div></div></div>`;
+  el._cv = $('.f-glit', el); el._lx = .3; el._ly = .22;
+  if (opts.ovBg) el._ovBg = opts.ovBg;
   setTier(el, tier);
-  if (opts.src) el._override = opts.src;
-  refreshArt(el);
   bindTilt(el, opts.tilt);
+  cards.add(el); ro.observe(el);
   return el;
 }
 function setTier(el, k) {
   const t = TIERS[TI[k]];
-  el.dataset.tier = k; el.dataset.layout = FULL.has(k) ? 'full' : 'frame'; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : '';
+  el.dataset.tier = k; el.dataset.glow = t.glow === 'rainbow' ? 'rainbow' : '';
   el.style.setProperty('--glow', t.glow === 'rainbow' ? '#fff' : t.glow);
   $('.f-rar', el).innerHTML = t.sym.map(s => SYM[s]).join('') + `<span>${t.code}</span>`;
   const serial = el._serial ?? (k === 'lr' ? 'No. 1 / 1' : k === 'ur' ? 'No. 3 / 10' : '');
   $('.f-serial', el).textContent = (k === 'lr' || k === 'ur' || el.classList.contains('show-serial')) ? serial || 'No. 3 / 10' : '';
+  const title = $('.f-title', el), name = $('.f-name', el);
+  const metal = { r: 'silver', sr: 'silver', ssr: 'gold', ur: 'silver', lr: 'prism' }[k];
+  title.classList.toggle('metal', !!metal); name.classList.toggle('outlined', PREMIUM.has(k) || k === 'r' || k === 'sr');
+  if (metal) title.style.setProperty('--metal', `var(--${metal})`);
+  el.classList.toggle('parch', PREMIUM.has(k));
+  refreshArt(el);
 }
-function refreshArt(el) { const img = $('img.art', el); const src = el._override || userArt || ART[el._asset.attr]; if (img.getAttribute('src') !== src) img.src = src; }
+/* Which layers a card shows, from its asset, its tier and any user images. */
+function artPlan(el) {
+  const a = el._asset, k = el.dataset.tier;
+  const bgOverride = el._ovBg || userBg;
+  let cut = null, fit = [0, 0, 100], fade = false;
+  if (el._ovBg) cut = userFg; else if (userFg) cut = userFg; else if (!userBg) { if (a.cut) { cut = a.cut; fit = a.fit; fade = true; } else if (a.subj) cut = a.subj; }
+  if (cut === userFg && userFg) { fit = [0, 0, 100]; fade = false; }
+  let bg, pos = '50% 50%', protect = null;
+  if (bgOverride) { bg = bgOverride; }
+  else if (cut && a.scene && !['ur', 'lr'].includes(k)) bg = a.scene;
+  else if (cut) bg = backdrop(BACKDROP_OF[k], a.tint || '#6a3aa8');
+  else { bg = a.art; pos = a.pos || '50% 50%'; protect = a.protect || null; }
+  if (cut && bgOverride && !userFg) cut = null;
+  return { bg, pos, cut, fit, fade, protect, lumNeeded: !cut };
+}
+function refreshArt(el) {
+  const p = artPlan(el), bg = $('.f-bg', el), sj = $('.f-subj', el);
+  if (bg.getAttribute('src') !== p.bg) bg.src = p.bg;
+  el.style.setProperty('--bgpos', p.pos); el.style.setProperty('--tint', el._asset.tint || '#6a3aa8');
+  el.dataset.subj = p.cut ? '1' : '0'; el.dataset.cut = p.cut ? '1' : '0';
+  if (p.cut) { if (sj.getAttribute('src') !== p.cut) sj.src = p.cut; sj.style.setProperty('--sx', p.fit[0] + '%'); sj.style.setProperty('--sy', p.fit[1] + '%'); sj.style.setProperty('--sw', p.fit[2] + '%');
+    sj.style.setProperty('--sfade', 'none');
+    if (p.fade) { const setFade = () => { if (!sj.naturalWidth) return; const h = p.fit[2] * sj.naturalHeight / sj.naturalWidth, top = p.fit[1] * 1.3968;
+        const end = Math.min(1, (126 - top) / h), start = Math.max(0, end - 22 / h);
+        sj.style.setProperty('--sfade', `linear-gradient(180deg, #000 ${(start * 100).toFixed(1)}%, transparent ${(end * 100).toFixed(1)}%)`); };
+      sj.complete ? setFade() : sj.addEventListener('load', setFade, { once: true }); } }
+  el._lum = null; el.style.removeProperty('--lum');
+  const token = el._artToken = {};
+  if (p.lumNeeded) lumMap(p.bg, p.pos, p.protect).then(m => { if (el._artToken !== token) return; el._lum = m; if (m) el.style.setProperty('--lum', m.mask); regen(el); });
+  regen(el);
+}
+
+/* ---------------------------------------------------------------- glitter
+   Each flake has a facet: it flashes when the light sits at its own reflection spot (flake position + facet offset),
+   so moving the light makes different flakes catch it — like real foil glitter. Crisp 1–2 device-px cores; the
+   brightest big flakes get a small four-point star. Drawn under the subject, so the figure stays clean. */
+const GLIT = {
+  sr:  { d: .0012, win: 1,   frame: 0,  text: 0,   cols: ['#ffffff', '#dfe6ff', '#cfd8ff'], big: .04 },
+  ssr: { d: .0045, win: .3,  frame: 1,  text: .02, cols: ['#fff3c8', '#ffd36b', '#ffe9a6', '#ffffff'], big: .1 },
+  ur:  { d: .0085, win: 1,   frame: 1,  text: .04, cols: ['#ffffff', '#fff6d8', '#ffe08a', '#ffffff', '#fff0b8'], big: .1 },
+  lr:  { d: .0075, win: 1,   frame: 1,  text: .04, cols: ['#ffffff', '#ffffff', '#e8f2ff', '#ffd6ec', '#fff2c8', '#d0ffec', '#e2d6ff'], big: .14 },
+};
+const WIN = [.066, 15 / 139.68, .934, 80 / 139.68], TXT = [.066, 86 / 139.68, .934, 125.5 / 139.68];
+const inRect = (x, y, r) => x > r[0] && x < r[2] && y > r[1] && y < r[3];
+function hashStr(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; }
+function regen(el) {
+  const spec = GLIT[el.dataset.tier], cw = el._cw, ch = el._ch;
+  if (!spec || !cw) { el._flakes = null; drawGlit(el); return; }
+  const R = seeded(hashStr(el._asset.key + el.dataset.tier)), n = Math.round(spec.d * cw * ch), lum = el._lum, cut = el.dataset.cut === '1';
+  const fl = [], scale = Math.max(.65, Math.min(1.15, cw / 380));
+  for (let tries = 0; fl.length < n && tries < n * 10; tries++) {
+    const x = R(), y = R(); let w;
+    if (inRect(x, y, TXT)) w = spec.text; else if (inRect(x, y, WIN)) w = spec.win; else w = spec.frame;
+    if (!cut && el.dataset.tier !== 'sr') { if (lum) { const v = lum.wt[(y * lum.h | 0) * lum.w + (x * lum.w | 0)]; w *= inRect(x, y, WIN) || inRect(x, y, [.03, .03, .97, .97]) ? .04 + .96 * v : 1; } else w *= .35; }
+    if (R() > w) continue;
+    const phi = R() * Math.PI * 2, rr = R() ** .7 * .42;
+    fl.push({ x, y, tx: Math.cos(phi) * rr, ty: Math.sin(phi) * rr * .8, s: (.7 + R() ** 2.5 * 1.9) * scale, c: spec.cols[R() * spec.cols.length | 0], base: .08 + R() ** 2 * .32, big: R() < spec.big, sc: scale });
+  }
+  el._flakes = fl; sizeCanvas(el); drawGlit(el);
+}
+function sizeCanvas(el) { const cv = el._cv, w = Math.round(el._cw * DPR), h = Math.round(el._ch * DPR); if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; } }
+function drawGlit(el) {
+  const cv = el._cv, ctx = cv.getContext('2d'), f = el._flakes; ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!f || !cv.width) return;
+  const Wc = cv.width, Hc = cv.height, ar = Hc / Wc, lx = el._lx, ly = el._ly;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const k of f) {
+    const dx = lx - (k.x + k.tx), dy = (ly - (k.y + k.ty)) * ar, sx = lx - k.x, sy = (ly - k.y) * ar;
+    let b = (k.base + Math.exp(-(dx * dx + dy * dy) / .026) * 1.3) * (.6 + .4 * Math.exp(-(sx * sx + sy * sy) / .25));
+    if (b < .05) continue; if (b > 1) b = 1;
+    const px = k.x * Wc, py = k.y * Hc, s = Math.max(1, Math.round(k.s * DPR));
+    ctx.fillStyle = k.c; ctx.globalAlpha = b; ctx.fillRect(Math.round(px - s / 2), Math.round(py - s / 2), s, s);
+    if (k.big && b > .5) {
+      const L = (2.5 + 7 * b) * DPR * k.sc, t = Math.max(1, Math.round(DPR * .75));
+      ctx.globalAlpha = b * .9; ctx.fillRect(px - L * .5, py - t / 2, L, t); ctx.fillRect(px - t / 2, py - L * .5, t, L);
+      ctx.globalAlpha = b * .35; ctx.fillRect(px - L, py - t / 2, L * 2, t); ctx.fillRect(px - t / 2, py - L, t, L * 2);
+      ctx.globalAlpha = b * .25; ctx.beginPath(); ctx.arc(px, py, 2.2 * DPR * k.sc, 0, 7); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+const ro = new ResizeObserver(es => es.forEach(e => { const el = e.target, r = e.contentRect; if (!r.width) return; if (Math.abs((el._cw || 0) - r.width) < .5) return; el._cw = r.width; el._ch = r.height; regen(el); }));
 
 /* --------------------------------------------------------------- tilt */
 const MAX = RM ? 3 : 14;
-function applyPose(el, x, y) { // x, y in 0..1
+let glitQueue = new Set(), glitRAF = 0;
+function queueGlit(el) { glitQueue.add(el); if (!glitRAF) glitRAF = requestAnimationFrame(() => { glitRAF = 0; glitQueue.forEach(drawGlit); glitQueue.clear(); }); }
+function applyPose(el, x, y) {
   const px = x - .5, py = y - .5, s = el.style;
   s.setProperty('--mx', (x * 100).toFixed(2) + '%'); s.setProperty('--my', (y * 100).toFixed(2) + '%');
   s.setProperty('--rx', (-py * MAX * 1.4).toFixed(2) + 'deg'); s.setProperty('--ry', (px * MAX * 2).toFixed(2) + 'deg');
   s.setProperty('--ang', (Math.atan2(py, px) * 180 / Math.PI + 90).toFixed(1) + 'deg'); s.setProperty('--o', '1');
+  if (el._live) { el._lx = x; el._ly = y; if (el._flakes) queueGlit(el); }
 }
-function clearPose(el) { ['--mx', '--my', '--rx', '--ry', '--ang', '--o'].forEach(p => el.style.removeProperty(p)); }
+function clearPose(el) { ['--mx', '--my', '--rx', '--ry', '--ang', '--o'].forEach(p => el.style.removeProperty(p)); if (el._live) { el._lx = .3; el._ly = .22; if (el._flakes) queueGlit(el); } }
 function bindTilt(el, hooks = {}) {
   let rect = null, raf = 0, lx = .5, ly = .5, down = false;
   const update = () => { raf = 0; applyPose(el, lx, ly); };
@@ -948,94 +1220,125 @@ function bindTilt(el, hooks = {}) {
   el.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') end(); });
 }
 
-/* ------------------------------------------------------------ sections */
-// 1 ladder
-const ladder = $('#ladder'), ladderAsset = ASSETS[2];
-TIERS.forEach(t => {
-  const r = document.createElement('div'); r.className = 'rung';
-  r.appendChild(makeCard(ladderAsset, t.k));
-  r.insertAdjacentHTML('beforeend', `<div><h3><span class="code" data-t="${t.k}">${t.code}</span>${t.name}<span class="odds">${t.odds}%</span></h3><p>${t.desc}</p></div>`);
-  ladder.appendChild(r);
-});
-const backCard = makeCard(ladderAsset, 'n'); backCard.classList.add('down'); $('#backHolder').appendChild(backCard);
+/* ------------------------------------------------------------ boot */
+function loadImg(src) { return new Promise(res => { const im = new Image(); im.onload = () => res(true); im.onerror = () => res(false); im.src = src; }); }
+let ART = null;
+async function boot() {
+  ART = buildArt();
+  const found = [];
+  for (const d of SAMPLE_DEFS) {
+    const ok = await Promise.all([loadImg(d.art), d.cut ? loadImg(d.cut) : true]);
+    if (ok.every(Boolean)) found.push(d);
+  }
+  ASSETS = found.length ? found : PROC_DEFS.map(d => ({ ...d, scene: ART.bg[d.proc], subj: ART.subj[d.proc] }));
+  sections();
+}
 
-// 2 featured
-const featAsset = ASSETS[0];
-let demoOn = !RM, demoHold = 0, demoRAF = 0, featVisible = true, featTier = 'ssr';
-const feat = makeCard(featAsset, featTier, { tilt: { start: () => stopDemo(true), end: () => scheduleDemo() } });
-$('#featHolder').appendChild(feat);
-const seg = $('#tierSeg');
-TIERS.forEach(t => seg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-k="${t.k}" aria-checked="false" tabindex="-1">${t.code}</button>`));
+/* ------------------------------------------------------------ sections */
+let feat, featTier, featAsset, demoOn = !RM, demoRAF = 0, featVisible = true, demoT0 = 0, demoTimer = 0, anat, anatHolder;
+const byKey = k => ASSETS.find(a => a.key === k) || ASSETS[0];
+function sections() {
+  const usingSamples = ASSETS[0].key[0] === 's';
+  // 1 ladder
+  const ladder = $('#ladder'), ladderAsset = usingSamples ? byKey('s2') : byKey('p2');
+  TIERS.forEach(t => {
+    const r = document.createElement('div'); r.className = 'rung';
+    r.appendChild(makeCard(ladderAsset, t.k));
+    r.insertAdjacentHTML('beforeend', `<div><h3><span class="code" data-t="${t.k}">${t.code}</span>${t.name}<span class="odds">${t.odds}%</span></h3><p>${t.desc}</p></div>`);
+    ladder.appendChild(r);
+  });
+  const backCard = makeCard(ladderAsset, 'n'); backCard.classList.add('down'); $('#backHolder').appendChild(backCard);
+
+  // 2 featured
+  featAsset = usingSamples ? byKey('s1') : byKey('p0'); featTier = featAsset.best;
+  feat = makeCard(featAsset, featTier, { live: true, tilt: { start: () => stopDemo(), end: () => scheduleDemo() } });
+  $('#featHolder').appendChild(feat);
+  const picks = $('#picks');
+  ASSETS.forEach(a => {
+    const thumb = a.cut || a.art || a.subj;
+    picks.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-key="${a.key}" aria-checked="false"><img alt="" src="${thumb}" style="${a.cut || a.subj ? 'object-fit:contain;background:#3a3550' : ''}">${esc(a.title)}</button>`);
+  });
+  picks.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; featAsset = byKey(b.dataset.key); feat._asset = featAsset; rebuildFeat(); showTier(featAsset.best); });
+  const seg = $('#tierSeg');
+  TIERS.forEach(t => seg.insertAdjacentHTML('beforeend', `<button type="button" role="radio" data-k="${t.k}" aria-checked="false" tabindex="-1">${t.code}</button>`));
+  seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTier(b.dataset.k); });
+  seg.addEventListener('keydown', e => {
+    const i = TI[featTier], d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
+  });
+  showTier(featTier);
+  new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
+  const tgDemo = $('#tgDemo'); if (RM) tgDemo.setAttribute('aria-pressed', 'false');
+  tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
+  const tgFx = $('#tgFx');
+  tgFx.addEventListener('click', () => { const on = tgFx.getAttribute('aria-pressed') !== 'true'; tgFx.setAttribute('aria-pressed', on); $('#featStage').classList.toggle('plain', !on); });
+  $('#tgFlip').addEventListener('click', () => feat.classList.toggle('down'));
+
+  // 4 anatomy
+  const anatAsset = usingSamples ? byKey('s2') : byKey('p2');
+  anat = makeCard(anatAsset, 'ssr', { serial: 'No. 3 / 10' }); anat.classList.add('show-serial'); setTier(anat, 'ssr');
+  anatHolder = $('#anatCard'); anatHolder.appendChild(anat);
+  const fl = $('#fields');
+  FIELDS.forEach((f, i) => {
+    fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${esc(f[3] === '@' ? anatAsset.title : f[3])}</i>` : ''}</span></li>`);
+    anatHolder.insertAdjacentHTML('beforeend', `<span class="pin" data-i="${i}">${i + 1}</span>`);
+  });
+  new ResizeObserver(placePins).observe(anatHolder);
+  const hot = li => anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', !!li && p.dataset.i === li.dataset.i));
+  fl.addEventListener('pointerover', e => hot(e.target.closest('li'))); fl.addEventListener('pointerleave', () => hot(null)); fl.addEventListener('focusin', e => hot(e.target.closest('li')));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePins);
+  placePins(); startDemo();
+}
+function rebuildFeat() { refreshArt(feat); $('.f-title', feat).textContent = featAsset.title; const at = ATTR[featAsset.attr];
+  const ty = $('.f-type', feat); ty.style.setProperty('--c1', at.c1); ty.style.setProperty('--c2', at.c2); ty.innerHTML = `<svg viewBox="0 0 24 24">${at.icon}</svg>`;
+  $('.f-illus', feat).textContent = `Illus. ${featAsset.credit} · 수집 ${featAsset.date}`; $('.f-typeline', feat).textContent = `[${at.name} / ${featAsset.tags.join(' · ')}]`;
+  $('.f-flavor', feat).textContent = featAsset.flavor; $('.f-no', feat).lastChild.textContent = `LK-${pad(featAsset.id)}`;
+  const st = $('.f-stats', feat); st.innerHTML = `<span>감상<b>${fmt(featAsset.views)}</b></span><span>앨범<b>${featAsset.albums}</b></span>${featAsset.fav ? `<span class="fav">${HEART}</span>` : ''}`; }
 function showTier(k, focus) {
   featTier = k; setTier(feat, k); const t = TIERS[TI[k]];
-  seg.querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
+  $('#tierSeg').querySelectorAll('button').forEach(b => { const on = b.dataset.k === k; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
+  $('#picks').querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', b.dataset.key === featAsset.key));
   const code = $('#fCode'); code.dataset.t = k; code.textContent = t.code; $('#fName').textContent = t.name; $('#fOdds').textContent = `뽑힐 확률 ${t.odds}%`;
   $('#fDesc').textContent = t.desc;
   $('#fLayers').innerHTML = t.layers.map((l, i) => `<li><span class="n">${i + 1}</span><b>${l[0]}</b><span>${l[1]}</span></li>`).join('');
 }
-seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTier(b.dataset.k); });
-seg.addEventListener('keydown', e => {
-  const i = TI[featTier], d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-  if (d) { e.preventDefault(); showTier(TIERS[(i + d + TIERS.length) % TIERS.length].k, true); }
-});
-showTier(featTier);
 function demoFrame(t) {
-  demoRAF = 0; if (!demoOn || !featVisible || feat.classList.contains('active') || Date.now() < demoHold) return;
+  demoRAF = 0; if (!demoOn || !featVisible || feat.classList.contains('active')) return;
   if (!demoT0) demoT0 = t; const k = Math.min(1, (t - demoT0) / 1600), e = k * k * (3 - 2 * k);
-  const sx = .5 + .36 * Math.sin(t * .00062), sy = .5 + .26 * Math.sin(t * .00097 + 1.2);
-  applyPose(feat, .34 + (sx - .34) * e, .24 + (sy - .24) * e); feat.style.setProperty('--o', (.5 + .35 * e).toFixed(3));
+  const sx = .5 + .38 * Math.sin(t * .00058), sy = .45 + .3 * Math.sin(t * .00091 + 1.2);
+  applyPose(feat, .3 + (sx - .3) * e, .22 + (sy - .22) * e); feat.style.setProperty('--o', (.5 + .4 * e).toFixed(3));
   demoRAF = requestAnimationFrame(demoFrame);
 }
-let demoT0 = 0;
-function startDemo() { if (!demoOn || demoRAF || !featVisible) return; demoT0 = 0; feat.classList.add('demo'); demoRAF = requestAnimationFrame(demoFrame); }
-function stopDemo() { if (demoRAF) cancelAnimationFrame(demoRAF), demoRAF = 0; feat.classList.remove('demo'); }
-let demoTimer = 0;
+function startDemo() { if (!feat || !demoOn || demoRAF || !featVisible) return; demoT0 = 0; feat.classList.add('demo'); demoRAF = requestAnimationFrame(demoFrame); }
+function stopDemo() { if (demoRAF) cancelAnimationFrame(demoRAF), demoRAF = 0; feat && feat.classList.remove('demo'); }
 function scheduleDemo() { clearTimeout(demoTimer); if (!demoOn) return; demoTimer = setTimeout(() => { if (!feat.classList.contains('active')) startDemo(); }, 2600); }
-new IntersectionObserver(es => { featVisible = es[0].isIntersecting; featVisible ? startDemo() : stopDemo(); }).observe(feat);
-const tgDemo = $('#tgDemo');
-if (RM) { tgDemo.setAttribute('aria-pressed', 'false'); }
-tgDemo.addEventListener('click', () => { demoOn = !demoOn; tgDemo.setAttribute('aria-pressed', demoOn); if (demoOn) startDemo(); else { stopDemo(); clearPose(feat); } });
-const tgFx = $('#tgFx');
-tgFx.addEventListener('click', () => { const on = tgFx.getAttribute('aria-pressed') !== 'true'; tgFx.setAttribute('aria-pressed', on); $('#featStage').classList.toggle('plain', !on); });
-$('#tgFlip').addEventListener('click', () => feat.classList.toggle('down'));
 
-// 4 anatomy
-const anatAsset = ASSETS[5];
-const anat = makeCard(anatAsset, 'sr', { serial: 'No. 3 / 10' }); anat.classList.add('show-serial'); setTier(anat, 'sr');
-$('#anatCard').appendChild(anat);
 const FIELDS = [
-  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', anatAsset.title],
-  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', '꽃'],
-  ['.f-art', '그림', '에셋 이미지 그대로. 풀아트 등급은 카드 전체를 덮음', ''],
-  ['.f-illus', '일러스트 줄', '작가 · 출처 사이트 · 수집일', `${anatAsset.handle} · ${anatAsset.site} · ${anatAsset.date}`],
-  ['.f-typeline', '타입 줄', '속성 + 대표 태그 2–3개', '[꽃 / 봄 · 일상]'],
+  ['.f-title', '카드 이름', '에셋 제목. 없으면 파일 이름에서 정리', '@'],
+  ['.f-type', '속성', '태그나 분류를 6가지 속성으로 묶어 아이콘과 색으로', ''],
+  ['.f-subj', '튀어나오는 인물 층', '배경을 지운 투명 레이어. SSR부터 틀 밖으로', ''],
+  ['.f-bg', '배경 박', '흰 배경 그림은 등급별 선버스트 박으로 바꿔 깜', ''],
+  ['.f-illus', '일러스트 줄', '작가 · 수집일', ''],
+  ['.f-typeline', '타입 줄', '속성 + 대표 태그 2–3개', ''],
   ['.f-flavor', '한 줄 글', '직접 적거나 비워 둠', '', '아이디어'],
-  ['.f-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 겨루는 숫자가 아니라 구경용', '', '아이디어'],
-  ['.f-no', '카드 번호', '에셋마다 고정 번호 LK-0001부터', 'LK-0215'],
-  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', 'SR'],
+  ['.f-stats', '스탯', '감상 횟수 · 담긴 앨범 수 · 즐겨찾기 표시. 구경용 숫자', '', '아이디어'],
+  ['.f-no', '카드 번호', '에셋마다 고정 번호', ''],
+  ['.f-rar', '등급 마크', '뽑을 때 정해진 등급, 모양 개수로 구분', ''],
   ['.f-serial', '시리얼', 'UR·LR만. 이 그림으로 나온 몇 번째 카드인지', 'No. 3 / 10'],
 ];
-const fl = $('#fields'), anatHolder = $('#anatCard');
-FIELDS.forEach((f, i) => {
-  fl.insertAdjacentHTML('beforeend', `<li data-i="${i}" tabindex="0"><span class="k">${i + 1}</span><b>${f[1]}${f[4] ? `<span class="tag">${f[4]}</span>` : ''}</b><span>${f[2]}${f[3] ? `<i>${f[3]}</i>` : ''}</span></li>`);
-  anatHolder.insertAdjacentHTML('beforeend', `<span class="pin" data-i="${i}">${i + 1}</span>`);
-});
 function placePins() {
-  const cb = anat.getBoundingClientRect(), hb = anatHolder.getBoundingClientRect();
+  if (!anat) return; const cb = anat.getBoundingClientRect(), hb = anatHolder.getBoundingClientRect();
   if (!cb.width) return;
-  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'R', 'L', 'L', 'L', 'L', 'B', 'R'];
+  const L = cb.left - hb.left - 15, Rr = cb.right - hb.left + 15, side = ['L', 'R', 'C', 'C', 'R', 'L', 'L', 'L', 'L', 'B', 'R'];
   FIELDS.forEach((f, i) => {
     const t = $(f[0], anat); if (!t) return; const r = t.getBoundingClientRect(), pin = anatHolder.querySelector(`.pin[data-i="${i}"]`), sd = side[i];
     let x = sd === 'L' ? L : sd === 'R' ? Rr : r.left - hb.left + r.width / 2, y = r.top - hb.top + r.height / 2;
-    if (sd === 'C') y = r.top - hb.top + r.height * .5;
+    if (f[0] === '.f-subj') { x = cb.left - hb.left + cb.width * .9; y = cb.top - hb.top + cb.height * .19; }
+    if (f[0] === '.f-bg') { x = cb.left - hb.left + cb.width * .14; y = cb.top - hb.top + cb.height * .3; }
     if (sd === 'B') y = cb.bottom - hb.top + 15;
     pin.className = 'pin ' + sd; pin.style.left = x + 'px'; pin.style.top = y + 'px';
   });
 }
-new ResizeObserver(placePins).observe(anatHolder);
-fl.addEventListener('pointerover', e => { const li = e.target.closest('li'); anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', li && p.dataset.i === li.dataset.i)); });
-fl.addEventListener('pointerleave', () => anatHolder.querySelectorAll('.pin').forEach(p => p.classList.remove('hot')));
-fl.addEventListener('focusin', e => { const li = e.target.closest('li'); anatHolder.querySelectorAll('.pin').forEach(p => p.classList.toggle('hot', li && p.dataset.i === li.dataset.i)); });
 
 /* ----------------------------------------------------------------- gacha */
 const stage = $('#stage'), pack = $('#pack'), stCards = $('#stCards'), stFlash = $('#stFlash'), stParticles = $('#stParticles'), stHint = $('#stHint');
@@ -1065,12 +1368,12 @@ function burst(el, k) {
     stParticles.appendChild(p); setTimeout(() => p.remove(), 1700);
   }
 }
+function clearStage() { stCards.querySelectorAll('.card').forEach(c => { cards.delete(c); ro.unobserve(c); }); stCards.innerHTML = ''; }
 async function pull(n) {
-  if (busy) return; setBusy(true); skip = false; stopDemo();
+  if (busy || !ASSETS.length) return; setBusy(true); skip = false; stopDemo();
   const res = draw(n), top = res.reduce((m, o) => Math.max(m, TI[o.k]), 0), topK = TIERS[top].k;
-  stCards.innerHTML = ''; stCards.className = 'st-cards ' + (n === 1 ? 'single' : 'multi'); stage.classList.remove('has-cards', 'rays');
-  $('#gRes').textContent = '뽑는 중…';
-  stHint.textContent = '화면을 누르면 건너뜁니다';
+  clearStage(); stCards.className = 'st-cards ' + (n === 1 ? 'single' : 'multi'); stage.classList.remove('has-cards', 'rays');
+  $('#gRes').textContent = '뽑는 중…'; stHint.textContent = '화면을 누르면 건너뜁니다';
   $('#packCount').textContent = n === 1 ? '1장' : '10장';
   if (!RM) {
     pack.className = 'pack'; pack.dataset.leak = topK === 'lr' ? 'rainbow' : ''; pack.style.setProperty('--leak', topK === 'lr' ? '#fff' : glowOf(topK));
@@ -1080,7 +1383,7 @@ async function pull(n) {
   }
   stage.classList.add('has-cards');
   const els = res.map((o, i) => {
-    const el = makeCard(o.a, o.k, { serial: o.k === 'ur' ? `No. ${1 + (Math.random() * 10 | 0)} / 10` : undefined });
+    const el = makeCard(o.a, o.k, { live: n === 1, serial: o.k === 'ur' ? `No. ${1 + (Math.random() * 10 | 0)} / 10` : undefined });
     el.style.setProperty('--i', i); if (!RM) el.classList.add('down'); stCards.appendChild(el); return el;
   });
   void stCards.offsetWidth; stCards.classList.add('dealt');
@@ -1116,32 +1419,35 @@ pack.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ')
 stage.addEventListener('click', e => { if (busy) { doSkip(); return; } const c = e.target.closest('.card.revealed'); if (c) openZoom(c); });
 new IntersectionObserver(es => stage.classList.toggle('paused', !es[0].isIntersecting)).observe(stage);
 
-// zoom
-const zoom = $('#zoom'), zoomHolder = $('#zoomHolder'); let zoomFrom = null;
+const zoom = $('#zoom'), zoomHolder = $('#zoomHolder'); let zoomFrom = null, zoomCard = null;
 function openZoom(c) {
-  zoomFrom = document.activeElement; zoomHolder.innerHTML = '';
-  const z = makeCard(c._asset, c.dataset.tier, { serial: c._serial, src: c._override }); zoomHolder.appendChild(z);
+  zoomFrom = document.activeElement; closeZoomCard();
+  zoomCard = makeCard(c._asset, c.dataset.tier, { live: true, serial: c._serial, ovBg: c._ovBg }); zoomHolder.appendChild(zoomCard);
   zoom.hidden = false; $('#zoomClose').focus();
 }
-function closeZoom() { zoom.hidden = true; zoomHolder.innerHTML = ''; zoomFrom && zoomFrom.focus && zoomFrom.focus(); }
+function closeZoomCard() { if (zoomCard) { cards.delete(zoomCard); ro.unobserve(zoomCard); zoomCard.remove(); zoomCard = null; } }
+function closeZoom() { zoom.hidden = true; closeZoomCard(); zoomFrom && zoomFrom.focus && zoomFrom.focus(); }
 $('#zoomClose').addEventListener('click', closeZoom);
 zoom.addEventListener('click', e => { if (e.target === zoom) closeZoom(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !zoom.hidden) closeZoom(); });
 
 /* -------------------------------------------------------- user images */
-const fileIn = $('#file'), artState = $('#artState'), resetBtn = $('#resetArt'), imgbar = $('#imgbar');
-const allCards = () => document.querySelectorAll('.card');
-function setGlobal(file) {
-  if (!file || !/^image\//.test(file.type)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
-  const url = URL.createObjectURL(file); madeURLs.push(url); userArt = url;
-  allCards().forEach(c => { c._override = null; refreshArt(c); });
-  artState.textContent = `모든 카드: ${file.name}`; resetBtn.hidden = false;
+const fileIn = $('#file'), fileFg = $('#fileFg'), artState = $('#artState'), resetBtn = $('#resetArt'), imgbar = $('#imgbar'), fgNote = $('#fgNote');
+const isImg = f => f && /^image\//.test(f.type);
+function refreshAll() { cards.forEach(refreshArt); fgNote.hidden = !(userBg && !userFg); resetBtn.hidden = !(userBg || userFg || [...cards].some(c => c._ovBg)); }
+function setGlobal(file, fg) {
+  if (!isImg(file)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
+  const url = URL.createObjectURL(file); madeURLs.push(url);
+  if (fg) userFg = url; else userBg = url;
+  cards.forEach(c => { c._ovBg = null; }); refreshAll();
+  artState.textContent = `${fg ? '튀어나올 부분' : '모든 카드'}: ${file.name}`;
 }
-fileIn.addEventListener('change', () => { setGlobal(fileIn.files[0]); fileIn.value = ''; });
-$('#fileBtn').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } });
+fileIn.addEventListener('change', () => { setGlobal(fileIn.files[0], false); fileIn.value = ''; });
+fileFg.addEventListener('change', () => { setGlobal(fileFg.files[0], true); fileFg.value = ''; });
+[['#fileBtn', fileIn], ['#fileFgBtn', fileFg]].forEach(([s, inp]) => $(s).addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } }));
 resetBtn.addEventListener('click', () => {
-  userArt = null; madeURLs.splice(0).forEach(u => URL.revokeObjectURL(u));
-  allCards().forEach(c => { c._override = null; refreshArt(c); }); artState.textContent = '원래 그림으로 돌렸습니다'; resetBtn.hidden = true;
+  userBg = userFg = null; cards.forEach(c => { c._ovBg = null; }); refreshAll(); madeURLs.splice(0).forEach(u => URL.revokeObjectURL(u));
+  artState.textContent = '원래 그림으로 돌렸습니다';
 });
 const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
 let lastTarget = null;
@@ -1156,16 +1462,15 @@ document.addEventListener('dragleave', e => { if (e.relatedTarget === null) { la
 document.addEventListener('drop', e => {
   if (!hasFiles(e)) return; e.preventDefault();
   lastTarget && lastTarget.classList.remove('drop-target'); lastTarget = null; imgbar.classList.remove('drop');
-  const f = e.dataTransfer.files[0]; const c = e.target.closest && e.target.closest('.card');
-  if (e.target.closest && e.target.closest('#imgbar')) return setGlobal(f);
+  const f = e.dataTransfer.files[0], c = e.target.closest && e.target.closest('.card');
+  if (e.target.closest && e.target.closest('#imgbar')) return setGlobal(f, false);
   if (!c || !f) return;
-  if (!/^image\//.test(f.type)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
-  const url = URL.createObjectURL(f); madeURLs.push(url); c._override = url; refreshArt(c);
+  if (!isImg(f)) { artState.textContent = '이미지 파일만 쓸 수 있어요'; return; }
+  const url = URL.createObjectURL(f); madeURLs.push(url); c._ovBg = url; refreshArt(c);
   artState.textContent = `카드 한 장: ${f.name}`; resetBtn.hidden = false;
 });
 
-placePins(); startDemo();
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePins);
+boot();
 })();
 </script>
 </body>
