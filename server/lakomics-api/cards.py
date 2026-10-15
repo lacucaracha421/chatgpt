@@ -2,6 +2,10 @@
 
 All grants, draws and album updates use the caller's control database transaction.
 No library publication, asset mutation or background accrual is performed here.
+
+Lifecycle of a pack: granted (its five cards are drawn at once into card_pending and are
+never shown) -> opened (cards move to card_draws; the album is untouched) -> kept (only the
+chosen slots reach card_album, with serials) or expired after KEEP_DAYS without a decision.
 """
 import base64
 import hashlib
@@ -25,6 +29,7 @@ from home_publications import Digest, Strict, bounded_body, fail, text
 PREFIX = "/v1/cards"
 MAX_BODY_BYTES = 4096
 MAX_CUTOUT_BYTES = 2 * 1024 * 1024
+KEEP_DAYS = 7
 TICKET_SECONDS = 300
 KST = timezone(timedelta(hours=9))
 TIERS = ("n", "r", "sr", "ssr", "ur", "lr")
@@ -41,13 +46,17 @@ INSERT OR IGNORE INTO card_state VALUES(1,0,NULL,NULL,NULL);
 CREATE TABLE IF NOT EXISTS card_packs(
  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('daily','bonus')),
  day TEXT NOT NULL, granted_at TEXT NOT NULL, opened_at TEXT, opened_by TEXT,
- open_operation_id TEXT);
+ open_operation_id TEXT, kept_at TEXT, keep_operation_id TEXT, expired_at TEXT);
 CREATE INDEX IF NOT EXISTS card_packs_unopened ON card_packs(opened_at,day,id);
 CREATE TABLE IF NOT EXISTS card_draws(
  pack_id TEXT NOT NULL, slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 4),
  character_id TEXT NOT NULL, tier TEXT NOT NULL, art_asset_id TEXT NOT NULL,
  serial INTEGER, was_new INTEGER NOT NULL, card_json TEXT NOT NULL,
- PRIMARY KEY(pack_id,slot));
+ kept INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(pack_id,slot));
+CREATE TABLE IF NOT EXISTS card_pending(
+ pack_id TEXT NOT NULL, slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 4),
+ character_id TEXT NOT NULL, tier TEXT NOT NULL, art_asset_id TEXT NOT NULL,
+ drawn_at TEXT NOT NULL, PRIMARY KEY(pack_id,slot));
 CREATE INDEX IF NOT EXISTS card_draws_character ON card_draws(character_id,tier,serial);
 CREATE TABLE IF NOT EXISTS card_album(
  character_id TEXT NOT NULL, tier TEXT NOT NULL, count INTEGER NOT NULL,
@@ -65,12 +74,32 @@ CREATE TABLE IF NOT EXISTS card_cutouts(
 """
 
 
+def _columns(db, table):
+    return {row[1] for row in db.execute("PRAGMA table_info(" + table + ")")}
+
+
 def startup_db(db):
     db.executescript(DDL)
+    # Tables created before the keep step lack these columns. Packs opened back then
+    # already put every card in the album, so they count as fully kept.
+    legacy = "kept_at" not in _columns(db, "card_packs")
+    for column in ("kept_at", "keep_operation_id", "expired_at"):
+        if column not in _columns(db, "card_packs"):
+            db.execute("ALTER TABLE card_packs ADD COLUMN " + column + " TEXT")
+    if "kept" not in _columns(db, "card_draws"):
+        db.execute("ALTER TABLE card_draws ADD COLUMN kept INTEGER NOT NULL DEFAULT 0")
+    if legacy:
+        db.execute("UPDATE card_packs SET kept_at=opened_at WHERE opened_at IS NOT NULL")
+        db.execute("UPDATE card_draws SET kept=1 WHERE pack_id IN (SELECT id FROM card_packs WHERE opened_at IS NOT NULL)")
 
 
 class OpenBody(Strict):
     operationId: text(128)
+
+
+class KeepBody(Strict):
+    operationId: text(128)
+    slots: Annotated[list[Annotated[int, Field(ge=0, le=4)]], Field(max_length=5)]
 
 
 class PrepareBody(Strict):
@@ -188,6 +217,11 @@ def accrue(db, now):
     if previous is None or previous < today.isoformat():
         db.execute("UPDATE card_state SET accrued_through=? WHERE singleton=1", [today.isoformat()])
         _bump(db)
+    cutoff = _iso(now - timedelta(days=KEEP_DAYS))
+    if db.execute("UPDATE card_packs SET expired_at=? WHERE opened_at IS NOT NULL AND kept_at IS NULL "
+                  "AND expired_at IS NULL AND julianday(opened_at)<=julianday(?)", [_iso(now), cutoff]).rowcount:
+        _bump(db)
+    draw_missing(db, now)
     _cover(db, today)
     return today
 
@@ -223,45 +257,174 @@ def _card(db, character_id, tier, art_id, count, level, serial, is_new, nodes):
             "isNew": is_new}
 
 
+def _expires_at(opened_at):
+    return datetime.fromisoformat(opened_at) + timedelta(days=KEEP_DAYS)
+
+
+def _draw_slots(rng, characters):
+    slots = []
+    for slot, tier in enumerate(roll_pack(rng)):
+        character_id = rng.choice(sorted(characters))
+        slots.append({"slot": slot, "character_id": character_id, "tier": tier,
+                      "art_asset_id": rng.choice(characters[character_id]["images"])["id"]})
+    return slots
+
+
+def _store_pending(db, pack_id, characters, now):
+    for row in _draw_slots(secrets.SystemRandom(), characters):
+        db.execute("INSERT INTO card_pending VALUES(?,?,?,?,?,?)",
+                   [pack_id, row["slot"], row["character_id"], row["tier"], row["art_asset_id"], _iso(now)])
+
+
+def draw_missing(db, now):
+    """Draw the contents of every unopened pack that has none yet (new grants and packs
+    granted before pre-drawing existed). Nothing is drawn while no character is eligible."""
+    ids = [r[0] for r in db.execute(
+        "SELECT p.id FROM card_packs p WHERE p.opened_at IS NULL AND NOT EXISTS "
+        "(SELECT 1 FROM card_pending d WHERE d.pack_id=p.id) ORDER BY p.day,p.id")]
+    if not ids:
+        return
+    characters = eligible_characters(db)
+    if not characters:
+        return
+    for pack_id in ids:
+        _store_pending(db, pack_id, characters, now)
+    _bump(db)
+
+
+def _simulate(db, rows, nodes):
+    """Cards of drawn slots as they would be if every one were kept. Writes nothing."""
+    seen, cards = {}, []
+    for row in rows:
+        key = (row["character_id"], row["tier"])
+        if key not in seen:
+            old = db.execute("SELECT count,art_asset_id FROM card_album WHERE character_id=? AND tier=?",
+                             list(key)).fetchone()
+            seen[key] = [old[0] if old else 0, old[1] if old else row["art_asset_id"]]
+        seen[key][0] += 1
+        count, art_id = seen[key]
+        cards.append({"slot": row["slot"], **_card(db, key[0], key[1], art_id, count, min(count, 5), None,
+                                                    count == 1, nodes)})
+    return cards
+
+
+def _pack_view(db, pack, already_opened, now):
+    """What every client sees of an opened pack. Undecided packs show current would-be values."""
+    rows = db.execute("SELECT * FROM card_draws WHERE pack_id=? ORDER BY slot", [pack["id"]]).fetchall()
+    expires = _expires_at(pack["opened_at"])
+    expired = pack["kept_at"] is None and (pack["expired_at"] is not None or now >= expires)
+    if pack["kept_at"] is None and not expired:
+        cards = _simulate(db, rows, _nodes(db))
+    else:
+        cards = [json.loads(r["card_json"]) for r in rows]
+    cards = [{**card, "kept": bool(row["kept"])} for card, row in zip(cards, rows)]
+    return {"packId": pack["id"], "openedAt": pack["opened_at"], "alreadyOpened": already_opened,
+            "expiresAt": _iso(expires), "keptAt": pack["kept_at"], "expired": expired, "cards": cards}
+
+
+def _pack_row(db, pack_id):
+    return db.execute("SELECT * FROM card_packs WHERE id=?", [pack_id]).fetchone()
+
+
 def open_pack(db, pack_id, operation_id, principal, now):
-    """Caller holds BEGIN IMMEDIATE, including the idempotency check."""
+    """Caller holds BEGIN IMMEDIATE, including the idempotency check. The album is not touched."""
     accrue(db, now)
-    pack = db.execute("SELECT * FROM card_packs WHERE id=?", [pack_id]).fetchone()
+    pack = _pack_row(db, pack_id)
     if pack is None:
         fail(404, "packNotFound", "Card pack not found.")
     if pack["opened_at"] is not None:
-        cards = [json.loads(r[0]) for r in db.execute(
-            "SELECT card_json FROM card_draws WHERE pack_id=? ORDER BY slot", [pack_id])]
-        return {"packId": pack_id, "openedAt": pack["opened_at"], "alreadyOpened": True, "cards": cards}
+        return _pack_view(db, pack, True, now)
     characters = eligible_characters(db)
     if not characters:
         fail(409, "noCharacters", "No registered characters have visible images.")
+    rows = db.execute("SELECT * FROM card_pending WHERE pack_id=? ORDER BY slot", [pack_id]).fetchall()
+    if len(rows) != 5:
+        db.execute("DELETE FROM card_pending WHERE pack_id=?", [pack_id])
+        _store_pending(db, pack_id, characters, now)
+        rows = db.execute("SELECT * FROM card_pending WHERE pack_id=? ORDER BY slot", [pack_id]).fetchall()
     rng = secrets.SystemRandom()
-    nodes = _nodes(db)
-    cards = []
-    for slot, tier in enumerate(roll_pack(rng)):
-        character_id = rng.choice(sorted(characters))
-        chosen = rng.choice(characters[character_id]["images"])
-        old = db.execute("SELECT * FROM card_album WHERE character_id=? AND tier=?", [character_id, tier]).fetchone()
-        count = old["count"] + 1 if old else 1
-        art_id = old["art_asset_id"] if old else chosen["id"]
-        level = min(count, 5)
-        serial = None
-        if tier in ("ur", "lr"):
-            serial = db.execute("SELECT next FROM card_serials WHERE tier=?", [tier]).fetchone()[0]
-            db.execute("UPDATE card_serials SET next=next+1 WHERE tier=?", [tier])
-        db.execute("INSERT INTO card_album VALUES(?,?,?,?,?,?,?) ON CONFLICT(character_id,tier) "
-                   "DO UPDATE SET count=excluded.count,level=excluded.level,last_drawn_at=excluded.last_drawn_at",
-                   [character_id, tier, count, level, art_id, _iso(now), _iso(now)])
-        card = {"slot": slot, **_card(db, character_id, tier, art_id, count, level, serial, old is None, nodes)}
-        # Snapshot display data as well: later duplicates/publications must not change a retry.
-        db.execute("INSERT INTO card_draws VALUES(?,?,?,?,?,?,?,?)",
-                   [pack_id, slot, character_id, tier, art_id, serial, int(old is None), json.dumps(card)])
-        cards.append(card)
+    slots = []
+    for row in rows:
+        row = dict(row)
+        images = characters.get(row["character_id"], {"images": []})["images"]
+        if row["art_asset_id"] not in {image["id"] for image in images}:
+            # The character or image was removed since the grant: keep the tier, redraw the rest.
+            row["character_id"] = rng.choice(sorted(characters))
+            row["art_asset_id"] = rng.choice(characters[row["character_id"]]["images"])["id"]
+        slots.append(row)
+    for card, row in zip(_simulate(db, slots, _nodes(db)), slots):
+        db.execute("INSERT INTO card_draws(pack_id,slot,character_id,tier,art_asset_id,serial,was_new,card_json,kept) "
+                   "VALUES(?,?,?,?,?,NULL,?,?,0)",
+                   [pack_id, row["slot"], row["character_id"], row["tier"], card["artAssetId"],
+                    int(card["isNew"]), json.dumps(card)])
+    db.execute("DELETE FROM card_pending WHERE pack_id=?", [pack_id])
     db.execute("UPDATE card_packs SET opened_at=?,opened_by=?,open_operation_id=? WHERE id=?",
                [_iso(now), principal, operation_id, pack_id])
     _bump(db)
-    return {"packId": pack_id, "openedAt": _iso(now), "alreadyOpened": False, "cards": cards}
+    return _pack_view(db, _pack_row(db, pack_id), False, now)
+
+
+def keep_pack(db, pack_id, operation_id, slots, now):
+    """Caller holds BEGIN IMMEDIATE. Only the chosen slots reach the album; a pack is decided once."""
+    accrue(db, now)
+    pack = _pack_row(db, pack_id)
+    if pack is None:
+        fail(404, "packNotFound", "Card pack not found.")
+    if pack["opened_at"] is None:
+        fail(409, "packNotOpened", "Card pack has not been opened.")
+    if pack["kept_at"] is not None:
+        if pack["keep_operation_id"] == operation_id:
+            return {**_pack_view(db, pack, True, now), "alreadyKept": True}
+        fail(409, "alreadyKept", "This pack has already been decided.")
+    if pack["expired_at"] is not None or now >= _expires_at(pack["opened_at"]):
+        fail(409, "packExpired", "The time to keep this pack has passed.")
+    if len(set(slots)) != len(slots):
+        fail(422, "invalidCardRequest", "Invalid card request.")
+    nodes = _nodes(db)
+    for row in db.execute("SELECT * FROM card_draws WHERE pack_id=? ORDER BY slot", [pack_id]).fetchall():
+        if row["slot"] not in slots:
+            continue
+        key = [row["character_id"], row["tier"]]
+        old = db.execute("SELECT * FROM card_album WHERE character_id=? AND tier=?", key).fetchone()
+        count = old["count"] + 1 if old else 1
+        art_id = old["art_asset_id"] if old else row["art_asset_id"]
+        level = min(count, 5)
+        serial = None
+        if row["tier"] in ("ur", "lr"):
+            serial = db.execute("SELECT next FROM card_serials WHERE tier=?", [row["tier"]]).fetchone()[0]
+            db.execute("UPDATE card_serials SET next=next+1 WHERE tier=?", [row["tier"]])
+        db.execute("INSERT INTO card_album VALUES(?,?,?,?,?,?,?) ON CONFLICT(character_id,tier) "
+                   "DO UPDATE SET count=excluded.count,level=excluded.level,last_drawn_at=excluded.last_drawn_at",
+                   [*key, count, level, art_id, _iso(now), _iso(now)])
+        card = {"slot": row["slot"], **_card(db, key[0], key[1], art_id, count, level, serial, old is None, nodes)}
+        # Snapshot display data: later duplicates/publications must not change a retry.
+        db.execute("UPDATE card_draws SET kept=1,art_asset_id=?,serial=?,was_new=?,card_json=? WHERE pack_id=? AND slot=?",
+                   [art_id, serial, int(old is None), json.dumps(card), pack_id, row["slot"]])
+    db.execute("UPDATE card_packs SET kept_at=?,keep_operation_id=? WHERE id=?", [_iso(now), operation_id, pack_id])
+    _bump(db)
+    return {**_pack_view(db, _pack_row(db, pack_id), True, now), "alreadyKept": False}
+
+
+def _prefetch(db, packs):
+    """Art asset ids of unopened packs, for warming images only: no slot order, tier or character.
+
+    A pre-drawn duplicate shows the album's first art, so ids follow what opening would display.
+    Cutout ids list every ready cutout among those images whatever the tier, so they hint at nothing.
+    """
+    result = []
+    for pack in packs:
+        rows = db.execute("SELECT * FROM card_pending WHERE pack_id=? ORDER BY slot", [pack["id"]]).fetchall()
+        if len(rows) != 5:
+            continue
+        shown = {card["artAssetId"] for card in _simulate(db, rows, [])}
+        visible = {r[0] for r in db.execute("SELECT id FROM visible_assets WHERE " + IMAGE_SQL +
+                                           " AND id IN (SELECT value FROM json_each(?))", [json.dumps(sorted(shown))])}
+        ready = {r[0] for r in db.execute("SELECT asset_id FROM card_cutouts WHERE state='ready' "
+                                         "AND asset_id IN (SELECT value FROM json_each(?))", [json.dumps(sorted(visible))])}
+        ids = sorted(visible, key=lambda asset_id: hashlib.sha256((pack["id"] + ":" + asset_id).encode()).hexdigest())
+        if ids:
+            result.append({"packId": pack["id"], "assetIds": ids, "cutoutAssetIds": [i for i in ids if i in ready]})
+    return result
 
 
 def _cover_view(db, day):
@@ -319,8 +482,12 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
             today = accrue(db, _now())
             summary = db.execute("SELECT COUNT(*),COALESCE(SUM(count),0) FROM card_album").fetchone()
             packs = [dict(r) for r in db.execute("SELECT id,kind,day FROM card_packs WHERE opened_at IS NULL ORDER BY day,id")]
+            pending_keep = [{"packId": r["id"], "openedAt": r["opened_at"], "expiresAt": _iso(_expires_at(r["opened_at"]))}
+                            for r in db.execute("SELECT id,opened_at FROM card_packs WHERE opened_at IS NOT NULL "
+                                                "AND kept_at IS NULL AND expired_at IS NULL ORDER BY opened_at,id")]
             payload = {"version": 1, "revision": status_signal(db), "day": today.isoformat(),
                        "nextResetAt": _iso(day_start(today + timedelta(days=1))), "unopened": packs,
+                       "pendingKeep": pending_keep, "prefetch": _prefetch(db, packs),
                        "savedToday": saved_count(db, today), "bonusThreshold": 50,
                        "bonusGranted": db.execute("SELECT 1 FROM card_packs WHERE id=?",
                                                   ["b-" + today.strftime("%Y%m%d")]).fetchone() is not None,
@@ -342,6 +509,36 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
             fail(422, "invalidPackId", "Invalid pack id.")
         body = await _body(request, OpenBody)
         return await run_in_threadpool(do_open, pack_id, body, principal)
+
+    def do_keep(pack_id, body, principal):
+        with get_db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = keep_pack(db, pack_id, body.operationId, body.slots, _now())
+            db.commit()
+            return result
+
+    @app.post(PREFIX + "/packs/{pack_id}/keep")
+    async def keep_route(pack_id: str, request: Request, authorization: str | None = Header(default=None)):
+        principal = await run_in_threadpool(require_client, authorization)
+        if not PACK_ID.fullmatch(pack_id):
+            fail(422, "invalidPackId", "Invalid pack id.")
+        body = await _body(request, KeepBody)
+        return await run_in_threadpool(do_keep, pack_id, body, principal)
+
+    @app.get(PREFIX + "/packs/{pack_id}")
+    def pack_route(pack_id: str, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        if not PACK_ID.fullmatch(pack_id):
+            fail(422, "invalidPackId", "Invalid pack id.")
+        with get_db() as db:
+            db.execute("BEGIN")
+            asset_visibility.install(db)
+            pack = _pack_row(db, pack_id)
+            if pack is None:
+                fail(404, "packNotFound", "Card pack not found.")
+            if pack["opened_at"] is None:
+                fail(409, "packNotOpened", "Card pack has not been opened.")
+            return _pack_view(db, pack, True, _now())
 
     @app.get(PREFIX + "/album")
     def album(authorization: str | None = Header(default=None),
