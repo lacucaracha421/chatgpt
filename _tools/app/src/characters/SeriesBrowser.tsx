@@ -52,6 +52,8 @@ import { characterExtrasApi } from "./extrasApi";
 import { extrasTagName } from "./extrasNames";
 import { FolderFilterControl } from "../assets/FolderShelf";
 import { SelectionBar } from "../assets/SelectionBar";
+import { useContainerFolder } from "./ContainerFolderDialog";
+import { registrationPreview } from "./RegistrationScope";
 import { CharacterAssignPicker } from "./CharacterAssignPicker";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { ConfirmList } from "./ConfirmList";
@@ -488,6 +490,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (!displayName || !selectedIds.length || saving.current) return;
     saving.current = true; setBusy(true); setError(null);
     try {
+      await registrationPreview({ seriesId: series.classificationId, mode: "manual" });
       const target = await hubApi.createManualCharacter({ seriesId: series.classificationId, displayName, assetIds: selectedIds });
       setCharacterOpen(false); setSelection(emptySelection()); refresh();
       onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id });
@@ -583,6 +586,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     saving.current = true; setBusy(true); setEditorError(null);
     try {
       const { draft, target } = editor;
+      if (!target) await registrationPreview({ seriesId: series.classificationId, mode: "settings", referenceIds: draft.references });
       const referenceRegions = draftReferenceRegions(draft.referenceRegions, draft.references, characterDraft(target).referenceRegions);
       await api.saveSettings({ id: target?.id ?? null, expectedRevision: target?.revision ?? null,
         seriesClassificationId: series.classificationId, linkedClassificationId: target?.linkedClassificationId ?? null,
@@ -760,7 +764,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     { id: "convert-folder", label: "일반 폴더로 전환", disabled: busy, onSelect: () => { setEditor(null); setConverting(true); } },
     ...(!characterTarget.manualOnly ? [{ id: "automatic-recognition", label: "자동 인식 끄기", checked: !characterTarget.enabled, disabled: busy, onSelect: () => void toggleAutomaticRecognition(characterTarget) }] : []),
   ] : [];
+  const seriesFolder = classifications.find(entry => entry.id === series.classificationId);
+  const containerFolder = useContainerFolder(classifications, onChanged);
   const seriesMenuItems = [
+    ...(seriesFolder && !seriesFolder.parentId ? [{ id: "container", label: "분류함으로 쓰기", checked: !!seriesFolder.isContainer, onSelect: () => void containerFolder.toggle(seriesFolder) }] : []),
     ...(!excludedOnly ? [{ id: "create-group", label: "그룹 만들기", onSelect: () => setGroupCreateRequest(v => v + 1) }] : []),
     { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
     ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
@@ -994,6 +1001,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onDone={outcome => { setPromoting(false); setPromotionTag(null); setSelection(emptySelection()); setPromotionDone(outcome); refresh(); }} />}
     {promotionDone && <ExtrasPromotionDone outcome={promotionDone} api={hubApi} onClose={() => setPromotionDone(null)}
       onOpen={() => { const target = promotionDone.result.target; setPromotionDone(null); onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id }); }} />}
+    {containerFolder.surface}
     {unregistering && <SeriesUnregisterDialog seriesId={series.classificationId} seriesName={name} api={extrasApi}
       onClose={(result, preview) => {
         setUnregistering(false);

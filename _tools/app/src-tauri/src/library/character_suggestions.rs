@@ -477,16 +477,10 @@ impl Library {
         // A new target needs fresh inference even for already-completed series jobs.
         // Keep enrollment atomic with registration and use the normal scope/pause rules.
         if target.ready && !target.manual_only {
-            let ids = tx.prepare(
-                "WITH RECURSIVE scope(id) AS (
-                   SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
-                 ) SELECT DISTINCT a.id FROM assets a
-                 JOIN asset_classifications ac ON ac.asset_id=a.id JOIN scope s ON s.id=ac.classification_id
-                 WHERE a.status='normal' AND a.media_kind='image'
-                 AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id)
-                 AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=?2 AND r.asset_id=a.id)"
-            )?.query_map(params![target.series_classification_id, target.id], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let references = target.references.iter().chain(&target.learned_references).filter_map(|r|r.asset_id.as_ref()).collect::<Vec<_>>();
+            let ids = tx.prepare(super::character_containers::REGISTRATION_IMAGES)?
+                .query_map(params![target.series_classification_id, serde_json::to_string(&references)?], |r| r.get::<_,String>(0))?
+                .collect::<std::result::Result<Vec<_>,_>>()?;
             for id in ids {
                 super::character_autotag::enqueue(
                     &tx,

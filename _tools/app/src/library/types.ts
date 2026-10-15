@@ -436,6 +436,8 @@ export type AssetView =
 export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill" | "reposter";
 
 export type ClassificationEntry = {
+  /** Desktop-local recognition configuration; absent from the cloud contract. */
+  isContainer?: boolean;
   id: string;
   kind: ClassificationKind;
   name: string;

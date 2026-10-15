@@ -1,3 +1,4 @@
+vi.mock("./RegistrationScope", async importOriginal => ({ ...(await importOriginal<typeof import("./RegistrationScope")>()), registrationPreview: vi.fn().mockResolvedValue({ imageCount: 0, otherSeries: false }) }));
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement } from "react";
 import * as viewportImages from "../shared/motion/viewportImages";

@@ -653,6 +653,34 @@ impl Library {
         Ok(())
     }
 
+    /// Check an already-read target without assembling every competing target and
+    /// checking their reference files while a manual decision holds the DB lock.
+    pub(super) fn character_autotag_target_eligible(
+        &self,
+        connection: &Connection,
+        asset_id: &str,
+        target: &super::characters::Target,
+    ) -> Result<bool> {
+        if target.role != "character"
+            || !target.enabled
+            || target.manual_only
+            || !target.ready
+            || folders(connection, asset_id)?.len() != 1
+        {
+            return Ok(false);
+        }
+        let Some(series) = target.series_classification_id.as_ref() else {
+            return Ok(false);
+        };
+        let Some(scope) = super::character_scope::resolve_character_scope(connection, asset_id)?
+        else {
+            return Ok(false);
+        };
+        Ok(scope.series_classification_ids.contains(series)
+            && super::character_hub::candidate_image_mode(connection, series, asset_id, true)
+                .is_ok())
+    }
+
     pub(super) fn character_autotag_targets(
         &self,
         connection: &Connection,

@@ -366,6 +366,8 @@ pub enum LibraryError {
     ClassificationNotFound,
     #[error("이 분류 항목은 Lakomics가 보호하는 보관 영역입니다.")]
     ProtectedClassification,
+    #[error("분류함을 해제한 뒤 폴더를 옮겨 주세요.")]
+    ContainerClassificationMove,
     #[error("같은 위치에 같은 이름의 분류 항목이 있습니다")]
     DuplicateClassificationName,
     #[error("최상위 분류는 부모를 가질 수 없고 작품은 최상위 분류 아래에 있어야 합니다")]

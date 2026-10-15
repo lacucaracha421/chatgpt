@@ -1,15 +1,16 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CharacterTarget } from "./api";
 import { ConfirmOverview } from "./ConfirmOverview";
 import { confirmSourceFor, shadowItem } from "./confirmTestKit";
+import type { TaggerReviewItem } from "./taggerReviewClient";
 
 // A stand-in for the suggestion cards: its button is the moment a registration or merge has been stored.
 vi.mock("./suggestions/CharacterSuggestions", () => ({
   CharacterSuggestionsOverview: ({ onSaved }: { onSaved?: (result: unknown) => void }) => <button type="button" onClick={() => onSaved?.({})}>제안 저장됨</button>,
 }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 const targets = [
   { id: "hina", seriesClassificationId: "series", displayName: "히나", thumbnailAssetId: null, references: [] },
@@ -51,6 +52,42 @@ it("skips the full read in lightweight mode and still offers the whole list", as
   expect(sources.tagger).not.toHaveBeenCalled();
   await userEvent.setup().click(screen.getByRole("button", { name: "전체 확인" }));
   expect(onOpen).toHaveBeenCalledWith({});
+});
+
+it("keeps old tallies on screen during a slow refresh and updates them silently", async () => {
+  const sources = confirmSourceFor({ candidates: [shadowItem("c1", "hina", "히나")] });
+  const tree = (version: number) => <ConfirmOverview sources={sources} targets={targets} seriesName={() => "백합"} version={version} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />;
+  const view = render(tree(0));
+  const row = await screen.findByRole("button", { name: "백합 › 히나 확인 1건" });
+  vi.useFakeTimers();
+  let finish!: (rows: TaggerReviewItem[]) => void;
+  sources.tagger.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  view.rerender(tree(1));
+  await act(async () => { vi.advanceTimersByTime(1200); });
+  expect(row).toBeInTheDocument();
+  expect(screen.queryByText(/다시 세는 중|확인 목록 읽는 중/)).toBeNull();
+  await act(async () => finish([{ asset: { id: "t1", originalName: "t1.png", width: 1, height: 1 }, seriesId: "series", targetId: "hina", targetName: "히나", targetFingerprint: "fp", evidence: { source: "tagger", reason: "recommendation", pixaiScore: 0.99, canaryScore: 0.99 } }] as TaggerReviewItem[]));
+  expect(screen.getByRole("button", { name: "백합 › 히나 확인 2건" })).toBe(row);
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("shows the first-read label only after 400 ms and silently refreshes a known empty tally", async () => {
+  vi.useFakeTimers();
+  const sources = confirmSourceFor();
+  let finish!: (rows: TaggerReviewItem[]) => void;
+  sources.tagger.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const tree = (version: number) => <ConfirmOverview sources={sources} targets={targets} seriesName={() => "백합"} version={version} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />;
+  const view = render(tree(0));
+  await act(async () => { vi.advanceTimersByTime(399); });
+  expect(screen.queryByText("확인 목록 읽는 중")).toBeNull();
+  await act(async () => { vi.advanceTimersByTime(1); });
+  expect(screen.getByText("확인 목록 읽는 중")).toBeInTheDocument();
+  await act(async () => finish([]));
+  await act(async () => { vi.advanceTimersByTime(500); });
+  view.rerender(tree(1));
+  await act(async () => { vi.advanceTimersByTime(1200); });
+  expect(screen.getByText("확인할 항목이 없습니다.")).toBeInTheDocument();
+  expect(screen.queryByText(/다시 세는 중|확인 목록 읽는 중/)).toBeNull();
 });
 
 it("goes back from the toolbar", async () => {

@@ -831,6 +831,159 @@ fn edit(target: &Target) -> TargetDraft {
     }
 }
 
+#[test]
+fn manual_decision_eligibility_does_not_read_competing_targets() {
+    let f = Fixture::new();
+    let target = f.ready("judged");
+    for i in 0..12 {
+        f.ready(&format!("competitor-{i}"));
+    }
+    let c = f.library.connection().unwrap();
+    unsafe extern "C" fn count_statement(
+        event: std::ffi::c_uint,
+        context: *mut std::ffi::c_void,
+        _: *mut std::ffi::c_void,
+        _: *mut std::ffi::c_void,
+    ) -> std::ffi::c_int {
+        if event == rusqlite::ffi::SQLITE_TRACE_STMT as u32 {
+            *(context as *mut usize) += 1;
+        }
+        0
+    }
+    let measure = |read: &mut dyn FnMut() -> bool| {
+        let mut statements = 0usize;
+        unsafe {
+            rusqlite::ffi::sqlite3_trace_v2(
+                c.handle(),
+                rusqlite::ffi::SQLITE_TRACE_STMT as u32,
+                Some(count_statement),
+                (&mut statements as *mut usize).cast(),
+            );
+        }
+        let start = std::time::Instant::now();
+        let result = read();
+        let elapsed = start.elapsed();
+        unsafe {
+            rusqlite::ffi::sqlite3_trace_v2(c.handle(), 0, None, std::ptr::null_mut());
+        }
+        (result, statements, elapsed)
+    };
+    let old = measure(&mut || {
+        f.library
+            .character_autotag_targets(&c, "asset-5")
+            .unwrap()
+            .iter()
+            .any(|row| row.id == target.id)
+    });
+    let new = measure(&mut || {
+        f.library
+            .character_autotag_target_eligible(&c, "asset-5", &target)
+            .unwrap()
+    });
+    eprintln!(
+        "manual eligibility: old={} statements {:?}, new={} statements {:?}",
+        old.1, old.2, new.1, new.2
+    );
+    assert!(old.0 && new.0);
+    assert!(
+        old.1 > new.1 * 3,
+        "fixture must exercise competing target reads"
+    );
+    assert!(
+        new.1 <= 12,
+        "eligibility must not assemble competing target references"
+    );
+}
+
+#[test]
+fn manual_decision_eligibility_matches_automatic_scope() {
+    let f = Fixture::new();
+    let target = f.ready("ready");
+    let disabled = {
+        let mut draft = edit(&target);
+        draft.enabled = false;
+        f.library.save_character_target(draft).unwrap()
+    };
+    let mut draft = edit(&disabled);
+    draft.enabled = true;
+    let target = f.library.save_character_target(draft).unwrap();
+    let manual = f.target("manual");
+    let c = f.library.connection().unwrap();
+    for asset in ["asset-0", "asset-5", "asset-6"] {
+        let automatic = f.library.character_autotag_targets(&c, asset).unwrap();
+        for row in [&target, &manual] {
+            assert_eq!(
+                f.library
+                    .character_autotag_target_eligible(&c, asset, row)
+                    .unwrap(),
+                automatic.iter().any(|value| value.id == row.id),
+                "{} / {asset}",
+                row.display_name,
+            );
+        }
+    }
+    c.execute(
+        "UPDATE character_series SET auto_classify=0 WHERE classification_id=?1",
+        [&f.series],
+    )
+    .unwrap();
+    assert!(!f
+        .library
+        .character_autotag_target_eligible(&c, "asset-5", &target)
+        .unwrap());
+}
+
+#[test]
+fn manual_decision_eligibility_matches_disabled_manual_only_and_multi_folder() {
+    let f = Fixture::new();
+    let target = f.ready("eligible");
+    let c = f.library.connection().unwrap();
+    let check = |expected: bool| {
+        let target = f.library.read_character_target(&c, &target.id).unwrap();
+        let old = f
+            .library
+            .character_autotag_targets(&c, "asset-5")
+            .unwrap()
+            .iter()
+            .any(|row| row.id == target.id);
+        let new = f
+            .library
+            .character_autotag_target_eligible(&c, "asset-5", &target)
+            .unwrap();
+        assert_eq!(old, expected);
+        assert_eq!(
+            new, old,
+            "enabled={}, manual_only={}",
+            target.enabled, target.manual_only
+        );
+    };
+    check(true);
+    c.execute(
+        "UPDATE character_targets SET enabled=0 WHERE id=?1",
+        [&target.id],
+    )
+    .unwrap();
+    check(false);
+    c.execute(
+        "UPDATE character_targets SET enabled=1,manual_only=1 WHERE id=?1",
+        [&target.id],
+    )
+    .unwrap();
+    check(false);
+    c.execute(
+        "UPDATE character_targets SET manual_only=0 WHERE id=?1",
+        [&target.id],
+    )
+    .unwrap();
+    check(true);
+    c.execute(
+        "INSERT INTO asset_classifications VALUES('asset-5',?1)",
+        [&f.child],
+    )
+    .unwrap();
+    check(false);
+}
+
 pub(in crate::library) fn historical_character_library(
     version: usize,
 ) -> (tempfile::TempDir, rusqlite::Connection) {

@@ -1,3 +1,4 @@
+import { registrationPreview } from "./RegistrationScope";
 import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CheckIcon } from "@heroicons/react/20/solid";
@@ -87,6 +88,7 @@ export function ExtrasPromotionDialog({ extras, seriesId, assetIds, tag, groups,
     setBusy(true); setError(null);
     let result: PromoteExtrasResult;
     try {
+      await registrationPreview({ seriesId, mode: "promotion", referenceIds: references });
       result = await api.promote({
         targetId: extras.id, expectedFingerprint: extras.fingerprint, displayName: trimmed,
         assetIds, thumbnailAssetId: assetIds.includes(thumbnail) ? thumbnail : assetIds[0] ?? null,

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLayoutEffect } from "react";
@@ -29,11 +29,11 @@ it("dims the suggestion collage on its first render and throughout late image fa
 const target: CharacterTarget = { id: "existing", displayName: "기존 캐릭터", seriesClassificationId: "series", linkedClassificationId: null, enabled: true, manualOnly: false, ready: false, references: [], revision: 2, fingerprint: "fingerprint" };
 const detail: SuggestionDetail = { previewToken: "snapshot", referenceIds: ["a4", "a0", "a1", "a2", "a3"], images: Array.from({ length: 8 }, (_, i) => ({ assetId: `a${i}`, assetHash: `h${i}`, pixaiScore: .99 - i * .01, canaryScore: i < 6 ? .9 : .2, insideSeries: i < 7, solo: i === 4 || i === 6 })) };
 const folders = [{ id: "series", parentId: null, name: "리버스", kind: "root", assetCount: 8, iconKey: null, colorKey: null }] as ClassificationEntry[];
-const api = (): SuggestionApi => ({ list: vi.fn().mockResolvedValue([suggestion]), detail: vi.fn().mockResolvedValue(detail), ignored: vi.fn().mockResolvedValue([]), ignore: vi.fn().mockResolvedValue(undefined), register: vi.fn().mockResolvedValue({ target, queuedCount: 3 }), merge: vi.fn().mockResolvedValue({ target, queuedCount: 8 }), context: vi.fn().mockResolvedValue({ targets: [target], folders }), groups: vi.fn().mockResolvedValue([]) });
+const api = (): SuggestionApi => ({ previewRegistration: vi.fn().mockResolvedValue({ imageCount: 0, otherSeries: false }), list: vi.fn().mockResolvedValue([suggestion]), detail: vi.fn().mockResolvedValue(detail), ignored: vi.fn().mockResolvedValue([]), ignore: vi.fn().mockResolvedValue(undefined), register: vi.fn().mockResolvedValue({ target, queuedCount: 3 }), merge: vi.fn().mockResolvedValue({ target, queuedCount: 8 }), context: vi.fn().mockResolvedValue({ targets: [target], folders }), groups: vi.fn().mockResolvedValue([]) });
 const dialog = (client: SuggestionApi, mode: "register" | "merge" = "register", row = suggestion, onSaved = vi.fn()) => render(<SuggestionDialog suggestion={row} mode={mode} privacyMode={false} api={client} onClose={vi.fn()} onSaved={onSaved} />);
 
 beforeEach(() => localStorage.removeItem(SUGGESTION_FILTERS_KEY));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 const chooseFromMenu = async (card: string, item: string) => {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: `${card} 더 보기` }));
@@ -74,6 +74,25 @@ it("shares pending suggestions across mounts and never publishes an older revisi
   render(tree(1));
   expect(screen.getByText("current suggestion")).toBeInTheDocument();
   expect(client.list).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the old suggestion count and rows without a busy label throughout a slow refresh", async () => {
+  const client = api(), onCount = vi.fn();
+  const tree = (version: number) => <CharacterSuggestionsOverview version={version} privacyMode={false} api={client} onCount={onCount} />;
+  const view = render(tree(0));
+  await screen.findByText("이졸데");
+  expect(onCount).toHaveBeenLastCalledWith(1);
+  vi.useFakeTimers();
+  let finish!: (rows: Suggestion[]) => void;
+  vi.mocked(client.list).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  view.rerender(tree(1));
+  await act(async () => { vi.advanceTimersByTime(1200); });
+  expect(screen.getByText("이졸데")).toBeInTheDocument();
+  expect(onCount).toHaveBeenLastCalledWith(1);
+  expect(screen.queryByText("제안 불러오는 중…")).toBeNull();
+  await act(async () => finish([]));
+  expect(onCount).toHaveBeenLastCalledWith(0);
+  expect(screen.queryByText("이졸데")).toBeNull();
 });
 
 it("keeps a dismissed suggestion dismissed after a remount at the same data revision", async () => {
@@ -186,6 +205,7 @@ describe("character suggestions", () => {
     fireEvent.click(screen.getByRole("button", { name: "레퍼런스로" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "수정한 이름" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "캐릭터 만들기" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ displayName: "수정한 이름", referenceIds: ["a4", "a1", "a2", "a3", "a5"], excludedAssetIds: [], includeOutside: true, linkTag: true, previewToken: "snapshot" })));
     expect(onSaved).toHaveBeenCalledWith({ target, queuedCount: 3 });

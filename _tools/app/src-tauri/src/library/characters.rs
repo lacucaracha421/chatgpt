@@ -561,6 +561,7 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        super::character_containers::reject_container(&tx, &request.series_id)?;
         if super::classification::classification_in_role_scope(
             &tx,
             &request.series_id,
@@ -571,7 +572,8 @@ impl Library {
             ));
         }
         let inside: bool = tx.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id) SELECT EXISTS(SELECT 1 FROM scope WHERE id=?2)", params![request.series_id,request.folder_id], |r| r.get(0))?;
-        if !inside {
+        let same_container: bool = tx.query_row("WITH RECURSIVE tree(root,id) AS (SELECT classification_id,classification_id FROM classification_containers UNION ALL SELECT tree.root,e.id FROM tree JOIN classification_entries e ON e.parent_id=tree.id) SELECT EXISTS(SELECT 1 FROM tree a JOIN tree b ON a.root=b.root WHERE a.id=?1 AND b.id=?2)", params![request.series_id,request.folder_id], |r|r.get(0))?;
+        if !inside && !same_container {
             return Err(Error::Invalid(
                 "원본 폴더를 포함하는 시리즈를 선택해 주세요.",
             ));
@@ -586,6 +588,11 @@ impl Library {
             return Err(Error::Invalid(
                 "폴더의 자산 구성이 바뀌었습니다. 목록을 다시 확인해 주세요.",
             ));
+        }
+        if !inside {
+            Self::set_asset_classification_cause_in(&tx, &super::models::SetAssetClassification {
+                asset_ids: ids.clone(), classification_id: Some(request.series_id.clone()),
+            }, super::character_autotag::Cause::AutomaticFinalization)?;
         }
         let target = if let Some(id) = request.target_id {
             let target = self.read_character_target(&tx, &id)?;
@@ -622,7 +629,7 @@ impl Library {
                 super::character_hub::validate_art(&tx, image)?;
             }
             let manual_only = request.reference_ids.len() < REFERENCE_COUNT;
-            tx.execute("INSERT INTO character_targets(id,series_classification_id,linked_classification_id,display_name,enabled,manual_only,thumbnail_asset_id,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?7)", params![id,request.series_id,request.folder_id,name,manual_only,request.thumbnail_id,now])?;
+            tx.execute("INSERT INTO character_targets(id,series_classification_id,linked_classification_id,display_name,enabled,manual_only,thumbnail_asset_id,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?7)", params![id,request.series_id,inside.then_some(&request.folder_id),name,manual_only,request.thumbnail_id,now])?;
             if manual_only {
                 tx.execute(
                     "INSERT INTO character_manual_targets(target_id,created_at) VALUES(?1,?2)",
@@ -807,6 +814,7 @@ impl Library {
             return Err(Error::Invalid("시리즈 폴더를 선택해 주세요."));
         }
         if let Some(series) = draft.series_classification_id.as_deref() {
+            super::character_containers::reject_container(transaction, series)?;
             if super::classification::classification_in_role_scope(
                 transaction,
                 series,
@@ -1662,10 +1670,11 @@ impl Library {
                         // A direct judgment may confirm or correct what the automatic
                         // pass may classify, including parent-folder images it reaches.
                         || (request.scan_id.is_none()
-                            && self
-                                .character_autotag_targets(transaction, asset_id)?
-                                .iter()
-                                .any(|t| t.id == target.id)),
+                            && self.character_autotag_target_eligible(
+                                transaction,
+                                asset_id,
+                                &target,
+                            )?),
                     request.scan_id.is_none(),
                 )?
                 .0

@@ -1,3 +1,5 @@
+import { SeriesPicker } from "../SeriesPicker";
+import { RegistrationScope } from "../RegistrationScope";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
@@ -17,6 +19,8 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
 }) {
   const stripWheel = useHorizontalWheel();
   const [context, setContext] = useState<SuggestionContext | null>(null);
+  const [chooseSeries, setChooseSeries] = useState(false);
+  const [detailSeries, setDetailSeries] = useState<string | null>(null);
   const [name, setName] = useState(suggestionName(suggestion.tag));
   const [seriesId, setSeriesId] = useState(suggestion.seriesId ?? "");
   const [targetId, setTargetId] = useState("");
@@ -28,11 +32,14 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [includeOutside, setIncludeOutside] = useState(true);
   const [linkTag, setLinkTag] = useState(true);
+  const [previewPending, setPreviewPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const saving = useRef(false);
   const target = context?.targets.find(item => item.id === targetId);
+  const seriesEntry = context?.folders.find(entry => entry.id === seriesId);
+  useEffect(() => { if (mode === "register" && seriesEntry?.isContainer) setChooseSeries(true); }, [mode, seriesEntry?.id, seriesEntry?.isContainer]);
   const chosenSeries = mode === "merge" ? target?.seriesClassificationId ?? null : seriesId || null;
   useEffect(() => {
     let live = true;
@@ -43,14 +50,14 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
   }, [api, retry]);
   useEffect(() => {
     let live = true;
-    setDetail(null); setReferences([]); setPreviewId(null); setGroups([]); setGroupId(""); setError(null);
-    if (!chosenSeries) return;
+    setPreviewId(null); setGroupId(""); setError(null);
+    if (!chosenSeries || seriesEntry?.isContainer) return;
     void Promise.all([api.detail(suggestion.tag, chosenSeries), mode === "register" ? api.groups(chosenSeries) : Promise.resolve([])]).then(([value, nextGroups]) => {
       if (!live) return;
-      setDetail(value); setGroups(nextGroups); setReferences(mode === "register" ? value.referenceIds : []);
+      setDetail(value); setDetailSeries(chosenSeries); setGroups(nextGroups); setReferences(mode === "register" ? value.referenceIds : []);
     }, reason => { if (live) setError(commandErrorMessage(reason, "제안을 불러오지 못했습니다.")); });
     return () => { live = false; };
-  }, [api, suggestion.tag, chosenSeries, mode, retry]);
+  }, [api, suggestion.tag, chosenSeries, mode, retry, seriesEntry?.isContainer]);
 
   const candidateImages = detail?.images.filter(image => !references.includes(image.assetId) && (includeOutside || image.insideSeries)) ?? [];
   const candidateCount = candidateImages.length;
@@ -63,7 +70,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
     setPreviewId(insideImages[(index + delta + insideImages.length) % insideImages.length].assetId);
   };
   const toggleReference = (image: SuggestionImage) => {
-    if (busy || !image.insideSeries) return;
+    if (busy || previewPending || !image.insideSeries) return;
     setReferences(ids => ids.includes(image.assetId) ? ids.filter(id => id !== image.assetId) : ids.length < 8 ? [...ids, image.assetId] : ids);
   };
   async function save() {
@@ -79,8 +86,8 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
     } catch (reason) { setError(commandErrorMessage(reason, "저장하지 못했습니다. 목록을 새로 불러온 뒤 다시 확인해 주세요.")); }
     finally { saving.current = false; setBusy(false); }
   }
-  const selectDisabled = busy || !context;
-  return <Dialog open title={mode === "register" ? "새 캐릭터 등록" : "같은 캐릭터 고르기"} variant={mode === "register" ? "workspace" : "medium"} onClose={() => { if (previewId) setPreviewId(null); else if (!busy) onClose(); }}>
+  const selectDisabled = busy || previewPending || !context;
+  return <Dialog open title={mode === "register" ? "새 캐릭터 등록" : "같은 캐릭터 고르기"} variant={mode === "register" ? "workspace" : "medium"} onClose={() => { if (previewId) setPreviewId(null); else if (!busy && !previewPending) onClose(); }}>
     <div className="character-suggestion-dialog">
       <div className="character-suggestion-dialog__content" inert={preview ? true : undefined}>
       <header className="character-suggestion-dialog__head">
@@ -90,31 +97,31 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
       <div className={mode === "register" ? "character-suggestion-dialog__columns" : "character-suggestion-dialog__merge"}>
         <div className="character-suggestion-dialog__settings">
           {mode === "register" ? <>
-            <TextField label="이름" value={name} disabled={busy} onChange={event => setName(event.target.value)} />
+            <TextField label="이름" value={name} disabled={busy || previewPending} onChange={event => setName(event.target.value)} />
             <small>이름을 고쳐도 태그 연결은 그대로예요.</small>
             <label className="character-suggestion-field">시리즈 폴더<select value={seriesId} disabled={selectDisabled} onChange={event => setSeriesId(event.target.value)}>
               <option value="">폴더를 골라 주세요</option>
               {context?.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(folder.id, context.folders)}</option>)}
             </select></label>
-            <label className="character-suggestion-field">그룹<select value={groupId} disabled={busy || !detail} onChange={event => setGroupId(event.target.value)}>
+            <label className="character-suggestion-field">그룹<select value={groupId} disabled={busy || previewPending || !detail} onChange={event => setGroupId(event.target.value)}>
               <option value="">없음</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select></label>
-            <label><input type="checkbox" checked={includeOutside} disabled={busy} onChange={event => setIncludeOutside(event.target.checked)} /> 시리즈 폴더 밖 이미지도 후보로</label>
+            <label><input type="checkbox" checked={includeOutside} disabled={busy || previewPending} onChange={event => setIncludeOutside(event.target.checked)} /> 시리즈 폴더 밖 이미지도 후보로</label>
           </> : <>
-            <TextField label="캐릭터 찾기" value={query} disabled={busy} onChange={event => setQuery(event.target.value)} />
+            <TextField label="캐릭터 찾기" value={query} disabled={busy || previewPending} onChange={event => setQuery(event.target.value)} />
             <div className="character-suggestion-targets" role="radiogroup" aria-label="합칠 캐릭터">
               {context?.targets.filter(item => item.seriesClassificationId && item.displayName.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
                 .sort((a, b) => Number(b.seriesClassificationId === suggestion.seriesId) - Number(a.seriesClassificationId === suggestion.seriesId))
-                .map(item => <label key={item.id}><input type="radio" name="suggestion-target" checked={targetId === item.id} disabled={busy} onChange={() => setTargetId(item.id)} />
+                .map(item => <label key={item.id}><input type="radio" name="suggestion-target" checked={targetId === item.id} disabled={busy || previewPending} onChange={() => setTargetId(item.id)} />
                   <span>{item.displayName}<small>{folderPath(item.seriesClassificationId!, context.folders)}</small></span>
                 </label>)}
             </div>
           </>}
-          <label><input type="checkbox" checked={linkTag} disabled={busy} onChange={event => setLinkTag(event.target.checked)} /> {mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</label>
+          <label><input type="checkbox" checked={linkTag} disabled={busy || previewPending} onChange={event => setLinkTag(event.target.checked)} /> {mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</label>
           {!linkTag && <small>연결하지 않으면 이 태그가 다시 제안될 수 있어요.</small>}
           <p className="character-suggestion-note">{mode === "register" ? "레퍼런스는 시리즈 폴더 안에서만 고를 수 있어요. 단독 이미지를 먼저 골라 두었어요." : "후보는 확인에서 볼 수 있어요. 바로 확정하지 않아요."}</p>
         </div>
-        {mode === "register" && <div className="character-suggestion-dialog__images">
+        {mode === "register" && <div className="character-suggestion-dialog__images" inert={detailSeries !== chosenSeries || previewPending ? true : undefined}>
           {!chosenSeries && <p>레퍼런스를 고를 시리즈 폴더를 선택해 주세요.</p>}
           <BusyLabel busy={!!(chosenSeries && !detail && !error)}><p role="status">이미지 불러오는 중…</p></BusyLabel>
           {detail && <>
@@ -123,26 +130,29 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
               {Array.from({ length: 8 }, (_, index) => {
                 const id = references[index];
                 const image = detail.images.find(item => item.assetId === id);
-                return image ? <ImageChoice key={id} image={image} privacyMode={privacyMode} selected index={index + 1} disabled={busy} onClick={() => setPreviewId(id)} />
+                return image ? <ImageChoice key={id} image={image} privacyMode={privacyMode} selected index={index + 1} disabled={busy || previewPending} onClick={() => setPreviewId(id)} />
                   : <div key={`empty-${index}`} className="character-suggestion-reference-empty" aria-label={`빈 레퍼런스 슬롯 ${index + 1}`}><span>{index + 1}</span></div>;
               })}
             </div>
             {references.length < 5 && <p className="character-suggestion-warning">레퍼런스 5장 미만: 수동으로 시작해요.</p>}
             <h3>레퍼런스 바꾸기<small>눌러서 크게 보기 · 단독 우선</small></h3>
             <div className="character-suggestion-replacements" role="group" aria-label="레퍼런스 바꾸기">
-              {replacements.map(image => <ImageChoice key={image.assetId} image={image} privacyMode={privacyMode} disabled={busy} onClick={() => setPreviewId(image.assetId)} />)}
+              {replacements.map(image => <ImageChoice key={image.assetId} image={image} privacyMode={privacyMode} disabled={busy || previewPending} onClick={() => setPreviewId(image.assetId)} />)}
               {!replacements.length && <p className="character-suggestion-tag">바꿀 레퍼런스가 없습니다.</p>}
             </div>
             <p className="character-suggestion-candidate-summary">확인할 이미지 {candidateCount}장 — 등록하면 자동 태그가 확실하고 인식도 같다고 본 그림은 자동으로 확정하고, 나머지는 확인으로 보내요.</p>
           </>}
         </div>}
       </div>
-      {error && <p role="alert">{error} <Button size="sm" disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
-      <div className="character-suggestion-dialog__footer">
+      {error && <p role="alert">{error} <Button size="sm" disabled={busy || previewPending} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
+      <RegistrationScope onPendingChange={setPreviewPending} loadPreview={api.previewRegistration} request={{ seriesId: chosenSeries ?? "", mode: mode === "register" ? "suggestion" : "manual", referenceIds: references }} entries={context?.folders ?? []} onSeriesSelected={entry => { setContext(current => current ? { ...current, folders: [...current.folders.filter(folder => folder.id !== entry.id), entry] } : current); setSeriesId(entry.id); }}>
+      {(guard, pending) => <div className="character-suggestion-dialog__footer">
         <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 레퍼런스 {references.length}장 · 확인할 이미지 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 확인할 이미지로 넣어요. 기존 레퍼런스·판단은 유지해요.</>}</p>
-        <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
-        <Button variant="primary" disabled={busy || !detail || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => void save()}><BusyLabel busy={!!(busy)} idle={mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}>저장 중…</BusyLabel></Button>
-      </div>
+        <Button variant="ghost" disabled={busy || previewPending} onClick={onClose}>취소</Button>
+        <Button variant="primary" disabled={busy || previewPending || pending || !detail || detailSeries !== chosenSeries || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => mode === "register" ? guard(save) : void save()}><BusyLabel busy={!!(busy)} idle={mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}>저장 중…</BusyLabel></Button>
+      </div>}
+      </RegistrationScope>
+      {chooseSeries && seriesEntry && <SeriesPicker parent={seriesEntry} entries={context?.folders ?? []} onClose={() => { setChooseSeries(false); setSeriesId(""); }} onSelected={entry => { setContext(current => current ? { ...current, folders: [...current.folders.filter(folder => folder.id !== entry.id), entry] } : current); setSeriesId(entry.id); setChooseSeries(false); }} />}
       </div>
       {preview && <ImagePreview image={preview} privacyMode={privacyMode} selected={references.includes(preview.assetId)}
         canAdd={references.length < 8} onMove={movePreview} onToggle={() => toggleReference(preview)} onClose={() => setPreviewId(null)} />}

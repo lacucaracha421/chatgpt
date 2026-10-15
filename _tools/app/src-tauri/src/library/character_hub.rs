@@ -293,6 +293,7 @@ impl Library {
     }
     pub fn save_character_series(&self, request: Series) -> Result<Series> {
         let connection = self.connection()?;
+        super::character_containers::reject_container(&connection, &request.classification_id)?;
         if super::classification::classification_in_role_scope(
             &connection,
             &request.classification_id,

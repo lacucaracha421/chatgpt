@@ -57,6 +57,11 @@ export type ConfirmRead = {
   failed: ConfirmKind[];
 };
 
+// Reuse the overview's existing full read for continuation; opening a scoped dialog
+// must not trigger another library-wide scan just to offer the next character.
+const overviewReads = new WeakMap<ConfirmSources, ConfirmRead>();
+export const getConfirmOverviewRead = (sources: ConfirmSources): ConfirmRead | undefined => overviewReads.get(sources);
+
 /**
  * Reads the three lists for one scope and merges them. A list that fails is reported in `failed` and the
  * others still show. Resolves null when `isLive` turned false (the reader is no longer wanted).
@@ -81,5 +86,7 @@ export async function readConfirmItems(sources: ConfirmSources, scope: ConfirmSc
   const items = mergeConfirmItems({ tagger: inScope(tagItems), candidates: shown, doubtful: inScope(doubtful), targets });
   const have = new Set(items.map(item => item.key));
   const folded = fold ? mergeConfirmItems({ tagger: [], candidates: inScope(candidates).filter(item => item.folded), doubtful: [], targets }).filter(item => !have.has(item.key)) : [];
-  return { items, folded, failed };
+  const read = { items, folded, failed };
+  if (!scope.series && !scope.target) overviewReads.set(sources, read);
+  return read;
 }

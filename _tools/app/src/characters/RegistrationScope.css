@@ -1,0 +1,6 @@
+.registration-scope__line { color: var(--color-text-muted); font-size: var(--type-meta); }
+.registration-scope__hero { display: flex; align-items: center; gap: var(--space-4); margin-block: var(--space-4); }
+.registration-scope__hero strong { font-size: var(--type-number); font-variant-numeric: tabular-nums; }
+.registration-scope__hero small { margin-left: var(--space-1); font-size: var(--type-meta); }
+.registration-scope__notice { padding: var(--space-4); background: var(--color-surface-raised); margin-block: var(--space-4); }
+.registration-scope__notice--warning { background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface)); }

@@ -14,6 +14,7 @@ import type { useCharacterHub } from "./useCharacterHub";
 import { characterHubApi, type CharacterSeries } from "./hubApi";
 import { SeriesBrowser, type CharacterGalleryDrag } from "./SeriesBrowser";
 import { useOptionalLibrary } from "../library/LibraryContext";
+import { useContainerFolder } from "./ContainerFolderDialog";
 import { seriesDataScope } from "./seriesMountCache";
 
 function inOriginals(id: string, classifications: ClassificationEntry[]) {
@@ -28,7 +29,7 @@ function inOriginals(id: string, classifications: ClassificationEntry[]) {
 }
 /** Whether this folder opens as a series (SeriesBrowser) rather than a plain folder. */
 export function opensAsSeries(id: string, series: CharacterSeries[], classifications: ClassificationEntry[]) {
-  return series.some(entry => entry.classificationId === id) && !inOriginals(id, classifications);
+  return !classifications.find(entry => entry.id === id)?.isContainer && series.some(entry => entry.classificationId === id) && !inOriginals(id, classifications);
 }
 
 export function CharacterFolderContent({ children, sort, onSortChange, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged, onReviewVideos, onMembershipChanged, groupEditRequest, onGroupEditRequestHandled, classificationOrderIds, onReorderFolders }: {
@@ -57,6 +58,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   const [exclusions, setExclusions] = useState<{ key: string; ids: string[] } | null>(null);
   const id = view.kind === "classification" ? view.classificationId : null;
   const folder = classifications.find(item => item.id === id);
+  const containerFolder = useContainerFolder(classifications, () => { hub.refresh(); onAssetsChanged(); });
   const series = hub.series.find(s => s.classificationId === id);
   const originalScope = Boolean(id && inOriginals(id, classifications));
   const ancestors: string[] = [];
@@ -78,7 +80,7 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
   }, [groupEligible, exclusionKey]);
   const canOrganizeGroup = groupEligible && exclusions?.key === exclusionKey
     && !ancestors.some(ancestorId => exclusions.ids.includes(ancestorId));
-  if (series && !originalScope) return <><FolderKindSwitch kind="series" cacheScope={cacheScope} seriesKey={JSON.stringify([id, view.kind === "classification" ? view.characterId : null, view.kind === "classification" ? view.characterGroupId : null])}><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} onReorderGroups={hub.reorderGroups} onReorderCharacters={hub.reorderCharacters} classificationOrderIds={classificationOrderIds} onReorderFolders={onReorderFolders} /></FolderKindSwitch></>;
+  if (series && !folder?.isContainer && !originalScope) return <><FolderKindSwitch kind="series" cacheScope={cacheScope} seriesKey={JSON.stringify([id, view.kind === "classification" ? view.characterId : null, view.kind === "classification" ? view.characterGroupId : null])}><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} extras={hub.extras} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} seriesRevisions={hub.seriesRevisions} onNavigate={onNavigate} onChanged={hub.refresh} onReviewVideos={onReviewVideos} onMembershipChanged={onMembershipChanged} groupEditRequest={groupEditRequest} onGroupEditRequestHandled={onGroupEditRequestHandled} onReorderGroups={hub.reorderGroups} onReorderCharacters={hub.reorderCharacters} classificationOrderIds={classificationOrderIds} onReorderFolders={onReorderFolders} /></FolderKindSwitch></>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);
@@ -86,12 +88,13 @@ export function CharacterFolderContent({ children, sort, onSortChange, requested
     catch (e) { setError(commandErrorMessage(e, "시리즈를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  return <><FolderKindSwitch kind="plain" cacheScope={cacheScope}><FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
-    { id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
-    { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) },
+  return <><FolderKindSwitch kind="plain" cacheScope={cacheScope}><FolderRegistrationContext.Provider value={folder && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+    ...(!folder.parentId ? [{ id: "container", label: "분류함으로 쓰기", checked: !!folder.isContainer, onSelect: () => void containerFolder.toggle(folder) }] : []),
+    ...(folder.parentId && !folder.isContainer ? [{ id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
+    { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) }] : []),
     ...(canOrganizeGroup ? [{ id: "organize-group", label: "그룹으로 정리", onSelect: () => setOrganizeGroup(true) }] : []),
   ]} /> : null}>
-    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}{organizeCharacter && id && <CharacterFolderOrganizer key={id} folderId={id} classifications={classifications} targets={hub.targets} privacyMode={privacyMode} onClose={() => setOrganizeCharacter(false)} onSingleSaved={target => { setOrganizeCharacter(false); onAssetsChanged(); onNavigate({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
+    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}{containerFolder.surface}{organizeCharacter && id && <CharacterFolderOrganizer key={id} folderId={id} classifications={classifications} targets={hub.targets} privacyMode={privacyMode} onClose={() => setOrganizeCharacter(false)} onSingleSaved={target => { setOrganizeCharacter(false); onAssetsChanged(); onNavigate({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
     </div>
   </FolderRegistrationContext.Provider></FolderKindSwitch>
       {/* Keep the dialog outside the retained browser so it closes as soon as apply succeeds. */}

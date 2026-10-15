@@ -65,6 +65,7 @@ impl Library {
             icon_key: None,
             color_key: None,
             asset_count: 0,
+            is_container: false,
             total_asset_count: None,
         };
         transaction
@@ -122,6 +123,9 @@ impl Library {
         let transaction = connection.transaction()?;
         let entry =
             find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
+        if parent_id.is_some() && transaction.query_row("SELECT EXISTS(SELECT 1 FROM classification_containers WHERE classification_id=?1)", [id], |r| r.get::<_,bool>(0))? {
+            return Err(LibraryError::ContainerClassificationMove);
+        }
         if classification_has_role(&transaction, id, "originals")? {
             return Err(LibraryError::ProtectedClassification);
         }
@@ -259,6 +263,9 @@ impl Library {
         let transaction = connection.transaction()?;
         let mut entries = list_classifications_in(&transaction)?;
         apply_subtree_asset_counts(&transaction, &mut entries)?;
+        let containers = transaction.prepare("SELECT classification_id FROM classification_containers")?
+            .query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<BTreeSet<_>>>()?;
+        for entry in &mut entries { entry.is_container = containers.contains(&entry.id); }
         transaction.commit()?;
         Ok(entries)
     }
@@ -800,6 +807,7 @@ fn entry_from_values(
         icon_key,
         color_key,
         asset_count: u64::try_from(asset_count).unwrap_or(0),
+        is_container: false,
         total_asset_count: None,
     })
 }
@@ -1017,6 +1025,7 @@ mod tests {
         assert_eq!(
             library.get_asset_classifications("asset-a").unwrap(),
             vec![crate::library::models::ClassificationEntry {
+                is_container: false,
                 total_asset_count: None,
                 ..moved.clone()
             }]
@@ -1072,6 +1081,7 @@ mod tests {
         assert_eq!(
             library.get_asset_classifications("asset-a").unwrap(),
             vec![crate::library::models::ClassificationEntry {
+                is_container: false,
                 total_asset_count: None,
                 ..moved.clone()
             }]

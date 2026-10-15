@@ -25,6 +25,7 @@ export type RegisterSuggestion = {
 export type MergeSuggestion = { tag: string; targetId: string; expectedFingerprint: string; previewToken: string; linkTag: boolean };
 export type SuggestionContext = { targets: CharacterTarget[]; folders: ClassificationEntry[] };
 export type SuggestionApi = {
+  previewRegistration: typeof import("../RegistrationScope").registrationPreview;
   list(minimum: number): Promise<Suggestion[]>;
   detail(tag: string, seriesId: string | null): Promise<SuggestionDetail>;
   ignored(): Promise<IgnoredTag[]>;
@@ -40,6 +41,7 @@ async function mutation(command: string, request: RegisterSuggestion | MergeSugg
   return result;
 }
 export const suggestionApi: SuggestionApi = {
+  previewRegistration: request => invoke("character_registration_preview", { request }),
   list: minimum => invoke("character_suggestions", { minimum }),
   detail: (tag, seriesId) => invoke("character_suggestion_detail", { tag, seriesId }),
   ignored: () => invoke("ignored_character_suggestions"),

@@ -90,7 +90,7 @@ it("keeps one-time registration tools out of root classifications",()=>{
   expect(screen.queryByRole("button",{name:"작품 후보"})).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"시리즈로 등록"})).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"캐릭터로 만들기"})).not.toBeInTheDocument();
-  expect(screen.queryByRole("button",{name:"폴더 더보기"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"폴더 더보기"})).toBeInTheDocument();
 });
 
 it("keeps child-folder conversion and registration reachable from one menu",async()=>{
@@ -144,6 +144,7 @@ it("offers reference suggestions after curated-folder conversion and keeps conve
   const manual={...fixtureTarget("manual","마커스"),manualOnly:true,ready:false,references:[]};
   vi.mocked(invoke).mockImplementation(async(command)=>{
     if(command==="character_folder_asset_snapshot")return {count:5,fingerprint:"snapshot"};
+    if(command==="character_registration_preview") return { imageCount: 0, otherSeries: false };
     if(command==="register_character_folder")return {target:manual,linkedAssetCount:5,referenceCandidateCount:5,sourceFolderRemoved:true};
     if(command==="reference_candidates")return {targetId:"manual",targetRevision:manual.revision,referenceSetHash:"set",confirmationMode:"initialize",minimumSelection:5,items:assets,suggestedAssetIds:assets.map(item=>item.id)};
     return undefined;

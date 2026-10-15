@@ -791,6 +791,8 @@ pub enum ClassificationKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassificationEntry {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_container: bool,
     pub id: String,
     pub kind: ClassificationKind,
     pub name: String,
@@ -1951,6 +1953,7 @@ mod tests {
                 icon_key: None,
                 color_key: None,
                 asset_count: 0,
+                is_container: false,
                 total_asset_count: None,
             }],
         };

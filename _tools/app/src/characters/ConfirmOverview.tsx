@@ -136,7 +136,7 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
           <span className="crv-space" />
           <Button size="sm" onClick={() => onOpen({})}>전체 확인</Button>
         </div>}
-        <BusyLabel busy={!restricted && !error && (!tallies || reading)}><p className="crv-reading" role="status">{tallies ? "다시 세는 중" : "확인 목록 읽는 중"}</p></BusyLabel>
+        <BusyLabel busy={!restricted && !error && tallies === null && reading} delay={400}><p className="crv-reading" role="status">확인 목록 읽는 중</p></BusyLabel>
         {body}
       </div>
     </div>

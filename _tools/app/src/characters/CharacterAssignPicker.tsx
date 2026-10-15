@@ -214,6 +214,7 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
         {otherSeriesRows.length === 0 && !onCreate && <EmptyState inline className="character-assign-picker__empty" title="검색 결과 없음" />}
       </>}
       {!scopedNoMatch && visibleRows.length === 0 && <EmptyState inline className="character-assign-picker__empty" title="검색 결과 없음" />}
+      {!scopedNoMatch && visibleRows.length === 0 && query.trim() && onCreate && <PickerSection label="새 캐릭터"><button type="button" className="character-assign-picker__create" disabled={busy} onClick={() => void onCreate(query.trim())}><span className="character-assign-picker__create-icon"><PlusIcon aria-hidden="true" /></span>“{query.trim()}” 만들기</button></PickerSection>}
     </div>
     {activeScopeId && <button type="button" className="character-assign-picker__all-series" onClick={clearScope}>
       <span className="character-assign-picker__all-series-icon"><Squares2X2Icon aria-hidden="true" /></span><span>모든 시리즈</span><ChevronRightIcon aria-hidden="true" />

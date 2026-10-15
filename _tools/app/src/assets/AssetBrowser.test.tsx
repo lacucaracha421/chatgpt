@@ -16,6 +16,26 @@ import { resetFolderPrefetch } from "./folderPrefetch";
 
 const classifications: ClassificationEntry[] = [];
 
+it("shows a container badge, its child series shelf, and the existing unclassified scope", async () => {
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  const entries: ClassificationEntry[] = [
+    { id: "container", kind: "root", name: "게임", parentId: null, iconKey: null, colorKey: null, isContainer: true, assetCount: 1, totalAssetCount: 4 },
+    { id: "series-child", kind: "tag", name: "이환", parentId: "container", iconKey: null, colorKey: null },
+    { id: "plain-child", kind: "tag", name: "일반 폴더", parentId: "container", iconKey: null, colorKey: null },
+  ];
+  renderBrowser(gateway, { view: { kind: "classification", classificationId: "container" }, classifications: entries,
+    characterSeries: [{ classificationId: "series-child", heroAssetId: null, autoClassify: true }],
+    folderShelfApi: { seriesFolders: vi.fn().mockResolvedValue([]) } });
+  await screen.findByRole("option", { name: "asset-0.png" });
+  expect(screen.getByText("분류함")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "시리즈 1" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "이환 폴더 열기" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "일반 폴더 폴더 열기" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "보기" }));
+  expect(screen.getByRole("radio", { name: "미분류 1" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.queryByText("정리 대기")).not.toBeInTheDocument();
+});
+
 afterEach(() => { vi.useRealTimers(); cleanup(); localStorage.clear(); });
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 },

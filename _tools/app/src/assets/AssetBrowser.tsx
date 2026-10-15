@@ -41,6 +41,7 @@ import { folderPreviewCache, rememberFolderPreview } from "./folderPreviewCache"
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { characterPickerSeriesId } from "./characterPickerScope";
 import { characterExtrasApi } from "../characters/extrasApi";
+import { NewManualCharacter } from "../characters/NewManualCharacter";
 import { CharacterAssignPicker } from "../characters/CharacterAssignPicker";
 import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api";
 import { characterHubApi, type CharacterGroup, type CharacterHubApi, type CharacterSeries } from "../characters/hubApi";
@@ -137,6 +138,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   const [inspectorOpen, setInspectorOpen] = useInfoPanelPreference();
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
+  const [newCharacter, setNewCharacter] = useState<{ name: string; assetIds: string[] } | null>(null);
   const [characterOpen, setCharacterOpen] = useState(false);
   const [characterCounts, setCharacterCounts] = useState<Record<string, number>>({});
   const [characterNotice, setCharacterNotice] = useState<CharacterAssignNoticeState | null>(null);
@@ -159,12 +161,18 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   if (sort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (sort !== "random") randomPivotRef.current = null; }, [sort]);
   const plainFolderId = view.kind === "classification" && view.classificationId && !view.characterId && !view.characterGroupId ? view.classificationId : null;
-  const scopeSeriesId = characterPickerSeriesId(view, classifications, characterSeries);
-  const seriesExtras = useMemo(() => scopeSeriesId ? characterExtras.filter(target => target.seriesClassificationId === scopeSeriesId) : undefined, [characterExtras, scopeSeriesId]);
+  const creationFolder = plainFolderId ? classifications.find(entry => entry.id === plainFolderId) : undefined;
+  const scopeSeriesId = creationFolder?.isContainer ? creationFolder.id : characterPickerSeriesId(view, classifications, characterSeries);
+  const seriesExtras = useMemo(() => scopeSeriesId && !creationFolder?.isContainer ? characterExtras.filter(target => target.seriesClassificationId === scopeSeriesId) : undefined, [characterExtras, scopeSeriesId, creationFolder?.isContainer]);
   const folderChildren = useMemo(() => plainFolderId
     ? sortFolders(classifications.filter(entry => entry.parentId === plainFolderId), classificationOrderIds)
     : [], [classifications, plainFolderId, classificationOrderIds]);
   const folderEntry = plainFolderId ? classifications.find(entry => entry.id === plainFolderId) : undefined;
+  const shelfFolders = useMemo(() => {
+    if (!folderEntry?.isContainer) return folderChildren;
+    const registered = new Set(characterSeries.map(series => series.classificationId));
+    return folderChildren.filter(entry => registered.has(entry.id));
+  }, [folderEntry?.isContainer, folderChildren, characterSeries]);
   const directOnly = directOnlyState.folderId === plainFolderId ? directOnlyState.value : true;
   const folderChildrenKey = folderChildren.map(entry => entry.id).sort().join(",");
   const [, updateFolderThumbnails] = useState(0);
@@ -638,14 +646,14 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     <Button variant="quiet" size="sm" onClick={onExitDescriptionSearch}>검색 해제</Button>
   </span>;
   const showNewest = () => { setPage(null); pageRef.current = null; setNewAssetsAvailable(false); refresh(); }; // no-flash-ok: 처음부터 보기 is an explicit restart
-  const folderShelfIntro = plainFolderId && directOnly && folderChildren.length > 0 ? <>
+  const folderShelfIntro = plainFolderId && directOnly && shelfFolders.length > 0 ? <>
     <FolderShelf
-      label={`폴더 ${folderChildren.length.toLocaleString()}`}
+      label={`${folderEntry?.isContainer ? "시리즈" : "폴더"} ${shelfFolders.length.toLocaleString()}`}
       ariaLabel="하위 폴더"
       appearanceKey="classification-folders"
       entrance={false}
-      reorder={onReorderFolders ? { ids: folderChildren.map(child => child.id), names: Object.fromEntries(folderChildren.map(child => [child.id, child.name])), onReorder: ids => onReorderFolders(plainFolderId, ids) } : undefined}
-      cards={folderChildren.map(child => <article className="folder-shelf__card" key={child.id} data-order-id={child.id} data-order-kind="folder">
+      reorder={onReorderFolders && shelfFolders.length === folderChildren.length ? { ids: shelfFolders.map(child => child.id), names: Object.fromEntries(shelfFolders.map(child => [child.id, child.name])), onReorder: ids => onReorderFolders(plainFolderId, ids) } : undefined}
+      cards={shelfFolders.map(child => <article className="folder-shelf__card" key={child.id} data-order-id={child.id} data-order-kind="folder">
         <button type="button" className="folder-shelf__card-open" aria-label={`${child.name} 폴더 열기`} onClick={() => onViewChange?.({ kind: "classification", classificationId: child.id })}>
           {folderThumbnails.get(child.id) && !privacyMode
             ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl(folderThumbnails.get(child.id)!)} alt="" />
@@ -708,7 +716,8 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>
-    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
+    {newCharacter && creationFolder && <NewManualCharacter {...newCharacter} series={classifications.find(entry => entry.id === scopeSeriesId) ?? creationFolder} entries={classifications} onClose={() => setNewCharacter(null)} onSaved={target => { setNewCharacter(null); setCharacterOpen(false); clearSelection(); onCharactersChanged(); onMembershipChanged(); refresh(); onViewChange?.({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
+    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{folderEntry?.isContainer && <Badge>분류함</Badge>}{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <CharacterAssignToast notice={characterNotice} privacyMode={privacyMode} busy={batchPending} onDismiss={() => setCharacterNotice(null)} onOpen={() => {
@@ -721,7 +730,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       <div className="asset-browser__gallery">
         {shownResults}
         {artistScope?.panel}
-        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
+        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [...selectedIds] }) : undefined} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
@@ -746,7 +755,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       folders={viewerFolders}
       onMoveToFolder={moveViewerAssetToFolder}
       onSetVideoThumbnail={gateway.setVideoThumbnailFromFrame ? (asset, timeMs) => void setVideoThumbnailFromFrame(asset, timeMs) : undefined}
-      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
+      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [asset.id] }) : undefined} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
       renderInfo={(asset) => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}
     />

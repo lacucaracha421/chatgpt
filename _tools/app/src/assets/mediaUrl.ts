@@ -35,6 +35,16 @@ export function assetUrl(assetId: string): string {
   return `${mediaOrigin()}/asset/${encodeURIComponent(assetId)}`;
 }
 
+/**
+ * A screen-size copy of a library image (long edge at most `maxEdge`, 640..2560), made in memory by
+ * the media protocol for views that flip through many large originals. Images already within the
+ * edge, and kinds it cannot scale, come back as the original bytes.
+ */
+export function assetPreviewUrl(assetId: string, maxEdge?: number): string {
+  const base = `${mediaOrigin()}/preview/${encodeURIComponent(assetId)}`;
+  return maxEdge === undefined ? base : `${base}/${Math.round(maxEdge)}`;
+}
+
 export function playbackUrl(assetId: string): string {
   return `${mediaOrigin()}/playback/${encodeURIComponent(assetId)}`;
 }

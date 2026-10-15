@@ -482,6 +482,8 @@ pub fn run() {
             commands::characters::apply_automatic_characters,
             commands::characters::character_series,
             commands::characters::save_character_series,
+            commands::characters::set_character_container,
+            commands::characters::character_registration_preview,
             commands::characters::browse_character_assets,
             commands::characters::save_character_target,
             commands::characters::save_character_settings,

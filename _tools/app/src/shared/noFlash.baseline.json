@@ -3,10 +3,6 @@
     "blankingReset": 1,
     "hiddenImage": 0
   },
-  "src/characters/FolderCharacterRegistration.tsx": {
-    "blankingReset": 1,
-    "hiddenImage": 0
-  },
   "src/characters/ReferenceCandidateDialog.tsx": {
     "blankingReset": 1,
     "hiddenImage": 0

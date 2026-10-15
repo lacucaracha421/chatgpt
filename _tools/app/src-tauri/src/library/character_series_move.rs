@@ -96,6 +96,7 @@ impl Library {
         target_id: &str,
         destination_id: &str,
     ) -> Result<SeriesMovePreview> {
+        super::character_containers::reject_container(c, destination_id)?;
         let target = self.read_character_target(c, target_id)?;
         if target.is_extras() {
             return Err(Error::Invalid(

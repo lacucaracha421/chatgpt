@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 133;
+pub(crate) const SCHEMA_VERSION: i64 = 134;
 
 #[cfg(test)]
 mod character_folder_perf_migration_tests {
@@ -936,6 +936,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version < 133 {
             transaction.execute_batch(include_str!("../../migrations/0133_character_reference_reinforcement.sql"))?;
+        }
+        if version < 134 {
+            transaction.execute_batch(include_str!("../../migrations/0134_classification_containers.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -5384,5 +5387,25 @@ mod manga_index_migration_tests {
                 .unwrap(),
             "ok"
         );
+    }
+}
+
+#[cfg(test)]
+mod container_migration_tests {
+    use super::*;
+    #[test]
+    fn container_migration_133_to_134_preserves_folders_without_defaults() {
+        let mut c=Connection::open_in_memory().unwrap();
+        migrate_to_latest(&mut c,0).unwrap();
+        c.execute_batch("DROP TRIGGER classification_container_top_level;
+          DROP TRIGGER classification_container_move; DROP TRIGGER classification_container_empty;
+          DROP TRIGGER classification_container_series; DROP TRIGGER classification_container_target;
+          DROP TRIGGER classification_container_target_move; DROP TABLE classification_containers;
+          PRAGMA user_version=133;
+          INSERT INTO classification_entries(id,kind,name,created_at) VALUES('game','root','Games','now');").unwrap();
+        migrate_to_latest(&mut c,133).unwrap();
+        assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),134);
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM classification_containers",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(c.query_row("SELECT name FROM classification_entries WHERE id='game'",[],|r|r.get::<_,String>(0)).unwrap(),"Games");
     }
 }

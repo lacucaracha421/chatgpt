@@ -11,6 +11,8 @@ use tauri::http::{
     Method, Response, StatusCode,
 };
 
+mod preview;
+
 use crate::library::{
     error::LibraryError,
     igdb::{IgdbClient, IgdbImageSize},
@@ -355,6 +357,15 @@ pub(crate) fn media_response_with_range(
                 .body(bytes).expect("AV jacket response is valid"),
             None => empty_response(StatusCode::NOT_FOUND),
         });
+    }
+    if path.starts_with("/preview/") {
+        let Some((asset_id, max)) = preview::parse(path) else {
+            return empty_response(StatusCode::BAD_REQUEST);
+        };
+        return match library {
+            Some(library) => preview::response(library, &asset_id, max),
+            None => empty_response(StatusCode::NOT_FOUND),
+        };
     }
     if path.starts_with("/igdb-image-preview/") {
         let Ok((variant, Some(image_id))) = parse_media_path(path) else {
@@ -1717,6 +1728,101 @@ mod tests {
         let original = media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}"));
         assert_eq!(original.status(), StatusCode::OK);
         assert_eq!(cache_control(&original), None);
+    }
+
+    fn preview_library(width: u32, height: u32) -> (tempfile::TempDir, Library, Vec<u8>) {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(&library, ASSET_ID, "assets/image.jpg", "thumbnails/image.webp");
+        let image = image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x * 255 / width) as u8, (y * 255 / height) as u8, ((x ^ y) & 0xff) as u8])
+        });
+        let mut original = Vec::new();
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut original), ImageFormat::Jpeg)
+            .unwrap();
+        std::fs::write(library.root().join("assets/image.jpg"), &original).unwrap();
+        (temp, library, original)
+    }
+
+    fn dimensions(bytes: &[u8]) -> (u32, u32) {
+        image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .unwrap()
+            .into_dimensions()
+            .unwrap()
+    }
+
+    #[test]
+    fn preview_route_serves_a_downscaled_copy_within_the_requested_edge() {
+        let (_temp, library, original) = preview_library(3000, 2000);
+        let default = media_response(Some(&library), &Method::GET, &format!("/preview/{ASSET_ID}"));
+        assert_eq!(default.status(), StatusCode::OK);
+        assert_eq!(default.headers()[CONTENT_TYPE], "image/jpeg");
+        assert_eq!(dimensions(default.body()), (1600, 1067));
+        assert!(default.body().len() < original.len());
+        assert_eq!(cache_control(&default), Some("private, max-age=60"));
+        let wide = media_response(Some(&library), &Method::GET, &format!("/preview/{ASSET_ID}/1280"));
+        assert_eq!(dimensions(wide.body()), (1280, 853));
+        // The requested edge is clamped to 640..2560.
+        let tiny = media_response(Some(&library), &Method::GET, &format!("/preview/{ASSET_ID}/10"));
+        assert_eq!(dimensions(tiny.body()), (640, 427));
+        // The original route is untouched, and nothing was written next to the library file.
+        let asset = media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}"));
+        assert_eq!(asset.body(), &original);
+        assert_eq!(std::fs::read_dir(library.root().join("assets")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn preview_route_serves_small_originals_unchanged_and_follows_the_asset_rules() {
+        let (_temp, library, original) = preview_library(1200, 800);
+        let small = media_response(Some(&library), &Method::GET, &format!("/preview/{ASSET_ID}"));
+        assert_eq!(small.status(), StatusCode::OK);
+        assert_eq!(small.body(), &original);
+        assert_eq!(cache_control(&small), None);
+
+        insert_asset_with_status(&library, TRASH_ID, "assets/trash.jpg", "thumbnails/t.webp", "trash");
+        for (path, status) in [
+            (format!("/preview/{TRASH_ID}"), StatusCode::NOT_FOUND),
+            (format!("/preview/{MISSING_ID}"), StatusCode::NOT_FOUND),
+            ("/preview/not-a-uuid".to_string(), StatusCode::BAD_REQUEST),
+            (format!("/preview/{ASSET_ID}/wide"), StatusCode::BAD_REQUEST),
+        ] {
+            assert_eq!(media_response(Some(&library), &Method::GET, &path).status(), status, "{path}");
+        }
+        assert_eq!(
+            media_response(None, &Method::GET, &format!("/preview/{ASSET_ID}")).status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            media_response(Some(&library), &Method::POST, &format!("/preview/{ASSET_ID}")).status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
+
+    #[test]
+    fn preview_route_decodes_once_then_answers_from_the_lru_until_the_file_changes() {
+        let (_temp, library, _) = preview_library(3000, 2000);
+        let cache = std::sync::Mutex::new(super::preview::Lru::new(24, 64 * 1024 * 1024));
+        let builds = || super::preview::BUILDS.with(|count| count.get());
+        let first = super::preview::serve(&cache, &library, ASSET_ID, 1600);
+        assert_eq!(builds(), 1);
+        let second = super::preview::serve(&cache, &library, ASSET_ID, 1600);
+        assert_eq!(builds(), 1, "a repeat is a cache hit");
+        assert_eq!(first.body(), second.body());
+        super::preview::serve(&cache, &library, ASSET_ID, 1280);
+        assert_eq!(builds(), 2, "another edge is another entry");
+
+        // New bytes under the same id and path never see the old preview.
+        let image = image::RgbImage::from_pixel(2400, 1800, image::Rgb([200, 10, 10]));
+        let mut changed = Vec::new();
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut changed), ImageFormat::Jpeg)
+            .unwrap();
+        std::fs::write(library.root().join("assets/image.jpg"), &changed).unwrap();
+        let third = super::preview::serve(&cache, &library, ASSET_ID, 1600);
+        assert_eq!(builds(), 3);
+        assert_eq!(dimensions(third.body()), (1600, 1200));
     }
 
     #[test]

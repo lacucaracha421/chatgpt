@@ -1,3 +1,4 @@
+import { useContainerFolder } from "../characters/ContainerFolderDialog";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { PinSolidIcon } from "../shared/ui/PinIcon";
 import { BookOpenIcon, ChevronRightIcon, Cog6ToothIcon, EllipsisHorizontalIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -61,6 +62,7 @@ type ClassificationSidebarProps = {
 };
 
 type SidebarTreeEntry = {
+  isContainer?: boolean;
   folderOrder?: number | null;
   characterId?: string;
   characterGroupId?: string;
@@ -102,6 +104,7 @@ export function ClassificationSidebar({
   onChanged,
   onAlbumsChanged = onChanged,
   onEditGroup,
+  onCharactersChanged,
   onReorderGroups,
   onExpandedIdsChange,
   onExpandedAlbumIdsChange = () => undefined,
@@ -160,6 +163,7 @@ export function ClassificationSidebar({
   const [name, setName] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [parentId, setParentId] = useState("");
+  const containerFolder = useContainerFolder(entries, () => { onChanged(); onCharactersChanged?.(); });
   const [message, setMessage] = useState<string | null>(null);
   const [foldersOpen, setFoldersOpen] = useState(true);
   const [albumsOpen, setAlbumsOpen] = useState(true);
@@ -575,6 +579,7 @@ export function ClassificationSidebar({
               registerTreeRow={registerTreeRow}
               onCreateChild={openChildCreate}
               onRename={openRename}
+              onContainer={entry => { const folder = entries.find(item => item.id === entry.id); if (folder) void containerFolder.toggle(folder); }}
               onAppearance={setAppearanceEntry}
               onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
               onEditSave={() => void saveInlineEdit()}
@@ -627,7 +632,8 @@ export function ClassificationSidebar({
                 registerTreeRow={registerTreeRow}
                 onCreateChild={openChildCreate}
                 onRename={openRename}
-                onAppearance={setAppearanceEntry}
+                onContainer={entry => { const folder = entries.find(item => item.id === entry.id); if (folder) void containerFolder.toggle(folder); }}
+              onAppearance={setAppearanceEntry}
                 onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
                 onEditSave={() => void saveInlineEdit()}
                 onEditCancel={cancelInlineEdit}
@@ -664,6 +670,7 @@ export function ClassificationSidebar({
         onPointerCancel={stopResize}
       />}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+      {containerFolder.surface}
       <ClassificationAppearanceDialog
         entry={appearanceEntry ? { ...appearanceEntry, scope: appearanceEntry.treeKind } : null}
         onClose={() => setAppearanceEntry(null)}
@@ -714,7 +721,7 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   );
 }
 
-function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, selectedGroupId = null, onEditGroup, onMoveGroup, canMoveGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onContainer, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, selectedGroupId = null, onEditGroup, onMoveGroup, canMoveGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   pinnedIds?: string[];
   onTogglePin?: (entry: SidebarTreeEntry) => void;
   activeRowId: string | null;
@@ -724,6 +731,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   hasNextSibling: boolean;
   inlineEdit: InlineEdit | null;
   node: SidebarTreeNode;
+  onContainer?: (entry: SidebarTreeEntry) => void;
   onAppearance: (entry: SidebarTreeEntry) => void;
   onCreateChild: (entry: SidebarTreeEntry) => void;
   onDelete: (entry: SidebarTreeEntry) => void;
@@ -770,6 +778,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const originalsRoot = isOriginalsRoot(node.entry);
   const actions: MenuItem[] = [
+    ...(!originalsRoot && node.entry.treeKind === "classification" && !node.entry.parentId && onContainer ? [{ id: "container", label: "분류함으로 쓰기", checked: !!node.entry.isContainer, onSelect: () => onContainer(node.entry) }] : []),
     ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "고정 해제" : "고정", onSelect: () => onTogglePin(node.entry) }] : []),
     { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     ...(!originalsRoot ? [{ id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) }] : []),
@@ -860,7 +869,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
               : "var(--color-sidebar-connector)",
           } as CSSProperties}
         >
-          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} onMoveGroup={onMoveGroup} canMoveGroup={canMoveGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onContainer={onContainer} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} onMoveGroup={onMoveGroup} canMoveGroup={canMoveGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       </div>}

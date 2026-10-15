@@ -44,6 +44,7 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        super::character_containers::reject_container(&transaction, &request.series_id)?;
         let registered: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1)",
             [&request.series_id],
@@ -60,6 +61,14 @@ impl Library {
             return Err(Error::Invalid("같은 이름의 캐릭터가 이미 있습니다."));
         }
         for asset_id in &ids {
+            // Choosing a child series from a container moves only the explicit
+            // selection, atomically with creation, and never enrolls rechecks.
+            let from_container: bool = transaction.query_row("WITH RECURSIVE tree(root,id) AS (SELECT classification_id,classification_id FROM classification_containers UNION ALL SELECT tree.root,e.id FROM tree JOIN classification_entries e ON e.parent_id=tree.id) SELECT EXISTS(SELECT 1 FROM tree a JOIN tree b ON a.root=b.root JOIN asset_classifications ac ON ac.classification_id=b.id WHERE a.id=?1 AND ac.asset_id=?2)", params![request.series_id,asset_id], |r|r.get(0))?;
+            if from_container && character_hub::candidate_media_mode(&transaction, &request.series_id, asset_id, false, true).is_err() {
+                Self::set_asset_classification_cause_in(&transaction, &super::models::SetAssetClassification {
+                    asset_ids: vec![asset_id.clone()], classification_id: Some(request.series_id.clone()),
+                }, super::character_autotag::Cause::AutomaticFinalization)?;
+            }
             character_hub::candidate_media_mode(
                 &transaction,
                 &request.series_id,
