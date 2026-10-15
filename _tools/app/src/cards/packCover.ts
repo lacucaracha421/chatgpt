@@ -6,6 +6,8 @@ const hues = ["#d8452e", "#2f6fd0", "#7b3fc6", "#e3a01c", "#1f977a", "#cf3a86", 
 function load(src: string): Promise<HTMLImageElement | null> {
   return new Promise(resolve => {
     const image = new Image();
+    // Canvas reads need CORS; the media protocol allows /preview/ for the app origin.
+    if (!src.startsWith("data:")) image.crossOrigin = "anonymous";
     const timer = setTimeout(() => resolve(null), 1800);
     image.onload = () => { clearTimeout(timer); resolve(image); };
     image.onerror = () => { clearTimeout(timer); resolve(null); };

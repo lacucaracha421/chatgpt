@@ -8,17 +8,40 @@ import { printVariables } from "./printAssets";
 import { RevealEffects } from "./RevealEffects";
 import { TradingCard } from "./TradingCard";
 import { cardTiers, revealOrder, type CardData, type PackCover } from "./types";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 
 type Phase = "pack" | "opening" | "reveal" | "results";
-export function PackOpening({ cards, cover, onClose }: { cards: readonly CardData[]; cover: PackCover; onClose: () => void }) {
+const noCards: readonly CardData[] = [];
+/** The keep step after the reveal: the player picks the cards that enter the album. */
+export interface KeepActions {
+  /** Sends the chosen server slots; may return the cards as the album now holds them (serials). */
+  onKeep: (slots: number[]) => Promise<readonly CardData[] | void>;
+  /** Leaves the pack undecided; it stays listed as waiting for a decision. */
+  onLater: () => void;
+}
+export function PackOpening({ cards: suppliedCards = noCards, cover, onClose, loadDraw, initialResults = false, onAlbum, keep, undecided: suppliedUndecided = false }: {
+  cards?: readonly CardData[]; cover: PackCover; onClose: () => void;
+  loadDraw?: () => Promise<{ cards: readonly CardData[]; alreadyOpened: boolean; undecided?: boolean }>;
+  initialResults?: boolean; onAlbum?: () => void;
+  keep?: KeepActions; undecided?: boolean;
+}) {
+  const [loaded, setLoaded] = useState<readonly CardData[] | null>(null);
+  const cards = loaded ?? suppliedCards;
+  const [pending, setPending] = useState(false), [error, setError] = useState(false), [attempt, setAttempt] = useState(0);
+  const request = useRef<Promise<void> | null>(null), committed = useRef(false), settled = useRef(false);
   const reduced = useCardReducedMotion();
-  const [phase, setPhase] = useState<Phase>("pack");
-  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
-  const revealedRef = useRef(new Set<string>());
+  const [phase, setPhase] = useState<Phase>(initialResults ? "results" : "pack");
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set(initialResults ? cards.map(c => c.id) : []));
+  const revealedRef = useRef(new Set(initialResults ? cards.map(c => c.id) : []));
   const [effects, setEffects] = useState<Set<string>>(() => new Set());
   const [cutin, setCutin] = useState<CardData | null>(null);
   const [revealingAll, setRevealingAll] = useState(false);
   const [bestWaiting, setBestWaiting] = useState(false);
+  // Nothing is selected at first: the player lifts the cards they want to keep.
+  const [undecided, setUndecided] = useState(suppliedUndecided);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [saved, setSaved] = useState<ReadonlySet<string>>(() => new Set());
+  const [saving, setSaving] = useState(false), [keepError, setKeepError] = useState(false);
   const stage = useRef<HTMLDivElement>(null), wrapper = useRef<HTMLDivElement>(null), stack = useRef<HTMLDivElement>(null), grid = useRef<HTMLDivElement>(null);
   const [burst, setBurst] = useState(false);
   const cutinRoot = useRef<HTMLDivElement>(null), cutinDim = useRef<HTMLDivElement>(null), cutinCard = useRef<HTMLDivElement>(null), cutinBanner = useRef<HTMLSpanElement>(null);
@@ -29,9 +52,31 @@ export function PackOpening({ cards, cover, onClose }: { cards: readonly CardDat
   useEffect(() => {
     mounted.current = true; reveals.current = new CardSequence(reduced);
     setRevealingAll(false);
-    if (revealedRef.current.size === cards.length) setPhase("results");
+    if (cards.length > 0 && revealedRef.current.size === cards.length) setPhase("results");
     return () => { mounted.current = false; opening.current?.stop(); reveals.current?.stop(); };
   }, [reduced, cards.length]);
+  const showResults = (next: readonly CardData[]) => {
+    revealedRef.current = new Set(next.map(card => card.id)); setRevealed(new Set(revealedRef.current)); setPhase("results");
+  };
+  const startRequest = () => {
+    if (!loadDraw || request.current || settled.current) return;
+    setError(false); setPending(true);
+    request.current = loadDraw().then(result => {
+      if (!mounted.current) return;
+      setLoaded(result.cards); settled.current = true; setUndecided(result.undecided ?? true);
+      if (result.alreadyOpened || reduced) showResults(result.cards);
+      else if (committed.current) setPhase("opening");
+    }).catch(() => {
+      if (!mounted.current) return;
+      committed.current = false; request.current = null; setError(true); setAttempt(value => value + 1);
+    }).finally(() => { if (mounted.current) setPending(false); });
+  };
+  const tear = () => {
+    committed.current = true;
+    if (!loadDraw || settled.current) {
+      if (reduced && loadDraw) showResults(cards); else setPhase("opening");
+    } else startRequest();
+  };
   /** One cut-in at a time; a second LR flipped meanwhile waits its turn. */
   const presentCutin = (card: CardData) => {
     if (cutinActive.current) { cutinQueue.current.push(card); return; }
@@ -175,25 +220,50 @@ export function PackOpening({ cards, cover, onClose }: { cards: readonly CardDat
     revealedRef.current = new Set(cards.map(card => card.id)); setRevealed(new Set(revealedRef.current)); clearCutins(); setRevealingAll(false); setPhase("results");
   };
   const canReveal = phase === "reveal" && !revealingAll;
+  const picking = !!keep && undecided && phase === "results";
+  const toggle = (id: string) => {
+    if (!picking || saving) return;
+    setSelected(previous => { const next = new Set(previous); if (!next.delete(id)) next.add(id); return next; });
+  };
+  const saveSelection = async () => {
+    if (!keep || saving || selected.size === 0) return;
+    const slots = cards.flatMap((card, index) => selected.has(card.id) ? [card.slot ?? index] : []);
+    setSaving(true); setKeepError(false);
+    try {
+      const next = await keep.onKeep(slots);
+      if (!mounted.current) return;
+      if (next) setLoaded(next);
+      setSaved(new Set(selected)); setUndecided(false);
+    } catch { if (mounted.current) setKeepError(true); }
+    finally { if (mounted.current) setSaving(false); }
+  };
+  const inAlbum = (card: CardData) => !picking && phase === "results" && (!!card.kept || saved.has(card.id));
+  const resultText = saved.size ? `앨범에 ${saved.size}장을 넣었습니다` : `공개 완료 · ${cards.length}장 · ${cards.filter(card => card.isNew).length}장 새로 발견`;
   return <div className="lkm-cards pack-opening" style={printVariables} data-phase={phase} data-reduced-motion={reduced}>
-    <div className="pack-opening__toolbar"><span>카드 팩 · 미리보기</span><div>{phase !== "results" && <Button onClick={skip}>건너뛰기</Button>}<Button onClick={onClose}>닫기</Button></div></div>
+    <div className="pack-opening__toolbar"><span>오늘의 카드</span><div>{phase !== "pack" && phase !== "results" && <Button onClick={skip}>건너뛰기</Button>}{onAlbum && phase === "results" && <Button onClick={onAlbum}>앨범</Button>}<Button onClick={onClose}>닫기</Button></div></div>
     <div className="pack-opening__stage" ref={stage}>
-      {(phase === "pack" || phase === "opening") && <div className="pack-opening__wrapper" ref={wrapper}><BoosterPack cover={cover} cardCount={cards.length} onOpened={() => setPhase("opening")} disabled={phase === "opening"} /></div>}
+      {(phase === "pack" || phase === "opening") && <div className="pack-opening__wrapper" ref={wrapper}><BoosterPack resetToken={attempt} cover={cover} cardCount={5} onTearStart={startRequest} onOpened={tear} disabled={phase === "opening" || (pending && committed.current)} /></div>}
       {phase === "opening" && <div className="pack-opening__stack" ref={stack}><i /><i /><CardBack /></div>}
       <div ref={grid} className="pack-opening__grid" style={{ visibility: phase === "pack" || phase === "opening" ? "hidden" : "visible" }}>
-        {cards.map(card => <div className="pack-opening__slot" key={card.id}>
+        {cards.map(card => <div className="pack-opening__slot" key={card.id} data-pickable={picking || undefined} data-selected={picking ? selected.has(card.id) : undefined}
+          onClick={picking ? event => { if (!(event.target as HTMLElement).closest(".pack-opening__pick")) toggle(card.id); } : undefined}>
           <TradingCard card={card} faceDown={!revealed.has(card.id)} onReveal={canReveal ? () => { void flip(card); } : undefined} />
           {effects.has(card.id) && <RevealEffects tier={card.tier} reduced={reduced} />}
+          {picking && <button type="button" role="checkbox" aria-checked={selected.has(card.id)} aria-label={`${card.tier.toUpperCase()} ${card.characterName} 선택`} className="pack-opening__pick" disabled={saving} onClick={() => toggle(card.id)}>
+            <span className="pack-opening__box" aria-hidden="true" />{selected.has(card.id) && <span>선택됨</span>}
+          </button>}
+          {inAlbum(card) && <span className="pack-opening__pick pack-opening__pick--saved" data-checked="true"><span className="pack-opening__box" aria-hidden="true" />앨범에 넣음</span>}
         </div>)}
       </div>
       {cutin && <div className="cutin" key={cutin.id} ref={cutinRoot} role="button" tabIndex={0} aria-label="별빛 한정 연출 건너뛰기" onClick={clearCutins} onKeyDown={event => { if (["Enter", " ", "Escape"].includes(event.key)) { event.preventDefault(); event.stopPropagation(); clearCutins(); } }}>
         <div className="cutin-dim" ref={cutinDim} style={{ opacity: 0 }} />
         <div className="cutin-card" ref={cutinCard}><TradingCard card={cutin} />{burst && <RevealEffects tier="lr" reduced={reduced} />}</div>
-        <div className="cutin-banner"><span ref={cutinBanner} style={{ opacity: 0 }}><small>LR · 별빛 한정 · {cutin.serial}</small><b>{cutin.characterName}</b></span></div>
+        <div className="cutin-banner"><span ref={cutinBanner} style={{ opacity: 0 }}><small>LR · 별빛 한정{cutin.serial ? ` · ${cutin.serial}` : ""}</small><b>{cutin.characterName}</b></span></div>
       </div>}
     </div>
-    <div className="pack-opening__footer"><p role="status">{phase === "pack" ? "윗 띠를 오른쪽으로 밀어서 뜯기 · Enter로 뜯기" : phase === "opening" ? "팩에서 카드를 꺼냅니다" : phase === "results" ? `공개 완료 · ${cards.length}장 · ${cards.filter(card => card.isNew).length}장 새로 발견` : bestWaiting ? "마지막 한 장은 직접 뒤집어 보세요" : "카드를 눌러 뒤집기 · 모두 공개는 가장 좋은 카드 한 장을 남겨 둡니다"}</p>
+    <div className="pack-opening__footer">{error && <p role="alert">팩을 열지 못했습니다. 다시 시도해 주세요.</p>}{keepError && <p role="alert">앨범에 넣지 못했습니다. 다시 시도해 주세요.</p>}<p role="status"><BusyLabel busy={pending || saving} delay={400} idle={phase === "pack" ? "윗 띠를 오른쪽으로 밀어서 뜯기 · Enter로 뜯기" : phase === "opening" ? "팩에서 카드를 꺼냅니다" : phase === "results" ? (picking ? `앨범에 넣을 카드를 눌러 고르세요 · ${resultText}` : resultText) : bestWaiting ? "마지막 한 장은 직접 뒤집어 보세요" : "카드를 눌러 뒤집기 · 모두 공개는 가장 좋은 카드 한 장을 남겨 둡니다"}>{saving ? "앨범에 넣는 중" : "팩을 여는 중"}</BusyLabel></p>
       {phase === "results" && <div className="pack-opening__results" aria-label="등급별 결과">{[...cardTiers].reverse().map(tier => { const count = cards.filter(card => card.tier === tier).length; return count ? <span key={tier}>{tier.toUpperCase()} {count}장</span> : null; })}</div>}
+      {picking && <div className="pack-opening__keep"><Button variant="primary" disabled={selected.size === 0 || saving} onClick={() => { void saveSelection(); }}>{`앨범에 넣기 (${selected.size}장)`}</Button><Button disabled={saving} onClick={keep!.onLater}>나중에</Button></div>}
       {phase === "reveal" && cards.length - revealed.size > 1 && <Button disabled={revealingAll} onClick={() => { void all(); }}>모두 공개</Button>}
     </div>
   </div>;

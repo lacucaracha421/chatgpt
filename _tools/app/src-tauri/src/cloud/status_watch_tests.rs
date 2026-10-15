@@ -842,7 +842,7 @@ fn the_watcher_holds_requests_and_delivers_a_change_at_once() {
     assert_eq!(seen.len(), 2, "{seen:?}");
     assert!(seen
         .iter()
-        .all(|s| s.auth == "Bearer publisher" && s.query == "wait=50"));
+        .all(|s| s.auth == "Bearer publisher" && s.query == "wait=50&signals=1"));
     assert!(seen[1].conditional);
     let changed = Instant::now();
     server.change(|doc| doc.bindings_last = 6);
@@ -1196,4 +1196,19 @@ fn home_publications_upcoming_head_wakes_the_lane_and_missing_head_falls_back() 
     assert!(Head::of(LogKind::UpcomingIntents,&missing).is_none());
     assert!(decide(None,LogPosition::cursor(Some(3)),Some(940),None,1000));
     assert!(diff(Some(&status_with(Some(missing))),&status_with(Some(logs))).logs);
+}
+
+#[test]
+fn the_cards_signal_fires_only_when_the_revision_moves() {
+    let endpoint = "http://cards-signal.test";
+    let _ = take_cards_signal();
+    observe_card_signal(endpoint, br#"{"signals":{"cards":3}}"#);
+    assert!(take_cards_signal(), "the first revision seen counts as a change");
+    observe_card_signal(endpoint, br#"{"signals":{"cards":3}}"#);
+    assert!(!take_cards_signal(), "same revision");
+    observe_card_signal(endpoint, br#"{"signals":{}}"#);
+    observe_card_signal(endpoint, b"not json");
+    assert!(!take_cards_signal(), "a status without the signal changes nothing");
+    observe_card_signal(endpoint, br#"{"signals":{"cards":4}}"#);
+    assert!(take_cards_signal());
 }

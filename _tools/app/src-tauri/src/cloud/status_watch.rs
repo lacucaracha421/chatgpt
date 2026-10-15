@@ -37,6 +37,30 @@ const TRUST_WINDOW: i64 = 180;
 static PUBLICATION_WAKE: AtomicBool = AtomicBool::new(false);
 static AUTHORITY_WAKE: AtomicBool = AtomicBool::new(false);
 static CAPTURES_SIGNAL: AtomicBool = AtomicBool::new(false);
+static CARDS_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+/// Reuse the existing held status request; no card-specific poller.
+pub(crate) fn observe_card_signal(endpoint: &str, body: &[u8]) {
+    static HEADS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+    let revision = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("signals")?.get("cards")?.as_i64())
+        .filter(|n| *n >= 0);
+    let Some(revision) = revision else {
+        return;
+    };
+    let mut heads = HEADS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if heads.insert(endpoint.to_owned(), revision) != Some(revision) {
+        CARDS_SIGNAL.store(true, Ordering::Release);
+    }
+}
+
+pub(crate) fn take_cards_signal() -> bool {
+    CARDS_SIGNAL.swap(false, Ordering::AcqRel)
+}
 
 /// A publisher log head moved: the publication lanes should run now instead of on their
 /// next 10 s tick.

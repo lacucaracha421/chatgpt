@@ -2,6 +2,9 @@ export type CardTier = "n" | "r" | "sr" | "ssr" | "ur" | "lr";
 
 export interface CardData {
   id: string;
+  characterId?: string;
+  artAssetId?: string;
+  firstDrawnAt?: string;
   characterName: string;
   seriesName: string;
   tier: CardTier;
@@ -14,10 +17,14 @@ export interface CardData {
   level: number;
   serial?: string;
   isNew?: boolean;
+  /** Server slot of a drawn card; the keep step sends these. */
+  slot?: number | null;
+  /** The card is already in the shared album (set by the server once a pack is decided). */
+  kept?: boolean;
 }
 
 /** Cover art is supplied independently of the draw contents. */
-export interface PackCover { imageUrls: readonly string[]; centreCutoutUrl?: string }
+export interface PackCover { imageUrls: readonly string[]; assetIds?: readonly string[]; centreCutoutUrl?: string }
 export interface CardPack { id: string; cover: PackCover; cardCount: number }
 export interface CardDraw { packId: string; cards: readonly CardData[] }
 

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { usePrivacy } from "../privacy/PrivacyContext";
+import { assetMasked } from "../shared/privacy/contentMask";
 import { composePackCover } from "./packCover";
 import { createPointerTilt, useCardReducedMotion } from "./motion";
 import { mark, printVariables } from "./printAssets";
@@ -10,18 +12,29 @@ export interface BoosterPackProps {
   cover?: PackCover;
   cardCount?: number;
   onOpened?: () => void;
+  onTearStart?: () => void;
+  resetToken?: number;
   disabled?: boolean;
 }
 const emptyCover: PackCover = { imageUrls: [] };
 
-export function BoosterPack({ cover = emptyCover, cardCount = 5, onOpened, disabled = false }: BoosterPackProps) {
+export function BoosterPack({ cover: suppliedCover = emptyCover, cardCount = 5, onOpened, onTearStart, resetToken = 0, disabled = false }: BoosterPackProps) {
+  const { privacyMode, nsfwFilter, ratings, requestRating } = usePrivacy();
+  useEffect(() => { suppliedCover.assetIds?.forEach(requestRating); }, [suppliedCover, requestRating]);
+  const maskCover = privacyMode || (nsfwFilter && (!suppliedCover.assetIds?.length || suppliedCover.assetIds.some(id => assetMasked(false, true, { contentRating: ratings.get(id) }))));
+  const cover = useMemo(() => maskCover ? emptyCover : suppliedCover, [maskCover, suppliedCover]);
   const root = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; start: number; last: number; time: number; velocity: number; progress: number } | null>(null);
   const opened = useRef(false);
   const [url, setUrl] = useState("");
   const [ready, setReady] = useState(false);
   const reduced = useCardReducedMotion();
-  useEffect(() => { let live = true; composePackCover(cover).then(value => { if (live) { setUrl(value); setReady(true); } }); return () => { live = false; }; }, [cover]);
+  useEffect(() => {
+    opened.current = false; drag.current = null;
+    root.current?.classList.remove("auto", "torn", "drag");
+    root.current?.style.setProperty("--tear", "0");
+  }, [resetToken]);
+  useEffect(() => { let live = true; composePackCover(cover).then(value => { if (live) { setUrl(value); setReady(true); } }).catch(() => { if (live) { setUrl(""); setReady(true); } }); return () => { live = false; }; }, [cover]);
   useEffect(() => {
     const node = root.current!; const tilt = createPointerTilt(node, reduced);
     const move = (event: globalThis.PointerEvent) => { if (!drag.current && !opened.current) tilt.move(event.clientX, event.clientY); };
@@ -30,12 +43,14 @@ export function BoosterPack({ cover = emptyCover, cardCount = 5, onOpened, disab
   }, [reduced]);
   const open = () => {
     if (opened.current || disabled) return;
+    onTearStart?.();
     opened.current = true; drag.current = null;
     root.current!.classList.remove("drag", "hov", "active"); root.current!.classList.add("auto", "torn"); root.current!.style.setProperty("--tear", "1"); onOpened?.();
   };
   const cancel = () => { if (opened.current) return; drag.current = null; root.current!.classList.remove("drag"); root.current!.style.setProperty("--tear", "0"); };
   const down = (event: PointerEvent<HTMLDivElement>) => {
     if (opened.current || disabled || drag.current || (event.button !== 0 && event.pointerType === "mouse")) return;
+    onTearStart?.();
     event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = { id: event.pointerId, start: event.clientX, last: event.clientX, time: event.timeStamp, velocity: 0, progress: 0 }; root.current!.classList.add("drag");
   };
@@ -46,7 +61,7 @@ export function BoosterPack({ cover = emptyCover, cardCount = 5, onOpened, disab
     state.progress = tearProgress(event.clientX - state.start, root.current!.getBoundingClientRect().width);
     root.current!.style.setProperty("--tear", String(state.progress)); if (completesTear(state.progress)) open();
   };
-  const face = <><div className="pk-bg" /><div className="pk-col">{url && <img src={url} alt="" draggable={false} />}</div>
+  const face = <><div className="pk-bg" /><div className={`pk-col${maskCover ? " privacy-mask" : ""}`}>{url && !maskCover && <img src={url} alt="" draggable={false} />}</div>
     {!cover.imageUrls.length && !cover.centreCutoutUrl && <div className="pk-emb"><svg viewBox="0 0 32 36"><path d={mark} fill="#e2c98a" /></svg></div>}
     <div className="pk-tags"><span><span className="pk-code">LKM-01</span><b className="pk-name">라쿠믹스</b></span><span><span className="pk-brand">LAKOMICS</span><span className="pk-age">수집용</span><i className="pk-kind">부스터 팩</i></span></div>
     <div className="pk-title"><i>수집의 밤</i><i>수집의 밤</i><i>수집의 밤</i></div>

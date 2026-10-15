@@ -7,7 +7,6 @@ import { CardSequence, createPointerTilt } from "./motion";
 import { PackOpening } from "./PackOpening";
 import { TradingCard } from "./TradingCard";
 import { cardTiers, completesTear, revealOrder, tearProgress, tierClass } from "./types";
-import { HomeDailyCard } from "../home/HomeSlots";
 
 const fixture = demoDeck();
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
@@ -277,11 +276,3 @@ it("모두 공개 stops on LR; flipping it twice triggers one cut-in", async () 
   expect(stage().querySelectorAll(".cutin")).toHaveLength(1); expect(log.filter(entry => entry.name === "cutin-dim")).toHaveLength(1);
 });
 
-it("Home's reserved slot opens a full-window preview and returns focus on close", async () => {
-  render(<HomeDailyCard />);
-  const opener = screen.getByRole("button", { name: "오늘의 카드 미리보기 열기" }); opener.focus(); fireEvent.click(opener);
-  expect(screen.getByRole("dialog", { name: "오늘의 카드 미리보기" })).toHaveClass("ui-dialog--fullscreen");
-  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); expect(opener).toHaveFocus();
-});

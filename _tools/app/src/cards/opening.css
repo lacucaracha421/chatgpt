@@ -38,6 +38,23 @@
 .pack-opening__slot .trading-card { position: relative; z-index: 2; }
 .pack-opening__slot .card { width: 100%; }
 .pack-opening__slot .card__flip { transition-duration: .42s; }
+/* Keep step: a selected card lifts and casts a soft growing shadow; the mark follows DESIGN.md (square checkbox, no edge stripe). */
+.pack-opening__slot[data-pickable] { cursor: pointer; transition: transform .18s ease-out; }
+.pack-opening__slot[data-pickable]::after { content: ""; position: absolute; z-index: 1; left: 10%; right: 10%; bottom: -4px; height: 20px; border-radius: 50%; background: rgb(0 0 0 / .55); filter: blur(12px); opacity: 0; transform: scaleX(.7); transition: opacity .18s ease-out, transform .18s ease-out; pointer-events: none; }
+.pack-opening__slot[data-selected="true"] { transform: translateY(-12px); }
+.pack-opening__slot[data-selected="true"]::after { opacity: 1; transform: scaleX(1.05); }
+.pack-opening[data-reduced-motion="true"] .pack-opening__slot[data-pickable], .pack-opening[data-reduced-motion="true"] .pack-opening__slot[data-pickable]::after { transition: none; }
+.pack-opening[data-reduced-motion="true"] .pack-opening__slot[data-selected="true"] { transform: none; }
+.pack-opening[data-reduced-motion="true"] .pack-opening__slot[data-selected="true"]::after { opacity: 0; }
+.pack-opening__pick { position: absolute; z-index: 12; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 8px 0 6px; border: 0; border-radius: 2px; background: rgb(8 9 13 / .78); color: var(--color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pack-opening__pick:disabled { cursor: default; }
+.pack-opening__pick:focus-visible { outline: 2px solid var(--color-focus, #7db1ff); outline-offset: 2px; }
+.pack-opening__box { position: relative; width: 16px; height: 16px; border: 1.5px solid currentColor; border-radius: 2px; flex: none; }
+.pack-opening__box::after { content: ""; position: absolute; inset: 3px; border-radius: 1px; background: var(--color-accent); opacity: 0; }
+.pack-opening__slot[data-selected="true"] .pack-opening__box, .pack-opening__pick--saved .pack-opening__box { border-color: var(--color-accent); }
+.pack-opening__slot[data-selected="true"] .pack-opening__box::after, .pack-opening__pick--saved .pack-opening__box::after { opacity: 1; }
+.pack-opening__pick--saved { pointer-events: none; font-weight: 500; }
+.pack-opening__keep { display: flex; gap: 8px; flex-wrap: wrap; }
 .lkm-cards .nb-no > span:first-child { max-width: 14cqw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-reveal-fx { position: absolute; pointer-events: none; left: -75%; top: -40%; width: 250%; height: 180%; }
 .card-reveal-fx--under { z-index: 1; } .card-reveal-fx--over { z-index: 3; }

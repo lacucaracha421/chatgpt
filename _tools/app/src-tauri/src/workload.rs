@@ -666,6 +666,9 @@ fn start_timers(app: tauri::AppHandle) {
             if crate::cloud::status_watch::take_captures_signal() {
                 let _ = app.emit("cloud://captures-pending", ());
             }
+            if crate::cloud::status_watch::take_cards_signal() {
+                let _ = app.emit("cloud://cards-changed", ());
+            }
             let current = app.state::<crate::commands::AppState>().current_library();
             watcher.tick(current.as_ref(), Instant::now());
             if inbox.tick(current.as_ref(), profile.restricted, Instant::now()) {

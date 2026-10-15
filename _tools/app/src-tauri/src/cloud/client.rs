@@ -1126,6 +1126,7 @@ impl CloudClient {
         let mut url = url::Url::parse(&self.endpoint("/v1/sync/status")?)
             .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
         url.query_pairs_mut().append_pair("wait", &wait.to_string());
+        url.query_pairs_mut().append_pair("signals", "1");
         let mut request = self
             .agent
             .get(url.as_str())
@@ -1161,7 +1162,11 @@ impl CloudClient {
             .map(str::to_owned);
         let body = read_body_bounded(&mut response, MAX_RESPONSE_BYTES)?;
         Ok(StatusWatchReply::Changed {
-            status: parse_sync_status(&body)?,
+            status: {
+                let status = parse_sync_status(&body)?;
+                super::status_watch::observe_card_signal(self.base(), &body);
+                status
+            },
             etag,
             advertised,
         })
@@ -4438,6 +4443,9 @@ impl CloudClient {
 
 #[path = "home_publications.rs"]
 mod home_publications;
+
+#[path = "cards.rs"]
+pub(crate) mod cards;
 
 #[cfg(test)]
 mod album_likes_result_tests {

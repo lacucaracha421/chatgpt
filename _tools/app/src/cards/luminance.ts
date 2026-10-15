@@ -5,6 +5,7 @@ export function luminanceMask(src: string): Promise<string | undefined> {
   if (cache.has(src)) return cache.get(src)!;
   const promise = new Promise<string | undefined>(resolve => {
     const image = new Image();
+    if (!src.startsWith("data:")) image.crossOrigin = "anonymous";
     const timer = setTimeout(() => resolve(undefined), 1800);
     image.onload = () => {
       clearTimeout(timer);

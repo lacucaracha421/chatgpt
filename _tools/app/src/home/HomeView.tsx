@@ -31,6 +31,7 @@ import { calendarPayments, calendarSavedQuery, releaseCalendarModel } from "./ho
 import { HomeTransfer, type PickFiles, type TransferRoute } from "./HomeTransfer";
 import { HomeQuickMemo } from "./HomeQuickMemo";
 import { HomeDailyCard, HomeLinkVault } from "./HomeSlots";
+import { CardAlbum } from "../cards/CardAlbum";
 import type { ExchangeStore } from "../exchange/exchangeStore";
 import type { DropSubscriber } from "../ingestion/useFileDrop";
 import { BusyLabel } from "../shared/ui/BusyLabel";
@@ -84,7 +85,8 @@ export type HomeViewProps = {
 
 /** PC Home (layout A): the release calendar and the tools on the left, today's card and attention on the right. */
 
-export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, transferRoute }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, transferRoute }: HomeViewProps) {
+  const [cardAlbum, setCardAlbum] = useState(false);
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -369,6 +371,12 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const launchHost = useRef<HTMLDivElement>(null);
   useLaunchReady(!firstLoad, launchHost);
 
+  if (cardAlbum) return <CardAlbum onBack={() => setCardAlbum(false)} onOpenAsset={onOpenAsset} onCharacter={id => {
+    const target = characters.find(character => character.id === id);
+    setCardAlbum(false);
+    onNavigate({ kind: "classification", classificationId: target?.seriesClassificationId ?? null, characterId: id });
+  }} />;
+
   if (reviewOverview) return <>
     <ConfirmOverview sources={sources ?? confirmSources} targets={characters} seriesName={seriesName} version={reviewRead} restricted={restricted} privacyMode={privacyMode}
       onBack={() => { setReviewOverview(false); setQueueRead((value) => value + 1); }} onOpen={(scope) => setDialog({ kind: "confirm", ...scope })} />
@@ -402,7 +410,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         </>}
       </div>
       <div className="home-day-column">
-      {!firstLoad && <HomeDailyCard />}
+      {!firstLoad && <HomeDailyCard key={root} root={root} active={active} onAlbum={() => setCardAlbum(true)} />}
       {!firstLoad && todayRows.length > 0 && <HomeToday rows={todayRows} animate={false} onOpen={row => {
         if (row.noteId) onNavigate({ kind: 'notes', noteId: row.noteId });
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }

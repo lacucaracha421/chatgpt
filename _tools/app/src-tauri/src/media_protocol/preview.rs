@@ -24,8 +24,11 @@ use crate::library::{error::LibraryError, Library, MediaVariant};
 pub(super) const DEFAULT_MAX: u32 = 1600;
 const MIN_MAX: u32 = 640;
 const MAX_MAX: u32 = 2560;
-const CACHE_ENTRIES: usize = 24;
-const CACHE_BYTES: usize = 64 * 1024 * 1024;
+/// Sized for the card pack warm-up (2026-10-15): five card arts plus the day's cover collage and
+/// a few review views must stay resident together until a pack is opened, so the budget is
+/// twice the earlier 24 entries / 64 MB (a 1280 px JPEG preview is typically 0.2-1.5 MB).
+const CACHE_ENTRIES: usize = 48;
+const CACHE_BYTES: usize = 128 * 1024 * 1024;
 const JPEG_QUALITY: u8 = 82;
 /// Beyond this the decode would take seconds and hundreds of MB; serve the original instead.
 const MAX_DECODE_PIXELS: u64 = 150_000_000;
@@ -348,6 +351,20 @@ mod tests {
             lru.get(&key("e")).is_none(),
             "an entry over the byte budget is not kept"
         );
+    }
+
+    #[test]
+    fn shared_budget_keeps_a_card_pack_with_its_cover_and_review_views() {
+        let mut lru = Lru::new(CACHE_ENTRIES, CACHE_BYTES);
+        for index in 0..(5 + 5 + 20) {
+            lru.insert(
+                key(&format!("art{index}")),
+                vec![0; 2 * 1024 * 1024],
+                "image/jpeg",
+            );
+        }
+        assert_eq!(lru.len(), 30);
+        assert!(lru.get(&key("art0")).is_some());
     }
 
     fn noisy_jpeg(width: u32, height: u32) -> Vec<u8> {

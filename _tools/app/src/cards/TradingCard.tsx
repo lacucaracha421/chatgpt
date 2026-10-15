@@ -7,6 +7,8 @@ import { frameTexture } from "./frameTexture";
 import { luminanceMask } from "./luminance";
 import { tierClass, tierRank, type CardData } from "./types";
 import "./cards.css";
+import { useAssetMask } from "../privacy/PrivacyContext";
+import { StableImage } from "../shared/ui/StableImage";
 
 function background(card: CardData) {
   if (!card.cutoutUrl) return card.artUrl;
@@ -23,17 +25,18 @@ export interface TradingCardProps {
 }
 
 export function TradingCard({ card, faceDown = false, onReveal }: TradingCardProps) {
+  const masked = useAssetMask(card.artAssetId);
   const rarityId = useId();
   const host = useRef<HTMLDivElement>(null);
   const reduced = useCardReducedMotion();
   const [teasing, setTeasing] = useState(false);
-  const art = useMemo(() => background(card), [card]);
+  const art = useMemo(() => masked ? "" : background(card), [card, masked]);
   useEffect(() => {
     const node = host.current!; let live = true;
     node.style.removeProperty("--lum");
-    if (!card.cutoutUrl) void luminanceMask(card.artUrl).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
+    if (!masked && !card.cutoutUrl) void luminanceMask(card.artUrl).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
     return () => { live = false; };
-  }, [card.artUrl, card.cutoutUrl]);
+  }, [card.artUrl, card.cutoutUrl, masked]);
   const frame = useMemo(() => {
     if (card.tier !== "n" && card.tier !== "r") return undefined;
     try { return `url("${frameTexture(card.tier)}")`; } catch { return undefined; }
@@ -60,9 +63,9 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
       onFocus={() => setTeasing(true)} onBlur={() => setTeasing(false)}>
       <div className="card__flip"><div className="card__tilt">
         <div className="face front" aria-hidden={faceDown}>
-          <img className="f-bg" src={art} alt="" draggable={false} />
+          {masked ? <span className="f-bg privacy-mask" aria-label="이미지 숨김" /> : art && <StableImage className="f-bg" src={art} alt="" draggable={false} respectReducedMotion />}
           <div className="f-sheen" /><div className="f-etch" /><div className="f-shade" /><div className="f-frame" style={{ backgroundImage: frame }} /><div className="f-glare" /><div className="f-rainbow" /><div className="f-depth" />
-          {card.cutoutUrl && <div className="f-subjwrap"><img className="f-subj" src={card.cutoutUrl} alt="" draggable={false} /></div>}
+          {!masked && card.cutoutUrl && <div className="f-subjwrap"><StableImage className="f-subj" src={card.cutoutUrl} alt="" draggable={false} respectReducedMotion /></div>}
           <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>
           <div className="f-cost"><span className="num">{rank + 1}</span></div>
           <div className={`f-dup${card.count > 9 ? " two" : ""}`}><span className="num">{card.count}</span></div>
