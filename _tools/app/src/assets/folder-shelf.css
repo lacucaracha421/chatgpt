@@ -66,3 +66,5 @@ html.is-shelf-reordering, html.is-shelf-reordering * { cursor: grabbing !importa
 .shelf-drag-ghost .series-character__open { cursor: grabbing; }
 
 @media (prefers-reduced-motion: reduce) { [data-reordering] > [data-order-id] { transition: none; } }
+/* "미분류 N장" names the folder's own images below the shelf. */
+.asset-browser__direct-label { margin: var(--space-2) 0 var(--space-3); }

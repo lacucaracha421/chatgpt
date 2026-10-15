@@ -49,6 +49,7 @@ import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, 
 import { sortFolders } from "../classification/buildTree";
 import { FolderFilterHelp, FolderShelf } from "./FolderShelf";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { descriptionSearchError, searchDescription } from "./descriptionSearch";
 import { prefetchedRead, publishAssetFolderFilters } from "./folderPrefetch";
 import type { AutoTagFilter } from "../autotags/types";
@@ -663,6 +664,8 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
         </button>
       </article>)}
     />
+    {/* The grid below is the folder's own images; name it with its count, like the shelf above (user 2026-10-15). */}
+    {folderEntry?.assetCount !== undefined && <SectionLabel className="asset-browser__direct-label" title="미분류" count={folderEntry.assetCount} unit="장" />}
   </> : null;
   const folderFilterControl = plainFolderId && folderChildren.length > 0 ? <SegmentedControl
       label="폴더 이미지 필터"
