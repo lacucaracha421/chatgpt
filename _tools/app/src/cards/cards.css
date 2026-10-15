@@ -1,0 +1,1568 @@
+/* Scoped materials and wrapper styling from card-back-pack-20261015. */
+@property --px {
+
+ syntax: '<percentage>'; inherits: true; initial-value: 32%; 
+
+}
+@property --py {
+
+ syntax: '<percentage>'; inherits: true; initial-value: 26%; 
+
+}
+@property --po {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+@property --tx {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+@property --ty {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+@property --tear {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+:where(.lkm-cards) .pack {
+
+ --pw: 160px; position: relative; width: var(--pw); aspect-ratio: 150 / 300; container-type: inline-size; z-index: 5; -webkit-tap-highlight-color: transparent;
+  --cut: calc(2.2% + var(--tear) * 100%);
+  
+  transition: --tear .42s cubic-bezier(.3, 1.45, .5, 1); 
+
+}
+:where(.lkm-cards) .pack.drag {
+
+ transition: --tear 0s; 
+
+}
+:where(.lkm-cards) .pk-shadow {
+
+ position: absolute; left: 7%; right: 7%; top: 4%; bottom: -1%; border-radius: 12% / 6%; background: rgba(0, 0, 0, .62); filter: blur(14px); transform: translateY(12px); pointer-events: none; 
+
+}
+:where(.lkm-cards) .pack.auto {
+
+ transition: --tear .44s cubic-bezier(.45, 0, .3, 1); 
+
+}
+
+:where(.lkm-cards) .pk-tilt {
+
+ position: absolute; inset: 0; transition: transform .5s var(--ease); 
+
+}
+:where(.lkm-cards) .pack.hov .pk-tilt {
+
+ transition: transform .09s linear; will-change: transform; 
+
+}
+:where(.lkm-cards) .pack.drag .pk-tilt {
+
+ transform: translateY(-4px) !important; 
+
+}
+:where(.lkm-cards) .pack-body {
+
+ position: absolute; inset: 0; clip-path: var(--pk-clip-body); 
+
+}
+:where(.lkm-cards) .pack-top {
+
+ position: absolute; inset: 0; pointer-events: none; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, calc(var(--tear) * 1.8 * .3))); 
+
+}
+:where(.lkm-cards) .tp {
+
+ position: absolute; inset: 0; 
+
+}
+:where(.lkm-cards) .tp-in {
+
+ position: absolute; inset: 0; clip-path: var(--pk-clip-top); 
+
+}
+:where(.lkm-cards) .tp-att {
+
+ clip-path: inset(-60% -60% -60% var(--cut)); 
+
+}
+:where(.lkm-cards) .tp-peel {
+
+ clip-path: inset(-60% calc(100% - var(--cut)) -60% -60%); transform-origin: var(--cut) var(--rip-y, 5.4%);
+  transform: translateY(calc(var(--tear) * -2%)) rotate(calc(min(var(--tear) * 5, 1) * 16deg + var(--tear) * 8deg)); 
+
+}
+:where(.lkm-cards) .pk-face {
+
+ position: absolute; inset: 0; overflow: hidden; font-family: var(--f-ui); 
+
+}
+:where(.lkm-cards) .pk-face > * {
+
+ position: absolute; 
+
+}
+:where(.lkm-cards) .pk-bg {
+
+ inset: 0; background: linear-gradient(180deg, #1a2a78 0%, #101a52 60%, #0a0f36 78%, #070b28 100%); 
+
+}
+:where(.lkm-cards) .pk-col {
+
+ left: 0; right: 0; top: 0; height: 76%; overflow: hidden; 
+
+}
+:where(.lkm-cards) .pk-col img {
+
+ position: absolute; inset: 0; width: 100%; height: 100%; display: block; 
+
+}
+:where(.lkm-cards) .pk-pan {
+
+ inset: 0; 
+
+}
+:where(.lkm-cards) .pk-pan img {
+
+ position: absolute; object-fit: cover; display: block; max-width: none; 
+
+}
+:where(.lkm-cards) .pk-pan img.sj {
+
+ object-fit: contain; object-position: 50% 30%; 
+
+}
+:where(.lkm-cards) .pk-pan i {
+
+ position: absolute; inset: 0; mix-blend-mode: soft-light; opacity: .55; 
+
+}
+:where(.lkm-cards) .pk-pan b {
+
+ position: absolute; inset: 0; background: radial-gradient(60% 40% at var(--hx) var(--hy), rgba(255, 255, 255, .22), transparent 60%), linear-gradient(180deg, transparent 50%, rgba(5, 8, 30, .35)); 
+
+}
+:where(.lkm-cards) .pk-pan.pat {
+
+ background: var(--pc); 
+
+}
+:where(.lkm-cards) .pk-pan.pat.p0 {
+
+ background: repeating-conic-gradient(from 0deg at var(--hx) var(--hy), rgba(255, 255, 255, .16) 0deg 3deg, transparent 3deg 9deg), var(--pc); 
+
+}
+:where(.lkm-cards) .pk-pan.pat.p1 {
+
+ background: radial-gradient(circle, rgba(255, 255, 255, .35) 0 .5cqw, transparent .6cqw) 0 0 / 3cqw 3cqw, var(--pc); 
+
+}
+:where(.lkm-cards) .pk-pan.pat.p2 {
+
+ background: var(--pk-mono) 0 0 / 11cqw 11cqw, var(--pc); 
+
+}
+:where(.lkm-cards) .pk-pan.pat.p3 {
+
+ background: repeating-linear-gradient(135deg, rgba(255, 255, 255, .14) 0 1cqw, transparent 1cqw 3cqw), var(--pc); 
+
+}
+:where(.lkm-cards) .pk-lines {
+
+ inset: 0; width: 100%; height: 100%; pointer-events: none; 
+
+}
+:where(.lkm-cards) .pk-hero {
+
+ pointer-events: none; height: auto; max-width: none; filter: drop-shadow(0 0 .7cqw rgba(255, 255, 255, .95)) drop-shadow(0 0 3cqw rgba(120, 170, 255, .55)) drop-shadow(0 2cqw 2cqw rgba(0, 0, 20, .6)); 
+
+}
+:where(.lkm-cards) .pk-heroframe {
+
+ left: 18cqw; width: 60cqw; top: 36cqw; height: 66cqw; transform: rotate(-6deg); border-radius: 1.4cqw; overflow: hidden; background: #1a2366;
+  box-shadow: 0 0 0 1.1cqw #f6f1e4, 0 0 0 1.7cqw #d6ac4e, 0 2cqw 4cqw 1cqw rgba(0, 0, 20, .6); 
+
+}
+:where(.lkm-cards) .pk-heroframe img {
+
+ width: 100%; height: 100%; object-fit: cover; display: block; 
+
+}
+:where(.lkm-cards) .pk-emb {
+
+ display: none; left: 22cqw; right: 22cqw; top: 40cqw; height: 54cqw; border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 236, 180, .16) 0deg 3deg, transparent 3deg 8deg), radial-gradient(circle at 50% 42%, #3a4fb4 0%, #19236a 62%, #0d1340 100%);
+  box-shadow: 0 0 0 1.4cqw #0d1340, 0 0 0 2.3cqw #e2c98a, 0 0 0 3.1cqw #0d1340, 0 0 0 3.6cqw rgba(226, 201, 138, .7), 0 2cqw 5cqw 2cqw rgba(6, 3, 30, .6); 
+
+}
+:where(.lkm-cards) .pk-emb svg {
+
+ position: absolute; left: 50%; top: 50%; width: 24cqw; height: 27cqw; margin: -13.5cqw 0 0 -12cqw; fill: url(#embGold); filter: drop-shadow(0 .6cqw 0 #0a0f2e); 
+
+}
+:where(.lkm-cards) .pack.art-none .pk-emb {
+
+ display: block; 
+
+}
+:where(.lkm-cards) .pk-tags {
+
+ left: 4.5cqw; right: 4.5cqw; top: 10cqw; display: flex; justify-content: space-between; align-items: flex-start; pointer-events: none; 
+
+}
+:where(.lkm-cards) .pk-tags > span {
+
+ display: flex; flex-direction: column; gap: 1.2cqw; 
+
+}
+:where(.lkm-cards) .pk-tags > span:last-child {
+
+ align-items: flex-end; 
+
+}
+:where(.lkm-cards) .pk-code {
+
+ font: 700 3cqw/1 var(--f-ui); color: #fff; padding: .7cqw 1.2cqw; box-shadow: inset 0 0 0 .35cqw rgba(255, 255, 255, .9); background: rgba(6, 10, 40, .55); letter-spacing: .02em; 
+
+}
+:where(.lkm-cards) .pk-name {
+
+ font: 900 5.6cqw/1 var(--f-ui); color: #fff; letter-spacing: -.02em; text-shadow: 0 .4cqw 0 #0a0f36, 0 0 1.4cqw rgba(0, 0, 0, .6); 
+
+}
+:where(.lkm-cards) .pk-brand {
+
+ font: 800 2.5cqw/1 var(--f-ui); color: #111; background: #fff; padding: .6cqw 1.2cqw; letter-spacing: .06em; 
+
+}
+:where(.lkm-cards) .pk-age {
+
+ font: 800 3.4cqw/1 var(--f-ui); color: #111; background: #fff; padding: .8cqw 1.4cqw; box-shadow: 0 .3cqw .8cqw rgba(0, 0, 0, .4); 
+
+}
+:where(.lkm-cards) .pk-kind {
+
+ font: 700 2.3cqw/1 var(--f-ui); color: #fff; font-style: normal; text-shadow: 0 0 1cqw rgba(0, 0, 0, .8); 
+
+}
+:where(.lkm-cards) .pk-title {
+
+ left: 0; right: 0; top: 122cqw; display: grid; justify-items: center; pointer-events: none; transform: skewX(-7deg); 
+
+}
+:where(.lkm-cards) .pk-title i {
+
+ grid-area: 1 / 1; position: relative; font: 900 19cqw/1 "Pretendard Variable", "Noto Sans KR", var(--f-ui); font-style: normal; letter-spacing: -.04em; white-space: nowrap; 
+
+}
+:where(.lkm-cards) .pk-title i:nth-child(1) {
+
+ color: #0c0618; -webkit-text-stroke: 4.2cqw #0c0618; filter: drop-shadow(0 1.2cqw 0 #000); 
+
+}
+:where(.lkm-cards) .pk-title i:nth-child(2) {
+
+ color: #d9a440; -webkit-text-stroke: 2cqw #f2cf72; 
+
+}
+:where(.lkm-cards) .pk-title i:nth-child(3) {
+
+ color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(180deg, #ffe0d2 0%, #ff6a52 26%, #d91c22 46%, #7c0614 58%, #c8221e 72%, #ff7a52 100%); 
+
+}
+:where(.lkm-cards) .pk-sub {
+
+ left: 0; right: 0; top: 147cqw; display: flex; flex-direction: column; align-items: center; pointer-events: none; 
+
+}
+:where(.lkm-cards) .pk-sub b {
+
+ display: grid; font: 400 11.5cqw/1 "Anton", "Oswald", Impact, sans-serif; letter-spacing: .03em; transform: skewX(-10deg); 
+
+}
+:where(.lkm-cards) .pk-sub b i {
+
+ grid-area: 1 / 1; position: relative; font-style: normal; 
+
+}
+:where(.lkm-cards) .pk-sub b i:nth-child(1) {
+
+ color: #1532a8; -webkit-text-stroke: 2.4cqw #1532a8; filter: drop-shadow(0 .7cqw 0 #050a2a); 
+
+}
+:where(.lkm-cards) .pk-sub b i:nth-child(2) {
+
+ color: #fff; background: linear-gradient(180deg, #fff 0 55%, #cfdcff 56% 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; 
+
+}
+:where(.lkm-cards) .pk-sub span {
+
+ margin-top: .6cqw; font: 700 3.6cqw/1 "Oswald", "Arial Narrow", sans-serif; letter-spacing: .24em; padding-left: .24em; color: #fff; text-shadow: 0 .3cqw 0 #050a2a; 
+
+}
+:where(.lkm-cards) .pk-sub em {
+
+ margin-top: .8cqw; font: 800 2.8cqw/1 var(--f-ui); font-style: normal; color: #ffd84a; letter-spacing: .04em; 
+
+}
+:where(.lkm-cards) .pk-strip {
+
+ left: 4cqw; right: 4cqw; top: 174.5cqw; display: grid; grid-template-columns: 1fr auto; column-gap: 2cqw; align-items: center; pointer-events: none; 
+
+}
+:where(.lkm-cards) .pk-strip .row {
+
+ display: flex; align-items: center; gap: 1.6cqw; white-space: nowrap; 
+
+}
+:where(.lkm-cards) .pk-total {
+
+ font: 800 2.7cqw/1 var(--f-ui); color: #fff; background: #d7262c; border-radius: 9cqw; padding: .7cqw 1.6cqw; 
+
+}
+:where(.lkm-cards) .pk-cnt {
+
+ font: 700 2.8cqw/1 var(--f-ui); color: #fff; 
+
+}
+:where(.lkm-cards) .pk-cnt b {
+
+ font-weight: 700; 
+
+}
+:where(.lkm-cards) .pk-legal {
+
+ grid-column: 1; margin-top: 1.2cqw; font: 500 1.65cqw/1.2 var(--f-ui); color: rgba(255, 255, 255, .6); white-space: nowrap; 
+
+}
+:where(.lkm-cards) .pk-marks {
+
+ grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 1cqw; 
+
+}
+:where(.lkm-cards) .pk-marks span {
+
+ width: 8.6cqw; height: 8.6cqw; display: grid; place-items: center; background: #fff; border-radius: .8cqw; 
+
+}
+:where(.lkm-cards) .pk-marks span svg {
+
+ width: 4.6cqw; height: 5.2cqw; fill: #1a2a78; 
+
+}
+:where(.lkm-cards) .pk-marks span:last-child {
+
+ background: #d7262c; color: #fff; font: 900 2.2cqw/1.05 var(--f-ui); text-align: center; letter-spacing: -.02em; 
+
+}
+:where(.lkm-cards) .pk-pillow {
+
+ inset: 0; pointer-events: none; background:
+    linear-gradient(90deg, rgba(0, 0, 0, .55) 0%, rgba(0, 0, 0, .12) 4%, rgba(255, 255, 255, .16) 7.5%, transparent 14%, transparent 86%, rgba(255, 255, 255, .1) 92.5%, rgba(0, 0, 0, .12) 96%, rgba(0, 0, 0, .55) 100%),
+    linear-gradient(180deg, transparent 3.6%, rgba(0, 0, 0, .4) 4.2%, transparent 7.5%, transparent 92%, rgba(0, 0, 0, .4) 95.8%, transparent 96.2%); 
+
+}
+:where(.lkm-cards) .pk-wrinkle {
+
+ inset: 0; pointer-events: none; background: var(--pk-wrinkle) center / 100% 100% no-repeat; mix-blend-mode: overlay; opacity: .95; 
+
+}
+:where(.lkm-cards) .pk-crimp {
+
+ left: 0; right: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .38) 0 .5cqw, rgba(0, 0, 0, .32) .5cqw 1.15cqw, rgba(255, 255, 255, .08) 1.15cqw 1.6cqw),
+    linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .05) 45%, rgba(0, 0, 0, .35)), linear-gradient(90deg, #8f86c8, #c9c3ee 30%, #7a70b8 60%, #b8b0e6); 
+
+}
+:where(.lkm-cards) .pk-crimp.t {
+
+ top: 0; height: 8.2cqw; box-shadow: 0 .5cqw .6cqw rgba(0, 0, 0, .45); 
+
+}
+:where(.lkm-cards) .pk-crimp.b {
+
+ bottom: 0; height: 8cqw; box-shadow: 0 -.5cqw .6cqw rgba(0, 0, 0, .45); transform: scaleY(-1); 
+
+}
+:where(.lkm-cards) .pk-crimp::after {
+
+ content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: .5cqw; background: rgba(255, 255, 255, .35); 
+
+}
+:where(.lkm-cards) .pk-sheen {
+
+ position: absolute; inset: 0; clip-path: var(--pk-clip-all); overflow: hidden; pointer-events: none; opacity: 0; transition: opacity .4s ease; 
+
+}
+:where(.lkm-cards) .pack.hov .pk-sheen {
+
+ opacity: 1; transition: opacity .15s linear; 
+
+}
+:where(.lkm-cards) .pk-sheen i, :where(.lkm-cards) .pk-sheen b {
+
+ position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; 
+
+}
+:where(.lkm-cards) .pack.hov .pk-sheen i, :where(.lkm-cards) .pack.hov .pk-sheen b {
+
+ will-change: transform; 
+
+}
+:where(.lkm-cards) .pk-sheen i {
+
+ background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .34), rgba(255, 255, 255, .08) 13%, transparent 25%); 
+
+}
+:where(.lkm-cards) .pk-sheen b {
+
+ background: linear-gradient(112deg, transparent 38%, rgba(255, 140, 200, .16) 44%, rgba(255, 232, 140, .18) 48%, rgba(140, 255, 215, .16) 52%, rgba(140, 190, 255, .16) 56%, transparent 62%); 
+
+}
+:where(.lkm-cards) .tp-peel .pk-face::after {
+
+ content: ""; position: absolute; inset: 0; pointer-events: none; opacity: calc(var(--tear) * .5);
+  background: linear-gradient(180deg, transparent 2%, rgba(230, 232, 245, .9) 6%, rgba(160, 165, 190, .9) 9%, transparent 10%); 
+
+}
+:where(.lkm-cards) .pk-grip {
+
+ display: none; position: absolute; left: -8%; right: -8%; top: -5%; height: 19%; z-index: 4; touch-action: none; cursor: grab; 
+
+}
+:where(.lkm-cards) .pack.live .pk-grip {
+
+ display: block; 
+
+}
+:where(.lkm-cards) .pack.drag .pk-grip {
+
+ cursor: grabbing; 
+
+}
+:where(.lkm-cards) .pk-hint {
+
+ display: none; position: absolute; left: 0; bottom: 100%; margin-bottom: 10px; white-space: nowrap; pointer-events: none;
+  font: 600 12px/1 var(--f-ui); color: rgba(231, 233, 236, .72); transition: opacity .2s ease; 
+
+}
+:where(.lkm-cards) .pk-hint b {
+
+ color: #ffd25a; font-weight: 700; margin-right: 4px; 
+
+}
+:where(.lkm-cards) .pack.live .pk-hint {
+
+ display: block; 
+
+}
+:where(.lkm-cards) .pack.drag .pk-hint, :where(.lkm-cards) .pack.torn .pk-hint, :where(.lkm-cards) .pack.auto .pk-hint {
+
+ opacity: 0; 
+
+}
+:where(.lkm-cards) .pack-leak {
+
+ position: absolute; left: 3%; right: 3%; top: var(--rip-y, 5.4%); height: 10%; margin-top: -5%; pointer-events: none; border-radius: 50%; transform-origin: 6% 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 242, 214, .95), rgba(255, 214, 150, .38) 42%, transparent 72%);
+  opacity: max(var(--leak-o, 0), calc(var(--tear) * .9)); transform: scaleX(max(var(--leak-s, .25), calc(.25 + var(--tear) * .8))); transition: transform .4s ease, opacity .3s ease; 
+
+}
+:where(.lkm-cards) .pack.drag .pack-leak, :where(.lkm-cards) .pack.auto .pack-leak {
+
+ transition: none; 
+
+}
+
+:where(.lkm-cards) .pack.torn {
+
+ --leak-o: .9; --leak-s: 1.05; 
+
+}
+:where(.lkm-cards) .pack.torn .tp-peel {
+
+ animation: lkm-fly .5s cubic-bezier(.4, 0, .7, .4) forwards; 
+
+}
+@keyframes lkm-fly {
+
+ to { transform: translate(60px, -160px) rotate(52deg); opacity: 0; } 
+
+}
+
+:where(.lkm-cards) .card {
+
+ --mx: 30%; --my: 22%; --o: .5; --ang: 35deg; --rx: 0deg; --ry: 0deg; --tint: #6a3aa8;
+  position: relative; z-index: 0; container-type: inline-size; aspect-ratio: 63 / 88; perspective: 1100px; -webkit-user-select: none; user-select: none;
+  touch-action: pan-y; transition: --mx .6s var(--ease), --my .6s var(--ease), --rx .7s var(--ease), --ry .7s var(--ease), --o .6s var(--ease), --ang .6s var(--ease); 
+
+}
+:where(.lkm-cards) .card.active {
+
+ transition: --mx .07s linear, --my .07s linear, --rx .1s linear, --ry .1s linear, --o .2s linear, --ang .07s linear; 
+
+}
+:where(.lkm-cards) .card::before {
+
+ content: ""; display: none; position: absolute; inset: -16% -22%; z-index: -1; pointer-events: none; opacity: 0; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--glow, #fff) 0%, var(--glow, #fff) 42%, color-mix(in srgb, var(--glow, #fff) 40%, transparent) 62%, transparent 85%); transition: opacity .35s ease; 
+
+}
+:where(.lkm-cards) .card[data-glow="rainbow"]::before {
+
+ background: conic-gradient(from 0deg, #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9);
+  -webkit-mask: radial-gradient(closest-side, #000 40%, transparent 85%); mask: radial-gradient(closest-side, #000 40%, transparent 85%); 
+
+}
+
+:where(.lkm-cards) .card__flip, :where(.lkm-cards) .card__tilt {
+
+ position: absolute; inset: 0; transform-style: preserve-3d; 
+
+}
+:where(.lkm-cards) .card__flip {
+
+ transition: transform .62s cubic-bezier(.3, .7, .2, 1); 
+
+}
+:where(.lkm-cards) .card.down .card__flip {
+
+ transform: rotateY(180deg); 
+
+}
+:where(.lkm-cards) .card__tilt {
+
+ transform: rotateX(var(--rx)) rotateY(var(--ry)); 
+
+}
+:where(.lkm-cards) .card.active .card__tilt {
+
+ scale: 1.02; 
+
+}
+
+:where(.lkm-cards) .face {
+
+ position: absolute; inset: 0; border-radius: 4.5cqw; overflow: hidden; isolation: isolate; -webkit-backface-visibility: hidden; backface-visibility: hidden;
+  box-shadow: 0 2cqw 6cqw rgba(0, 0, 0, .55), 0 .5cqw 1.2cqw rgba(0, 0, 0, .35); font-family: var(--f-ui); 
+
+}
+:where(.lkm-cards) .back {
+
+ transform: rotateY(180deg); 
+
+}
+:where(.lkm-cards) .face > * {
+
+ position: absolute; 
+
+}
+:where(.lkm-cards) .card {
+
+ --wt: 3.8cqw; --wx: 3.8cqw; --wh: 113.2cqw; --wbm: 22.68cqw; --c1: #ffb08a; --c2: #c92a4a; 
+
+}
+:where(.lkm-cards) .front {
+
+ --ink: #261f15; --ink2: #5d5140;
+  --p-fill: rgba(250, 245, 232, .94); --p-line: linear-gradient(135deg, #5e4d33, #a08a60 45%, #5e4d33); --p-ink: #261f15; --p-ink2: #5d5140;
+  --nb-fill: linear-gradient(180deg, #fbf6e8, #e9dfc6); --nb-line: linear-gradient(135deg, #5e4d33, #a08a60 45%, #5e4d33); --nb-ink: #241c12;
+  --ring: linear-gradient(135deg, #6e5634, #e6d3a8 40%, #8a7048 70%, #d9c497); --tr-ink: #4a3f2e; --vc-ink: #5a4c36;
+  background: #15131c; color: var(--ink); 
+
+}
+:where(.lkm-cards) .f-bg {
+
+ inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--bgpos, 50% 50%); display: block; 
+
+}
+:where(.lkm-cards) .f-sheen {
+
+ inset: 0; pointer-events: none; opacity: 0; -webkit-mask-image: var(--lum, none); mask-image: var(--lum, none); -webkit-mask-size: 100% 100%; mask-size: 100% 100%; 
+
+}
+:where(.lkm-cards) .f-shade {
+
+ top: var(--wt); left: var(--wx); right: var(--wx); height: var(--wh); pointer-events: none; box-shadow: inset 0 0 1.8cqw rgba(0, 0, 0, .4); 
+
+}
+:where(.lkm-cards) .f-frame {
+
+ inset: 0; padding: var(--wt) var(--wx) var(--wbm); border-radius: inherit; pointer-events: none; background-size: 100% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); 
+
+}
+:where(.lkm-cards) .f-frame::after {
+
+ content: ""; position: absolute; inset: 0; opacity: 0; pointer-events: none; 
+
+}
+:where(.lkm-cards) .f-glit {
+
+ inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; mix-blend-mode: plus-lighter; 
+
+}
+:where(.lkm-cards) .f-glare {
+
+ inset: 0; pointer-events: none; border-radius: inherit; mix-blend-mode: soft-light; opacity: calc(var(--o) * .75);
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .6) 0%, rgba(255, 255, 255, .2) 22%, transparent 50%); 
+
+}
+:where(.lkm-cards) .f-subjwrap {
+
+ inset: 0; pointer-events: none; clip-path: inset(var(--wt) var(--wx) var(--wbm) var(--wx)); 
+
+}
+:where(.lkm-cards) .f-subj {
+
+ position: absolute; left: var(--sx, 0%); top: var(--sy, 0%); width: var(--sw, 100%); height: auto; max-width: none; display: block; opacity: 1; mix-blend-mode: normal;
+  -webkit-mask-image: var(--sfade, none); mask-image: var(--sfade, none); 
+
+}
+:where(.lkm-cards) .card[data-subj="0"] .f-subjwrap {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .f-cost, :where(.lkm-cards) .f-dup {
+
+ display: grid; place-items: center; border-radius: 50%; border: .8cqw solid transparent; color: #fff;
+  background: radial-gradient(circle at 40% 32%, #3d3756 0%, #1b1828 70%) padding-box, var(--ring) border-box;
+  box-shadow: 0 .4cqw .9cqw rgba(0, 0, 0, .5), inset 0 0 0 .35cqw color-mix(in srgb, var(--c2) 70%, transparent); text-shadow: 0 .2cqw .3cqw rgba(0, 0, 0, .6); 
+
+}
+:where(.lkm-cards) .f-cost {
+
+ left: 5.4cqw; top: 5.6cqw; width: 13cqw; height: 13cqw; 
+
+}
+:where(.lkm-cards) .f-dup {
+
+ left: 8.6cqw; top: 19.4cqw; width: 8.6cqw; height: 8.6cqw; 
+
+}
+.lkm-cards {
+
+ --num-font: "Oswald", "Arial Narrow", "Roboto Condensed", Impact, sans-serif; --num-w: 700; --cap: .83; 
+
+}
+:where(.lkm-cards) .num {
+
+ display: block; font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
+  text-box: trim-both cap alphabetic; 
+
+}
+:where(.lkm-cards) .f-cost .num {
+
+ font-size: calc(7.3cqw / var(--cap)); 
+
+}
+:where(.lkm-cards) .f-dup .num {
+
+ font-size: calc(4.6cqw / var(--cap)); 
+
+}
+:where(.lkm-cards) .f-dup.two .num {
+
+ font-size: calc(3.5cqw / var(--cap)); letter-spacing: -.02em; 
+
+}
+:where(.lkm-cards) .f-cost::before, :where(.lkm-cards) .f-dup::before {
+
+ position: absolute; left: 50%; top: -1.25cqw; transform: translateX(-50%); padding: .25cqw 1.1cqw .2cqw; border-radius: .6cqw; white-space: nowrap;
+  font-family: var(--num-font); font-weight: var(--num-w); font-size: 1.85cqw; line-height: 1.05; letter-spacing: .06em; color: #fff;
+  background: linear-gradient(180deg, var(--c1), var(--c2)); box-shadow: 0 0 0 .2cqw rgba(0, 0, 0, .35); text-shadow: 0 .1cqw .2cqw rgba(0, 0, 0, .5); 
+
+}
+:where(.lkm-cards) .f-cost::before {
+
+ content: "COST"; 
+
+}
+:where(.lkm-cards) .f-dup::before {
+
+ content: "Count"; top: -1.35cqw; font-size: 1.6cqw; letter-spacing: .03em; 
+
+}
+:where(.lkm-cards) .f-power {
+
+ right: 6cqw; top: 4.6cqw; display: flex; align-items: flex-end; gap: .5cqw; color: #fff; line-height: 1;
+  text-shadow: 0 0 .25cqw #000, 0 0 .25cqw #000, 0 0 .6cqw rgba(0, 0, 0, .7), 0 .3cqw .7cqw rgba(0, 0, 0, .55); 
+
+}
+:where(.lkm-cards) .f-power b.num {
+
+ font-size: calc(7.4cqw / var(--cap)); 
+
+}
+:where(.lkm-cards) .pw-tail {
+
+ display: flex; flex-direction: column; align-items: flex-end; gap: .7cqw; 
+
+}
+:where(.lkm-cards) .pw-tail i {
+
+ font-family: var(--num-font); font-weight: var(--num-w); font-style: normal; font-size: 2.3cqw; line-height: 1; letter-spacing: .08em; text-box: trim-both cap alphabetic; 
+
+}
+:where(.lkm-cards) .pw-tail small.num {
+
+ font-size: calc(3.9cqw / var(--cap)); 
+
+}
+:where(.lkm-cards) .f-gem {
+
+ right: 6cqw; top: 14.6cqw; display: flex; align-items: center; gap: 1cqw; 
+
+}
+:where(.lkm-cards) .f-type {
+
+ width: 7.2cqw; height: 7.2cqw; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c1) 35%, var(--c2) 100%); box-shadow: 0 0 0 .45cqw rgba(255, 255, 255, .6), 0 0 0 .8cqw rgba(0, 0, 0, .4), inset 0 -.6cqw 1cqw rgba(0, 0, 0, .25); 
+
+}
+:where(.lkm-cards) .f-type svg {
+
+ width: 4.4cqw; height: 4.4cqw; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 .2cqw .3cqw rgba(0, 0, 0, .35)); 
+
+}
+:where(.lkm-cards) .f-heart {
+
+ width: 4.6cqw; height: 4.6cqw; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 38% 30%, #ffe1e4 0%, #ff5a6a 30%, #b3122c 70%, #5a0612);
+  box-shadow: 0 0 0 .3cqw rgba(255, 255, 255, .6), 0 0 0 .55cqw rgba(0, 0, 0, .4); 
+
+}
+:where(.lkm-cards) .f-heart svg {
+
+ width: 2.6cqw; height: 2.6cqw; fill: rgba(255, 255, 255, .9); 
+
+}
+:where(.lkm-cards) .f-fx {
+
+ left: 5.4cqw; right: 5.4cqw; bottom: 23.8cqw; padding: 1.8cqw 2.4cqw; display: flex; flex-direction: column; gap: 1.1cqw; isolation: isolate; color: var(--p-ink); 
+
+}
+:where(.lkm-cards) .f-fx::before, :where(.lkm-cards) .f-fx::after {
+
+ content: ""; position: absolute; inset: 0; z-index: -2; --c: 2cqw;
+  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); 
+
+}
+:where(.lkm-cards) .f-fx::before {
+
+ background: var(--p-line); 
+
+}
+:where(.lkm-cards) .f-fx::after {
+
+ inset: .3cqw; --c: 1.85cqw; z-index: -1; background: var(--p-fill); 
+
+}
+:where(.lkm-cards) .fx {
+
+ display: flex; align-items: flex-start; gap: 1.4cqw; font-size: 2.65cqw; line-height: 1.4; word-break: keep-all; 
+
+}
+:where(.lkm-cards) .fx .kw {
+
+ flex: none; padding: .35cqw 1.7cqw .45cqw; font-size: 2.2cqw; font-weight: 800; color: #fff; white-space: nowrap; letter-spacing: -.01em;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c1) 55%, var(--c2)), var(--c2)); text-shadow: 0 .1cqw .25cqw rgba(0, 0, 0, .55);
+  clip-path: polygon(1cqw 0, calc(100% - 1cqw) 0, 100% 50%, calc(100% - 1cqw) 100%, 1cqw 100%, 0 50%); 
+
+}
+:where(.lkm-cards) .fx b {
+
+ font-weight: 800; 
+
+}
+:where(.lkm-cards) .fx .tx {
+
+ padding-top: .1cqw; 
+
+}
+:where(.lkm-cards) .f-nb {
+
+ left: 5.4cqw; right: 5.4cqw; top: 117.6cqw; height: 10.4cqw; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1.6cqw; padding: 0 2.2cqw 0 1.1cqw; isolation: isolate; color: var(--nb-ink); 
+
+}
+:where(.lkm-cards) .f-nb::before, :where(.lkm-cards) .f-nb::after {
+
+ content: ""; position: absolute; inset: 0; z-index: -2; --c: 2.2cqw;
+  clip-path: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)); 
+
+}
+:where(.lkm-cards) .f-nb::before {
+
+ background: var(--nb-line); filter: drop-shadow(0 .3cqw .5cqw rgba(0, 0, 0, .35)); 
+
+}
+:where(.lkm-cards) .f-nb::after {
+
+ inset: .35cqw; --c: 2cqw; z-index: -1; background: var(--nb-fill); 
+
+}
+:where(.lkm-cards) .nb-lv {
+
+ display: inline-flex; align-items: baseline; gap: .2cqw; padding: .9cqw 1.6cqw 1cqw 1.8cqw; color: #fff; font-weight: 800; font-size: 4.6cqw; line-height: 1; font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c2) 70%, #000), color-mix(in srgb, var(--c2) 45%, #000)); box-shadow: inset 0 0 0 .25cqw rgba(255, 255, 255, .3);
+  clip-path: polygon(1.2cqw 0, 100% 0, 100% 100%, 1.2cqw 100%, 0 calc(100% - 1.2cqw), 0 1.2cqw); text-shadow: 0 .15cqw .3cqw rgba(0, 0, 0, .5); 
+
+}
+:where(.lkm-cards) .nb-lv i {
+
+ font-style: normal; font-size: 2.4cqw; 
+
+}
+:where(.lkm-cards) .nb-lv .num {
+
+ display: inline-block; font-size: calc(3.7cqw / var(--cap)); 
+
+}
+:where(.lkm-cards) .f-title {
+
+ justify-self: center; max-width: 100%; font-size: 5.6cqw; font-weight: 800; letter-spacing: -.035em; white-space: nowrap; line-height: 1.25; padding: .3cqw 0; transform: scaleX(.92); 
+
+}
+:where(.lkm-cards) .nb-no {
+
+ display: flex; flex-direction: column; align-items: flex-end; gap: .4cqw; font-size: 2.1cqw; font-weight: 800; letter-spacing: .03em; line-height: 1; font-variant-numeric: tabular-nums; 
+
+}
+:where(.lkm-cards) .f-rar {
+
+ display: inline-flex; align-items: center; gap: .4cqw; font-weight: 800; letter-spacing: .06em; 
+
+}
+:where(.lkm-cards) .f-rar svg {
+
+ width: 2.3cqw; height: 2.3cqw; fill: currentColor; 
+
+}
+:where(.lkm-cards) .f-traits {
+
+ left: 7cqw; right: 7cqw; top: 129.2cqw; display: flex; align-items: center; justify-content: flex-end; gap: 1.2cqw; font-size: 2.05cqw; font-weight: 700; color: var(--tr-ink); white-space: nowrap; 
+
+}
+:where(.lkm-cards) .f-traits .t + .t::before {
+
+ content: ""; display: inline-block; width: .14cqw; height: 1.8cqw; margin-right: 1.2cqw; vertical-align: -.25cqw; background: currentColor; opacity: .5; 
+
+}
+:where(.lkm-cards) .f-traits .f-serial {
+
+ margin-right: auto; padding: 0 .9cqw; border-radius: .5cqw; box-shadow: inset 0 0 0 .2cqw currentColor; font-variant-numeric: tabular-nums; 
+
+}
+:where(.lkm-cards) .f-vc {
+
+ right: 1.55cqw; top: 46cqw; writing-mode: vertical-rl; font-size: 1.5cqw; line-height: 1; letter-spacing: .05em; color: var(--vc-ink); white-space: nowrap; font-weight: 600; 
+
+}
+:where(.lkm-cards) .card .f-title.metal {
+
+ color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(100deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), var(--metal);
+  background-size: 260% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(115% - var(--mx) * 1.3) 0, 0 0;
+  filter: drop-shadow(0 0 .15cqw rgba(0, 0, 0, .9)) drop-shadow(0 .2cqw .2cqw rgba(0, 0, 0, .45)); 
+
+}
+:where(.lkm-cards) .card {
+
+ --gold: linear-gradient(180deg, #fff8dc 0%, #f7d77e 28%, #a8711c 50%, #e7bd5c 68%, #fff0bb 100%);
+  --silver: linear-gradient(180deg, #ffffff 0%, #e6ebf1 28%, #7f8a9c 50%, #d3d9e3 68%, #ffffff 100%);
+  --prism: linear-gradient(180deg, #ffffff 0%, #ffe6f2 24%, #8f9bc4 50%, #d8fff0 70%, #fff7e0 100%); 
+
+}
+@property --dx {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+@property --dy {
+
+ syntax: '<number>'; inherits: true; initial-value: 0; 
+
+}
+:where(.lkm-cards) .card {
+
+ transition: --mx .6s var(--ease), --my .6s var(--ease), --rx .7s var(--ease), --ry .7s var(--ease), --o .6s var(--ease), --ang .6s var(--ease), --dx .7s var(--ease), --dy .7s var(--ease); 
+
+}
+:where(.lkm-cards) .card.active {
+
+ transition: --mx .07s linear, --my .07s linear, --rx .1s linear, --ry .1s linear, --o .2s linear, --ang .07s linear, --dx .1s linear, --dy .1s linear; 
+
+}
+:where(.lkm-cards) .f-etch, :where(.lkm-cards) .f-rainbow, :where(.lkm-cards) .f-depth, :where(.lkm-cards) .f-motes {
+
+ inset: 0; pointer-events: none; border-radius: inherit; opacity: 0; 
+
+}
+:where(.lkm-cards) .f-motes, :where(.lkm-cards) .f-depth {
+
+ overflow: hidden; 
+
+}
+:where(.lkm-cards) .f-ser2 {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .card .f-rar svg {
+
+ fill: url(#swSsr); 
+
+}
+:where(.lkm-cards) .card[data-tier="n"] .f-rar svg {
+
+ fill: currentColor; 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-rar svg, :where(.lkm-cards) .card[data-tier="ur"] .f-rar svg, :where(.lkm-cards) .card[data-tier="lr"] .f-rar svg {
+
+ fill: url(#swUr); 
+
+}
+:where(.lkm-cards) .card[data-tier="n"] {
+
+ --wt: 2.4cqw; --wx: 2.4cqw; --wh: 114.6cqw; 
+
+}
+:where(.lkm-cards) .card[data-tier="n"] .front {
+
+ --p-line: linear-gradient(135deg, #a9a59b, #f6f3ec 45%, #b8b4aa 70%, #e9e5dc); --nb-line: linear-gradient(135deg, #a9a59b, #f6f3ec 45%, #b8b4aa 70%, #e9e5dc);
+  --ring: linear-gradient(135deg, #9a968c, #ffffff 40%, #b3afa5 70%, #ecE8df); 
+
+}
+:where(.lkm-cards) .card[data-tier="n"] .f-glare {
+
+ opacity: calc((var(--o) - .5) * 1.1); mix-blend-mode: soft-light; 
+
+}
+:where(.lkm-cards) .card[data-tier="r"] .front {
+
+ --p-fill: rgba(247, 248, 250, .94); --p-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --p-ink: #1e232a;
+  --nb-fill: linear-gradient(180deg, #ffffff, #d5dae0); --nb-line: linear-gradient(135deg, #5f6772, #f3f5f7 40%, #7d8590 65%, #dfe3e7); --nb-ink: #1c2128;
+  --ring: linear-gradient(135deg, #5f6772, #ffffff 40%, #8a929c 70%, #e6e9ed); --tr-ink: #3c434d; --vc-ink: #4b525c; 
+
+}
+:where(.lkm-cards) .card[data-tier="r"] .f-sheen {
+
+ opacity: calc(.2 + var(--o) * .45); mix-blend-mode: color-dodge; filter: saturate(.75) brightness(.72);
+  clip-path: inset(var(--wt) var(--wx) var(--wbm) var(--wx));
+  background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] {
+
+ --band: linear-gradient(135deg, #8d949c 0%, #f4f6f8 18%, #a8afb7 34%, #ffffff 50%, #8f969e 66%, #e6e9ec 84%, #7d848c 100%); 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] .front {
+
+ --p-fill: rgba(244, 246, 250, .94); --p-line: linear-gradient(135deg, #7d848c, #ffffff 40%, #9aa1aa 65%, #eef0f2); --p-ink: #1b2027;
+  --nb-fill: linear-gradient(180deg, #f4f6f9, #c9ced6); --nb-line: linear-gradient(135deg, #5d646c, #ffffff 45%, #7d848c); --nb-ink: #2c333d;
+  --ring: linear-gradient(135deg, #8d949c, #ffffff 40%, #a8afb7 70%, #eef0f2); --tr-ink: #e9edf2; --vc-ink: #3b414a; 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] .f-frame {
+
+ background: var(--band); box-shadow: inset 0 0 0 .25cqw rgba(0, 0, 0, .35), inset .5cqw .5cqw .7cqw rgba(255, 255, 255, .6), inset -.5cqw -.5cqw .8cqw rgba(0, 0, 0, .4); 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] .f-frame::after {
+
+ opacity: calc(var(--o) * .8); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] .f-traits {
+
+ text-shadow: 0 0 .25cqw #000, 0 0 .5cqw rgba(0, 0, 0, .8); 
+
+}
+:where(.lkm-cards) .card[data-tier="sr"] .f-rainbow {
+
+ opacity: calc(.16 + var(--o) * .38); mix-blend-mode: color-dodge; filter: saturate(.85) brightness(.75);
+  background: linear-gradient(115deg, transparent 18%, #ff9ac8 30%, #ffe79a 38%, #9affd2 46%, #9ad0ff 54%, #d0a8ff 62%, transparent 74%);
+  background-size: 280% 280%; background-position: var(--mx) var(--my); 
+
+}
+:where(.lkm-cards) .card .f-title.emboss {
+
+ color: #3a414c; text-shadow: 0 -.18cqw 0 rgba(0, 0, 0, .45), 0 .22cqw 0 rgba(255, 255, 255, .95); 
+
+}
+:where(.lkm-cards) .fa {
+
+ --wt: 0cqw; --wx: 0cqw; --wbm: 0cqw; --wh: 139.68cqw; 
+
+}
+:where(.lkm-cards) .fa .f-shade {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .fa .f-subj {
+
+ filter: drop-shadow(0 1cqw 1.2cqw rgba(0, 0, 0, .45)); 
+
+}
+:where(.lkm-cards) .fa .front {
+
+ --p-fill: rgba(10, 10, 20, .62); --p-ink: #ffffff; --tr-ink: #ffffff; 
+
+}
+:where(.lkm-cards) .fa .f-fx {
+
+ padding: 0 .4cqw; gap: .9cqw; 
+
+}
+:where(.lkm-cards) .fa .f-fx::before, :where(.lkm-cards) .fa .f-fx::after {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .fa .fx {
+
+ position: relative; isolation: isolate; color: #fff; 
+
+}
+:where(.lkm-cards) .fa .fx .tx {
+
+ font-weight: 700; text-shadow: 0 0 .2cqw #000, 0 0 .2cqw #000, .12cqw .12cqw 0 #000, -.12cqw -.12cqw 0 #000, .12cqw -.12cqw 0 #000, -.12cqw .12cqw 0 #000, 0 .3cqw .7cqw rgba(0, 0, 0, .7); 
+
+}
+:where(.lkm-cards) .fa .fx .kw {
+
+ box-shadow: none; filter: drop-shadow(0 0 .2cqw rgba(0, 0, 0, .9)); 
+
+}
+:where(.lkm-cards) .fa .f-traits {
+
+ text-shadow: 0 0 .25cqw #000, 0 0 .5cqw rgba(0, 0, 0, .8); 
+
+}
+:where(.lkm-cards) .card[data-samebg="1"] .f-subj, :where(.lkm-cards) .card[data-samebg="1"] .f-bg {
+
+ translate: none !important; scale: none !important; 
+
+}
+:where(.lkm-cards) .fa .f-subj {
+
+ translate: calc(var(--dx) * 2.2cqw) calc(var(--dy) * 1.4cqw); 
+
+}
+:where(.lkm-cards) .fa .f-bg {
+
+ translate: calc(var(--dx) * -1cqw) calc(var(--dy) * -.7cqw); scale: 1.04; 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] {
+
+ --band: linear-gradient(135deg, #d9c49a 0%, #fff8e8 22%, #ecd9ae 42%, #fffdf6 58%, #d6bf92 82%, #fbf0d6 100%); 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-frame {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-subjwrap {
+
+ clip-path: inset(0 round 4.5cqw); 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .front {
+
+ --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #b89a5e, #fff4d8 50%, #b89a5e); --nb-ink: #2a2214;
+  --ring: linear-gradient(135deg, #a8916a, #fff4dc 40%, #c8b088 70%, #f2e2bf); --vc-ink: #fff; 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-etch {
+
+ opacity: calc(.35 + var(--o) * .55); mix-blend-mode: overlay;
+  background: radial-gradient(circle at var(--mx) var(--my), #fff 0%, rgba(255, 255, 255, .45) 30%, rgba(255, 255, 255, .14) 65%);
+  -webkit-mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; -webkit-mask-composite: source-in;
+  mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; mask-composite: intersect; 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-sheen {
+
+ opacity: calc(.1 + var(--o) * .22); mix-blend-mode: color-dodge; filter: saturate(.6) brightness(.8);
+  background: linear-gradient(var(--ang), #ffb3d0, #ffe6a8, #b3f5d8, #b0d4ff, #d6c2ff, #ffb3d0); background-size: 220% 220%; background-position: var(--mx) var(--my); 
+
+}
+:where(.lkm-cards) .card[data-tier="ssr"] .f-nb::after, :where(.lkm-cards) .card[data-tier="ur"] .f-nb::after, :where(.lkm-cards) .card[data-tier="lr"] .f-nb::after {
+
+
+  background: linear-gradient(100deg, transparent 36%, rgba(255, 255, 255, .85) 50%, transparent 64%) calc(115% - var(--mx) * 1.3) 0 / 260% 100% no-repeat, var(--nb-fill); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] {
+
+ --band: linear-gradient(135deg, #d39a2c 0%, #ffeeb8 18%, #f6c855 36%, #fffaea 50%, #eebb45 66%, #ffe9a6 82%, #c88a22 100%); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .front {
+
+ --p-fill: rgba(22, 13, 2, .6); --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #b07a1c, #fff0c0 50%, #b07a1c); --nb-ink: #2a1a04;
+  --ring: linear-gradient(135deg, #c88a22, #fff0c0 35%, #f0b83e 60%, #ffe9a6 85%); --vc-ink: #fff3cf; 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-frame {
+
+ padding: 1.3cqw; background: var(--band); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-frame::after {
+
+ opacity: var(--o); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-etch {
+
+ opacity: calc(.55 + var(--o) * .45); mix-blend-mode: overlay;
+  background: radial-gradient(circle at var(--mx) var(--my), #fff8dc 0%, #f3c65a 30%, #b07818 70%);
+  -webkit-mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; -webkit-mask-composite: source-in;
+  mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; mask-composite: intersect; 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-sheen {
+
+ opacity: calc(.15 + var(--o) * .45); mix-blend-mode: soft-light; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 226, 150, .9), rgba(255, 190, 90, .3) 40%, transparent 70%); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .front, :where(.lkm-cards) .card[data-tier="lr"] .front {
+
+ overflow: visible; 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .front > .f-bg, :where(.lkm-cards) .card[data-tier="lr"] .front > .f-bg, :where(.lkm-cards) .card[data-tier="ur"] .f-sheen, :where(.lkm-cards) .card[data-tier="lr"] .f-sheen, :where(.lkm-cards) .card[data-tier="ur"] .f-glit, :where(.lkm-cards) .card[data-tier="lr"] .f-glit {
+
+ border-radius: inherit; 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-bg, :where(.lkm-cards) .card[data-tier="lr"] .f-bg {
+
+ clip-path: inset(0 round 4.5cqw); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"] .f-subjwrap, :where(.lkm-cards) .card[data-tier="lr"] .f-subjwrap {
+
+ clip-path: inset(-40cqw 0 0 0 round 0 0 4.5cqw 4.5cqw); 
+
+}
+:where(.lkm-cards) .card[data-tier="ur"][data-cut="1"] .f-subj, :where(.lkm-cards) .card[data-tier="lr"][data-cut="1"] .f-subj {
+
+ translate: calc(var(--dx) * 2.6cqw) calc(-8cqw + var(--dy) * 1.6cqw); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] {
+
+ --band: linear-gradient(135deg, #d8a845 0%, #fff3cc 18%, #f3cf6e 34%, #fffdf2 50%, #ecc25a 66%, #fff0bf 84%, #cf9c38 100%); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .front {
+
+ --p-fill: rgba(14, 10, 4, .6); --nb-fill: var(--band); --nb-line: linear-gradient(135deg, #b8862a, #fff4cf 50%, #b8862a); --nb-ink: #241804;
+  --ring: linear-gradient(135deg, #cf9c38, #fff3cc 35%, #f3cf6e 60%, #fff0bf 85%); --vc-ink: #fff3cf; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-frame {
+
+ padding: 0; -webkit-mask: none; mask: none; background: var(--lr-frame) center / 100% 100% no-repeat; box-shadow: none; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-frame::after {
+
+ opacity: calc(var(--o) * .9); mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), #fff, transparent 40%); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-etch {
+
+ opacity: calc(.4 + var(--o) * .45); mix-blend-mode: overlay;
+  background: radial-gradient(circle at var(--mx) var(--my), #fffbe8 0%, #f3d27a 35%, #c9a04a 70%);
+  -webkit-mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; -webkit-mask-composite: source-in;
+  mask: var(--tex-etch) 0 0 / 2.4cqw 2.4cqw, var(--lum, linear-gradient(#000, #000)) 0 0 / 100% 100%; mask-composite: intersect; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-sheen {
+
+ opacity: calc(.1 + var(--o) * .28); mix-blend-mode: color-dodge; filter: saturate(.6) brightness(.8);
+  background: linear-gradient(var(--ang), #ffd6a8, #fff3c0, #d8f5d0, #c8dcff, #f0d0ff, #ffd6a8); background-size: 220% 220%; background-position: var(--mx) var(--my); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-depth {
+
+ opacity: 1; translate: calc(var(--dx) * 1.2cqw) calc(var(--dy) * .8cqw);
+  background: radial-gradient(42% 30% at 50% 36%, rgba(255, 232, 170, .55), rgba(255, 210, 120, .18) 55%, transparent 75%); mix-blend-mode: screen; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"][data-cut="0"] .f-depth {
+
+ translate: none; mix-blend-mode: screen;
+  background: radial-gradient(80% 70% at 50% 46%, transparent 58%, rgba(255, 214, 130, .22) 82%, rgba(255, 226, 160, .42) 100%); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"][data-cut="0"] .f-sheen {
+
+ opacity: calc(.04 + var(--o) * .14); 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-motes {
+
+ opacity: 1; 
+
+}
+:where(.lkm-cards) .f-motes i {
+
+ position: absolute; width: 1.1cqw; height: 1.1cqw; border-radius: 50%; background: radial-gradient(circle, #fff 0%, #ffe6a0 40%, transparent 70%);
+  opacity: 0; animation: lkm-mote var(--d, 9s) linear var(--w, 0s) infinite; 
+
+}
+@keyframes lkm-mote {
+
+ 0% { transform: translateY(0); opacity: 0; } 15% { opacity: .9; } 80% { opacity: .55; } 100% { transform: translateY(-46cqw); opacity: 0; } 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-serial {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-ser2 {
+
+ display: block; left: 7cqw; top: 128.9cqw; padding: .5cqw 1.6cqw .55cqw; border-radius: 1cqw; white-space: nowrap;
+  font-family: var(--num-font); font-weight: var(--num-w); font-size: 2.3cqw; line-height: 1; letter-spacing: .08em; color: #2a1a04;
+  background: var(--band); box-shadow: 0 0 0 .3cqw #2a1a04, 0 .5cqw 1cqw rgba(0, 0, 0, .5); z-index: 1; 
+
+}
+:where(.lkm-cards) .card[data-tier="lr"] .f-rar {
+
+ padding: .25cqw .8cqw; border-radius: .6cqw; background: linear-gradient(180deg, #3a2a08, #120c02); box-shadow: 0 0 0 .25cqw #e8c46a; color: #f3d27a; 
+
+}
+:where(.lkm-cards) .card.down .back {
+
+ transition: box-shadow .15s ease-out; 
+
+}
+:where(.lkm-cards) .card.down .b-tint {
+
+ transition: opacity .15s ease-out; 
+
+}
+:where(.lkm-cards) .card.down.hover .back {
+
+ transition: box-shadow .45s cubic-bezier(.55, 0, 1, .45); 
+
+}
+:where(.lkm-cards) .card.down.hover .b-tint {
+
+ transition: opacity .45s cubic-bezier(.55, 0, 1, .45); 
+
+}
+@property --rimA {
+
+ syntax: '<angle>'; inherits: false; initial-value: 0deg; 
+
+}
+:where(.lkm-cards) .card > .rim {
+
+ position: absolute; inset: -1.3cqw; z-index: 2; border-radius: 5.6cqw; padding: 1.5cqw; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .15s ease-out;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); 
+
+}
+:where(.lkm-cards) .card > .rim i {
+
+ position: absolute; left: 50%; top: 50%; width: 190%; aspect-ratio: 1; translate: -50% -50%;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--rc1) 40deg, transparent 90deg, transparent 180deg, var(--rc2) 220deg, transparent 270deg, transparent 360deg); 
+
+}
+:where(.lkm-cards) .card.down.hover > .rim i {
+
+ animation: lkm-rimSpin var(--rs, 2.6s) linear infinite; 
+
+}
+@keyframes lkm-rimSpin {
+
+ to { rotate: 360deg; } 
+
+}
+:where(.lkm-cards) .card.down.hover > .rim {
+
+ transition: opacity .45s cubic-bezier(.55, 0, 1, .45); 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="sr"] > .rim {
+
+ opacity: .55; --rc1: #ffffff; --rc2: #c9d6ff; --rs: 3.2s; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ssr"] > .rim {
+
+ opacity: .85; --rc1: #e2dbff; --rc2: #8a6cff; --rs: 2.6s; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ur"] > .rim {
+
+ opacity: 1; --rc1: #fff3cf; --rc2: #ffb21e; --rs: 2.1s; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="lr"] > .rim {
+
+ opacity: 1; --rc1: #ffffff; --rc2: #ffcf5a; --rs: 1.6s; padding: 2cqw; inset: -1.8cqw; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="lr"] > .rim i {
+
+ background: conic-gradient(from 0deg, transparent 0deg, #fff 30deg, #ffcf5a 60deg, transparent 100deg, #ffb3d0 150deg, transparent 180deg, #fff 210deg, #ffcf5a 240deg, transparent 280deg, #b8f0ff 330deg, transparent 360deg); 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="sr"] .back.card.down.hover[data-tier="sr"] .back {
+
+ box-shadow: 0 0 0 .6cqw rgba(228, 236, 255, .95), 0 0 5cqw 1cqw rgba(200, 214, 255, .45), 0 2cqw 6cqw rgba(0, 0, 0, .55); 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="sr"] .b-tint {
+
+ opacity: .5; background: #dfe8ff; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ssr"] .back {
+
+ box-shadow: 0 0 0 .55cqw #8a6cff, 0 0 7cqw 1.6cqw rgba(138, 108, 255, .6), 0 2cqw 6cqw rgba(0, 0, 0, .55); 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ssr"] .b-tint {
+
+ opacity: .65; background: #8a6cff; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ur"] .back, :where(.lkm-cards) .card.down.hover[data-tier="lr"] .back {
+
+ box-shadow: 0 0 0 .6cqw #ffd36b, 0 0 9cqw 2.4cqw rgba(255, 178, 40, .62), 0 2cqw 6cqw rgba(0, 0, 0, .55); 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ur"] .b-tint, :where(.lkm-cards) .card.down.hover[data-tier="lr"] .b-tint {
+
+ opacity: .7; background: #ffb21e; 
+
+}
+:where(.lkm-cards) .card.down .b-gold {
+
+ transition: background-position .15s ease-out, background-size .15s ease-out, opacity .15s ease-out; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="ur"] .b-gold, :where(.lkm-cards) .card.down.hover[data-tier="lr"] .b-gold {
+
+ background-position: 50% 50%; background-size: 130% 130%; opacity: 1;
+  transition: background-position 2.6s cubic-bezier(.4, 0, .9, .6), background-size 2.6s cubic-bezier(.4, 0, .9, .6), opacity .5s ease-in; 
+
+}
+:where(.lkm-cards) .card.down[data-tier="lr"]::before {
+
+ display: block; opacity: 0; transform: scale(.8); inset: -26% -34%;
+  background: radial-gradient(closest-side, rgba(255, 228, 160, .55), rgba(255, 200, 90, .2) 55%, transparent 80%); -webkit-mask: none; mask: none; transition: opacity .15s ease-out, transform .2s ease-out; 
+
+}
+:where(.lkm-cards) .card.down.hover[data-tier="lr"]::before {
+
+ opacity: 1; transform: scale(1.3); transition: opacity .6s cubic-bezier(.55, 0, 1, .45), transform 3.2s cubic-bezier(.2, 0, .3, 1); 
+
+}
+:where(.lkm-cards) .card.down.hover.still[data-tier="lr"]::before {
+
+ transform: scale(1.3); 
+
+}
+
+
+
+:where(.lkm-cards) .new-tag {
+
+ position: absolute; left: 50%; top: 0; z-index: 4; transform: translate(-50%, -55%); padding: 3px 7px; border-radius: 999px; pointer-events: none;
+  font: 800 10px/1 var(--f-ui); letter-spacing: .06em; color: #1a1205; background: #ffd84a; box-shadow: 0 0 0 2px #0b0c10; animation: lkm-tagIn .3s var(--ease) both; 
+
+}
+@keyframes lkm-tagIn {
+
+ from { opacity: 0; transform: translate(-50%, -20%); } 
+
+}
+:where(.lkm-cards) .lr-banner {
+
+ position: absolute; left: 50%; bottom: 0; z-index: 4; transform: translate(-50%, 60%); padding: 4px 10px; border-radius: 3px; white-space: nowrap; pointer-events: none;
+  font: 800 11px/1 var(--f-ui); color: #241804; background: linear-gradient(135deg, #8a6a2a, #fff1c4 30%, #d4a84e 60%, #ffe6a0); box-shadow: 0 0 0 1px #241804; 
+
+}
+:where(.lkm-cards) .cutin {
+
+ position: absolute; inset: 0; z-index: 40; display: grid; place-items: center; background: transparent; cursor: pointer; 
+
+}
+
+:where(.lkm-cards) .cutin .card {
+
+ width: min(250px, 52%); transition: transform .32s cubic-bezier(.2, .8, .2, 1); 
+
+}
+:where(.lkm-cards) .cutin-banner {
+
+ position: absolute; left: 0; right: 0; top: 68%; display: flex; justify-content: center; pointer-events: none; 
+
+}
+:where(.lkm-cards) .cutin-banner span {
+
+ display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 28px 9px; color: #241804; white-space: nowrap;
+  background: linear-gradient(135deg, #8a6a2a, #fff1c4 25%, #d4a84e 50%, #fffbe8 70%, #b8893a); box-shadow: 0 0 0 1.5px #241804, 0 8px 24px rgba(0, 0, 0, .6);
+  clip-path: polygon(4% 0, 96% 0, 100% 50%, 96% 100%, 4% 100%, 0 50%);
+
+}
+:where(.lkm-cards) .cutin-banner b {
+
+ font: 800 17px/1 var(--f-ui); 
+
+}
+:where(.lkm-cards) .cutin-banner small {
+
+ font: 700 11px/1 var(--f-ui); letter-spacing: .08em; 
+
+}
+:where(.lkm-cards) .card.xfade .face.front {
+
+ animation: lkm-xf .2s ease-out; 
+
+}
+@keyframes lkm-xf {
+
+ from { opacity: 0; } 
+
+}
+@media (prefers-reduced-motion: reduce) {
+:where(.lkm-cards) .f-motes {
+
+ display: none; 
+
+}
+:where(.lkm-cards) .card.down .back, :where(.lkm-cards) .card.down .b-tint, :where(.lkm-cards) .card.down .b-gold, :where(.lkm-cards) .card.down[data-tier="lr"]::before {
+
+ transition: none !important; 
+
+}
+:where(.lkm-cards) .card > .rim {
+
+ transition: none !important; 
+
+}
+:where(.lkm-cards) .card.down.hover > .rim i {
+
+ animation: none; 
+
+}
+}
+:where(.lkm-cards) .card {
+
+ --bk-font: "Cinzel", "Times New Roman", serif; --bk-w: 700; --bk-fs: 8.5cqw; --bk-ls: .05em; --bk-y: 16.4cqw; --bk-ring: 10px; 
+
+}
+:where(.lkm-cards) .back {
+
+ background: #141b45; 
+
+}
+:where(.lkm-cards) .b-art {
+
+ inset: 0; background: var(--back-a-art) center / 100% 100% no-repeat; 
+
+}
+:where(.lkm-cards) .b-ring {
+
+ inset: 0; width: 100%; height: 100%; pointer-events: none; color: #d9c48c; opacity: .82;
+  font-family: var(--bk-font); font-weight: var(--bk-w); font-size: var(--bk-ring); 
+
+}
+:where(.lkm-cards) .b-gold {
+
+ inset: 0; pointer-events: none; -webkit-mask: var(--back-a-gold) center / 100% 100% no-repeat; mask: var(--back-a-gold) center / 100% 100% no-repeat;
+  background: linear-gradient(118deg, transparent 34%, rgba(255, 246, 214, .9) 47%, rgba(255, 255, 255, 1) 50%, rgba(255, 238, 190, .85) 53%, transparent 66%);
+  background-size: 300% 300%; background-position: calc(100% - var(--mx)) calc(100% - var(--my)); mix-blend-mode: soft-light; opacity: calc(.25 + var(--o) * .75); 
+
+}
+:where(.lkm-cards) .b-tint {
+
+ inset: 0; pointer-events: none; opacity: 0; -webkit-mask: var(--back-a-gold) center / 100% 100% no-repeat; mask: var(--back-a-gold) center / 100% 100% no-repeat;
+  background: var(--glow, #fff); mix-blend-mode: color; transition: opacity .3s ease; 
+
+}
+:where(.lkm-cards) .card[data-glow="rainbow"] .b-tint {
+
+ background: conic-gradient(from 30deg, #ff7ba9, #ffe17a, #7dffc0, #7cc8ff, #c49bff, #ff7ba9); 
+
+}
+:where(.lkm-cards) .b-logo {
+
+ left: 0; right: 0; top: 50%; height: 0; pointer-events: none; 
+
+}
+:where(.lkm-cards) .b-logo span {
+
+ position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; line-height: 1;
+  font-family: var(--bk-font); font-weight: var(--bk-w); font-size: var(--bk-fs); letter-spacing: var(--bk-ls); padding-left: var(--bk-ls);
+  top: calc(var(--bk-y) * -1 - var(--bk-fs) / 2); color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, .95) 50%, transparent 62%), linear-gradient(180deg, #f6e7b8 0%, #d9bf7c 55%, #b8964f 100%);
+  background-size: 300% 100%, 100% 100%; background-repeat: no-repeat; background-position: calc(100% - var(--mx) * 1.2) 0, 0 0;
+  filter: drop-shadow(0 .3cqw 0 #0a0f2e); 
+
+}
+:where(.lkm-cards) .b-logo span.dn {
+
+ top: calc(var(--bk-y) - var(--bk-fs) / 2); transform: rotate(180deg); 
+
+}
+:where(.lkm-cards) .b-print {
+
+ inset: 0; pointer-events: none; background: var(--tex-paper); background-size: 34cqw 34cqw; mix-blend-mode: multiply; opacity: .9; 
+
+}
+:where(.lkm-cards) .b-sheen {
+
+ inset: 0; pointer-events: none; mix-blend-mode: soft-light; opacity: calc(var(--o) * .45);
+  background: radial-gradient(circle at calc(100% - var(--mx)) var(--my), rgba(255, 255, 255, .55), transparent 55%); 
+
+}
+@media (prefers-reduced-motion: reduce) {
+:where(.lkm-cards) .card, :where(.lkm-cards) .card.active {
+
+ transition: none; 
+
+}
+:where(.lkm-cards) .card__flip {
+
+ transition: none; 
+
+}
+:where(.lkm-cards) .pack, :where(.lkm-cards) .pack.hov, :where(.lkm-cards) .pack.auto {
+
+ transition: none; 
+
+}
+:where(.lkm-cards) .pk-tilt, :where(.lkm-cards) .pack.drag .pk-tilt {
+
+ transform: none; 
+
+}
+:where(.lkm-cards) .pack.torn .tp-peel {
+
+ animation: none; opacity: 0; 
+
+}
+}
