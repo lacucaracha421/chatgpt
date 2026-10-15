@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { ImageTextLine } from "../../library/types";
 import { reducedMotion, EASE_STANDARD } from "../motion/curves";
-import { layoutImageTextNotes, type ImageRect, type ImageZoom } from "./imageTextNoteLayout";
+import { layoutImageTextNotes, lineGeometry, type ImageRect, type ImageZoom } from "./imageTextNoteLayout";
 import "./image-text.css";
 
 export type ImageTextNotesHandle = { tap: (clientX: number, clientY: number) => boolean; dismissCard: () => boolean };
@@ -68,6 +68,10 @@ export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
   const note = layout.notes.find(item => item.index === card);
   const line = card !== null ? lines[card] : null;
   const W = rect.width * layout.scale, H = rect.height * layout.scale;
+  // Older saved translations legitimately have no OCR coordinates. Keep them readable
+  // in a viewport-bound list rather than inventing anchors or silently dropping them.
+  const unpositioned = lines.map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.korean.trim() && !lineGeometry(line, 1000, 1000));
   // Clamp the card to the visible viewport as well as the image, including zoomed images.
   const stage = root.current?.parentElement;
   const viewLeft = Math.max(0, -left / ratio), viewTop = Math.max(0, -top / ratio);
@@ -77,7 +81,7 @@ export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
   const cardMaxHeight = Math.max(0, viewBottom - viewTop);
   const visibleCardHeight = Math.min(cardHeight, cardMaxHeight);
   const cardTop = note ? (note.y + note.h + 4 + visibleCardHeight <= viewBottom ? note.y + note.h + 4 : note.y - visibleCardHeight - 4) : 0;
-  return <div ref={root} className="image-text-notes" role="group" aria-label="이미지 글자 번역" data-open={open} data-sized={W > 0 && H > 0} data-panning={panning} data-animate-pan={animatePan} data-surface-tap={surfaceTap} aria-hidden={!open} inert={!open || !interactive}
+  return <><div ref={root} className="image-text-notes" role="group" aria-label="이미지 글자 번역" data-open={open} data-sized={W > 0 && H > 0} data-panning={panning} data-animate-pan={animatePan} data-surface-tap={surfaceTap} aria-hidden={!open} inert={!open || !interactive}
     onKeyDown={event => { if (event.key === "Escape" && dismissCard()) { event.preventDefault(); event.stopPropagation(); } }}
     style={{ left: 0, top: 0, width: W, height: H, transform: `translate(${left}px, ${top}px) scale(${ratio})` }}>
     {layout.notes.map(item => <button key={item.index} type="button" className="image-text-note" data-line-note={item.index} data-stacked={!!item.stacked} aria-label={`${item.index + 1}번 대사`} aria-pressed={selected === item.index}
@@ -92,5 +96,17 @@ export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
         try { await onCopy(line.korean); setCopyState("복사됨"); } catch { setCopyState("복사하지 못했습니다. 다시 시도해 주세요."); }
       }}>복사</button></div>{copyState && <span role="status">{copyState}</span>}
     </div>}
-  </div>;
+  </div>
+    {open && unpositioned.length > 0 && <div className="image-text-unpositioned ui-anchored-panel" role="region" aria-label="위치 없는 번역" inert={!interactive}
+      onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+      <ol className="image-text-section__lines">
+        {unpositioned.map(({ line, index }) => <li key={index}>
+          <button type="button" className="image-text-section__row" aria-pressed={selected === index} onClick={() => onSelect(index)}>
+            <span className="image-text-section__number" data-positioned="false">{index + 1}</span>
+            <span><span className="image-text-section__korean">{line.korean}</span><span className="image-text-section__original">{line.original}</span></span>
+          </button>
+        </li>)}
+      </ol>
+    </div>}
+  </>;
 });

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.48 — 2026-10-16
+
+- Fix: since 3.5.43, text positions converted from pixel answers were fractional and were
+  dropped when saving a translation to Lakomics; boxes are now rounded so saved
+  translations keep their positions.
+
 ## 3.5.47 — 2026-10-16
 
 - On stacked manga pages (pixiv multi-page works) the translation button group stays

@@ -590,6 +590,24 @@ it("toggles translation notes without an information dock and closes the card be
   expect(screen.queryByRole("button", {name: "1번 대사"})).toBeNull();
 });
 
+it("shows saved translations without boxes in the viewer without requiring the information dock", async () => {
+  // Four of the six production payloads have only original/korean strings (no box key).
+  const text: AssetImageText = { digest: "legacy-unpositioned", lines: Array.from({length: 10}, (_, i) => ({
+    original: `保存された文章 ${i + 1}`, korean: `저장된 번역 문장 ${i + 1}`,
+  })) };
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(text) } as unknown as LibraryGateway;
+  render(textViewer(gateway, "a", {renderInfo: undefined}));
+  const toggle = await screen.findByRole("button", {name: "번역"});
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const translations = screen.getByRole("region", {name: "위치 없는 번역"});
+  expect(within(translations).getAllByRole("button")).toHaveLength(10);
+  expect(translations).toHaveTextContent("저장된 번역 문장 10");
+  expect(screen.queryByRole("complementary")).toBeNull();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole("region", {name: "위치 없는 번역"})).toBeNull();
+});
+
 it("starts folded; button/T unfold; marker and row selection link both ways and clear on a second click", async () => {
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn().mockRejectedValue(new Error("offline")) } as unknown as LibraryGateway;
   const { rerender } = render(textViewer(gateway));
@@ -628,7 +646,7 @@ it("holds outgoing rows until the decoded slot swap, then swaps rows/markers and
   const { rerender } = render(textViewer(gateway));
   fireEvent.load(screen.getByRole("img", { name: "a.png" }));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  // 번역 opens the info dock itself.
   fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
   let decode!: () => void;
   const spare = document.querySelector<HTMLImageElement>('.asset-viewer__media[src$="/asset/b"]')!;
@@ -652,7 +670,7 @@ it("refreshes only changed digests and retains the local rows during refresh", a
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText | null>(done => { resolve = done; })) } as unknown as LibraryGateway;
   render(textViewer(gateway));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  // 번역 opens the info dock itself.
   expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
   await act(async () => resolve({ digest: "changed", lines: [{ ...imageTextFixture.lines[0], korean: "갱신된 번역" }] }));
   expect(within(document.querySelector(".image-text-section")!).getByText("갱신된 번역")).toBeInTheDocument();
@@ -664,7 +682,7 @@ it("ignores changed lines under an unchanged digest", async () => {
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText>(done => { resolve = done; })) } as unknown as LibraryGateway;
   render(textViewer(gateway));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  // 번역 opens the info dock itself.
   await act(async () => resolve({ ...imageTextFixture, lines: [{ ...imageTextFixture.lines[0], korean: "잘못 바뀐 내용" }] }));
   expect(within(document.querySelector(".image-text-section")!).queryByText("잘못 바뀐 내용")).toBeNull();
   expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
@@ -701,7 +719,7 @@ it("pans an off-screen row marker into view over 200ms without changing zoom", a
   Object.defineProperties(image, { offsetWidth: { configurable: true, value: 600 }, offsetHeight: { configurable: true, value: 300 }, naturalWidth: { configurable: true, value: 200 }, naturalHeight: { configurable: true, value: 100 } });
   fireEvent.load(image);
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  // 번역 opens the info dock itself.
   fireEvent.wheel(stage, { ctrlKey: true, deltaY: -600, clientX: 0, clientY: 0 });
   const before = image.style.transform;
   fireEvent.click(screen.getByRole("button", { name: /응.*はい/ }));

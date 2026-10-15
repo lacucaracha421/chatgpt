@@ -231,10 +231,12 @@
       const original = Array.from(line.original.trim()).slice(0, 800).join("");
       const korean = Array.from(line.korean.trim()).slice(0, 800).join("");
       if (!korean) continue;
-      const clean = { original, korean }, box = line.box;
+      const clean = { original, korean };
+      // Boxes converted from pixel answers can be fractional; the server stores integers.
+      const box = line.box && Object.fromEntries(["x0", "y0", "x1", "y1"].map(key => [key, Number.isFinite(line.box[key]) ? Math.round(line.box[key]) : NaN]));
       if (box && [box.x0, box.y0, box.x1, box.y1].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)
           && box.x0 < box.x1 && box.y0 < box.y1) {
-        clean.box = { x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y1 };
+        clean.box = box;
       }
       lines.push(clean);
       if (lines.length === 60) break;

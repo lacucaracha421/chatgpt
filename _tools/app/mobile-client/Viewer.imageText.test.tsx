@@ -79,6 +79,24 @@ it('toggles notes without the info sheet, copies from the card, and consumes Bac
   fireEvent.click(toggle);
   expect(screen.queryByRole('button', {name:'1번 대사'})).toBeNull();
 });
+it('reads saved lines without coordinates without starting a surface swipe', async () => {
+  mocks.api.mockResolvedValue({digest: 'unpositioned', lines: [{original: '保存された文章', korean: '저장된 번역'}]});
+  render(<Viewer {...props} items={items} index={0}/>);
+  await loaded();
+  fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+  const region = screen.getByRole('region', {name: '위치 없는 번역'});
+  expect(getComputedStyle(region).position).toBe('absolute');
+  expect(getComputedStyle(region).overflow).toBe('auto');
+  const row = screen.getByRole('button', {name: /저장된 번역.*保存された文章/});
+  fireEvent.pointerDown(row, {pointerId: 1, clientX: 300, clientY: 120});
+  fireEvent.pointerUp(row, {pointerId: 1, clientX: 100, clientY: 120});
+  fireEvent.click(row);
+  expect(row).toHaveAttribute('aria-pressed', 'true');
+  expect(props.onIndex).not.toHaveBeenCalled();
+  expect(props.onClose).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+  expect(screen.queryByRole('region', {name: '위치 없는 번역'})).toBeNull();
+});
 it('does not fetch or offer translation without the flag or for video, vault and privacy covers', async () => {
   for (const options of [
     {items: [{...items[0], has_image_text: undefined}]},

@@ -39,13 +39,15 @@ it("scrolls the selected row inside the designated reading surface only", () => 
   expect(dock.scrollTop).toBe(80);
 });
 
-it("draws solid translated notes only for boxed lines, toggles them and raises the selected row", () => {
+it("draws anchored notes and lists unpositioned lines, toggles both and raises the selected row", () => {
   const onSelect = vi.fn();
   const props = {lines, onSelect, rect: {left: 10, top: 20, width: 400, height: 600}, zoom: {scale: 2, x: 30, y: 40}};
   const {container, rerender} = render(<ImageTextNotes {...props} selected={null} open/>);
-  expect(screen.getAllByRole("button")).toHaveLength(2);
+  expect(screen.getAllByRole("button")).toHaveLength(3);
   expect(screen.getByRole("button", {name: "1번 대사"})).toHaveTextContent("있잖아");
-  expect(screen.queryByText("끝")).toBeNull();
+  expect(screen.getByRole("region", {name: "위치 없는 번역"})).toHaveTextContent("끝");
+  fireEvent.click(screen.getByRole("button", {name: /끝.*終/}));
+  expect(onSelect).toHaveBeenCalledWith(2);
   rerender(<ImageTextNotes {...props} selected={1} open/>);
   const note = screen.getByRole("button", {name: "2번 대사"});
   expect(note).toHaveAttribute("aria-pressed", "true");
@@ -67,9 +69,9 @@ it("opens an original/translation card, copies the translation and reports a cop
   await act(async () => fireEvent.click(screen.getByRole("button", {name: "복사"})));
   expect(screen.getByRole("status")).toHaveTextContent("복사하지 못했습니다");
   const escape = new KeyboardEvent("keydown", {key:"Escape", bubbles:true, cancelable:true});
-  fireEvent(screen.getByRole("region"), escape);
+  fireEvent(screen.getByRole("region", {name: "대사 번역"}), escape);
   expect(escape.defaultPrevented).toBe(true);
-  expect(screen.queryByRole("region")).toBeNull();
+  expect(screen.queryByRole("region", {name: "대사 번역"})).toBeNull();
 });
 
 it("holds layout through zoom/pan, transforms the previous notes and refits at screen size on settle", () => {

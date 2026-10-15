@@ -214,7 +214,8 @@ export function AssetViewer({
     clearTimeout(textPanTimer.current);
     textPanTimer.current = setTimeout(() => setTextPanning(false), 200);
   };
-  const toggleText = () => setTextOpen(open => !open);
+  // Turning the notes on also opens the info dock with the line list (user 2026-10-16).
+  const toggleText = () => { if (!textOpen) setInfoOpen(true); setTextOpen(!textOpen); };
 
   /** Recomputes which overlays are shown; returns whether an open menu or panel holds the top bar (nothing announces when that ends, so the idle clock re-checks). */
   const refreshZones = useCallback(() => {

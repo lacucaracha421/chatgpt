@@ -22,9 +22,10 @@
 .image-text-notes[data-open="false"] .image-text-note, .image-text-notes[data-surface-tap="true"] .image-text-note { pointer-events: none; }
 .image-text-note-card { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--space-2); width: min(260px, 100%); overflow: auto; padding: var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface-elevated); color: var(--color-text); box-shadow: var(--shadow-floating); font: 400 var(--type-body) / 1.5 var(--font-ui); word-break: keep-all; overflow-wrap: anywhere; pointer-events: auto; animation: image-text-card-in 140ms var(--ease-standard); }
 .image-text-note-card__original { color: var(--color-muted); }
+.image-text-unpositioned.ui-anchored-panel { position: absolute; z-index: 3; top: 64px; right: var(--space-4); box-sizing: border-box; width: min(360px, calc(100% - 32px)); max-height: calc(100% - 152px); overflow: auto; overscroll-behavior: contain; background: var(--color-surface-elevated); color: var(--color-text); border: 1px solid var(--color-border); box-shadow: var(--shadow-floating); animation: image-text-card-in 140ms var(--ease-standard); }
 .image-text-note-card > div { display: flex; justify-content: flex-end; gap: var(--space-2); }
 .image-text-note-card button { min-height: var(--control-height); padding: 0 var(--space-2); background: transparent; color: var(--color-text); font: inherit; border: 0; cursor: pointer; }
 .image-text-note-card button:hover { background: var(--color-surface-hover); }
 .image-text-note-card button:focus-visible, .image-text-section__row:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 @keyframes image-text-card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .image-text-notes, .image-text-section__row { transition: none; } .image-text-note-card { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .image-text-notes, .image-text-section__row { transition: none; } .image-text-note-card, .image-text-unpositioned { animation: none; } }

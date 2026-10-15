@@ -281,7 +281,7 @@ test('boxes clamp and swap finite numbers; unusable boxes drop without losing th
   const lines = plain(ctx.LakomicsTranslationCore.image.parseLines({lines: boxes.map(box => ({original: 'a', korean: '가', box}))}));
   assert.equal(lines.length, boxes.length);
   assert.deepEqual(lines[0].box, {x0: 0, y0: 100, x1: 1000, y1: 900});
-  assert.deepEqual(lines[1].box, boxes[1]);
+  assert.deepEqual(lines[1].box, {x0: Math.round(boxes[1].x0), y0: Math.round(boxes[1].y0), x1: boxes[1].x1, y1: boxes[1].y1}, "boxes are rounded to integers so saves keep them");
   assert.ok(lines.slice(2).every(line => !('box' in line)));
 });
 
@@ -1752,7 +1752,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.47');
+  assert.equal(manifest.version, '3.5.48');
 });
 
 

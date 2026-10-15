@@ -167,7 +167,7 @@
         // A missing or unknown kind is dialogue, so answers without the field still work.
         const line = { original, korean, kind: item.kind === "sfx" ? "sfx" : "dialogue" }, box = toNormalized(item.box, options);
         if (box) {
-          const clamp = value => Math.max(0, Math.min(1000, value));
+          const clamp = value => Math.round(Math.max(0, Math.min(1000, value)));
           const [x0, x1] = [clamp(box.x0), clamp(box.x1)].sort((a, b) => a - b);
           const [y0, y1] = [clamp(box.y0), clamp(box.y1)].sort((a, b) => a - b);
           if (x1 > x0 && y1 > y0) line.box = { x0, y0, x1, y1 };
