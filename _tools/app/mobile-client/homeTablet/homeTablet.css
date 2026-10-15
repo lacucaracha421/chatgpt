@@ -1,7 +1,6 @@
 /* Tablet Home (HOME-REDESIGN-001): one column of the PC's parts, in the order of the PC's layout A. */
 .home-tablet-layout { min-height:100%; display:flex; flex-direction:column; gap:var(--space-8); }
 .home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); align-items:start; }
-.home-tablet-pair.is-single { grid-template-columns:minmax(0,1fr); }
 .home-tablet-card, .home-tablet-today { min-width:0; }
 
 /* This week as one row: the PC cells, shorter, with touch-sized targets and the week arrows. */
@@ -41,4 +40,3 @@
 .home-tab-sent li small { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
 .home-tab-sent li[data-tone="error"] small { color:var(--color-danger); }
 
-@media (orientation:portrait) and (max-width:700px) { .home-tablet-pair { grid-template-columns:minmax(0,1fr); } }

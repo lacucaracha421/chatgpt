@@ -5,8 +5,9 @@ it('stacks the PC parts in one column, pairs card with 오늘 할 것 and memo w
   const css = readFileSync('mobile-client/homeTablet/homeTablet.css', 'utf8');
   expect(css).toContain('.home-tablet-layout { min-height:100%; display:flex; flex-direction:column;');
   expect(css).toContain('.home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));');
-  expect(css).toContain('.home-tablet-pair.is-single { grid-template-columns:minmax(0,1fr); }');
-  expect(css).toContain('@media (orientation:portrait) and (max-width:700px) { .home-tablet-pair { grid-template-columns:minmax(0,1fr); } }');
+  // Two halves always, also in portrait (user 2026-10-16).
+  expect(css).not.toContain('is-single');
+  expect(css).not.toContain('max-width:700px');
   expect(css).toContain('.home-tablet-week { touch-action:pan-y; }');
   expect(css).toMatch(/\.home-tablet-week__nav \.ui-icon-button \{ min-width:44px; min-height:44px; \}/);
   expect(css).toMatch(/\.home-cal__payment\.ui-button[^{]*\{ min-height:44px; \}/);

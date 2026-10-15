@@ -257,9 +257,10 @@ export function Home(props: HomeProps) {
     {pull}
     {firstLoad ? <div className="home-media-waiting" aria-busy="true"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <div className="home-tablet-layout">
     <TabletWeekStrip model={calendar} at={at} onOpenCalendar={props.onReleases} onOpenNote={props.onNotes} />
-    <div className={`home-tablet-pair${rows.length ? '' : ' is-single'}`}>
+    {/* Always two halves (user 2026-10-16): the card never takes the whole row; an empty 오늘 할 것 shows its empty line. */}
+    <div className="home-tablet-pair">
       <div className="home-tablet-card"><TabletDailyCard privacy={privacy} root={props.scope} active={!paused} onOpenAlbum={() => props.onAlbum?.()} /></div>
-      {rows.length > 0 && <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
+      <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
         if (row.noteId) props.onNotes(row.noteId);
         else if (row.key === 'unsorted') props.onUnclassified();
         else if (row.key === 'similar') props.onSimilarity();
@@ -268,7 +269,7 @@ export function Home(props: HomeProps) {
         else if (row.key === 'duplicates') props.onDuplicates();
         else if (row.key === 'connection:exchange') props.onExchange();
         else if (row.key.startsWith('connection:')) props.onSettings();
-      }} /></div>}
+      }} /></div>
     </div>
     <div className="home-tablet-pair">
       <HomeQuickMemo store={notesStore} root={props.scope} onOpenNotes={() => props.onNotes()} />

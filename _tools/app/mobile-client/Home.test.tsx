@@ -181,7 +181,7 @@ describe('shared Home attention on tablet', () => {
     await act(async () => {localStorage.setItem(PRIVACY_MODE_KEY, '1'); window.dispatchEvent(new Event(PRIVACY_MODE_EVENT));});
     expect(screen.getByRole('region', {name:'오늘의 카드'}).getAttribute('data-privacy')).toBe('true');
   });
-  it('omits today when every known attention source is empty', async () => {
+  it('keeps an empty 오늘 할 것 beside the card when every attention source is empty', async () => {
     notes=[]; server.summary={...(server.summary as object),unclassified:0};
     const read=mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation((path,...args)=> {
@@ -190,9 +190,11 @@ describe('shared Home attention on tablet', () => {
       return read(path,...args);
     });
     render(<Home {...props()}/>);
-    await screen.findByRole('region', {name:/^발매 캘린더/}); expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
+    // The card keeps its half; an empty 오늘 할 것 shows its empty line beside it.
+    await screen.findByRole('region', {name:/^발매 캘린더/});
+    expect(screen.getByRole('region', {name:/오늘 할 것/}).textContent).toContain('오늘 할 것이 없습니다');
     expect(screen.getByRole('region', {name:'오늘의 카드'})).toBeTruthy();
-    expect(document.querySelector('.home-tablet-pair.is-single')).toBeTruthy();
+    expect(document.querySelector('.home-tablet-pair.is-single')).toBeNull();
   });
   it.each(['2026-09-24', '2026-09-25'])('never marks an unwished Korean calendar movie NEW on %s, including a saved pending arrival', async date => {
     const key = 'lakomics.home.visit.v1:https://a.example';
