@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  const revealedLayers = new WeakSet();
   const paths = {
     copy: "M8 7V4h12v13h-3M4 7h12v13H4z", cut: "M8 8l12 12M8 16L20 4M7 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0M7 17a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
     clipboard: "M9 4H5v17h14V4h-4M9 2h6v4H9z", select: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M7 7h10v10H7z",
@@ -31,16 +32,31 @@
     const linear = values.slice(0, 3).map(value => { value /= 255; return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4; });
     return .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2] < .4 ? "dark" : "light";
   }
+  // Collector/toast hosts live outside our shadow roots. z-index alone cannot
+  // put them above a top-layer image overlay; they must join the top layer too.
+  function revealAboveNotes(node, zIndex = 2147483647) {
+    if (!node) return;
+    node.style.zIndex = String(zIndex);
+    if (typeof node.showPopover !== "function") return;
+    if (!node.hasAttribute("popover")) {
+      Object.assign(node.style, { margin: "0", border: "0", padding: "0", background: "transparent", width: "auto", height: "auto", overflow: "visible" });
+      node.setAttribute("popover", "manual");
+    }
+    // Showing an already open popover does not change its top-layer order.
+    try { node.hidePopover?.(); node.showPopover(); revealedLayers.add(node); } catch {}
+  }
   function createSurfaces({ doc = document, win = window, css = "" } = {}) {
     const model = globalThis.LakomicsContextModel, blocks = new WeakMap();
     let sheet = null, currentToast = null;
     if (win.CSSStyleSheet?.prototype.replaceSync) { sheet = new win.CSSStyleSheet(); sheet.replaceSync(css); }
-    function host(tag, target, floating = true) {
+    function host(tag, target, floating = true, { documentCoordinates = false } = {}) {
       const node = doc.createElement(tag), root = node.attachShadow({ mode: "closed" });
       node.dataset.theme = theme(target, doc, win);
       if (sheet) root.adoptedStyleSheets = [sheet]; else { const style = doc.createElement("style"); style.textContent = css; root.append(style); }
       if (floating) {
         node.style.cssText = "all:initial;position:fixed;inset:0 auto auto 0;z-index:2147483647;contain:layout style;pointer-events:none;margin:0;border:0;padding:0;background:transparent;overflow:visible;";
+        node.style.zIndex = String(tag === "lakomics-image-markers" ? 2147483644 : ["lakomics-toast", "lakomics-page-status"].includes(tag) ? 2147483647 : 2147483645);
+        if (documentCoordinates) node.style.position = "absolute";
         node.style.colorScheme = node.dataset.theme;
         if (typeof node.showPopover === "function") node.setAttribute("popover", "manual");
         (doc.fullscreenElement || doc.documentElement).append(node);
@@ -51,7 +67,15 @@
       }
       return { node, root };
     }
-    function reveal(surface) { if (surface.node.hasAttribute("popover")) { try { surface.node.showPopover(); } catch {} } }
+    function reveal(surface) {
+      if (surface.node.hasAttribute("popover")) { try { surface.node.showPopover(); revealedLayers.add(surface.node); } catch {} }
+      // Top-layer order follows show order, regardless of host z-index. Restore
+      // higher extension layers when notes are recreated from a cached answer.
+      const higher = [...doc.querySelectorAll('lakomics-image-popover[popover],lakomics-toast[popover],lakomics-page-status[popover],#lakomics-arc-collector[popover],.lakomics-list-toasts[popover]')]
+        .filter(node => revealedLayers.has(node) && Number(node.style.zIndex) > Number(surface.node.style.zIndex))
+        .sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
+      for (const node of higher) revealAboveNotes(node, Number(node.style.zIndex));
+    }
     function viewport() { return win.visualViewport || { width: win.innerWidth, height: win.innerHeight, offsetLeft: 0, offsetTop: 0 }; }
     function place(surface, box, origin, offset = 2) {
       const rect = box.getBoundingClientRect(), view = viewport();
@@ -63,6 +87,7 @@
     function remove(surface, box, ms = 90, collapse = false) {
       if (!surface || surface.closed) return;
       surface.closed = true;
+      revealedLayers.delete(surface.node);
       if (!ms || win.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { surface.node.remove(); return; }
       box.classList.add("exit");
       win.setTimeout(() => {
@@ -154,7 +179,7 @@
       win.addEventListener("resize", reposition);
       return api;
     }
-    return { host, reveal, place, remove, toast, inline, note, status, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
+    return { host, reveal, revealAboveNotes, place, remove, toast, inline, note, status, viewport, icon: name => icon(doc, name), destroy() { currentToast?.close(0); } };
   }
   // Pending text appears after 400 ms and, once visible, lasts at least 600 ms.
   async function delayed(work, pending, { win = window, now = () => Date.now() } = {}) {
@@ -163,5 +188,5 @@
     try { return await work(); }
     finally { win.clearTimeout(timer); if (shown !== null) await new Promise(resolve => win.setTimeout(resolve, Math.max(0, 600 - (now() - shown)))); }
   }
-  globalThis.LakomicsContextSurfaces = { createSurfaces, delayed, theme, opaqueTheme };
+  globalThis.LakomicsContextSurfaces = { createSurfaces, revealAboveNotes, delayed, theme, opaqueTheme };
 })();

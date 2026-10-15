@@ -861,6 +861,9 @@
     function toastLayer() {
       let layer = document.querySelector(".lakomics-list-toasts");
       if (!layer) { layer = document.createElement("div"); layer.className = "lakomics-list-toasts"; document.documentElement.append(layer); }
+      // Keep the existing viewport anchor while overriding popover UA insets.
+      layer.style.right = "auto"; layer.style.bottom = "auto";
+      globalThis.LakomicsContextSurfaces?.revealAboveNotes(layer);
       return layer;
     }
 

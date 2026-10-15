@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.45 — 2026-10-16
+
+- Translation notes and their button group scroll with the page natively (no jitter);
+  they are repositioned only when the layout changes.
+- Translating the same image again no longer leaves a second button group behind.
+- The save window, its errors and status toasts always appear above translation notes.
+
 ## 3.5.44 — 2026-10-16
 
 - Overlapping translation notes are separated (narrower shape first, then a small move,

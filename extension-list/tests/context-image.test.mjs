@@ -420,9 +420,9 @@ for (const touch of [false, true]) test(`translation notes sit over each text bl
   assert.notEqual(v.notes[0].style.background, '', 'solid colour, no glass');
   assert.deepEqual([...v.pill.querySelectorAll('button')].map(button => button.textContent), ['원문', '모두 복사', '']);
   assert.equal(v.pill.dataset.placement, 'below');
-  // follows scroll / resize
+  // Real layout changes follow resize, rather than document scroll events.
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 420, top: 70, bottom: 170, width: 300, height: 100})});
-  f.doc.dispatchEvent(new f.w.Event('scroll'));
+  f.w.dispatchEvent(new f.w.Event('resize'));
   assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['120px', '70px', '300px', '100px']);
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0})});
   f.w.dispatchEvent(new f.w.Event('resize'));
@@ -535,27 +535,91 @@ test('toolbar placement prefers below, then above, then the least-overlap corner
   f.close();
 });
 
-test('outside toolbar follows position-only scrolling and visual viewport changes and remains interactive', async () => {
+test('document notes and outside toolbar scroll natively without rewriting position; zoom relayout remains interactive', async () => {
   const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
   const viewport = new f.w.EventTarget();
   Object.assign(viewport, {width: 800, height: 600, offsetLeft: 0, offsetTop: 0});
   Object.defineProperty(f.w, 'visualViewport', {value: viewport});
-  let y = 50;
-  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width: 300, height: 200})});
+  let y = 50, reads = 0;
+  f.w.scrollX = 25; f.w.scrollY = 100;
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => { reads++; return {left: 100, top: y, width: 300, height: 200}; }});
   await f.actions.activate('image.translate', f.context(), origin, gesture);
   const v = notesView(f);
+  assert.equal(v.host.style.position, 'absolute');
+  assert.equal(v.host.hasAttribute('popover'), true, 'absolute coordinates use the top-layer initial containing block');
+  assert.deepEqual([v.host.style.left, v.host.style.top], ['125px', '150px']);
   assert.equal(v.host.style.overflow, 'visible'); assert.equal(v.host.style.contain, 'layout style');
   assert.equal(v.host.style.pointerEvents, 'none');
   assert.equal(v.pill.dataset.placement, 'below'); assert.equal(v.pill.style.top, '206px');
-  y = 400; f.doc.dispatchEvent(new f.w.Event('scroll'));
-  assert.equal(v.pill.dataset.placement, 'above'); assert.equal(v.pill.style.top, '-38px');
+  const hostStyle = v.host.style.cssText, pillStyle = v.pill.style.cssText;
+  const writes = [];
+  const observer = new f.w.MutationObserver(records => writes.push(...records));
+  observer.observe(v.host, {attributes: true}); observer.observe(v.pill, {attributes: true});
+  const beforeScroll = reads;
+  y = -300; f.w.scrollY = 450; f.doc.dispatchEvent(new f.w.Event('scroll'));
+  viewport.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(reads, beforeScroll, 'scroll events do not run image geometry checks');
+  await f.timer.advance(1000);
+  assert.equal(v.host.style.cssText, hostStyle); assert.equal(v.pill.style.cssText, pillStyle);
+  assert.equal(writes.length, 0, 'neither scroll nor fallback checks rewrite unchanged document geometry');
+  observer.disconnect();
+  y = 400;
   viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
   assert.equal(v.pill.dataset.placement, 'below');
-  viewport.offsetTop = 410; viewport.height = 200; viewport.dispatchEvent(new f.w.Event('scroll'));
+  viewport.offsetTop = 410; viewport.height = 200; viewport.dispatchEvent(new f.w.Event('resize'));
   assert.equal(v.pill.dataset.placement, 'corner');
   viewport.offsetTop = 0; viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
   f.user(() => v.pill.querySelector('[data-action="image.copy"]').click()); await f.timer.advance(0);
   assert.equal(f.clipboard.length, 1, 'outside controls retain their handlers');
+  f.actions.destroy(); f.close();
+});
+
+test('image ResizeObserver, position mutations and the cheap fallback relayout document notes and stop on close', async () => {
+  const f = page('<div id="parent"><img id="pic" src="https://img.test/a.png"></div>', {send: async () => ({ok: true, lines: noteLines})});
+  let resize, disconnected = false, width = 200, y = 50;
+  f.w.ResizeObserver = class { constructor(callback) { resize = callback; } observe(node) { assert.equal(node, f.img); } disconnect() { disconnected = true; } };
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width, height: 200})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f), firstWidth = v.notes[0].style.width;
+  width = 400; resize();
+  assert.equal(v.host.style.width, '400px'); assert.notEqual(v.notes[0].style.width, firstWidth);
+  y = 80; f.img.parentElement.style.marginTop = '30px';
+  await f.timer.advance(60); assert.equal(v.host.style.top, '80px');
+  y = 110; await f.timer.advance(500); assert.equal(v.host.style.top, '110px', 'fallback detects layout shifts without DOM mutations');
+  f.actions.destroy();
+  assert.equal(disconnected, true);
+  const afterClose = v.host.style.cssText;
+  y = 180; f.img.parentElement.style.marginTop = '100px';
+  await f.timer.advance(1000); assert.equal(v.host.style.cssText, afterClose);
+  f.close();
+});
+
+test('nested overflow containers retain fixed scroll tracking, including the outside toolbar', async () => {
+  const f = page('<div style="overflow:auto"><img id="pic" src="https://img.test/a.png"></div>', {send: async () => ({ok: true, lines: noteLines})});
+  let y = 50;
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width: 300, height: 200})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.equal(v.host.style.position, 'fixed');
+  y = 600; f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(v.host.style.top, '600px'); assert.equal(v.pill.dataset.placement, 'above');
+  f.img.parentElement.style.overflow = 'visible'; await f.timer.advance(60);
+  assert.equal(v.host.style.position, 'absolute', 'layout changes can leave the fallback');
+  f.img.parentElement.style.overflow = 'auto'; await f.timer.advance(60);
+  assert.equal(v.host.style.position, 'fixed', 'layout changes can enter the fallback');
+  y = 500; f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(v.host.style.top, '500px', 're-entering fallback restores scroll tracking');
+  f.actions.destroy(); f.close();
+});
+
+test('X-style corner clipping keeps document anchoring; actually scrollable hidden wrappers fall back', async () => {
+  const f = page('<div style="overflow:hidden"><img id="pic" src="https://img.test/a.png"></div>', {send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f), wrapper = f.img.parentElement;
+  assert.equal(v.host.style.position, 'absolute');
+  Object.defineProperties(wrapper, {scrollHeight: {value: 400}, clientHeight: {value: 200}});
+  await f.timer.advance(500);
+  assert.equal(v.host.style.position, 'fixed');
   f.actions.destroy(); f.close();
 });
 
@@ -572,6 +636,86 @@ test('notes survive the cache, close on navigation, and a located answer replace
   assert.equal(f.sent.length, 1); assert.equal(notesView(f).notes.length, 2, 'cached boxes render notes again');
   f.watchers.at(-1).callback(); assert.equal(notesView(f).host, null, 'navigation closes the overlay immediately');
   f.actions.destroy(); f.close();
+});
+
+test('reopening a cached image during its exit leaves exactly one toolbar, including after relayout', async () => {
+  const collector = {findCandidate: image => ({element: image, type: 'image'}), open() {}};
+  const f = page(undefined, {collector, send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const old = notesView(f);
+  f.user(() => old.pill.querySelector('.x').click());
+  // Reopen before the 90 ms exit completes, with the image now near the bottom.
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, right: 300, top: 550, bottom: 750, width: 200, height: 200})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.equal(f.doc.querySelectorAll('lakomics-image-markers').length, 1);
+  assert.equal(old.host.isConnected, false, 'the exiting toolbar cannot remain above the new one');
+  assert.equal(v.root.querySelectorAll('[role="toolbar"]').length, 1);
+  assert.equal(v.pill.dataset.placement, 'above');
+  for (let i = 0; i < 3; i++) {
+    f.w.dispatchEvent(new f.w.Event('resize'));
+    await f.actions.activate('image.translate', f.context(), origin, gesture);
+    assert.equal(f.doc.querySelectorAll('lakomics-image-markers').length, 1);
+    assert.equal(notesView(f).root.querySelectorAll('.pill').length, 1);
+  }
+  await f.timer.advance(100);
+  assert.equal(notesView(f).host.isConnected, true, 'the old exit timer cannot remove the replacement');
+  assert.equal(f.sent.length, 1);
+  f.actions.destroy(); f.close();
+});
+
+for (const topLayer of [true, false]) test(`save host, errors and notices stay above notes across reopens (top layer=${topLayer})`, async () => {
+  let picker, lifecycle;
+  const collector = {findCandidate: image => ({element: image, type: 'image'}), open(candidate, origin, input, callbacks) {
+    lifecycle = callbacks;
+    picker = f.w.LakomicsArcCollector.mount({entries: [{id: 'art', name: '그림', parentId: null}], profile: {}, origin, onSave: async () => ({ok: false, message: '서버 원본 수신 실패'}), onClose() {}});
+    callbacks.onOpen();
+  }};
+  const f = page(undefined, {collector, send: async () => ({ok: true, lines: noteLines})});
+  const stack = [];
+  f.w.HTMLElement.prototype.showPopover = topLayer ? function() { if (!stack.includes(this)) stack.push(this); } : undefined;
+  f.w.HTMLElement.prototype.hidePopover = function() { const i = stack.indexOf(this); if (i >= 0) stack.splice(i, 1); };
+  for (const name of ['classification-tree', 'arc-collector']) f.w.eval(await readFile(new URL(`../src/${name}.js`, import.meta.url), 'utf8'));
+  const content = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
+  // Run the actual content toast host creation, independent of collector startup.
+  const toastLayer = f.w.eval(`(${content.slice(content.indexOf('function toastLayer()'), content.indexOf('// Save outcomes outlive'))})`);
+  const saveToastHost = toastLayer();
+  const surfaces = f.w.LakomicsContextSurfaces.createSurfaces({doc: f.doc, win: f.w, css});
+  const warning = surfaces.toast(origin, f.img); warning.show('서버 원본 수신 실패', {error: true});
+  const status = surfaces.status(f.img); status.show('저장 중');
+  const noticeHosts = [saveToastHost, f.doc.querySelector('lakomics-toast'), f.doc.querySelector('lakomics-page-status')];
+  const above = (upper, lower) => {
+    assert.ok(Number(upper.style.zIndex) > Number(lower.style.zIndex), `${upper.localName} has a higher host z-index`);
+    if (topLayer) {
+      assert.ok(stack.includes(upper) && stack.includes(lower), 'both hosts participate in the top layer');
+      assert.ok(stack.indexOf(upper) > stack.indexOf(lower), `${upper.localName} is revealed above the notes`);
+    }
+  };
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  let v = notesView(f);
+  for (const host of noticeHosts) above(host, v.host);
+  f.user(() => v.notes[0].click());
+  assert.ok(Number(notesView(f).card.style.zIndex) > Number(v.pill.style.zIndex));
+  assert.ok(Number(v.pill.style.zIndex) > Number(v.notes[0].style.zIndex));
+  f.user(() => v.pill.querySelector('[data-action="image.lakomics"]').click());
+  above(picker.host, v.host);
+  assert.equal(v.host.style.visibility, 'hidden');
+  f.user(() => picker.host.shadowRoot.querySelector('[data-classification-id="art"]').click());
+  f.user(() => picker.host.shadowRoot.querySelector('.save-current').click());
+  await f.timer.advance(0);
+  assert.equal(picker.host.shadowRoot.querySelector('.notice').textContent, '서버 원본 수신 실패');
+  above(picker.host, v.host);
+  picker.dispose(); lifecycle.onClose();
+  assert.equal(v.host.style.visibility, 'visible');
+  // A new overlay must stay below notices which already existed.
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  v = notesView(f);
+  for (const host of noticeHosts) above(host, v.host);
+  const popover = surfaces.host('lakomics-image-popover', f.img); surfaces.reveal(popover);
+  above(popover.node, v.host);
+  assert.equal(toastLayer(), saveToastHost, 'content saves reuse their toast host');
+  above(saveToastHost, v.host);
+  warning.close(0); status.close(0); f.actions.destroy(); f.close();
 });
 
 test('an answer without any position falls back to a plain unnumbered window', async () => {
@@ -1363,7 +1507,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.44');
+  assert.equal(manifest.version, '3.5.45');
 });
 
 

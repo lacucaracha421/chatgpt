@@ -266,7 +266,7 @@
 
   function create({ doc = document, win = window, send, surfaces, collector = {}, alive = () => true, watchSession = () => ({ watch() {}, stop() {} }) } = {}) {
     const model = globalThis.LakomicsContextModel, cache = new Map();
-    let current = null, sequence = 0;
+    let current = null, sequence = 0, exitingOverlay = null;
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
     const touchMode = session => Boolean(session.context.touch || win.matchMedia?.("(hover: none) and (pointer: coarse)").matches);
 
@@ -301,15 +301,44 @@
       for (const key of Object.keys(inset)) if (!Number.isFinite(inset[key])) inset[key] = 0;
       return imageFrame({ rect, inset, natural: { width: image.naturalWidth, height: image.naturalHeight }, fit: style?.objectFit || "fill", position: style?.objectPosition || "50% 50%" });
     }
-    function placeNotes(session) {
+    function usesDocumentCoordinates(image) {
+      // Top-layer absolute popovers use the initial containing block, independent
+      // of X's positioned/transformed wrappers. Keep fixed tracking for scrollers
+      // and sticky/fixed images whose motion differs from document scrolling.
+      if (doc.fullscreenElement || typeof doc.documentElement.showPopover !== "function") return false;
+      for (let node = image; node; node = node.parentElement) {
+        const style = win.getComputedStyle(node);
+        if (style.position === "fixed" || style.position === "sticky") return false;
+        if (node === image || node === doc.scrollingElement || node === doc.documentElement) continue;
+        const overflowX = style.overflowX || style.overflow, overflowY = style.overflowY || style.overflow;
+        if (/(auto|scroll|overlay)/.test(`${style.overflow} ${overflowX} ${overflowY}`)) return false;
+        // X also uses overflow:hidden solely to clip rounded image corners.
+        // Those wrappers must not force compositor-scrolled images back to JS.
+        if (((overflowX === "hidden" || style.overflow === "hidden") && node.scrollWidth > node.clientWidth) || ((overflowY === "hidden" || style.overflow === "hidden") && node.scrollHeight > node.clientHeight)) return false;
+      }
+      return true;
+    }
+    function placeNotes(session, { checkOnly = false } = {}) {
       const overlay = session.overlay, image = session.context.image;
       if (!overlay || overlay.surface.closed) return;
       const rect = image?.isConnected ? image.getBoundingClientRect() : null, empty = !rect || rect.width <= 0 || rect.height <= 0;
       const frame = empty ? null : frameOf(image, rect), view = frame?.view, gone = empty || !(view.w > 0 && view.h > 0);
+      const documentCoordinates = usesDocumentCoordinates(image);
+      const x = (view?.x || 0) + (documentCoordinates ? win.scrollX : 0), y = (view?.y || 0) + (documentCoordinates ? win.scrollY : 0);
+      // Compare document geometry, not viewport geometry: ordinary scrolling
+      // must not rewrite the host or flip the toolbar between above and below.
+      const d = frame?.drawn;
+      const geometry = JSON.stringify([documentCoordinates, gone, session.pickerOpen, x, y, view?.w, view?.h, d && [d.x - view.x, d.y - view.y, d.w, d.h]]);
+      if (checkOnly && overlay.geometry === geometry) return;
+      overlay.geometry = geometry;
+      const modeChanged = overlay.documentCoordinates !== documentCoordinates;
+      overlay.documentCoordinates = documentCoordinates;
+      if (modeChanged) overlay.trackScroll?.();
+      overlay.surface.node.style.position = documentCoordinates ? "absolute" : "fixed";
       overlay.surface.node.style.visibility = session.pickerOpen || gone ? "hidden" : "visible";
       if (gone) return;
-      Object.assign(overlay.surface.node.style, { left: view.x + "px", top: view.y + "px", width: view.w + "px", height: view.h + "px" });
-      const d = frame.drawn, key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
+      Object.assign(overlay.surface.node.style, { left: x + "px", top: y + "px", width: view.w + "px", height: view.h + "px" });
+      const key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
       if (overlay.key !== key) { overlay.key = key; layoutNotes(session, { W: view.w, H: view.h, ox: d.x - view.x, oy: d.y - view.y, DW: d.w, DH: d.h }); }
       placePill(session, view);
     }
@@ -464,8 +493,9 @@
     }
     function showNotes(session, lines) {
       dropPopover(session, 90);
+      dropOverlay(session, 0);
       const image = session.context.image;
-      const surface = surfaces.host("lakomics-image-markers", image), box = doc.createElement("div");
+      const surface = surfaces.host("lakomics-image-markers", image, true, { documentCoordinates: usesDocumentCoordinates(image) }), box = doc.createElement("div");
       surface.node.dataset.touch = String(touchMode(session));
       box.className = "image-notes"; box.setAttribute("role", "group"); box.setAttribute("aria-label", "이미지 글자 번역");
       if (reduced()) box.style.animation = "none";
@@ -538,10 +568,32 @@
     function watchFollow(session) {
       const overlay = session.overlay, surfaceHost = overlay.surface.node;
       overlay.follow = () => placeNotes(session);
-      doc.addEventListener("scroll", overlay.follow, true); win.addEventListener("resize", overlay.follow);
+      overlay.scroll = () => placeNotes(session);
+      overlay.trackScroll = () => {
+        doc.removeEventListener("scroll", overlay.scroll, true);
+        win.visualViewport?.removeEventListener("scroll", overlay.scroll);
+        if (!overlay.documentCoordinates) {
+          doc.addEventListener("scroll", overlay.scroll, true);
+          win.visualViewport?.addEventListener("scroll", overlay.scroll);
+        }
+      };
+      overlay.trackScroll();
+      win.addEventListener("resize", overlay.follow);
       win.addEventListener("orientationchange", overlay.follow);
-      win.visualViewport?.addEventListener("resize", overlay.follow); win.visualViewport?.addEventListener("scroll", overlay.follow);
+      win.visualViewport?.addEventListener("resize", overlay.follow);
       if (win.ResizeObserver) { overlay.observer = new win.ResizeObserver(() => placeNotes(session)); overlay.observer.observe(session.context.image); }
+      if (win.MutationObserver) {
+        overlay.mutations = new win.MutationObserver(records => {
+          if (records.every(record => record.target === surfaceHost) || overlay.layoutTimer) return;
+          overlay.layoutTimer = win.setTimeout(() => { overlay.layoutTimer = 0; placeNotes(session, { checkOnly: true }); }, 50);
+        });
+        overlay.mutations.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      const check = () => {
+        placeNotes(session, { checkOnly: true });
+        overlay.checkTimer = win.setTimeout(check, 500);
+      };
+      overlay.checkTimer = win.setTimeout(check, 500);
       overlay.onKey = event => {
         if (event.isTrusted !== true || event.key !== "Escape" || session.pickerOpen) return;
         if (overlay.card) closeCard(session); else dismiss();
@@ -554,12 +606,14 @@
     function dropOverlay(session, ms) {
       const overlay = session.overlay; if (!overlay) return;
       session.overlay = null;
-      doc.removeEventListener("scroll", overlay.follow, true); win.removeEventListener("resize", overlay.follow); win.removeEventListener("orientationchange", overlay.follow);
-      win.visualViewport?.removeEventListener("resize", overlay.follow); win.visualViewport?.removeEventListener("scroll", overlay.follow);
+      doc.removeEventListener("scroll", overlay.scroll, true); win.removeEventListener("resize", overlay.follow); win.removeEventListener("orientationchange", overlay.follow);
+      win.visualViewport?.removeEventListener("resize", overlay.follow); win.visualViewport?.removeEventListener("scroll", overlay.scroll);
+      overlay.mutations?.disconnect(); win.clearTimeout(overlay.layoutTimer); win.clearTimeout(overlay.checkTimer);
       overlay.observer?.disconnect(); win.removeEventListener("keydown", overlay.onKey, true); doc.removeEventListener("pointerdown", overlay.outside, true);
       overlay.surface.node.inert = true;
       overlay.box.querySelectorAll("button").forEach(button => { button.disabled = true; });
       surfaces.remove(overlay.surface, overlay.box, ms);
+      exitingOverlay = overlay;
     }
 
     async function load(session) {
@@ -793,7 +847,10 @@
         try { void Promise.resolve(collector.open(resolved,
           { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, touch ? "touch" : "mouse", {
             imageText: session.imageText,
-            onOpen: () => setPicker(session, true),
+            onOpen: () => {
+              surfaces.revealAboveNotes(doc.getElementById("lakomics-arc-collector"), 2147483646);
+              setPicker(session, true);
+            },
             onClose: () => setPicker(session, false),
           })).catch(() => {}); } catch {}
       });
@@ -828,6 +885,9 @@
     }
 
     function dismiss(ms = 90) {
+      // A dismissed session can still be fading when a cached image is reopened.
+      // Retire that host too, even though `current` has already been cleared.
+      if (exitingOverlay) { exitingOverlay.surface.node.remove(); exitingOverlay = null; }
       const session = current; if (!session) return; current = null; session.watcher?.stop();
       win.clearTimeout(session.copyTimer);
       dropPopover(session, ms); dropOverlay(session, ms);
