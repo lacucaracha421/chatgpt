@@ -9,7 +9,7 @@
   const CENTER_TEMPORARY_WHEEL_PX = 150, CENTER_WHEEL_NOTCHES = 3, CENTER_STEP_MS = 120, CENTER_HOLD_MS = 120;
   const DIAL_SAMPLE_MS = 100, DIAL_HOLD_MS = 60, DIAL_DECELERATION = .998, DIAL_RUBBER_SPAN = 1.5;
 
-  function mount({ entries, profile, arcLayout, hiddenClassificationIds = [], origin, onSave, onClose, onTemporary = null, inputLocked = false, inputKind = null, container = null, onReorder, onHide }) {
+  function mount({ entries, profile, arcLayout, hiddenClassificationIds = [], origin, onSave, onClose, onTemporary = null, onTranslate = null, inputLocked = false, inputKind = null, container = null, onReorder, onHide }) {
     const editing = Boolean(container);
     const model = globalThis.LakomicsClassificationTree;
     let tree, layout, fullLayout;
@@ -29,17 +29,18 @@
     const midpoint = (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth) / 2;
     const side = !editing && Number.isFinite(origin?.x) && origin.x < midpoint ? "left" : "right";
     let busy = false, disposed = false, locked = Boolean(inputLocked), pointer = null, suppressClick = false;
-    let radius = 224, lastTap = null;
+    let radius = 224, lastTap = null, backPressed = false, backListening = false;
     let centerWheel = null, centerWheelTimer = null, centerCommitTimer = null, centerProgress = 0, centerDirection = 1;
     let dialFrame = null, dialVelocity = 0, dialTarget = null, wheelTimer = null, wheelGesture = null;
     let wheelBurstUntil = 0, wheelBurstDirection = 0, dialNodeParent = null, dialPoolStart = null, dialLabelSignature = null;
-    const dialNodes = new Map(), dialLabels = new Map(), bubbles = new Map(), retiringBubbles = new Set();
-    let keyboardModality = inputKind === "keyboard", selectedBubbleId = null, collapsedBubble = null;
+    const dialNodes = new Map(), dialLabels = new Map();
+    let keyboardModality = inputKind === "keyboard";
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const motions = new Map();
     let outgoing = null, exitTimer = null;
     const SAVE_ICON = 'M -12 -5 V 9 Q -12 11 -10 11 H 10 Q 12 11 12 9 V -4 Q 12 -6 10 -6 H 1 L -3 -9 H -10 Q -12 -9 -12 -7 Z M 2 -2 V 6 M -2 2 L 2 6 L 6 2';
     const DOWNLOAD_ICON = 'M 0 -9 V 3 M -4 -1 L 0 3 L 4 -1 M -8 5 V 9 H 8 V 5';
+    const TRANSLATE_ICON = 'M -13 -7 H -1 M -7 -10 V -7 M -11 -7 Q -10 0 -4 3 M -3 -7 Q -4 0 -12 4 M 1 10 L 6 -2 L 11 10 M 3.4 6 H 8.6';
     const BACK_ICON = 'M 7 -7 H -2 Q -9 -7 -9 0 V 4 M -13 0 L -9 4 L -5 0';
     const icon = path => `<svg viewBox="-18 -18 36 36" aria-hidden="true"><path d="${path}"/></svg>`;
     const requestFrame = window.requestAnimationFrame?.bind(window) || (callback => setTimeout(() => callback(performance.now()), 16));
@@ -51,8 +52,6 @@
     const panel = document.createElement("section"); panel.className = "panel";
     panel.setAttribute("role", editing ? "region" : "dialog"); if (!editing) panel.setAttribute("aria-modal", "true"); panel.setAttribute("aria-label", editing ? "반원 폴더 배치" : "분류 선택");
     panel.innerHTML = `<div class="path" aria-live="polite"></div><div class="arc"><div class="folders"><div class="sectors"></div><div class="dial-labels" aria-hidden="true"></div></div><div class="center"><button class="save-current">${editing ? "" : `<span class="center-face" aria-hidden="true"></span>`}<span class="action-icon">${icon(SAVE_ICON)}</span>${editing ? "" : `<span class="action-icon center-preview" aria-hidden="true">${icon(DOWNLOAD_ICON)}</span>`}<span class="destination" hidden></span></button>${editing ? `<button class="back"><span class="action-icon">${icon(DOWNLOAD_ICON)}</span></button>` : ""}</div></div><footer><button class="root-next" hidden></button><div class="notice" role="status" hidden></div></footer>`;
-    const caption = document.createElement("div"); caption.className = "destination-caption"; caption.hidden = true; caption.setAttribute("aria-hidden", "true");
-    panel.querySelector("footer").prepend(caption);
     if (!editing) {
       const arc = panel.querySelector(".arc"); arc.setAttribute("role", "group"); arc.setAttribute("aria-label", "폴더");
     }
@@ -143,8 +142,32 @@
       motion(wrapper, [{ opacity: snapshot.opacity }, { opacity: 0 }], 140, () => { wrapper.remove(); if (outgoing === wrapper) outgoing = null; });
       motion($(".folders"), [{ opacity: 0 }, { opacity: 1 }], 180);
     }
+    // The mouse Back button (button 4) steps the menu up instead of navigating the page.
+    // Chrome navigates on the release, so the whole press is swallowed and exactly one
+    // step is taken on its first down event, even after the menu itself has closed.
+    const BACK_BUTTON_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup", "auxclick"];
+    function removeBackListeners() {
+      if (!backListening) return;
+      backListening = false; backPressed = false;
+      for (const type of BACK_BUTTON_EVENTS) window.removeEventListener(type, onBackButton, true);
+    }
+    function onBackButton(event) {
+      if (event.button !== 3) return;
+      if (disposed && !backPressed) { removeBackListeners(); return; }
+      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation?.();
+      if (event.type === "pointerdown" || event.type === "mousedown") {
+        if (backPressed) return;
+        backPressed = true;
+        if (disposed) return;
+        if (history.length > 1) back(); else cancel();
+      } else if (event.type === "pointerup") {
+        // Mouse events of the same press may still follow; only drop the guard once they did.
+        if (disposed) setTimeout(removeBackListeners, 150); else backPressed = false;
+      } else if (disposed && event.type === "auxclick") removeBackListeners();
+    }
     function cleanup() {
       disposed = true;
+      if (!backPressed) removeBackListeners();
       clearTimeout(centerWheelTimer); clearTimeout(centerCommitTimer); clearTimeout(wheelTimer);
       releaseCenterPointer();
       stopDialSpring(); clearFolderMotion();
@@ -163,7 +186,7 @@
     function onReducedMotion() {
       if (!reducedMotion.matches) return;
       if (disposed) { dispose(); return; }
-      clearFolderMotion(); finishBubbleExits();
+      clearFolderMotion();
       for (const [target, animation] of [...motions]) { animation.onfinish?.(); stopMotion(target); animation.cancel(); }
       if (!editing) paintCenter(centerProgress, centerDirection);
       const target = dialTarget ?? Math.round(clampedDialPosition());
@@ -193,7 +216,7 @@
     function focusFirst() { $(".sector:not(:disabled):not([aria-hidden=true])")?.focus({ preventScroll: true }); }
     function back() {
       if (!available() || history.length < 2) return;
-      lastTap = null; finishBubbleExits();
+      lastTap = null;
       changeFolder(() => history.pop());
       notice(""); render();
     }
@@ -513,8 +536,6 @@
       panel.setAttribute("aria-busy", String(busy));
       const path = current.selectedId ? tree.path(current.selectedId).map(entry => entry.name).join(" / ") : "분류 선택";
       $(".path").textContent = path;
-      renderBreadcrumbs();
-      positionCaption();
       const root = current.id === null;
       if (editing) {
         $(".back").classList.toggle("temporary", root);
@@ -527,7 +548,7 @@
       $(".save-current").disabled = busy || (editing && (!destination() || !hasChildren(destination()?.id) || destination()?.id === current.id));
       $(".save-current").setAttribute("aria-disabled", String($(".save-current").disabled || !destination()));
       $(".save-current").setAttribute("aria-label", editing ? "선택한 폴더의 하위 폴더 열기" : destination() ? `${path}에 저장` : "저장");
-      if (!editing) $(".save-current").setAttribute("aria-description", "위로 끌어 뒤로, 아래로 끌어 임시저장");
+      if (!editing) $(".save-current").setAttribute("aria-description", (history.length > 1 ? "아래로 끌어 뒤로" : "아래로 끌어 임시저장") + (onTranslate ? ", 바깥쪽으로 끌어 번역" : ""));
       $(".destination").textContent = destination()?.name || "폴더 선택";
       $(".save-current").setAttribute("aria-busy", String(busy));
       $(".root-next").hidden = !editing || current.id !== null || count < 2;
@@ -575,119 +596,6 @@
         renderDialSectors(current.dialPosition); paintDial(current.dialPosition, false, dialFrame === null && !pointer?.dial?.dragging && !wheelGesture);
       }
     }
-    function removeBubble(node) {
-      stopMotion(node); for (const child of node.querySelectorAll("*")) stopMotion(child);
-      retiringBubbles.delete(node); node.remove(); caption.hidden = !caption.children.length;
-    }
-    function finishBubbleExits() { for (const node of [...retiringBubbles]) removeBubble(node); }
-    function renderBreadcrumbs() {
-      if (editing) return;
-      const path = history.slice(1).map(item => tree.byId.get(item.id)).filter(Boolean), selected = destination();
-      if (selected && path.at(-1)?.id !== selected.id) path.push(selected);
-      const ids = new Set(path.map(item => item.id)), previousSelected = bubbles.get(selectedBubbleId);
-      // Reuse the selected position for a sibling change, but never an ancestor
-      // becoming selected on Back or a selected folder becoming an ancestor.
-      const sibling = selected && previousSelected && !ids.has(selectedBubbleId)
-        && !bubbles.has(selected.id) && previousSelected.dataset.depth === String(history.length);
-      if (sibling) {
-        bubbles.delete(selectedBubbleId); bubbles.set(selected.id, previousSelected);
-        const pill = previousSelected.querySelector(".bubble-pill"), oldText = previousSelected.dataset.name;
-        for (const child of pill.querySelectorAll("*")) stopMotion(child);
-        const oldWidth = pill.getBoundingClientRect().width; stopMotion(pill);
-        pill.textContent = selected.name;
-        const newWidth = pill.getBoundingClientRect().width;
-        if (oldText !== selected.name) {
-          // Keep the old text in the same pill while the new text crossfades.
-          const old = document.createElement("span"); old.className = "bubble-old"; old.textContent = oldText;
-          const fresh = document.createElement("span"); fresh.textContent = selected.name;
-          pill.replaceChildren(old, fresh);
-          motion(old, [{ opacity: 1 }, { opacity: 0 }], 140, () => old.remove());
-          motion(fresh, [{ opacity: 0 }, { opacity: 1 }], 140);
-          motion(pill, [{ width: `${oldWidth}px` }, { width: `${newWidth}px` }], 140);
-        }
-      }
-      for (const [id, node] of bubbles) {
-        if (ids.has(id)) continue;
-        bubbles.delete(id); retiringBubbles.add(node);
-        node.style.left = `${node.offsetLeft}px`; node.style.top = `${node.offsetTop}px`; node.classList.add("leaving");
-        motion(node, [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.96)" }], 120, () => removeBubble(node));
-      }
-      for (const entry of path) {
-        let node = bubbles.get(entry.id);
-        const appended = !node;
-        if (!node) {
-          node = document.createElement("span"); node.className = "breadcrumb";
-          const separator = document.createElement("span"); separator.className = "bubble-separator"; separator.textContent = " › ";
-          const pill = document.createElement("span"); pill.className = "bubble-pill"; pill.textContent = entry.name;
-          node.append(separator, pill); bubbles.set(entry.id, node);
-        }
-        node.dataset.classificationId = entry.id; node.dataset.depth = String(history.length);
-        node.classList.toggle("selected", entry.id === selected?.id);
-        const pill = node.querySelector(".bubble-pill");
-        if (node.dataset.name !== entry.name && !(sibling && node === previousSelected)) {
-          for (const child of pill.querySelectorAll("*")) stopMotion(child);
-          stopMotion(pill); pill.textContent = entry.name;
-        }
-        node.dataset.name = entry.name;
-        // Insert only when order actually changed; unchanged bubbles stay mounted.
-        const previous = path[path.indexOf(entry) - 1], anchor = previous ? bubbles.get(previous.id).nextSibling : caption.firstChild;
-        if (anchor !== node) caption.insertBefore(node, anchor);
-        if (appended) motion(node, [{ opacity: 0, transform: "translateY(4px) scale(.92)" }, { opacity: 1, transform: "translateY(0) scale(1)" }], 180, null, "cubic-bezier(.2,.8,.2,1)");
-      }
-      selectedBubbleId = selected?.id ?? null;
-      if (!bubbles.size) collapsedBubble?.remove();
-      caption.hidden = !caption.children.length; layoutBreadcrumbs();
-    }
-    function layoutBreadcrumbs() {
-      if (editing || !bubbles.size) return;
-      const nodes = [...bubbles.values()];
-      collapsedBubble?.remove();
-      for (const [index, node] of nodes.entries()) {
-        node.hidden = false; node.classList.toggle("first", index === 0);
-        node.querySelector(".bubble-separator").textContent = index === 0 ? "" : " › ";
-        node.style.maxWidth = `${node.classList.contains("selected") ? radius : radius * .6}px`;
-      }
-      // This is a render/resize-only measurement, never part of dial paint.
-      // Budget two rows, then retain the last two ancestors and destination.
-      let lines = 1, used = 0;
-      for (const node of nodes) {
-        const width = node.offsetWidth;
-        if (used && used + 4 + width > radius) { lines++; used = 0; }
-        used += (used ? 4 : 0) + width;
-      }
-      if (lines <= 2) return;
-      const keep = nodes.at(-1).classList.contains("selected") ? 3 : 2;
-      const collapse = nodes.length > keep;
-      if (collapse) {
-        if (!collapsedBubble) {
-          collapsedBubble = document.createElement("span"); collapsedBubble.className = "breadcrumb bubble-collapse first";
-          const pill = document.createElement("span"); pill.className = "bubble-pill"; pill.textContent = "…"; collapsedBubble.append(pill);
-        }
-        caption.prepend(collapsedBubble);
-      }
-      nodes.slice(0, -keep).forEach(node => { node.hidden = true; });
-      for (const node of nodes.slice(-keep)) {
-        node.classList.toggle("first", !collapse && node === nodes[0]);
-        node.querySelector(".bubble-separator").textContent = !collapse && node === nodes[0] ? "" : " › ";
-        // Two compact ancestors share the first row with the ellipsis. The
-        // selected pill may take the entire second row, including its chevron.
-        node.style.maxWidth = `${node.classList.contains("selected") ? radius : Math.min(radius * .6, (radius - (collapse ? 44 : 4)) / 2)}px`;
-      }
-    }
-    function positionCaption() {
-      if (caption.hidden) return;
-      const bounds = $(".arc").getBoundingClientRect(), top = window.visualViewport?.offsetTop || 0;
-      // Reserve two lines above the arc. In short windows the footer scrolls
-      // with the arc, keeping the below-arc fallback reachable.
-      const above = bounds.top - top >= 62;
-      caption.dataset.placement = above ? "above" : "below";
-      caption.style.width = `${radius}px`;
-      caption.dataset.side = side;
-      caption.style.left = above && side === "left" ? panel.style.left : "auto";
-      caption.style.right = above && side === "right" ? panel.style.right : "auto";
-      caption.style.bottom = above ? `${window.innerHeight - bounds.top + 6}px` : "auto";
-      if (above) backdrop.append(caption); else $("footer").prepend(caption);
-    }
     function position() {
       const viewport = window.visualViewport;
       const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
@@ -706,11 +614,17 @@
       panel.style.maxHeight = `${Math.max(80, height - 16)}px`;
       panel.style.left = side === "left" ? `${viewport?.offsetLeft || 0}px` : "auto";
       panel.style.right = side === "right" ? `${Math.max(0, window.innerWidth - width - (viewport?.offsetLeft || 0))}px` : "auto";
-      panel.style.top = `${(viewport?.offsetTop || 0) + Math.max(8, (height - (radius * 2 + 104)) / 2)}px`;
+      const offsetTop = viewport?.offsetTop || 0;
+      let top = offsetTop + Math.max(8, (height - (radius * 2 + 104)) / 2);
+      if (inputKind === "touch" && Number.isFinite(origin?.y)) {
+        // Touch: centre the half-disc on the pressed point, kept inside the visual viewport.
+        const panelHeight = radius * 2 + 20, minTop = offsetTop + 8, maxTop = offsetTop + height - panelHeight - 8;
+        top = Math.max(minTop, Math.min(Math.max(minTop, maxTop), origin.y - radius - 6));
+      }
+      panel.style.top = `${top}px`;
       panel.dataset.side = side;
       panel.querySelectorAll(".sector").forEach(button => shape(button, Number(button.dataset.slot)));
       paintDialLabels(Number(frame().dialPosition) || 0, true);
-      layoutBreadcrumbs(); positionCaption();
     }
     async function temporary() {
       if (!available() || editing || !onTemporary) return;
@@ -726,16 +640,24 @@
     }
     function centerAction(distance) {
       if (editing || !available() || Math.abs(distance) < CENTER_COMMIT) return null;
-      return distance < 0 ? (history.length > 1 ? "back" : null) : (onTemporary ? "temporary" : null);
+      // Inside a folder both swipe directions mean Back; Temporary is a root-level gesture.
+      if (history.length > 1) return "back";
+      return distance > 0 && onTemporary ? "temporary" : null;
     }
     function paintCenter(progress, direction, duration = 0) {
       const button = $(".save-current"), face = button.querySelector(".center-face");
       const save = button.querySelector(".action-icon"), preview = button.querySelector(".center-preview");
       centerProgress = progress; centerDirection = direction;
-      face.style.background = direction > 0 ? "#2f7d5b" : "#39495f";
-      preview.querySelector("path").setAttribute("d", direction > 0 ? DOWNLOAD_ICON : BACK_ICON);
-      const hidden = (1 - progress) * 100, slide = reducedMotion?.matches ? 0 : 24;
-      const styles = [
+      // direction 0 is the outward (toward the attached screen edge) translate drag.
+      const kind = direction === 0 ? "translate" : direction < 0 || history.length > 1 ? "back" : "temporary";
+      face.style.background = { translate: "#6b4fc4", back: "#39495f", temporary: "#2f7d5b" }[kind];
+      preview.querySelector("path").setAttribute("d", { translate: TRANSLATE_ICON, back: BACK_ICON, temporary: DOWNLOAD_ICON }[kind]);
+      const hidden = (1 - progress) * 100, slide = reducedMotion?.matches ? 0 : 24, edge = side === "left" ? -1 : 1;
+      const styles = kind === "translate" ? [
+        [face, { clipPath: side === "left" ? `inset(0 ${hidden}% 0 0)` : `inset(0 0 0 ${hidden}%)` }],
+        [save, { transform: `translateX(${-edge * slide * progress}px)`, opacity: String(1 - progress) }],
+        [preview, { transform: `translateX(${edge * slide * (1 - progress)}px)`, opacity: String(progress) }],
+      ] : [
         [face, { clipPath: direction > 0 ? `inset(${hidden}% 0 0 0)` : `inset(0 0 ${hidden}% 0)` }],
         [save, { transform: `translateY(${-direction * slide * progress}px)`, opacity: String(1 - progress) }],
         [preview, { transform: `translateY(${direction * slide * (1 - progress)}px)`, opacity: String(progress) }],
@@ -745,12 +667,17 @@
         stopMotion(target); Object.assign(target.style, next);
         if (duration) motion(target, [from, next], duration, null, "ease-out");
       }
-      button.classList.toggle("commit-back", progress === 1 && direction < 0);
-      button.classList.toggle("commit-temporary", progress === 1 && direction > 0);
+      button.classList.toggle("commit-back", progress === 1 && kind === "back");
+      button.classList.toggle("commit-temporary", progress === 1 && kind === "temporary");
+      button.classList.toggle("commit-translate", progress === 1 && kind === "translate");
     }
+    function previewTranslate(outward) {
+      paintCenter(onTranslate && outward > 0 ? Math.min(1, outward / CENTER_COMMIT) : 0, 0);
+    }
+    const outwardDistance = dx => side === "left" ? -dx : dx;
     function previewCenter(distance, threshold = CENTER_COMMIT, duration = 0) {
       const direction = distance < 0 ? -1 : 1;
-      const supported = direction < 0 ? history.length > 1 : Boolean(onTemporary);
+      const supported = history.length > 1 || (direction > 0 && Boolean(onTemporary));
       const progress = supported ? Math.min(1, Math.abs(distance) / threshold) : 0;
       paintCenter(progress, direction, duration);
       return progress === 1 ? centerAction(direction * CENTER_COMMIT) : null;
@@ -758,13 +685,20 @@
     function resetCenterPreview() {
       if (!editing) paintCenter(0, centerDirection, CENTER_RETURN_MS);
     }
-    function commitCenter(action, step = 0) {
+    function translateNow(event) {
+      if (!onTranslate) return;
+      let started = false;
+      try { started = Boolean(onTranslate(event)); } catch {}
+      if (started) close(); else resetCenterPreview();
+    }
+    function commitCenter(action, step = 0, event = null) {
       if (!action || !available()) return;
       // Reserve the action throughout the reveal and full-face hold.
       centerCommitTimer = setTimeout(() => {
         centerCommitTimer = null;
         if (!available()) { resetCenterPreview(); return; }
         if (action === "back") { back(); resetCenterPreview(); }
+        else if (action === "translate") translateNow(event);
         else void temporary();
       }, CENTER_HOLD_MS + (reducedMotion?.matches ? 0 : step));
     }
@@ -775,10 +709,11 @@
     function moveCenterPointer(event) {
       const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
       if (!pointer.axis && Math.hypot(dx, dy) >= CENTER_SLOP) {
-        pointer.axis = Math.abs(dy) > Math.abs(dx) ? "vertical" : "cancelled";
+        pointer.axis = Math.abs(dy) > Math.abs(dx) ? "vertical" : onTranslate ? "horizontal" : "cancelled";
         suppressClick = true; lastTap = null;
       }
       if (pointer.axis === "vertical") previewCenter(dy);
+      else if (pointer.axis === "horizontal") previewTranslate(outwardDistance(dx));
       return dy;
     }
     function wheelCenter(event) {
@@ -787,7 +722,7 @@
       // Keep extending an existing gesture during an async save, so late OS
       // inertia cannot retry a failed Temporary action.
       if (!centerWheel && (!available() || pointer)) return;
-      const now = performance.now(), direction = Math.sign(event.deltaY);
+      const now = performance.now(), direction = Math.sign(event.deltaY), inFolder = history.length > 1;
       centerWheel ??= { distance: 0, committed: false, temporary: false, burstDirection: 0, burstUntil: 0 };
       const gesture = centerWheel;
       clearTimeout(centerWheelTimer);
@@ -798,10 +733,13 @@
         if (notch) {
           if (direction !== gesture.burstDirection || now >= gesture.burstUntil) {
             gesture.burstDirection = direction; gesture.burstUntil = now + DIAL_WHEEL_BURST_MS;
-            if (direction < 0) {
-              const cancelProgress = gesture.distance > 0;
+            if (inFolder) {
+              // Inside a folder a downward notch is Back; hold the gesture so
+              // trailing inertia cannot fire Temporary at the root afterwards.
+              gesture.distance = 0; resetCenterPreview(); back();
+              if (direction > 0) gesture.committed = true;
+            } else if (direction < 0) {
               gesture.distance = 0; resetCenterPreview();
-              if (!cancelProgress) back();
             } else {
               gesture.distance = onTemporary ? Math.max(0, gesture.distance) + CENTER_TEMPORARY_WHEEL_PX / CENTER_WHEEL_NOTCHES : 0;
               action = previewCenter(gesture.distance, CENTER_TEMPORARY_WHEEL_PX, CENTER_STEP_MS);
@@ -809,8 +747,8 @@
           }
         } else {
           gesture.distance += event.deltaY;
-          if (!onTemporary) gesture.distance = Math.min(0, gesture.distance);
-          action = previewCenter(gesture.distance, gesture.distance > 0 ? CENTER_TEMPORARY_WHEEL_PX : CENTER_COMMIT);
+          if (!onTemporary && !inFolder) gesture.distance = Math.min(0, gesture.distance);
+          action = previewCenter(gesture.distance, gesture.distance > 0 && !inFolder ? CENTER_TEMPORARY_WHEEL_PX : CENTER_COMMIT);
         }
         if (action) {
           gesture.committed = true; gesture.temporary = action === "temporary";
@@ -922,10 +860,12 @@
       if (pointer?.id !== event.pointerId) return;
       if (pointer.center) {
         const distance = available() ? moveCenterPointer(event) : 0;
-        const action = pointer.axis === "vertical" ? centerAction(distance) : null;
+        const action = pointer.axis === "vertical" ? centerAction(distance)
+          : pointer.axis === "horizontal" && available() && outwardDistance(event.clientX - pointer.x) >= CENTER_COMMIT ? "translate" : null;
+        const releaseEvent = event;
         suppressClick = Boolean(pointer.axis) || !available();
         releaseCenterPointer(); pointer = null;
-        if (action) commitCenter(action); else resetCenterPreview();
+        if (action) commitCenter(action, 0, releaseEvent); else resetCenterPreview();
         return;
       }
       if (pointer.dial?.dragging) {
@@ -965,7 +905,7 @@
       if (!editing && (event.key === "t" || event.key === "T") && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
           && !shadow.activeElement?.closest("input,textarea,select,[contenteditable]:not([contenteditable=false]),[role=textbox]")
           && !event.target.closest?.("input,textarea,select,[contenteditable]:not([contenteditable=false]),[role=textbox]")) {
-        if (onTemporary) { event.preventDefault(); void temporary(); }
+        if (onTemporary && history.length < 2) { event.preventDefault(); void temporary(); }
         return;
       }
       if (event.key === "Backspace") { event.preventDefault(); back(); return; }
@@ -993,6 +933,7 @@
       if (event.key === "Enter" && event.ctrlKey) { event.preventDefault(); if (editing) openSelected(); else void save(); }
       if (event.key === "Enter" || event.key === " ") suppressClick = false;
     });
+    if (!editing) { backListening = true; for (const type of BACK_BUTTON_EVENTS) window.addEventListener(type, onBackButton, true); }
     setLocked(locked); render(); position();
     reducedMotion?.addEventListener?.("change", onReducedMotion);
     window.addEventListener("pagehide", dispose);
@@ -1008,17 +949,17 @@
   }
 
   const CSS = `
-:host{--paper:#252f3e;--ink:#e2eaf5;--line:#465265;--muted:#a5b3c6;--sector:#343e4e;--selected:#3579df;--inverse:#fff;position:fixed;inset:0;z-index:2147483646;pointer-events:none;font:15px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink);-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+:host{--paper:#252f3e;--ink:#e2eaf5;--line:#465265;--muted:#a5b3c6;--sector:#343e4e;--selected:#e8e3d5;--selected-hover:#f2eee3;--selected-press:#d9d3c4;--on-selected:#17181a;--inverse:#fff;position:fixed;inset:0;z-index:2147483646;pointer-events:none;font:15px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink);-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 *{box-sizing:border-box;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}button{font:inherit;color:inherit;cursor:pointer;border:0;touch-action:manipulation}button:disabled{cursor:default;color:var(--muted)}button:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}[hidden]{display:none!important}
 .backdrop{position:fixed;inset:0;pointer-events:auto;background:rgba(0,0,0,.14)}:host(.input-locked) .backdrop,:host(.exiting) .backdrop{pointer-events:none}
 .panel{position:fixed;width:var(--radius,224px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-bottom:8px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.30)) drop-shadow(0 14px 28px rgba(0,0,0,.22))}
 .path{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .root-next{width:100%;min-height:44px;padding:2px;background:none;color:var(--inverse);text-shadow:0 1px 3px #000c;font-size:12px}
-.arc{position:relative;width:var(--radius);height:calc(var(--radius) * 2);border-radius:100% 0 0 100% / 50% 0 0 50%;background:transparent;margin:6px 0;isolation:isolate;--dial-angle:0deg;--dial-counter-angle:0deg;--dial-brightness:1}:host(:not(.editing)) .arc{overflow:hidden;touch-action:none}.folders{position:absolute;inset:0;opacity:1}.folder-exit-host{position:absolute;inset:0;z-index:2;pointer-events:none}.sectors{position:absolute;inset:0;z-index:1}.dial-labels{display:none}:host(:not(.editing)) .sectors{width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);left:var(--dial-left,0px);right:auto;bottom:auto;transform-origin:50% 50%;transform:rotate(var(--dial-angle));filter:brightness(var(--dial-brightness));will-change:transform,filter}:host(:not(.editing)) .dial-labels{display:block;position:absolute;left:0;top:0;width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);z-index:2;pointer-events:none;filter:brightness(var(--dial-brightness))}:host(:not(.editing)) .sector>.sector-label{display:none}.dial-label{position:absolute;transform:translate(-50%,-50%);width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--ink);opacity:0;pointer-events:none;will-change:left,top,opacity}.dial-label.selected{color:var(--inverse)}.center{z-index:3}:host(:not(.editing)) .sector:disabled{pointer-events:none}:host(:not(.editing)) .sector.dial-buffer:disabled{color:inherit}@media(pointer:fine){:host(:not(.editing)) .sector:not(:disabled){cursor:grab}:host(:not(.editing)) .arc.dial-moving .sector:not(:disabled){cursor:grabbing}}
-.sector{position:absolute;inset:0;width:100%;height:100%;background:transparent;padding:0}.sector:before{content:'';position:absolute;inset:0;clip-path:var(--sector-face);background:var(--sector);pointer-events:none;transition:background-color 90ms ease-out}.sector.branch{background:#647187}.sector.branch[aria-pressed=true]{background:#8eb8f5}.sector:not(:disabled):not([aria-pressed=true]):hover:before{background:#424f63}.sector[aria-pressed=true]:before{background:var(--selected)}.sector[aria-pressed=true]{color:var(--inverse)}.sector:not(:disabled):not([aria-pressed=true]):active:before{background:#53627a}.sector[aria-pressed=true]:active:before{background:#2865bf}.sector.empty:before{background:#242d3a}:host(:not(.editing)) .sector.empty{visibility:hidden}
+.arc{position:relative;width:var(--radius);height:calc(var(--radius) * 2);border-radius:100% 0 0 100% / 50% 0 0 50%;background:transparent;margin:6px 0;isolation:isolate;--dial-angle:0deg;--dial-counter-angle:0deg;--dial-brightness:1}:host(:not(.editing)) .arc{overflow:hidden;touch-action:none}.folders{position:absolute;inset:0;opacity:1}.folder-exit-host{position:absolute;inset:0;z-index:2;pointer-events:none}.sectors{position:absolute;inset:0;z-index:1}.dial-labels{display:none}:host(:not(.editing)) .sectors{width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);left:var(--dial-left,0px);right:auto;bottom:auto;transform-origin:50% 50%;transform:rotate(var(--dial-angle));filter:brightness(var(--dial-brightness));will-change:transform,filter}:host(:not(.editing)) .dial-labels{display:block;position:absolute;left:0;top:0;width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);z-index:2;pointer-events:none;filter:brightness(var(--dial-brightness))}:host(:not(.editing)) .sector>.sector-label{display:none}.dial-label{position:absolute;transform:translate(-50%,-50%);width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--ink);opacity:0;pointer-events:none;will-change:left,top,opacity}.dial-label.selected{color:var(--on-selected)}.center{z-index:3}:host(:not(.editing)) .sector:disabled{pointer-events:none}:host(:not(.editing)) .sector.dial-buffer:disabled{color:inherit}@media(pointer:fine){:host(:not(.editing)) .sector:not(:disabled){cursor:grab}:host(:not(.editing)) .arc.dial-moving .sector:not(:disabled){cursor:grabbing}}
+.sector{position:absolute;inset:0;width:100%;height:100%;background:transparent;padding:0}.sector:before{content:'';position:absolute;inset:0;clip-path:var(--sector-face);background:var(--sector);pointer-events:none;transition:background-color 90ms ease-out}.sector.branch{background:#647187}.sector.branch[aria-pressed=true]{background:#fbf8ef}.sector:not(:disabled):not([aria-pressed=true]):hover:before{background:#424f63}.sector[aria-pressed=true]:before{background:var(--selected)}.sector[aria-pressed=true]{color:var(--on-selected)}.sector[aria-pressed=true] small{color:#4a4a45}.sector:not(:disabled):not([aria-pressed=true]):active:before{background:#53627a}.sector[aria-pressed=true]:active:before{background:var(--selected-press)}.sector.empty:before{background:#242d3a}:host(:not(.editing)) .sector.empty{visibility:hidden}
 .sector-label{position:absolute;transform:translate(-50%,-50%) rotate(var(--dial-counter-angle));width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}.name{width:100%;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;word-break:keep-all;overflow-wrap:anywhere;text-align:center;font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:1.25}.dial-label .name{font-weight:600}.sector-label small{font-size:11px;color:var(--muted)}.sector.next:before{background:#2b3749}
-.sector:focus-visible,.center button:focus-visible{outline:none}.panel.keyboard-focus .sector:focus:before{background:#526985}.panel.keyboard-focus .sector[aria-pressed=true]:focus:before{background:#195bbd}.panel.keyboard-focus .center button:focus .action-icon{outline:2px solid #fff;outline-offset:3px;border-radius:8px}
-.center{position:absolute;right:0;top:50%;transform:translateY(-50%);width:calc(var(--radius) * .43);height:calc(var(--radius) * .86);border-radius:100% 0 0 100% / 50% 0 0 50%;overflow:hidden;background:#2b3749;box-shadow:inset 0 0 0 1px #49596f}.center button{position:absolute;right:0;width:100%;padding:0;background:transparent;color:#c5d1e3}.save-current{top:0;height:61%;border-bottom:1px solid #49596f}.back{bottom:0;height:39%}.save-current:not(:disabled){background:#326ed0;color:#fff}.save-current:not(:disabled):hover{background:#407fdf}.back:not(:disabled):hover{background:#39495f}.center button:disabled{color:#8291a6}.action-icon{position:absolute;width:34px;height:34px;left:calc(62% - 17px);top:calc(55% - 17px);pointer-events:none}.back .action-icon{left:calc(66% - 16px);top:calc(40% - 16px);width:32px;height:32px}.action-icon svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.save-current[aria-busy=true] .action-icon{opacity:.55}
+.sector:focus-visible,.center button:focus-visible{outline:none}.panel.keyboard-focus .sector:focus:before{background:#526985}.panel.keyboard-focus .sector[aria-pressed=true]:focus:before{background:var(--selected-hover)}.panel.keyboard-focus .center button:focus .action-icon{outline:2px solid #fff;outline-offset:3px;border-radius:8px}.panel.keyboard-focus .save-current:not(:disabled):not([aria-disabled=true]):focus .action-icon{outline-color:var(--on-selected)}
+.center{position:absolute;right:0;top:50%;transform:translateY(-50%);width:calc(var(--radius) * .43);height:calc(var(--radius) * .86);border-radius:100% 0 0 100% / 50% 0 0 50%;overflow:hidden;background:#2b3749;box-shadow:inset 0 0 0 1px #49596f}.center button{position:absolute;right:0;width:100%;padding:0;background:transparent;color:#c5d1e3}.save-current{top:0;height:61%;border-bottom:1px solid #49596f}.back{bottom:0;height:39%}.save-current:not(:disabled){background:var(--selected);color:var(--on-selected)}.save-current:not(:disabled):hover{background:var(--selected-hover)}.save-current:not(:disabled):active{background:var(--selected-press)}.back:not(:disabled):hover{background:#39495f}.center button:disabled{color:#8291a6}.action-icon{position:absolute;width:34px;height:34px;left:calc(62% - 17px);top:calc(55% - 17px);pointer-events:none}.back .action-icon{left:calc(66% - 16px);top:calc(40% - 16px);width:32px;height:32px}.action-icon svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.save-current[aria-busy=true] .action-icon{opacity:.55}
 :host(:not(.editing)) .save-current{height:100%;border-bottom:0;touch-action:none}
 :host(:not(.editing)) .save-current .action-icon{top:calc(50% - 17px);left:calc(57.56% - 17px)}
 :host(:not(.editing)) .panel[data-side=left] .save-current .action-icon{left:auto;right:calc(57.56% - 17px)}
@@ -1027,7 +968,6 @@
 :host(:not(.editing)) .center-preview{color:#fff;opacity:0}
 footer{background:none}.notice{padding:10px;max-height:100px;overflow:auto;background:var(--paper);border-radius:12px;font-size:13px;color:#f0c5aa}
 .panel[data-side=left] .arc,.panel[data-side=left] .center{border-radius:0 100% 100% 0 / 0 50% 50% 0}.panel[data-side=left] .center{left:0;right:auto}.panel[data-side=left] .action-icon{left:auto;right:calc(62% - 17px)}.panel[data-side=left] .back .action-icon{right:calc(66% - 16px)}
-.destination-caption{position:relative;margin:6px 0;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px;pointer-events:none;line-height:18px}.destination-caption[data-side=left]{justify-content:flex-start}.destination-caption[data-placement=above]{position:fixed;margin:0}:host(.editing) .destination-caption{display:none}.breadcrumb{display:inline-flex;align-items:center;min-width:0;flex:none;transform-origin:center}.bubble-pill{position:relative;display:block;min-width:0;max-width:100%;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--paper);color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.breadcrumb.selected .bubble-pill{background:var(--selected);color:var(--inverse);font-size:13px;font-weight:600}.bubble-separator{flex:none;width:12px;color:var(--muted);font-size:12px;white-space:pre}.breadcrumb.first .bubble-separator{display:none}.bubble-old{position:absolute;left:10px;right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.breadcrumb.leaving{position:absolute;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.sector:before{transition:none}}
 :host(.editing){position:relative;inset:auto;z-index:auto;display:block;pointer-events:auto;width:100%;font-family:inherit}
 :host(.editing) .backdrop{position:static;background:none}

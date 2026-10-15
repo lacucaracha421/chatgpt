@@ -79,23 +79,25 @@
     function canTranslateTouch(event) {
       return !model.bypass(event, { ...config, hostname: model.topHostname(win), ...collector.state?.() });
     }
-    function translateTouch(target, origin, event) {
-      if (!canTranslateTouch({ isTrusted: event.isTrusted, target, composedPath: () => [target] })) return false;
-      const candidate = collector.findCandidate?.(target);
-      const image = candidate?.type !== "video" && candidate?.element?.tagName === "IMG" ? candidate.element : null;
-      const context = { target, image, candidate, imageUrl: image?.currentSrc || image?.src || "", href: win.location.href, touch: true };
-      const id = image ? "image.translate" : "page.translate";
+    // The collector is mid-gesture (its own arc is open) when this is called, so its
+    // phase must not count as a reason to bypass; settings and the host still do.
+    const canTranslateImage = (image, event) => !model.bypass({ isTrusted: event.isTrusted, target: image, composedPath: () => [image] }, { ...config, hostname: model.topHostname(win) });
+    // Runs the context menu's "image text translation" for one image, with the
+    // same setup (API key) and availability checks as the menu item.
+    function translateImage(image, origin, event) {
+      if (!image || !canTranslateImage(image, event)) return false;
+      const candidate = collector.findCandidate?.(image);
+      const context = { target: image, image, candidate, imageUrl: image.currentSrc || image.src || "", href: win.location.href, touch: true };
       const watcher = watchSession(); actionWatchers.add(watcher);
       watcher.watch(() => { context.departed = true; watcher.stop(); actionWatchers.delete(watcher); });
       void (async () => {
         try {
           const available = await send({ type: "translation:settings" });
-          if (departing || context.departed || context.href !== win.location.href || !canTranslateTouch({ isTrusted: event.isTrusted, target, composedPath: () => [target] })) return;
+          if (departing || context.departed || context.href !== win.location.href || !canTranslateImage(image, event)) return;
           context.imageModel = available?.imageModel || "";
-          const pageState = actions.pageState();
-          const item = model.items(image ? { imageUrl: context.imageUrl } : {}, { ...available, pageState: pageState === "off" ? null : pageState }).find(item => item.id === id);
+          const item = model.items({ imageUrl: context.imageUrl }, { ...available, pageState: null }).find(item => item.id === "image.translate");
           if (item?.setup) await send({ type: "context:settings" });
-          else if (item && !item.disabled) await actions.activate(id, context, origin, event);
+          else if (item && !item.disabled) await actions.activate("image.translate", context, origin, event);
         } finally { watcher.stop(); actionWatchers.delete(watcher); }
       })().catch(() => {});
       return true;
@@ -120,7 +122,7 @@
     win.addEventListener("contextmenu", contextmenu); win.addEventListener("keydown", keydown);
     doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", dismiss, true); win.addEventListener("resize", dismiss); win.addEventListener("blur", dismiss); doc.addEventListener("visibilitychange", dismiss);
     win.visualViewport?.addEventListener("resize", dismiss); win.visualViewport?.addEventListener("scroll", dismiss);
-    return { open, openTouch: event => open(event, false, true), close, keydown, canTranslateTouch, translateTouch, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
+    return { open, openTouch: event => open(event, false, true), close, keydown, canTranslateTouch, translateImage, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
       close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); actions.destroy?.(); surfaces.destroy();
       win.removeEventListener("contextmenu", captureContextmenu, true);
       win.removeEventListener("contextmenu", contextmenu); win.removeEventListener("keydown", keydown); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", dismiss, true); win.removeEventListener("resize", dismiss); win.removeEventListener("blur", dismiss); doc.removeEventListener("visibilitychange", dismiss);

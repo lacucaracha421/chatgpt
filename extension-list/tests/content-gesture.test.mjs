@@ -35,14 +35,6 @@ test('non-image touch holds open a menu, cancel on movement/scroll/multitouch an
   pointer('pointerdown');pointer('pointerdown',40,12);await f.advance(501);pointer('pointerup');pointer('pointerup',40,12);assert.equal(opens.length,1);
   f.close();
 });
-test('two-finger translation cancels a pending link menu without a duplicate menu', async()=>{
-  let menus=0,translations=0;
-  const f=fixture({canTranslateTouch:()=>true,openTouch:()=>{menus++;return true;},translateTouch:()=>{translations++;return true;}});
-  await f.advance(0);const link=f.w.document.createElement('a');link.href='https://example.test/link';f.w.document.body.append(link);f.w.document.elementFromPoint=()=>link;
-  for(const id of [11,12]) {const event=new f.w.MouseEvent('pointerdown',{bubbles:true,clientX:40,clientY:40});Object.defineProperties(event,{pointerType:{value:'touch'},pointerId:{value:id}});link.dispatchEvent(event);}
-  await f.advance(501);assert.equal(translations,1);assert.equal(menus,0);
-  const escaped=new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true,shiftKey:true});link.dispatchEvent(escaped);assert.equal(escaped.defaultPrevented,false);f.close();
-});
 test('existing selected text opens a touch menu while image hold still opens the save picker', async () => {
   const opens=[], f=fixture({canTranslateTouch:()=>true,openTouch:event=>{opens.push(event);return true;}});
   await f.advance(0);

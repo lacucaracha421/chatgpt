@@ -67,73 +67,23 @@ async function fixture({ key = true, settings = {}, video = false, collector = t
   await f.advance(0); return f;
 }
 
-async function hold(f, target = f.image) {
+async function twoFingers(f, target = f.image) {
   f.target(target);
-  assert.equal(f.pointer('pointerdown', 1, 100, 100, target).defaultPrevented, false);
+  f.pointer('pointerdown', 1, 100, 100, target);
   await f.advance(100);
-  assert.equal(f.pointer('pointerdown', 2, 120, 100, target).defaultPrevented, false);
-  await f.advance(349);
-  assert.equal(f.messages.some(message => message.type === 'translation:image'), false);
-  await f.advance(1);
+  f.pointer('pointerdown', 2, 120, 100, target);
+  await f.advance(1000);
 }
 function release(f) { f.pointer('pointerup', 1); f.pointer('pointerup', 2); }
 
-test('two-finger hold translates the midpoint image at 350 ms, cancels single-finger save and swallows follow-up events', async () => {
-  const f = await fixture(); await hold(f);
-  assert.deepEqual(f.midpoint, { x: 110, y: 100 });
-  assert.equal(f.messages.filter(message => message.type === 'translation:image').length, 1);
-  assert.equal(f.messages.find(message => message.type === 'translation:image').url, f.image.src);
-  assert.ok(f.popover()); assert.equal(f.mounts.length, 0); release(f);
-  for (const type of ['click', 'contextmenu']) assert.equal(f.pointer(type).defaultPrevented, true);
-  await f.advance(1000); assert.equal(f.mounts.length, 0);
-  assert.equal(f.pointer('click').defaultPrevented, false); f.close();
-});
-
-test('midpoint candidate resolution wins over finger targets', async () => {
-  const f = await fixture(); f.target(f.image);
-  f.pointer('pointerdown', 1, 100, 100, f.text); f.pointer('pointerdown', 2, 120, 100, f.text);
-  await f.advance(350); assert.ok(f.popover()); assert.equal(f.pageCalls.length, 0); f.close();
-});
-
-test('hold elsewhere and on a video candidate toggles the existing page translation state', async () => {
-  for (const video of [false, true]) {
-    const f = await fixture({ video }), target = video ? f.image : f.text;
-    for (const expected of ['on', 'hidden', 'on']) {
-      await hold(f, target); assert.equal(f.state, expected); release(f);
-    }
-    assert.equal(f.pageCalls.length, 3);
-    assert.equal(f.messages.some(message => message.type === 'translation:image'), false);
-    assert.equal(f.mounts.length, 0); f.close();
-  }
-});
-
-for (const reason of ['pinch-first', 'pinch-second', 'moved-before-second', 'quick-tap', 'late-second', 'third-finger', 'pointercancel', 'scroll', 'blur', 'pagehide']) {
-  test(`${reason} cancels silently and never opens translation or the single-finger arc`, async () => {
-    const f = await fixture(); f.pointer('pointerdown');
-    if (reason === 'moved-before-second') f.pointer('pointermove', 1, 111);
-    await f.advance(reason === 'late-second' ? 151 : 100); f.pointer('pointerdown', 2, 120);
-    if (reason.startsWith('pinch')) f.pointer('pointermove', reason === 'pinch-first' ? 1 : 2, reason === 'pinch-first' ? 111 : 131);
-    if (reason === 'third-finger') f.pointer('pointerdown', 3, 130);
-    if (reason === 'quick-tap') { await f.advance(349); release(f); }
-    if (reason === 'pointercancel') f.pointer('pointercancel');
-    if (['scroll', 'blur', 'pagehide'].includes(reason)) (reason === 'scroll' ? f.w.document : f.w).dispatchEvent(new f.w.Event(reason));
-    await f.advance(1000);
+test('two-finger hold no longer translates anything, on an image, text or video', async () => {
+  for (const [video, target] of [[false, 'image'], [false, 'text'], [true, 'image']]) {
+    const f = await fixture({ video }); await twoFingers(f, f[target]);
     assert.equal(f.messages.some(message => message.type.startsWith('translation:')), false);
-    assert.equal(f.mounts.length, 0); release(f);
+    assert.equal(f.pageCalls.length, 0); assert.equal(f.mounts.length, 0); assert.equal(f.popover(), null);
+    release(f);
     for (const type of ['click', 'contextmenu']) assert.equal(f.pointer(type).defaultPrevented, false);
     f.close();
-  });
-}
-
-test('150 ms pairing and 10 px movement are inclusive, and mouse/pen never form the gesture', async () => {
-  const f = await fixture();
-  f.pointer('pointerdown'); await f.advance(150); f.pointer('pointerdown', 2, 120);
-  f.pointer('pointermove', 1, 110); f.pointer('pointermove', 2, 130);
-  await f.advance(350); assert.ok(f.popover()); f.close();
-  for (const input of ['mouse', 'pen']) {
-    const other = await fixture();
-    other.pointer('pointerdown', 1, 100, 100, other.text, input); other.pointer('pointerdown', 2, 120, 100, other.text, input);
-    await other.advance(1000); assert.equal(other.messages.length, 0); other.close();
   }
 });
 
@@ -145,65 +95,28 @@ test('single-finger save remains a 500 ms hold, and a second finger during its h
   assert.equal(late.mounts.length, 0); assert.equal(late.messages.length, 0); late.close();
 });
 
-test('disabled/excluded settings, own shadow hosts and YouTube subtitle UI bypass translation', async () => {
-  for (const settings of [{ enabled: false }, { excludedHosts: ['example.test'] }]) {
-    const f = await fixture({ settings }); await hold(f, f.text); assert.equal(f.messages.length, 0); f.close();
-  }
-  for (const name of ['lakomics-image-popover', 'youtube']) {
-    const f = await fixture();
-    const host = name === 'youtube' ? f.w.document.getElementById('lakomics-yt-overlay') : f.w.document.createElement(name);
-    f.w.document.body.append(host);
-    const target = name === 'youtube' ? host : host.attachShadow({ mode: 'open' }).appendChild(f.w.document.createElement('span'));
-    await hold(f, target); assert.equal(f.messages.length, 0); f.close();
-  }
-  const changed = await fixture(); changed.pointer('pointerdown'); changed.pointer('pointerdown', 2); changed.settings({ enabled: false });
-  await changed.advance(350); assert.equal(changed.messages.length, 0); changed.close();
-});
-
-test('both translation paths use the menu setup action when keys are missing', async () => {
-  for (const image of [true, false]) {
-    const f = await fixture({ key: false }); await hold(f, image ? f.image : f.text);
-    assert.equal(f.messages.filter(message => message.type === 'context:settings').length, 1);
-    assert.equal(f.messages.some(message => message.type === 'translation:image'), false);
-    assert.equal(f.pageCalls.length, 0); f.close();
-  }
-});
-
-test('저장 opens the normal picker for the translated image, leaves the popover open and saves its translation text', async () => {
-  const f = await fixture(); await hold(f); release(f);
-  const box = f.popover(), save = box.querySelector('[data-action="image.lakomics"]');
-  assert.equal(save.textContent, '저장'); assert.equal(save.previousElementSibling.textContent, '모두 복사');
-  // A fresh tap clears the release-generated click guard.
-  f.pointer('pointerdown', 4, 10, 10, save); f.pointer('pointerup', 4, 10, 10, save); save.click(); await f.advance(0);
-  assert.equal(f.mounts.length, 1); assert.equal(f.mounts[0].inputKind, 'touch');
-  assert.deepEqual(JSON.parse(JSON.stringify(f.mounts[0].origin)), { x: 200, y: 150 });
-  assert.equal(f.popover(), box); assert.equal(f.mounts[0].inputLocked, false);
-  const host = box.getRootNode().host;
-  assert.equal(host.inert, true); assert.equal(box.classList.contains('picker-hidden'), true);
-  await f.mounts[0].onSave('one'); await f.advance(0);
-  const payload = f.messages.find(message => message.type === 'collector:save').payload;
-  assert.equal(payload.candidate.mediaUrl, f.image.src);
-  assert.deepEqual(Object.keys(payload).sort(), ['candidate', 'classificationId', 'classificationPath', 'imageText']);
-  assert.ok(payload.imageText.length > 0);
-  assert.equal('text' in payload.candidate, false);
-  f.mounts[0].onClose({ok: true, pending: true}); await f.advance(0);
-  assert.equal(host.inert, false); assert.equal(box.classList.contains('picker-restored'), true); f.close();
-});
-
 test('no arc translation rows or their wiring remain for any input', () => {
   assert.doesNotMatch(sources[1], /translation-actions|translation\?\.|translation =/);
   assert.doesNotMatch(sources.at(-1), /collectorTranslation|translation: contextController/);
   assert.doesNotMatch(sources[names.indexOf('context-menu/menu')], /collectorTranslation/);
 });
 
+test('the two-finger gesture and its guards are gone from the content script', () => {
+  assert.doesNotMatch(sources.at(-1), /twoFinger|translationGuard|translateTouch/);
+  assert.doesNotMatch(sources[names.indexOf('context-menu/menu')], /translateTouch/);
+});
 
-test('cancelling the picker restores the same translated popover position', async () => {
-  const f = await fixture(); await hold(f); release(f);
-  const box = f.popover(), save = box.querySelector('[data-action="image.lakomics"]'), host = box.getRootNode().host;
-  const position = [host.style.left, host.style.top];
-  f.pointer('pointerdown', 4, 10, 10, save); f.pointer('pointerup', 4, 10, 10, save); save.click(); await f.advance(0);
-  assert.equal(host.inert, true);
-  f.mounts[0].onClose(); await f.advance(0);
-  assert.equal(host.inert, false); assert.equal(box.classList.contains('picker-hidden'), false);
-  assert.deepEqual([host.style.left, host.style.top], position); f.close();
+test('the arc offers outward-drag translation only for a still https image and runs the image translation action', async () => {
+  const f = await fixture(); f.pointer('pointerdown'); await f.advance(501);
+  assert.equal(f.mounts.length, 1); assert.equal(typeof f.mounts[0].onTranslate, 'function');
+  assert.equal(f.messages.some(message => message.type === 'translation:image'), false);
+  assert.equal(f.mounts[0].onTranslate({ isTrusted: true }), true); await f.advance(0);
+  assert.equal(f.messages.filter(message => message.type === 'translation:image').length, 1);
+  assert.equal(f.messages.find(message => message.type === 'translation:image').url, f.image.src); f.close();
+  const video = await fixture({ video: true }); video.pointer('pointerdown'); await video.advance(501);
+  assert.equal(video.mounts[0].onTranslate, null); video.close();
+  const noKey = await fixture({ key: false }); noKey.pointer('pointerdown'); await noKey.advance(501);
+  assert.equal(noKey.mounts[0].onTranslate({ isTrusted: true }), true); await noKey.advance(0);
+  assert.equal(noKey.messages.some(message => message.type === 'context:settings'), true);
+  assert.equal(noKey.messages.some(message => message.type === 'translation:image'), false); noKey.close();
 });

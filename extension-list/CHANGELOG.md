@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.5.42 — 2026-10-16
+
+- Image text translation now lays solid translation notes over each text block on the
+  picture instead of numbered markers and a list window; notes wrap by word, never go
+  below 14px, mark sound effects with a small tag, and a corner bar offers 원문 (hold),
+  모두 복사, 저장 and close. Tapping a note shows its original and a copy button.
+- Arc save menu: dragging the centre toward the screen edge translates the image
+  (violet fill); dragging down saves temporarily at the top level and goes back inside
+  a folder; the path chips above the menu are gone; the accent is ivory.
+- Touch: the menu opens at the pressed height on the nearer edge. PC: the mouse Back
+  button goes up a folder (closes at the top) while the menu is open.
+- The two-finger hold translation gesture was removed.
+
 ## 3.5.41 — 2026-10-16
 
 - Tablet: after a touch or pen text selection settles, a small "번역" chip appears near

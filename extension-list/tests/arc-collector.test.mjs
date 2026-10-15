@@ -91,7 +91,7 @@ test('rounded spaced sectors expose a rear surface for branches and icon-only ce
   assert.equal(view.$('.destination').hidden, true);
   assert.equal(view.$('.back'), null);
   assert.equal(view.$('.save-current').getAttribute('aria-label'), '저장');
-  assert.equal(view.$('.save-current').getAttribute('aria-description'), '위로 끌어 뒤로, 아래로 끌어 임시저장');
+  assert.equal(view.$('.save-current').getAttribute('aria-description'), '아래로 끌어 임시저장');
   assert.equal(view.$('[title]'), null);
 });
 
@@ -342,13 +342,13 @@ test('opening finger lock blocks navigation, saving, temporary action and dismis
 
 // The old root-only lower button and 400 ms mode-switch guard are gone.
 // Temporary must work immediately after Back and inside a folder.
-test('temporary is available inside folders and immediately after Back without a guard', async () => {
+test('temporary key works only at the root and immediately after Back without a guard', async () => {
   let calls = 0;
   const view = mount({ onTemporary: () => { calls++; return false; } });
   enter(view, 'games'); temporary(view); await tick();
-  assert.equal(calls, 1); assert.equal(view.$('.panel').dataset.depth, '1');
+  assert.equal(calls, 0, 'no temporary save from inside a folder'); assert.equal(view.$('.panel').dataset.depth, '1');
   back(view); temporary(view); await tick();
-  assert.equal(calls, 2); assert.equal(view.$('.panel').dataset.depth, '0');
+  assert.equal(calls, 1); assert.equal(view.$('.panel').dataset.depth, '0');
   assert.equal(view.$('.back'), null); assert.equal(view.host.isConnected, true);
 });
 
@@ -904,49 +904,12 @@ test('peeks mirror directly on both edges at desktop and tablet radius caps', ()
   } finally { dom.window.innerWidth = width; dom.window.innerHeight = height; }
 });
 
-test('destination caption retains the full selected path when its wedge leaves view and clears with selection', async () => {
-  const view = mount();
-  const caption = view.$('.destination-caption');
-  assert.equal(caption.hidden, true);
-  enter(view, 'games'); row(view, 'game0').click();
-  assert.equal(caption.textContent, '게임 › 게임 0');
-  assert.equal(caption.hidden, false);
-  assert.equal(caption.getAttribute('aria-hidden'), 'true');
-  wheel(view); await settleDial();
-  assert.equal(row(view, 'game0').getAttribute('aria-hidden'), 'true');
-  assert.equal(caption.textContent, '게임 › 게임 0');
-  back(view); assert.equal(caption.textContent, '게임');
-  view.update({ hiddenClassificationIds: ['games'] });
-  assert.equal(caption.hidden, true); assert.equal(caption.textContent, '');
-  const preview = editor(); row(preview, 'games').click();
-  assert.equal(preview.$('.destination-caption').hidden, true);
-  assert.equal(preview.$('.edit-selection').textContent, '게임');
-});
-
-test('caption anchors to either edge above the arc, falls below in short viewports, and remains an outside tap', () => {
-  for (const x of [10, 900]) for (const top of [100, 14]) {
-    const view = mount({ origin: { x } }), left = x === 10;
-    const bounds = { left: left ? 0 : 824, right: left ? 200 : 1024, top, bottom: top + 400, width: 200, height: 400 };
-    view.$('.arc').getBoundingClientRect = () => bounds;
-    row(view, 'games').click();
-    const caption = view.$('.destination-caption');
-    assert.equal(caption.dataset.placement, top === 100 ? 'above' : 'below');
-    if (top === 100) {
-      assert.equal(caption.style[left ? 'left' : 'right'], '0px');
-      assert.equal(caption.parentElement.className, 'backdrop');
-    } else assert.equal(caption.parentElement.tagName, 'FOOTER');
-    caption.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: left ? 50 : 974, clientY: top === 100 ? 80 : bounds.bottom + 20 }));
-    assert.equal(view.host.isConnected, false);
-  }
-});
-
-
 test('folder names have no underline and only keyboard modality highlights the focused wedge', () => {
   const view = mount({ origin: { x: 10 }, inputKind: 'touch' });
   const css = view.$('style').textContent;
   assert.doesNotMatch(css, /text-decoration:\s*underline|text-underline-offset/);
   assert.match(css, /\.panel\.keyboard-focus \.sector:focus:before\{background:#526985\}/);
-  assert.match(css, /\.panel\.keyboard-focus \.sector\[aria-pressed=true\]:focus:before\{background:#195bbd\}/);
+  assert.match(css, /\.panel\.keyboard-focus \.sector\[aria-pressed=true\]:focus:before\{background:var\(--selected-hover\)\}/);
   assert.equal(view.host.shadowRoot.activeElement, row(view, 'games'));
   assert.equal(view.$('.panel').classList.contains('keyboard-focus'), false);
   view.$('.panel').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -957,89 +920,6 @@ test('folder names have no underline and only keyboard modality highlights the f
   const keyboard = mount({ inputKind: 'keyboard' });
   assert.equal(keyboard.$('.panel').classList.contains('keyboard-focus'), true);
   assert.equal(keyboard.host.shadowRoot.activeElement, row(keyboard, 'games'));
-});
-
-const crumbs = view => [...view.$('.destination-caption').querySelectorAll('.breadcrumb:not(.leaving):not([hidden])')];
-
-test('breadcrumb appends animate only the new bubble and sibling selection reuses its pill', () => {
-  const animations = mockMotion(), view = mount();
-  assert.equal(crumbs(view).length, 0); assert.equal(view.$('.destination-caption').hidden, true);
-  tap(view, 'games');
-  const ancestor = crumbs(view)[0], first = animations.filter(a => a.target === ancestor);
-  assert.equal(first.length, 1); assert.equal(first[0].options.duration, 180);
-  assert.equal(first[0].options.easing, 'cubic-bezier(.2,.8,.2,1)');
-  assert.deepEqual(first[0].frames[0], { opacity: 0, transform: 'translateY(4px) scale(.92)' });
-  first[0].finish(); tap(view, 'games');
-  assert.equal(crumbs(view)[0], ancestor, 'entering a selected folder retains its bubble');
-  const count = animations.length; row(view, 'game0').click();
-  const selected = crumbs(view)[1], pill = selected.querySelector('.bubble-pill');
-  assert.equal(animations.length - count, 1);
-  assert.equal(animations.at(-1).target, selected);
-  assert.equal(animations.filter(a => a.target === ancestor).length, 1);
-  animations.at(-1).finish(); row(view, 'game1').click();
-  assert.equal(crumbs(view)[0], ancestor); assert.equal(crumbs(view)[1], selected);
-  assert.equal(selected.querySelector('.bubble-pill'), pill);
-  assert.equal(selected.dataset.classificationId, 'game1');
-  assert.ok(animations.slice(-3).every(a => a.options.duration === 140));
-  animations.slice(-3).forEach(a => a.finish());
-  assert.equal(pill.textContent, '게임 1');
-});
-
-test('Back fades removed bubbles then removes nodes, and repeated Back finishes an earlier fade', () => {
-  const animations = mockMotion();
-  const branchEntries = Array.from({ length: 5 }, (_, i) => ({ id: `depth${i}`, name: `Depth ${i}`, parentId: i ? `depth${i - 1}` : null }));
-  const view = mount({ entries: branchEntries });
-  enter(view, 'depth0'); enter(view, 'depth1'); enter(view, 'depth2'); row(view, 'depth3').click();
-  const bubble = crumbs(view).at(-1);
-  back(view);
-  const fade = animations.findLast(a => a.target === bubble && a.options.duration === 120);
-  assert.ok(fade); assert.equal(bubble.isConnected, true);
-  assert.deepEqual(fade.frames.at(-1), { opacity: 0, transform: 'scale(.96)' });
-  // The restored selection still includes depth2; another Back retires it.
-  back(view);
-  assert.equal(bubble.isConnected, false); assert.equal(fade.cancelled, true);
-  const pending = animations.findLast(a => a.target.classList.contains('leaving') && !a.cancelled);
-  assert.ok(pending); assert.equal(pending.target.isConnected, true);
-  pending.finish(); assert.equal(pending.target.isConnected, false);
-});
-
-test('breadcrumbs follow visited pinned paths and retain an entered folder with no selection', () => {
-  const view = mount({ profile: { pinnedClassificationIds: ['game7'] } });
-  enter(view, 'game7');
-  assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId), ['game7']);
-  row(view, 'child0').click();
-  view.update({ classifications: { entries: entries.filter(entry => entry.id !== 'child0') } });
-  assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId), ['game7']);
-  assert.equal(crumbs(view)[0].classList.contains('selected'), false);
-  assert.equal(view.$('.save-current').getAttribute('aria-disabled'), 'true');
-  back(view);
-  assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId), ['game7']);
-  assert.equal(crumbs(editor()).length, 0);
-});
-
-test('deep overflowing breadcrumbs collapse earliest ancestors and keep the last two plus selection', () => {
-  const original = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetWidth');
-  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() {
-    return this.classList.contains('breadcrumb') ? 116 : original.get.call(this);
-  } });
-  try {
-    const branchEntries = Array.from({ length: 7 }, (_, i) => ({ id: `depth${i}`, name: `Long folder ${i}`, parentId: i ? `depth${i - 1}` : null }));
-    const view = mount({ entries: branchEntries, origin: { x: 10 } });
-    for (let i = 0; i < 5; i++) enter(view, `depth${i}`);
-    row(view, 'depth5').click();
-    assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId || node.textContent), ['…', 'depth3', 'depth4', 'depth5']);
-    assert.equal(view.$('.destination-caption').dataset.side, 'left');
-    assert.ok(view.$('.destination-caption [data-classification-id="depth0"]').hidden);
-    assert.equal(crumbs(view).at(-1).classList.contains('selected'), true);
-  } finally { Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', original); }
-});
-
-test('reduced motion changes breadcrumbs instantly without any animation', () => {
-  const animations = mockMotion(); dom.window.matchMedia = () => ({ matches: true });
-  const view = mount(); enter(view, 'games'); row(view, 'game0').click(); row(view, 'game1').click();
-  const selected = crumbs(view).at(-1); back(view);
-  assert.equal(selected.isConnected, false); assert.equal(animations.length, 0);
-  assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId), ['games']);
 });
 
 // Exact event/frame times make the release projection independently predictable.
@@ -1169,28 +1049,6 @@ test('an upper-end overscroll returns to the last slot, and tapping still select
   assert.equal(view.$('.destination').textContent, '최상위 0');
 }));
 
-test('changing to reduced motion finishes a pending breadcrumb text crossfade and removal', () => {
-  const animations = mockMotion(); let changed;
-  const preference = { matches: false, addEventListener(type, callback) { changed = callback; } };
-  dom.window.matchMedia = query => query.includes('reduced-motion') ? preference : { matches: false };
-  const view = mount(); enter(view, 'games'); row(view, 'game0').click(); row(view, 'game1').click();
-  const pill = crumbs(view).at(-1).querySelector('.bubble-pill');
-  assert.ok(pill.querySelector('.bubble-old'));
-  preference.matches = true; changed();
-  assert.equal(pill.querySelector('.bubble-old'), null); assert.equal(pill.textContent, '게임 1');
-  const count = animations.length; back(view); assert.equal(animations.length, count);
-  assert.deepEqual(crumbs(view).map(node => node.dataset.classificationId), ['games']);
-});
-
-
-test('root shortcut selection crossfades in place across different canonical parents', () => {
-  const animations = mockMotion(), view = mount({ profile: { pinnedClassificationIds: ['game7'] } });
-  row(view, 'game7').click(); const bubble = crumbs(view)[0]; animations.at(-1).finish();
-  row(view, 'games').click();
-  assert.equal(crumbs(view)[0], bubble); assert.equal(bubble.dataset.classificationId, 'games');
-  assert.ok(animations.slice(-3).every(animation => animation.options.duration === 140));
-});
-
 test('center taps save the selection for touch, pen and mouse on either edge', async () => {
   for (const x of [10, 900]) for (const kind of ['touch', 'pen', 'mouse']) {
     const saved = [], view = mount({ origin: { x }, onSave: async id => { saved.push(id); return { ok: false }; } });
@@ -1215,7 +1073,7 @@ test('center up drag restores one visited level, selection and dial position on 
   }
 }));
 
-test('center down drag works inside folders and at root without a selected destination', () => dialClock(async advance => {
+test('center down drag is Temporary at the root and Back inside a folder, without a selected destination', () => dialClock(async advance => {
   for (const inside of [false, true]) for (const x of [10, 900]) {
     let calls = 0, saves = 0;
     const view = mount({ origin: { x }, onTemporary: () => { calls++; return false; }, onSave: () => saves++ });
@@ -1225,9 +1083,10 @@ test('center down drag works inside folders and at root without a selected desti
       assert.equal(view.$('.save-current').getAttribute('aria-disabled'), 'true');
       view.$('.save-current').click(); assert.equal(saves, 0);
     }
+    // Down at the root is Temporary; down inside a folder is Back and never Temporary.
     centerDrag(view, 48); advance(120); await tick(); view.$('.save-current').click();
-    assert.equal(calls, 1); assert.equal(saves, 0);
-    assert.equal(view.$('.panel').dataset.depth, inside ? '1' : '0');
+    assert.equal(calls, inside ? 0 : 1); assert.equal(saves, 0);
+    assert.equal(view.$('.panel').dataset.depth, '0');
     assert.equal(view.host.isConnected, true); view.dispose();
   }
 }));
@@ -1259,7 +1118,7 @@ test('below-threshold, horizontal, cancelled and returned drags never invoke any
 
 test('drag reveals the face and both icons proportionally on either edge, with no layout reads', () => {
   for (const x of [10, 900]) {
-    const view = mount({ origin: { x }, onTemporary: () => false }); enter(view, 'games');
+    const view = mount({ origin: { x }, onTemporary: () => false });
     const button = view.$('.save-current'), face = view.$('.center-face');
     const save = view.$('.save-current .action-icon'), preview = view.$('.center-preview'), pointer = centerPointer(view);
     for (const node of [button, face, save, preview]) node.getBoundingClientRect = () => { throw new Error('preview layout read'); };
@@ -1269,16 +1128,25 @@ test('drag reveals the face and both icons proportionally on either edge, with n
     assert.equal(preview.style.transform, 'translateY(12px)'); assert.equal(preview.style.opacity, '0.5');
     const download = preview.querySelector('path').getAttribute('d');
     pointer('pointermove', -24);
-    assert.equal(face.style.clipPath, 'inset(0 0 50% 0)'); assert.equal(face.style.background, 'rgb(57, 73, 95)');
-    assert.equal(save.style.transform, 'translateY(12px)'); assert.equal(preview.style.transform, 'translateY(-12px)');
-    assert.notEqual(preview.querySelector('path').getAttribute('d'), download);
-    pointer('pointermove', -48); assert.equal(button.classList.contains('commit-back'), true);
+    assert.equal(face.style.clipPath, 'inset(0 0 100% 0)', 'up at the root previews nothing'); assert.equal(preview.style.opacity, '0');
     pointer('pointermove', 48); assert.equal(button.classList.contains('commit-temporary'), true);
     assert.equal(face.style.clipPath, 'inset(0% 0 0 0)'); assert.equal(preview.style.transform, 'translateY(0px)');
     pointer('pointermove', 47); assert.equal(button.classList.contains('commit-temporary'), false);
     pointer('pointercancel', 47);
     assert.equal(face.style.clipPath, 'inset(100% 0 0 0)'); assert.equal(save.style.transform, 'translateY(0px)');
     assert.equal(save.style.opacity, '1'); assert.equal(preview.style.opacity, '0');
+    // Inside a folder both directions preview Back, with the back colour and icon.
+    row(view, 'games').dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true })); enter(view, 'games');
+    pointer('pointerdown'); pointer('pointermove', 24);
+    assert.equal(face.style.clipPath, 'inset(50% 0 0 0)'); assert.equal(face.style.background, 'rgb(57, 73, 95)');
+    assert.equal(save.style.transform, 'translateY(-12px)'); assert.equal(preview.style.transform, 'translateY(12px)');
+    assert.notEqual(preview.querySelector('path').getAttribute('d'), download);
+    pointer('pointermove', 48); assert.equal(button.classList.contains('commit-back'), true);
+    assert.equal(button.classList.contains('commit-temporary'), false);
+    pointer('pointermove', -24);
+    assert.equal(face.style.clipPath, 'inset(0 0 50% 0)'); assert.equal(face.style.background, 'rgb(57, 73, 95)');
+    pointer('pointermove', -48); assert.equal(button.classList.contains('commit-back'), true);
+    pointer('pointercancel', -48);
     view.dispose();
   }
 });
@@ -1420,11 +1288,11 @@ test('600 ms idle drains notch progress in 150 ms and resets the count, includin
 }));
 
 test('up notch cancels down-progress without Back, while an up notch at zero goes Back immediately', () => dialClock(advance => {
-  let calls = 0; const view = mount({ onTemporary: () => calls++ }); enter(view, 'games');
+  let calls = 0; const view = mount({ onTemporary: () => calls++ });
   centerWheel(view, 53); centerWheel(view, -53);
-  assert.equal(view.$('.panel').dataset.depth, '1'); assert.equal(view.$('.center-preview').style.opacity, '0');
-  advance(40); centerWheel(view, -53); assert.equal(view.$('.panel').dataset.depth, '1');
-  advance(72); centerWheel(view, -53); assert.equal(view.$('.panel').dataset.depth, '0');
+  assert.equal(view.$('.panel').dataset.depth, '0'); assert.equal(view.$('.center-preview').style.opacity, '0');
+  enter(view, 'games'); advance(120); centerWheel(view, -53);
+  assert.equal(view.$('.panel').dataset.depth, '0');
   assert.equal(calls, 0);
 }));
 
@@ -1528,9 +1396,47 @@ test('a lock or disposal during the full-face hold cancels the reserved action',
 
 test('unsupported Temporary wheel input does not create progress that swallows Back', () => dialClock(() => {
   for (const delta of [30, 53]) {
-    const view = mount(); enter(view, 'games'); centerWheel(view, delta);
+    const view = mount(); centerWheel(view, delta);
     assert.equal(view.$('.center-preview').style.opacity, '0');
-    centerWheel(view, -53); assert.equal(view.$('.panel').dataset.depth, '0'); view.dispose();
+    view.dispose();
+  }
+}));
+
+test('a downward wheel inside a folder goes Back once and never reaches Temporary at the root', () => dialClock(advance => {
+  let calls = 0; const view = mount({ onTemporary: () => { calls++; return false; } }); enter(view, 'games');
+  centerWheel(view, 53); assert.equal(view.$('.panel').dataset.depth, '0');
+  advance(112); centerWheel(view, 53); advance(112); centerWheel(view, 53); advance(112); centerWheel(view, 53);
+  assert.equal(view.$('.center-preview').style.opacity, '0'); advance(400); assert.equal(calls, 0);
+  const smooth = mount({ onTemporary: () => { calls++; return false; } }); enter(smooth, 'games');
+  centerWheel(smooth, 30); assert.equal(smooth.$('.panel').dataset.depth, '1');
+  centerWheel(smooth, 20); advance(120); assert.equal(smooth.$('.panel').dataset.depth, '0'); advance(400); assert.equal(calls, 0);
+}));
+
+test('dragging the centre outward past the threshold translates and closes; short, inward and unsupported drags do nothing', () => dialClock(async advance => {
+  for (const x of [10, 900]) {
+    const out = x === 10 ? -1 : 1, fill = pct => x === 10 ? `inset(0 ${pct}% 0 0)` : `inset(0 0 0 ${pct}%)`;
+    let calls = 0, closed = 0;
+    const view = mount({ origin: { x }, onTranslate: event => { calls++; return event?.type === 'pointerup'; }, onClose: () => closed++ });
+    const button = view.$('.save-current'), face = view.$('.center-face'), pointer = centerPointer(view);
+    assert.match(button.getAttribute('aria-description'), /바깥쪽으로 끌어 번역/);
+    pointer('pointerdown'); pointer('pointermove', 0, out * 24);
+    assert.equal(face.style.clipPath, fill(50)); assert.equal(face.style.background, 'rgb(107, 79, 196)');
+    assert.equal(view.$('.center-preview').style.opacity, '0.5');
+    pointer('pointermove', 0, out * 48); assert.equal(button.classList.contains('commit-translate'), true);
+    pointer('pointermove', 0, out * 47); assert.equal(button.classList.contains('commit-translate'), false);
+    pointer('pointerup', 0, out * 47); advance(200);
+    assert.equal(calls, 0); assert.equal(view.host.isConnected, true); assert.equal(face.style.clipPath, fill(100));
+    pointer('pointerdown'); pointer('pointermove', 0, out * 48); pointer('pointerup', 0, out * 60);
+    assert.equal(calls, 0); advance(120);
+    assert.equal(calls, 1); assert.equal(closed, 1); assert.equal(view.host.isConnected, false);
+    const inward = mount({ origin: { x }, onTranslate: () => { calls++; return true; } }), inwardPointer = centerPointer(inward);
+    inwardPointer('pointerdown'); inwardPointer('pointermove', 0, -out * 100);
+    assert.equal(inward.$('.center-preview').style.opacity, '0'); inwardPointer('pointerup', 0, -out * 100); advance(300);
+    assert.equal(calls, 1); assert.equal(inward.host.isConnected, true); inward.dispose();
+    const none = mount({ origin: { x } }), nonePointer = centerPointer(none);
+    assert.doesNotMatch(none.$('.save-current').getAttribute('aria-description'), /번역/);
+    nonePointer('pointerdown'); nonePointer('pointermove', 0, out * 100); nonePointer('pointerup', 0, out * 100); advance(300);
+    assert.equal(none.host.isConnected, true); none.dispose();
   }
 }));
 
@@ -1581,4 +1487,61 @@ test('an outside tap still closes the menu after a dial gesture was cancelled wi
   press('pointerdown', backdrop, 5, 92);
   backdrop.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 200 }));
   assert.equal(closes, 1);
+});
+
+test('touch opening centres the half-disc on the pressed point and clamps it inside the viewport; mouse opening is unchanged', () => {
+  const height = dom.window.innerHeight, radius = 200, top = view => parseFloat(view.$('.panel').style.top);
+  // Panel height is 2r + 20; the arc centre sits 6 + r below the panel top.
+  assert.equal(top(mount({ inputKind: 'touch', origin: { x: 10, y: 384 } })), 384 - radius - 6);
+  assert.equal(top(mount({ inputKind: 'touch', origin: { x: 900, y: 384 } })), 384 - radius - 6);
+  assert.equal(top(mount({ inputKind: 'touch', origin: { x: 10, y: 20 } })), 8, 'clamped to the top edge');
+  assert.equal(top(mount({ inputKind: 'touch', origin: { x: 10, y: height - 4 } })), height - (radius * 2 + 20) - 8, 'clamped to the bottom edge');
+  const near = mount({ inputKind: 'touch', origin: { x: 900, y: 384 } }), far = mount({ inputKind: 'touch', origin: { x: 10, y: 384 } });
+  assert.equal(near.$('.panel').dataset.side, 'right'); assert.equal(far.$('.panel').dataset.side, 'left');
+  for (const kind of ['mouse', 'pen', null]) assert.equal(top(mount({ inputKind: kind, origin: { x: 10, y: 20 } })), Math.max(8, (height - (radius * 2 + 104)) / 2));
+  // A visual viewport offset (pinch zoom) moves the clamp window with it.
+  const original = Object.getOwnPropertyDescriptor(dom.window, 'visualViewport');
+  Object.defineProperty(dom.window, 'visualViewport', { configurable: true, value: { offsetTop: 100, offsetLeft: 0, width: 1024, height: 500, addEventListener() {}, removeEventListener() {} } });
+  try {
+    const zoomed = mount({ inputKind: 'touch', origin: { x: 10, y: 120 } });
+    assert.equal(top(zoomed), 108, 'top clamp includes the viewport offset');
+    const bottom = mount({ inputKind: 'touch', origin: { x: 10, y: 590 } }), r = parseFloat(bottom.$('.panel').style.getPropertyValue('--radius'));
+    assert.equal(top(bottom), Math.max(108, 100 + 500 - (r * 2 + 20) - 8));
+  } finally { if (original) Object.defineProperty(dom.window, 'visualViewport', original); else delete dom.window.visualViewport; }
+});
+
+function mouseBack(type, button = 3) {
+  const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button });
+  dom.window.dispatchEvent(event); return event;
+}
+function pressBack(button = 3) { return ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'auxclick'].map(type => mouseBack(type, button)); }
+
+test('mouse Back button steps up one folder per press, closes at the root, and is left alone when the menu is not open', () => {
+  let closed = 0;
+  const view = mount({ onClose: () => closed++ });
+  enter(view, 'games'); assert.equal(view.$('.panel').dataset.depth, '1');
+  const first = pressBack();
+  assert.ok(first.every(event => event.defaultPrevented), 'every event of the press is swallowed so the browser does not navigate');
+  assert.equal(view.$('.panel').dataset.depth, '0'); assert.equal(closed, 0, 'one press is one step, not a step per event');
+  pressBack(); assert.equal(closed, 1); assert.equal(view.host.isConnected, false);
+  for (const event of pressBack()) assert.equal(event.defaultPrevented, false, 'untouched once the menu is gone');
+  assert.equal(closed, 1);
+});
+
+test('mouse Back release after the menu closed on that press is swallowed; other buttons and editing mode are untouched', async () => {
+  const view = mount();
+  assert.equal(mouseBack('pointerdown').defaultPrevented, true); assert.equal(view.host.isConnected, false);
+  assert.equal(mouseBack('pointerup').defaultPrevented, true);
+  assert.equal(mouseBack('mouseup').defaultPrevented, true);
+  assert.equal(mouseBack('auxclick').defaultPrevented, true);
+  assert.equal(mouseBack('mousedown').defaultPrevented, false, 'a new press after the release is not ours');
+  const other = mount();
+  for (const type of ['pointerdown', 'mousedown', 'mouseup']) assert.equal(mouseBack(type, 4).defaultPrevented, false);
+  assert.equal(other.host.isConnected, true);
+});
+
+test('mouse Back button does nothing special in the settings preview (editing mode)', () => {
+  const preview = editor();
+  for (const event of pressBack()) assert.equal(event.defaultPrevented, false);
+  assert.equal(preview.host.isConnected, true);
 });

@@ -211,7 +211,7 @@ test('Anthropic request carries a base64 image block, the structured schema, Kor
   const terms = [{source: 'ホロライブ', korean: '홀로라이브'}, {source: 'Jeff', korean: '제프'}];
   const f = worker({pictures: {[IMG]: image()}, stored: {userTerms: terms}});
   const result = await f.handle({type: 'translation:image', url: IMG});
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), {ok: true, lines: [{original: 'またね！', korean: '또 봐!'}], model: 'anthropic:claude-haiku-5-5'});
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {ok: true, lines: [{original: 'またね！', korean: '또 봐!', kind: 'dialogue'}], model: 'anthropic:claude-haiku-5-5'});
   const call = f.calls[0];
   assert.equal(call.url, 'https://api.anthropic.com/v1/messages');
   assert.equal(call.init.headers['x-api-key'], 'ant-key');
@@ -229,7 +229,9 @@ test('Anthropic request carries a base64 image block, the structured schema, Kor
   assert.match(call.body.system, /"source":"Jeff"/);
   const schema = call.body.output_config.format.schema;
   assert.deepEqual(Object.keys(schema.properties), ['lines']);
-  assert.deepEqual(schema.properties.lines.items.required, ['original', 'korean', 'box']);
+  assert.deepEqual(schema.properties.lines.items.required, ['original', 'korean', 'kind', 'box']);
+  assert.deepEqual(schema.properties.lines.items.properties.kind, {type: 'string', enum: ['dialogue', 'sfx']});
+  assert.match(call.body.system, /"kind" is "sfx" for a sound effect/);
   assertBoxSchema(schema);
   for (const rule of ['speech', 'thoughts', 'narration/captions', 'labels characters react to', 'large, prominent sound effects', 'watermarks', 'artist signatures', 'credits', 'URLs', 'social handles', 'site/patreon notices', 'small or repeated', 'clothes/props', '0–1000', 'top-left']) assert.ok(call.body.system.includes(rule), rule);
   assert.equal(JSON.stringify(result).includes('ant-key'), false);
@@ -280,6 +282,17 @@ test('boxes clamp and swap finite numbers; unusable boxes drop without losing th
   assert.ok(lines.slice(2).every(line => !('box' in line)));
 });
 
+test('each line carries a kind: sfx stays sfx, a missing or unknown kind is dialogue', () => {
+  const ctx = vm.createContext({});
+  for (const script of core) vm.runInContext(script, ctx);
+  const lines = plain(ctx.LakomicsTranslationCore.image.parseLines({lines: [
+    {original: 'ドン', korean: '쾅', kind: 'sfx'}, {original: 'a', korean: '가', kind: 'dialogue'}, {original: 'b', korean: '나'},
+    {original: 'c', korean: '다', kind: 'shout'}, {original: 'd', korean: '라', kind: 7}]}));
+  assert.deepEqual(lines.map(line => line.kind), ['sfx', 'dialogue', 'dialogue', 'dialogue', 'dialogue']);
+  const schema = ctx.LakomicsTranslationCore.image.SCHEMA.properties.lines.items;
+  assert.deepEqual(plain(schema.required), Object.keys(schema.properties), 'strict schema lists every field');
+});
+
 test('lines that are only a handle, URL or site credit drop; story text with them stays', () => {
   const ctx = vm.createContext({});
   for (const script of core) vm.runInContext(script, ctx);
@@ -292,7 +305,7 @@ test('lines that are only a handle, URL or site credit drop; story text with the
 test('answers are read as lines: empty means no text, junk entries drop, malformed or cut-off answers fail', async () => {
   const run = async options => worker({pictures: {[IMG]: image()}, ...options}).handle({type: 'translation:image', url: IMG});
   assert.deepEqual(JSON.parse(JSON.stringify(await run({reply: answer([])}))).lines, []);
-  assert.deepEqual(plain((await run({reply: answer([{original: ' A ', korean: ' 가 \n 나 '}, {original: 'B', korean: ''}, {korean: '다'}, 7, null])})).lines), [{original: 'A', korean: '가 나'}, {original: '', korean: '다'}]);
+  assert.deepEqual(plain((await run({reply: answer([{original: ' A ', korean: ' 가 \n 나 '}, {original: 'B', korean: ''}, {korean: '다'}, 7, null])})).lines), [{original: 'A', korean: '가 나', kind: 'dialogue'}, {original: '', korean: '다', kind: 'dialogue'}]);
   assert.equal((await run({reply: 'not json'})).code, 'invalid_translation');
   assert.equal((await run({reply: JSON.stringify({text: 'x'})})).code, 'invalid_translation');
   assert.equal((await run({reply: answer([{original: 'a', korean: '가'}]), finish: 'length'})).code, 'invalid_translation');
@@ -375,69 +388,204 @@ const markerView = f => {
   return {host, buttons: host ? [...f.roots.get(host).querySelectorAll('button')] : []};
 };
 
-for (const touch of [false, true]) test(`numbered markers clamp, link both ways, follow and survive the cache (touch=${touch})`, async () => {
-  const f = page(undefined, {touch, send: async () => ({ok: true, lines: locatedLines})});
+const noteLines = [
+  {original: 'こいつら', korean: '얘네 한 거야!!', kind: 'dialogue', box: {x0: 100, y0: 100, x1: 400, y1: 300}},
+  {original: 'ドン', korean: '쿵', kind: 'sfx', box: {x0: 600, y0: 500, x1: 900, y1: 700}},
+  {original: '付け足すな', korean: '덧붙이지 마', box: {x0: 100, y0: 700, x1: 200, y1: 950}},
+  {original: '位置なし', korean: '위치 없음'},
+];
+const notesView = f => {
+  const host = f.doc.querySelector('lakomics-image-markers'), root = host ? f.roots.get(host) : null;
+  return {host, root, notes: root ? [...root.querySelectorAll('.note')] : [], tags: root ? [...root.querySelectorAll('.tag')] : [],
+    pill: root?.querySelector('.pill') || null, card: root?.querySelector('.card') || null, box: root?.querySelector('.image-notes') || null};
+};
+
+for (const touch of [false, true]) test(`translation notes sit over each text block; the numbered list window is gone (touch=${touch})`, async () => {
+  const f = page(undefined, {touch, send: async () => ({ok: true, lines: noteLines})});
   await f.actions.activate('image.translate', f.context(), origin, gesture);
-  const items = [...f.popover().querySelectorAll('li')], body = f.popover().querySelector('.pb');
-  assert.deepEqual(items.map(item => item.querySelector('.line-number').textContent), ['1', '2', '3']);
-  const {host, buttons} = markerView(f), inset = touch ? 6.5 : 5;
-  assert.deepEqual(buttons.map(button => button.textContent), ['1', '3']);
-  assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), ['1번 대사', '3번 대사']);
-  assert.equal(host.style.pointerEvents, 'none'); assert.equal(host.dataset.touch, String(touch));
-  assert.equal(buttons[0].style.left, inset + '%'); assert.equal(buttons[1].style.top, (100 - inset) + '%');
-  assert.equal(buttons[0].style.width, (touch ? 26 : 20) + 'px');
-  let leaked = 0;
-  f.doc.addEventListener('click', () => leaked++);
-  f.doc.addEventListener('pointerdown', () => leaked++);
-  buttons[0].click(); assert.equal(items[0].classList.contains('selected'), false, 'synthetic selection is ignored');
-  f.user(() => buttons[0].dispatchEvent(new f.w.Event('pointerdown', {bubbles: true, composed: true})));
-  Object.defineProperty(body, 'getBoundingClientRect', {value: () => ({top: 0, bottom: 100})});
-  Object.defineProperty(items[2], 'getBoundingClientRect', {value: () => ({top: 150, bottom: 180})});
-  f.user(() => buttons[1].click());
-  assert.equal(leaked, 0); assert.equal(body.scrollTop, 80);
-  assert.equal(items[2].classList.contains('selected'), true); assert.equal(buttons[1].getAttribute('aria-pressed'), 'true');
-  f.user(() => items[0].click());
-  assert.equal(buttons[0].getAttribute('aria-pressed'), 'true'); assert.equal(buttons[1].getAttribute('aria-pressed'), 'false');
-  assert.equal(items.filter(item => item.classList.contains('selected')).length, 1);
-  f.user(() => items[0].click()); assert.equal(buttons[0].getAttribute('aria-pressed'), 'false');
-  f.user(() => items[1].dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Enter', bubbles: true})));
-  assert.equal(items[1].classList.contains('selected'), true, 'a line without a box stays selectable');
+  const v = notesView(f);
+  assert.equal(f.popover(), null, 'no list window for a located answer');
+  assert.equal(f.doc.querySelector('lakomics-image-popover'), null);
+  assert.equal(v.root.querySelector('ol, .line-number, .image-marker'), null, 'no numbered markers or list');
+  assert.equal(v.notes.length, 2); assert.equal(v.tags.length, 1, 'a sound effect gets a small tag');
+  assert.deepEqual(v.notes.map(note => note.querySelector('.nt').textContent), ['얘네 한 거야⁠!!', '덧붙이지 마'], 'trailing marks are glued to their word');
+  assert.equal(v.tags[0].textContent, '쿵'); assert.equal(v.tags[0].getAttribute('aria-label'), '효과음: 쿵');
+  assert.equal(v.host.dataset.touch, String(touch));
+  assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['100px', '50px', '200px', '200px']);
+  // the first note starts at its OCR box (100,100 of 1000 is 20,20 px of a 200 px image) minus a 3 px margin
+  assert.equal(v.notes[0].style.left, '17px'); assert.equal(v.notes[0].style.top, '17px');
+  assert.notEqual(v.notes[0].style.background, '', 'solid colour, no glass');
+  assert.deepEqual([...v.pill.querySelectorAll('button')].map(button => button.textContent), ['원문', '모두 복사', '']);
+  assert.ok(v.pill.dataset.corner);
+  // follows scroll / resize
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 420, top: 70, bottom: 170, width: 300, height: 100})});
   f.doc.dispatchEvent(new f.w.Event('scroll'));
-  assert.deepEqual([host.style.left, host.style.top, host.style.width, host.style.height], ['120px', '70px', '300px', '100px']);
-  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 130, top: 70, bottom: 80, width: 10, height: 10})});
+  assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['120px', '70px', '300px', '100px']);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0})});
   f.w.dispatchEvent(new f.w.Event('resize'));
-  assert.equal(buttons[0].style.width, '10px'); assert.equal(buttons[0].style.left, '50%', 'tiny images still contain the entire badge');
-  await f.actions.activate('image.translate', f.context(), origin, gesture);
-  assert.equal(host.isConnected, false); assert.equal(f.sent.length, 1);
-  assert.equal(markerView(f).buttons.length, 2, 'cached boxes render markers again');
-  f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
-  await f.timer.advance(100); assert.equal(markerView(f).host, null);
-  await f.actions.activate('image.translate', f.context(), origin, gesture);
-  f.watchers.at(-1).callback(); assert.equal(markerView(f).host, null, 'navigation closes the overlay immediately');
+  assert.equal(v.host.style.visibility, 'hidden', 'a vanished image hides the notes');
   f.actions.destroy(); f.close();
 });
 
-test('picker hides and restores markers, and closing during the picker cannot resurrect them', async () => {
+test('tapping a note opens a card with the original, the translation and a copy button; Escape closes the card first', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  let v = notesView(f), leaked = 0;
+  f.doc.addEventListener('click', () => leaked++); f.doc.addEventListener('pointerdown', () => leaked++);
+  v.notes[0].click(); assert.equal(notesView(f).card, null, 'a script-made click is ignored');
+  f.user(() => v.notes[0].click());
+  v = notesView(f);
+  assert.equal(v.card.querySelector('.jp').textContent, 'こいつら'); assert.equal(v.card.querySelector('.ko').textContent, '얘네 한 거야!!', 'the card shows the text as translated');
+  assert.equal(v.card.querySelector('.jp').lang, 'ja');
+  f.user(() => v.card.querySelector('.cbtn').click()); await f.timer.advance(0);
+  assert.deepEqual(f.clipboard, ['얘네 한 거야!!']);
+  assert.equal(v.card.querySelector('.cbtn span').textContent, '복사됨');
+  f.user(() => v.notes[0].click()); assert.equal(notesView(f).card, null, 'a second tap on the same note closes the card');
+  f.user(() => v.tags[0].click()); assert.equal(notesView(f).card.querySelector('.ko').textContent, '쿵');
+  assert.equal(leaked, 0, 'clicks stay inside the overlay');
+  f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
+  assert.equal(notesView(f).card, null); assert.ok(notesView(f).host, 'the first Escape only closes the card');
+  f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
+  await f.timer.advance(100); assert.equal(notesView(f).host, null, 'the second Escape closes the translation');
+  f.actions.destroy(); f.close();
+});
+
+test('원문 shows the picture text while held; 모두 복사 copies every line; x closes', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f), peek = v.pill.querySelector('.peek-btn'), copy = v.pill.querySelector('[data-action="image.copy"]');
+  pointer(f, peek, 'pointerdown', 0, 0);
+  assert.equal(v.box.classList.contains('peek'), true); assert.equal(peek.getAttribute('aria-pressed'), 'true');
+  pointer(f, peek, 'pointerup', 0, 0);
+  assert.equal(v.box.classList.contains('peek'), false);
+  // press-and-hold on a note
+  pointer(f, v.notes[0], 'pointerdown', 5, 5); await f.timer.advance(219); assert.equal(v.box.classList.contains('peek'), false);
+  await f.timer.advance(1); assert.equal(v.box.classList.contains('peek'), true);
+  pointer(f, v.notes[0], 'pointerup', 5, 5); assert.equal(v.box.classList.contains('peek'), false);
+  f.user(() => v.notes[0].click()); assert.equal(notesView(f).card, null, 'the release after a hold is not a tap');
+  copy.click(); assert.deepEqual(f.clipboard, [], 'only a real click copies');
+  f.user(() => copy.click()); await f.timer.advance(0);
+  assert.deepEqual(f.clipboard, ['얘네 한 거야!!\n쿵\n덧붙이지 마\n위치 없음']);
+  assert.equal(copy.textContent, '복사됨'); await f.timer.advance(1600); assert.equal(copy.textContent, '모두 복사');
+  f.user(() => v.pill.querySelector('.x').click()); await f.timer.advance(100);
+  assert.equal(notesView(f).host, null);
+  f.actions.destroy(); f.close();
+});
+
+test('notes survive the cache, close on navigation, and a located answer replaces the waiting window', async () => {
+  let finish;
+  const f = page(undefined, {send: () => new Promise(resolve => { finish = resolve; })});
+  const work = f.actions.activate('image.translate', f.context(), origin, gesture);
+  await f.timer.advance(400);
+  assert.ok(f.popover().querySelector('.sk'));
+  finish({ok: true, lines: noteLines}); await f.timer.advance(600); await work;
+  assert.equal(notesView(f).notes.length, 2);
+  await f.timer.advance(100); assert.equal(f.doc.querySelector('lakomics-image-popover'), null, 'the waiting window is gone');
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  assert.equal(f.sent.length, 1); assert.equal(notesView(f).notes.length, 2, 'cached boxes render notes again');
+  f.watchers.at(-1).callback(); assert.equal(notesView(f).host, null, 'navigation closes the overlay immediately');
+  f.actions.destroy(); f.close();
+});
+
+test('an answer without any position falls back to a plain unnumbered window', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: [{original: 'a', korean: '가', kind: 'dialogue'}, {original: 'b', korean: '나'}]})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  assert.equal(notesView(f).host, null);
+  assert.deepEqual([...f.popover().querySelectorAll('li b')].map(b => b.textContent), ['가', '나']);
+  assert.equal(f.popover().querySelector('.line-number'), null);
+  f.actions.destroy(); f.close();
+});
+
+test('picker hides and restores the notes, and closing during the picker cannot resurrect them', async () => {
   let lifecycle;
   const collector = {findCandidate: image => ({element: image, type: 'image'}), open(candidate, origin, input, callbacks) { lifecycle = callbacks; callbacks.onOpen(); }};
-  const f = page(undefined, {touch: true, collector, send: async () => ({ok: true, lines: locatedLines})});
+  const f = page(undefined, {touch: true, collector, send: async () => ({ok: true, lines: noteLines})});
   await f.actions.activate('image.translate', f.context(), origin, gesture);
-  const {host} = markerView(f);
-  f.user(() => f.popover().querySelector('[data-action="image.lakomics"]').click());
+  const {host, pill} = notesView(f), save = pill.querySelector('[data-action="image.lakomics"]');
+  assert.ok(save, '저장 sits in the button group');
+  assert.deepEqual([...pill.querySelectorAll('button')].map(button => button.textContent), ['원문', '모두 복사', '저장', '']);
+  f.user(() => save.click());
   assert.equal(host.inert, true); assert.equal(host.style.visibility, 'hidden'); assert.equal(host.getAttribute('aria-hidden'), 'true');
   lifecycle.onClose(); assert.equal(host.inert, false); assert.equal(host.style.visibility, 'visible');
-  f.user(() => f.popover().querySelector('[data-action="image.lakomics"]').click());
-  f.actions.destroy(); lifecycle.onClose(); assert.equal(host.isConnected, false); assert.equal(markerView(f).host, null);
+  f.user(() => save.click());
+  f.actions.destroy(); lifecycle.onClose(); assert.equal(host.isConnected, false); assert.equal(notesView(f).host, null);
   f.close();
 });
 
-test('markers use square badges, the shared accent and a reduced-motion-aware fade', () => {
-  assert.match(css, /\.image-marker\{[^}]*border:1px solid #fff;[^}]*border-radius:0;[^}]*background:#1d1d1f/);
-  assert.match(css, /\.image-marker\[aria-pressed="true"\]\{background:var\(--m-focus\)\}/);
-  assert.match(css, /\.image-line.selected\{background:color-mix\(in srgb,var\(--m-focus\) 12%,transparent\)\}/);
-  assert.match(css, /\.image-markers\{[^}]*pointer-events:none;animation:menuIn 120ms/);
-  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.image-markers,\.image-markers.exit\{animation:none\}\}/);
+test('저장 from the notes passes the lines to the collector', async () => {
+  const opened = [];
+  const collector = {findCandidate: image => ({element: image, type: 'image', mediaUrl: image.src}), open: (...args) => opened.push(args)};
+  const f = page(undefined, {collector, send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  f.user(() => notesView(f).pill.querySelector('[data-action="image.lakomics"]').click());
+  assert.equal(opened.length, 1); assert.deepEqual(plain(opened[0][1]), {x: 200, y: 150}); assert.equal(opened[0][2], 'mouse');
+  assert.equal(opened[0][3].imageText.length, 4);
+  f.actions.destroy(); f.close();
+});
+
+// A text model: every Korean syllable is 1em wide, words are separated by 0.3em gaps.
+function textMeasure(words) {
+  return (f, r, padX, padY, wrap) => {
+    const inner = r.w - 2 * padX, longest = Math.max(...words.map(word => word.length)) * f;
+    const overflow = wrap ? 0 : Math.max(0, longest - inner);
+    let lines = 1, used = 0;
+    for (const word of words) {
+      const width = wrap ? Math.min(word.length * f, inner) : word.length * f;
+      if (used && used + f * .3 + width > inner) { lines += 1; used = width; } else used += (used ? f * .3 : 0) + width;
+    }
+    return {overflow, height: lines * f * 1.28};
+  };
+}
+
+test('note layout: starts at the OCR box, never below 14 px, widens only for the longest word, then grows downward', () => {
+  const f = page(); const {fitNote, MIN_FONT} = f.w.LakomicsContextImage;
+  assert.equal(MIN_FONT, 14);
+  const words = ['말도', '안', '돼,', '진짜로', '그랬다는', '거야?'];
+  // roomy box: keeps the OCR position, nothing widens, font stays within 14..20
+  const roomy = plain(fitNote({box: {x: 100, y: 100, w: 300, h: 200}, W: 600, H: 800, chars: 6, measure: textMeasure(words)}));
+  assert.deepEqual([roomy.x, roomy.y, roomy.w, roomy.widened, roomy.wrap], [97, 97, 306, false, false]);
+  assert.ok(roomy.f >= 14 && roomy.f <= 20);
+  // narrow tall box: the longest word (4 syllables at 14 px = 56 px) forces a wider note, centred on the box
+  const narrow = plain(fitNote({box: {x: 300, y: 100, w: 30, h: 60}, W: 600, H: 800, vertical: true, chars: 20, measure: textMeasure(words)}));
+  assert.equal(narrow.f, 14, 'never below the minimum'); assert.equal(narrow.widened, true);
+  assert.ok(narrow.w >= 4 * 14 + 2 * narrow.padX, 'wide enough for the longest word at 14 px'); assert.equal(narrow.wrap, false, 'words are not split');
+  assert.ok(Math.abs((narrow.x + narrow.w / 2) - 315) <= 1, 'widened around the box centre');
+  assert.equal(narrow.y, 97, 'grows downward, the top stays at the OCR box'); assert.ok(narrow.h > 66, 'taller than the box');
+  assert.ok(narrow.x >= 4 && narrow.x + narrow.w <= 596, 'stays inside the image');
+  // at the bottom edge it grows upward instead
+  const bottom = plain(fitNote({box: {x: 300, y: 760, w: 30, h: 36}, W: 600, H: 800, vertical: true, chars: 20, measure: textMeasure(words)}));
+  assert.ok(bottom.y < 757 && bottom.y + bottom.h <= 796);
+  // a single word wider than the whole image is the only case that may break
+  const huge = plain(fitNote({box: {x: 10, y: 10, w: 20, h: 20}, W: 60, H: 200, chars: 5, measure: textMeasure(['아주아주긴낱말입니다'])}));
+  assert.equal(huge.wrap, true); assert.equal(huge.f, 14);
+});
+
+test('the button group takes the corner that covers the least note area', () => {
+  const f = page(); const {chooseCorner} = f.w.LakomicsContextImage;
+  assert.equal(chooseCorner([], 400, 600, 200, 32).corner, 'tr');
+  assert.equal(chooseCorner([{x: 150, y: 0, w: 250, h: 100}], 400, 600, 200, 32).corner, 'br');
+  assert.equal(['br', 'bl'].includes(chooseCorner([{x: 0, y: 0, w: 400, h: 100}], 400, 600, 200, 32).corner), true);
+  assert.equal(chooseCorner([{x: 0, y: 0, w: 400, h: 100}, {x: 200, y: 500, w: 200, h: 100}], 400, 600, 200, 32).corner, 'bl');
+});
+
+test('note colours come from around the text box and fall back to a light note when the picture is unreadable', () => {
+  const f = page(); const {toneAround} = f.w.LakomicsContextImage;
+  const fill = (r, g, b, w = 100, h = 100) => ({width: w, height: h, data: Uint8ClampedArray.from({length: w * h * 4}, (_, i) => [r, g, b, 255][i % 4])});
+  const light = plain(toneAround(fill(240, 240, 235), {x: 40, y: 40, w: 20, h: 20}));
+  assert.ok(light.bg.every(v => v >= 235)); assert.ok(light.fg.every(v => v < 40));
+  const dark = plain(toneAround(fill(20, 20, 30), {x: 40, y: 40, w: 20, h: 20}));
+  assert.ok(dark.bg.every(v => v < 40)); assert.ok(dark.fg.every(v => v > 240));
+  assert.deepEqual(plain(toneAround(null, {x: 0, y: 0, w: 1, h: 1})), {bg: [251, 250, 247], fg: [31, 33, 35]});
+});
+
+test('notes are solid, keep whole words, use at least 14 px and fade in without motion when reduced', () => {
+  assert.doesNotMatch(css, /backdrop-filter/);
+  assert.match(css, /\.image-notes \.nt\{[^}]*word-break:keep-all;overflow-wrap:normal/);
+  assert.match(css, /\.image-notes \.tag\{[^}]*font:600 14px/);
+  assert.match(css, /\.image-notes \.note\{[^}]*animation:menuIn 140ms/);
+  assert.match(css, /\.image-notes\.peek \.note,\.image-notes\.peek \.tag\{opacity:0\}/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.image-notes,\.image-notes\.exit,\.image-notes \.note,\.image-notes \.tag,\.image-notes \.card\{animation:none\}/);
+  assert.doesNotMatch(css, /\.image-marker\b/);
 });
 
 test('desktop image translation exposes 저장 only with an available collector candidate and keeps the popover open', async () => {
@@ -1015,7 +1163,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.41');
+  assert.equal(manifest.version, '3.5.42');
 });
 
 
