@@ -483,6 +483,8 @@ pub fn run() {
             commands::characters::character_series,
             commands::characters::save_character_series,
             commands::characters::set_character_container,
+            commands::characters::container_conversion_preview,
+            commands::characters::convert_to_container,
             commands::characters::character_registration_preview,
             commands::characters::browse_character_assets,
             commands::characters::save_character_target,

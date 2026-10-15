@@ -90,11 +90,16 @@ fn shared_destination(
 }
 
 impl Library {
-    fn character_series_move_in(
+    /// `container` is a folder that is about to stop being a series (a 분류함). A shared
+    /// image that no common series folder can serve then stays where it is instead of
+    /// failing the move: character links and references are never rewritten. Anything a
+    /// valid series can still hold is placed exactly as in an ordinary move.
+    pub(super) fn character_series_move_in(
         &self,
         c: &Connection,
         target_id: &str,
         destination_id: &str,
+        container: Option<&str>,
     ) -> Result<SeriesMovePreview> {
         super::character_containers::reject_container(c, destination_id)?;
         let target = self.read_character_target(c, target_id)?;
@@ -189,14 +194,29 @@ impl Library {
                 }
             }
             let placement = if keep_folder {
-                folders[0].clone()
+                Some(folders[0].clone())
             } else {
-                shared_destination(c, destination_id, own_reference, &served_others)?
+                match shared_destination(c, destination_id, own_reference, &served_others) {
+                    Ok(folder) => Some(folder),
+                    // Only the container was left as a common ancestor: leave the image alone.
+                    Err(Error::Invalid(_))
+                        if !others.is_empty()
+                            && match container {
+                                Some(folder) => in_subtree(c, folder, destination_id)?,
+                                None => false,
+                            } =>
+                    {
+                        None
+                    }
+                    Err(error) => return Err(error),
+                }
             };
-            if !in_subtree(c, destination_id, &placement)? {
-                let counts = shared_locations.entry(placement.clone()).or_default();
-                counts.0 += 1;
-                counts.1 += usize::from(!keep_folder);
+            if let Some(placement) = &placement {
+                if !in_subtree(c, destination_id, placement)? {
+                    let counts = shared_locations.entry(placement.clone()).or_default();
+                    counts.0 += 1;
+                    counts.1 += usize::from(!keep_folder);
+                }
             }
             let excluded = super::character_folders::asset_excluded(c, id)?
                 || match target.series_classification_id.as_deref() {
@@ -206,7 +226,7 @@ impl Library {
             if excluded {
                 excluded_ids.push(id.clone());
             }
-            if !keep_folder {
+            if let (false, Some(placement)) = (keep_folder, placement) {
                 for folder in &folders {
                     if super::classification::classification_in_role_scope(c, folder, "originals")?
                     {
@@ -266,7 +286,7 @@ impl Library {
     ) -> Result<SeriesMovePreview> {
         let mut c = self.connection()?;
         let tx = c.transaction()?;
-        self.character_series_move_in(&tx, target_id, destination_id)
+        self.character_series_move_in(&tx, target_id, destination_id, None)
     }
 
     pub fn move_character_to_series(
@@ -277,10 +297,25 @@ impl Library {
     ) -> Result<Target> {
         let mut c = self.connection()?;
         let tx = c.transaction()?;
-        let preview = self.character_series_move_in(&tx, target_id, destination_id)?;
+        let preview = self.character_series_move_in(&tx, target_id, destination_id, None)?;
         if preview.token != token {
             return Err(Error::Stale);
         }
+        let result = self.apply_series_move_in(&tx, target_id, destination_id, preview)?;
+        tx.commit()?;
+        drop(c);
+        self.cancel_obsolete_character_scan(target_id, &result.fingerprint);
+        Ok(result)
+    }
+
+    /// Writes a move computed by `character_series_move_in` inside the caller's transaction.
+    pub(super) fn apply_series_move_in(
+        &self,
+        tx: &Connection,
+        target_id: &str,
+        destination_id: &str,
+        preview: SeriesMovePreview,
+    ) -> Result<Target> {
         let now = chrono::Utc::now().timestamp();
         // Carry explicit opt-outs across the move instead of silently re-enabling these assets.
         tx.execute("INSERT OR IGNORE INTO character_series_asset_exclusions(series_id,asset_id,created_at)
@@ -303,7 +338,7 @@ impl Library {
             tx.execute("UPDATE character_autotag_jobs SET state='superseded',review_state='superseded',claim_id=NULL,error=NULL WHERE asset_id IN (SELECT value FROM json_each(?1))", [&ids_json])?;
             tx.execute("UPDATE character_reference_refresh_items SET state='superseded',updated_at=?2 WHERE asset_id IN (SELECT value FROM json_each(?1)) AND state IN ('pending','processing')", params![ids_json,now])?;
             Self::set_asset_classification_cause_in(
-                &tx,
+                tx,
                 &SetAssetClassification {
                     asset_ids,
                     classification_id: Some(folder_id),
@@ -314,7 +349,7 @@ impl Library {
         // An excluded image relocated to a common ancestor must not become eligible
         // for that ancestor's automatic scope on a later restore or ingestion.
         for asset_id in &preview.excluded_ids {
-            if let Some(scope) = super::character_scope::resolve_character_scope(&tx, asset_id)? {
+            if let Some(scope) = super::character_scope::resolve_character_scope(tx, asset_id)? {
                 for series_id in scope.series_classification_ids {
                     tx.execute("INSERT OR IGNORE INTO character_series_asset_exclusions(series_id,asset_id,created_at) VALUES(?1,?2,?3)", params![series_id,asset_id,chrono::Utc::now().to_rfc3339()])?;
                 }
@@ -323,19 +358,19 @@ impl Library {
         // The existing trigger removes old group membership and increments its revision.
         // An ordinary linked folder stays in place and becomes visible as an ordinary folder again.
         tx.execute("UPDATE character_targets SET series_classification_id=?2,linked_classification_id=NULL,revision=revision+1,updated_at=?3 WHERE id=?1", params![target_id,destination_id,chrono::Utc::now().to_rfc3339()])?;
-        let result = self.read_character_target(&tx, target_id)?;
-        tx.commit()?;
-        // Stop only an obsolete explicit scan of this character, not the native queue.
-        drop(c);
+        self.read_character_target(tx, target_id)
+    }
+
+    // Stop only an obsolete explicit scan of this character, not the native queue.
+    pub(super) fn cancel_obsolete_character_scan(&self, target_id: &str, fingerprint: &str) {
         if let Some(scan) = self.character_scan_status() {
             if scan.target_id == target_id
-                && scan.target_fingerprint != result.fingerprint
+                && scan.target_fingerprint != fingerprint
                 && matches!(scan.state.as_str(), "running" | "cancelling")
             {
                 let _ = self.cancel_character_scan(&scan.id);
             }
         }
-        Ok(result)
     }
 }
 

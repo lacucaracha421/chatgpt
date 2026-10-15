@@ -17,15 +17,17 @@ const large: ClassificationEntry = { ...small, id: "large", name: "리버스", t
 const entries = [root, small, large];
 const create = vi.fn();
 let preview: RegistrationPreview;
+let conversion: unknown;
 beforeEach(() => {
   preview = { imageCount: 12, otherSeries: false };
+  conversion = { movedCount: 1, sharedCount: 0, keptInFolderCount: 0 };
   const registered = [small.id, large.id];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "character_registration_preview") return preview;
     if (command === "character_series") return registered.map(classificationId => ({ classificationId, heroAssetId: null, autoClassify: true }));
     if (command === "save_character_series") registered.push((args as { request: { classificationId: string } }).request.classificationId);
     if (command === "create_manual_character") return { ...fixtureTarget("created", "민트"), seriesClassificationId: (args as { request: { seriesId: string } }).request.seriesId };
-    if (command === "character_series_move_preview") return { token: "current" };
+    if (command === "container_conversion_preview") { if (conversion instanceof Error) throw conversion; return conversion; }
     return undefined;
   });
 });
@@ -108,20 +110,61 @@ it("keeps zero scope silent for a manual character", async () => {
   expect(screen.queryByText(/다시 확인합니다/)).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
-it("moves each character using the existing move command before marking the folder", async () => {
+it("converts the folder in one command after every character has a destination", async () => {
   const saved = vi.fn();
   render(provider(<ContainerFolderDialog folder={root} targets={[{ ...fixtureTarget("character", "민트"), seriesClassificationId: root.id }]} entries={entries} onClose={vi.fn()} onSaved={saved} />));
   const user = userEvent.setup();
   expect(screen.getByRole("button", { name: "분류함으로 바꾸기" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "시리즈 고르기" }));
   await user.click(await screen.findByRole("button", { name: /이환.*12장/ }));
+  expect(await screen.findByText("여러 캐릭터가 함께 쓰는 이미지는 없습니다.")).toBeVisible();
+  expect(screen.getByText("레퍼런스도 모두 그대로 쓰입니다.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "분류함으로 바꾸기" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
-  expect(invoke).toHaveBeenCalledWith("move_character_to_series", { targetId: "character", destinationId: "small", token: "current" });
-  expect(invoke).toHaveBeenCalledWith("set_character_container", { folderId: "games", enabled: true });
+  expect(invoke).toHaveBeenCalledWith("convert_to_container", { folderId: "games", moves: [{ targetId: "character", destinationId: "small" }] });
   const commands = vi.mocked(invoke).mock.calls.map(call => call[0]);
-  expect(commands.indexOf("move_character_to_series")).toBeLessThan(commands.indexOf("set_character_container"));
+  expect(commands).not.toContain("move_character_to_series");
+  expect(commands).not.toContain("set_character_container");
   expect(commands).not.toContain("request_character_reference_refresh");
+});
+
+it("says what happens to images shared by several characters", async () => {
+  conversion = { movedCount: 2, sharedCount: 5, keptInFolderCount: 3 };
+  const targets = [fixtureTarget("first", "민트"), fixtureTarget("second", "블로니")].map(target => ({ ...target, seriesClassificationId: root.id }));
+  render(provider(<ContainerFolderDialog folder={root} targets={targets} entries={entries} onClose={vi.fn()} onSaved={vi.fn()} />));
+  const user = userEvent.setup();
+  for (const name of [/이환.*12장/, /리버스.*2,659장/]) {
+    await user.click(screen.getAllByRole("button", { name: "시리즈 고르기" })[0]!);
+    await user.click(await screen.findByRole("button", { name }));
+  }
+  expect(await screen.findByText(/함께 쓰는 이미지 5장.*그중 3장은 게임 폴더 안에 그대로 둡니다/)).toBeVisible();
+});
+
+it("warns per character when references end up outside the series, and still allows converting", async () => {
+  conversion = { movedCount: 2, sharedCount: 5, keptInFolderCount: 0, referenceLosses: [{ targetId: "second", name: "블로니", ineligibleCount: 5, losesReady: true }] };
+  const targets = [fixtureTarget("first", "민트"), fixtureTarget("second", "블로니")].map(target => ({ ...target, seriesClassificationId: root.id }));
+  render(provider(<ContainerFolderDialog folder={root} targets={targets} entries={entries} onClose={vi.fn()} onSaved={vi.fn()} />));
+  const user = userEvent.setup();
+  for (const name of [/이환.*12장/, /리버스.*2,659장/]) {
+    await user.click(screen.getAllByRole("button", { name: "시리즈 고르기" })[0]!);
+    await user.click(await screen.findByRole("button", { name }));
+  }
+  const warning = await screen.findByRole("status");
+  expect(within(warning).getByText(/블로니: 레퍼런스 5장이 시리즈 밖에 남아 자동 인식이 멈춥니다/)).toBeVisible();
+  expect(within(warning).getByText(/같은 하위 시리즈로 보내면/)).toBeVisible();
+  expect(warning).toHaveClass("registration-scope__notice--warning");
+  expect(screen.queryByText("레퍼런스도 모두 그대로 쓰입니다.")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "분류함으로 바꾸기" })).toBeEnabled();
+});
+
+it("shows why the folder cannot be converted and keeps the action off", async () => {
+  conversion = new Error("대상 시리즈에 같은 이름의 캐릭터가 있습니다.");
+  render(provider(<ContainerFolderDialog folder={root} targets={[{ ...fixtureTarget("character", "민트"), seriesClassificationId: root.id }]} entries={entries} onClose={vi.fn()} onSaved={vi.fn()} />));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "시리즈 고르기" }));
+  await user.click(await screen.findByRole("button", { name: /이환.*12장/ }));
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(screen.getByRole("button", { name: "분류함으로 바꾸기" })).toBeDisabled();
 });
 
 it("offers an inline-created series to the next character in the same conversion", async () => {
@@ -138,6 +181,5 @@ it("offers an inline-created series to the next character in the same conversion
   await user.click(await screen.findByRole("button", { name: /새 작품.*0장/ }));
   await user.click(screen.getByRole("button", { name: "분류함으로 바꾸기" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
-  expect(invoke).toHaveBeenCalledWith("move_character_to_series", { targetId: "first", destinationId: "new", token: "current" });
-  expect(invoke).toHaveBeenCalledWith("move_character_to_series", { targetId: "second", destinationId: "new", token: "current" });
+  expect(invoke).toHaveBeenCalledWith("convert_to_container", { folderId: "games", moves: [{ targetId: "first", destinationId: "new" }, { targetId: "second", destinationId: "new" }] });
 });

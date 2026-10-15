@@ -1528,6 +1528,16 @@ pub async fn set_character_container(folder_id: String, enabled: bool, state: St
     tauri::async_runtime::spawn_blocking(move || library.set_character_container(&folder_id, enabled)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn container_conversion_preview(folder_id: String, moves: Vec<crate::library::character_containers::ContainerMove>, state: State<'_, AppState>) -> Result<crate::library::character_containers::ContainerConversion, CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.container_conversion_preview(&folder_id, &moves)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn convert_to_container(folder_id: String, moves: Vec<crate::library::character_containers::ContainerMove>, state: State<'_, AppState>) -> Result<crate::library::character_containers::ContainerConversion, CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.convert_to_container(&folder_id, &moves)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
 pub async fn character_registration_preview(request: crate::library::character_containers::RegistrationPreviewRequest, state: State<'_, AppState>) -> Result<crate::library::character_containers::RegistrationPreview, CommandError> {
     let library=current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_registration_preview(request)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)

@@ -589,7 +589,7 @@ fn reinforcement_migration_preserves_history_without_enqueuing_it() {
     assert_eq!(
         c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        133
+        134
     );
     assert_eq!(
         c.query_row(
