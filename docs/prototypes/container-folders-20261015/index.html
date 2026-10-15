@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>분류함 폴더</title>
+<!-- Loads the app's real font, tokens, base, controls, the character picker and the folder shelf; only the frames and the new pieces below are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/characters/CharacterAssignPicker.css">
+<link rel="stylesheet" href="../../../_tools/app/src/assets/folder-shelf.css">
+<style>
+/* The app shell locks html/body height; this page scrolls as a document. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+:root { --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); }
+button, input, select { font-family: inherit; }
+.doc { width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 12px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 100ch; line-height: 1.7; }
+.note b, .lead b { color: var(--color-text); font-weight: 600; }
+.cap { margin: 24px 0 8px; font-size: var(--type-meta); color: var(--color-faint); }
+.cap b { color: var(--color-muted); font-weight: 600; }
+.tight .row { gap: 16px; }
+.tight .stage { padding: 16px; }
+.tight .stage > .cap { max-width: 360px; }
+#c .stage .ui-dialog { width: 410px; }
+.row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; min-width: 0; }
+svg.i { width: 16px; height: 16px; flex: none; }
+
+/* ===== App frame ===== */
+.frame { position: relative; display: grid; grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto 1fr; width: 1376px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; }
+.frame__top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-2); height: var(--toolbar-height); padding: 0 var(--space-4); background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.frame__index { background: var(--color-sidebar); padding: var(--space-3) var(--space-2) var(--space-4); border-right: 1px solid var(--color-border); min-width: 0; }
+.frame__index > .ui-section-label { margin: 0 var(--space-1) var(--space-2); }
+.main { position: relative; min-width: 0; padding: var(--space-4) var(--space-4) var(--space-8); display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* Sidebar tree (simplified copy of the classification tree: 32px rows, 24px depth step, a guide line per level) */
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--color-border); }
+.t-row { position: relative; display: flex; align-items: center; gap: var(--space-2); height: var(--sidebar-tree-row-height); padding: 0 var(--space-2) 0 var(--space-1); color: var(--color-text); border-radius: var(--radius-control); cursor: default; white-space: nowrap; }
+.t-row:hover, .t-row.is-hover { background: var(--color-sidebar-hover); }
+.t-row .tg { width: 16px; height: 16px; color: var(--color-muted); flex: none; }
+.t-row .sp { width: 16px; flex: none; }
+.t-row .fi { width: 16px; height: 16px; flex: none; }
+.t-row .lb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.t-row .ct { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.t-row .ct.hover { opacity: 0; }
+.t-row:hover .ct.hover, .t-row.is-hover .ct.hover { opacity: 1; }
+/* 정리 대기: a virtual row like the group rows; its count stays visible because it asks for attention. */
+.t-row--sort .fi { color: var(--color-muted); }
+.t-row--sort .lb { color: var(--color-muted); }
+.t-row--sort .ct { color: var(--color-text); font-weight: 600; }
+.t-row[aria-current=page] { color: var(--color-on-accent); background: var(--color-accent); border-radius: 0; box-shadow: var(--selection-echo); }
+.t-row[aria-current=page] .lb, .t-row[aria-current=page] .fi, .t-row[aria-current=page] .tg, .t-row[aria-current=page] .ct { color: inherit; }
+.t-row[aria-current=page]::after { content: ""; width: var(--selection-mark-size); height: var(--selection-mark-size); flex: none; background: currentColor; }
+
+/* Screen header inside the main area */
+.hdr { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); }
+.hdr h3 { margin: 0; font-size: var(--type-title); font-weight: 600; letter-spacing: -.2px; }
+.hdr .crumb { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-muted); font-size: var(--type-body); }
+.hdr .crumb svg { width: 16px; height: 16px; }
+.hdr .num { color: var(--color-muted); font-size: var(--type-body); font-variant-numeric: tabular-nums; }
+.hdr .grow { flex: 1; }
+.ib.ui-button.ui-button--quiet { width: var(--control-height-compact); padding: 0; }
+.ib.ui-button.ui-button--quiet svg { width: 20px; height: 20px; }
+
+/* Stand-in pictures */
+.ph { background-color: var(--color-surface); }
+.tiles { display: flex; gap: 2px; height: 140px; overflow: hidden; }
+.tiles > span { position: relative; height: 100%; flex: none; }
+.tiles--sm { height: 112px; }
+
+/* Folder shelf card meta: shown here permanently on one card to show the hover state */
+.folder-shelf__meta.on { opacity: 1; }
+.folder-shelf .home-shelf__track { overflow: hidden; }
+
+/* Static floating surfaces on the page (the real ones are portalled / fixed) */
+.stage { position: relative; padding: 24px; background: color-mix(in srgb, var(--color-bg) 70%, #000); border: 1px solid var(--color-border); }
+.stage .ui-dialog { position: relative; inset: auto; margin: 0; z-index: auto; max-height: none; overflow: visible; width: 440px; }
+.stage .ui-dialog--wide { width: 600px; }
+.stage .ui-menu { position: relative; }
+.stage .ctx.ui-menu { position: absolute; z-index: 3; width: 232px; }
+.ui-menu__item { width: 100%; font-size: var(--type-body); cursor: default; }
+.ui-menu__item[aria-disabled=true] { color: var(--color-faint); }
+.menu-sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
+.menu-mark { width: 5px; height: 5px; margin-left: auto; background: var(--color-accent); flex: none; }
+.ui-menu__item.is-on { font-weight: 600; }
+.ui-menu__item.is-hl { background: var(--color-surface-hover); }
+
+/* Character picker hosted statically */
+.stage .character-assign-picker.ui-menu { position: relative; bottom: auto; left: auto; max-height: none; }
+.picker-head { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3) 0 var(--space-2); }
+.picker-head b { font-weight: 600; font-size: var(--type-body); }
+.series-thumb { display: block; width: 32px; height: 32px; }
+.character-assign-picker__row.is-chosen { background: var(--color-surface-hover); font-weight: 600; }
+.create-open { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3); }
+.create-open__line { display: flex; align-items: center; gap: var(--space-2); }
+.create-open .ui-text-input { flex: 1; min-width: 0; display: flex; align-items: center; }
+.create-open .ui-text-input input { width: 100%; border: 0; background: transparent; color: var(--color-text); font-size: var(--type-body); outline: 0; }
+.is-typing { border-bottom: 2px solid var(--color-focus) !important; border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; }
+.create-open small { color: var(--color-faint); font-size: var(--type-meta); padding-left: 40px; }
+.picker-preview { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: var(--type-meta); }
+.picker-preview b { color: var(--color-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.picker-preview svg { width: 16px; height: 16px; color: var(--color-muted); }
+.sel-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-sm); box-shadow: var(--shadow-floating); white-space: nowrap; }
+.sel-bar b { padding: 0 var(--space-1); }
+.sel-bar b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.sel-bar .sep { width: 1px; height: 20px; background: var(--color-border); }
+.sel-bar .ui-button--quiet[aria-expanded=true] { background: var(--color-surface-hover); color: var(--color-text); }
+
+/* Dialog content */
+.dlg-p { margin: 0 0 var(--space-3); color: var(--color-muted); line-height: var(--line-copy); }
+.field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+.field > .lbl { color: var(--color-muted); font-size: var(--type-meta); }
+.selectlike { display: flex; align-items: center; gap: var(--space-2); height: var(--control-height); padding: 0 var(--space-3); background: var(--color-surface); border-radius: var(--radius-control); color: var(--color-text); }
+.selectlike .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selectlike .v small { color: var(--color-faint); font-size: var(--type-meta); margin-left: var(--space-2); }
+.selectlike svg { width: 16px; height: 16px; color: var(--color-muted); }
+.selectlike.is-open { border-bottom: 2px solid var(--color-focus); border-radius: var(--radius-control) var(--radius-control) 0 0; }
+.inputlike { display: flex; align-items: center; height: var(--control-height); padding: 0 var(--space-3); background: var(--color-surface); border-radius: var(--radius-control); }
+.chk { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); color: var(--color-text); }
+.move-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 16px 180px; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); margin-bottom: var(--space-3); }
+.move-row .who b { display: block; font-weight: 600; }
+.move-row .who small { display: block; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.move-row > svg { width: 16px; height: 16px; color: var(--color-muted); }
+.ph40 { width: 40px; height: 40px; }
+.kv { margin: 0 0 var(--space-1); display: flex; flex-direction: column; }
+.kv > div { display: flex; align-items: baseline; gap: var(--space-3); min-height: var(--row-height, 32px); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+.kv > div:first-child { border-top: 1px solid var(--color-border); }
+.kv dt { width: 96px; flex: none; color: var(--color-muted); font-size: var(--type-meta); }
+.kv dd { margin: 0; flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.kv dd small { color: var(--color-faint); font-size: var(--type-meta); }
+.kv dd .path { display: inline-flex; align-items: center; gap: var(--space-1); }
+.kv dd .path svg { width: 14px; height: 14px; color: var(--color-faint); }
+
+/* New shared piece: 등록 범위 (RegistrationScope) — one big number, what it covers, and a warning when it is large */
+.scope-hero { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-4); }
+.scope-hero__num { font-size: var(--type-number); font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.3px; }
+.scope-hero__num small { font-size: var(--type-body); font-weight: 600; margin-left: 2px; }
+.scope-hero__what { color: var(--color-text); }
+.scope-hero__what b { font-weight: 600; }
+.scope-warn { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); background: var(--color-surface); border-radius: var(--radius-control); }
+.scope-warn > svg { width: 20px; height: 20px; flex: none; color: var(--color-muted); margin-top: 2px; }
+.scope-warn--strong { background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface)); }
+.scope-warn--strong > svg { color: var(--color-danger); }
+.scope-warn__body { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.scope-warn__body b { font-weight: 600; }
+.scope-warn__body p { margin: 0; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); }
+.scope-warn__series { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+.scope-warn .ui-button--quiet { align-self: flex-start; margin-left: calc(var(--space-2) * -1); margin-top: var(--space-1); color: var(--color-text); }
+.ui-dialog__actions .push { margin-right: auto; }
+
+/* 정리 대기 */
+.sort-group { display: flex; flex-direction: column; gap: var(--space-3); }
+.sort-group .ui-section-label__actions { display: inline-flex; align-items: center; gap: var(--space-1); }
+.sort-group .ui-section-label__title { color: var(--color-text); font-size: var(--type-body); }
+.sort-group .ui-section-label { min-height: var(--control-height); }
+.sort-group .why { color: var(--color-faint); font-size: var(--type-meta); }
+.sort-bar-wrap { position: absolute; left: 50%; bottom: var(--space-4); transform: translateX(-50%); }
+.dock-anchor { position: relative; }
+.dock-anchor .character-assign-picker.ui-menu { position: absolute; bottom: calc(100% + var(--space-2)); left: 0; }
+
+/* Questions */
+.q { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.8; max-width: 110ch; }
+.q b { color: var(--color-text); font-weight: 600; }
+</style>
+<style>/* Mockup page scrolls like a document; the app shell locks html/body to the window. */ html{height:auto!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:auto!important} body{height:auto!important;overflow:visible!important;overscroll-behavior:auto!important}</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>분류함 폴더 · 캐릭터 등록 범위</h1>
+    <p class="lead"><b>게임 · 만화 · 기타</b> 같은 맨 위 폴더를 <b>분류함</b>으로 표시합니다. 분류함은 시리즈를 담는 상자라서 캐릭터를 직접 둘 수 없고, 등록하려 하면 그 안의 시리즈를 고르거나 새 시리즈를 바로 만듭니다. 바로 안에 놓인 이미지는 <b>정리 대기</b>로 모이고, 모든 캐릭터 등록은 확인할 이미지 수를 먼저 보여 줍니다.</p>
+    <p class="lead">앱의 실제 폰트 · 색 · 버튼 · 배지 · 메뉴 · 캐릭터 고르기 · 폴더 선반 CSS를 그대로 불러옵니다. 썸네일은 색 자리표시입니다. 리버스 · 젠레스 · 기타 게임 · 게임 합계 외의 장수와 캐릭터 수는 예시입니다.</p>
+  </header>
+
+  <!-- ===================== A ===================== -->
+  <section id="a">
+    <h2 class="sec">A · 사이드바와 분류함 화면</h2>
+    <p class="note"><b>사이드바</b> 폴더 행 모양은 그대로 두고(아이콘·색은 사용자 것), 분류함 바로 아래 첫 줄에 <b>정리 대기 232</b>가 생깁니다. 이 숫자는 할 일이라 마우스를 올리지 않아도 보입니다. 바로 안에 이미지가 없으면(기타 0장) 이 줄은 없습니다. 오리지널은 지금처럼 폴더 자체가 시리즈입니다.</p>
+    <p class="note"><b>게임 화면</b>은 시리즈 화면이 아니라 분류함 화면이 됩니다: 위에 하위 시리즈 선반, 아래에 바로 안의 이미지 232장. 제목 옆 배지 하나로 분류함임을 알리고, 캐릭터 만들기 버튼은 없습니다.</p>
+    <div class="cap"><b>A-1</b> 게임 열기 · 사이드바에서 게임이 선택됨</div>
+    <div class="frame" id="frameA">
+      <div class="frame__top"><span>에셋</span></div>
+      <nav class="frame__index" data-tree="game"></nav>
+      <div class="main">
+        <div class="hdr">
+          <h3>게임</h3><span class="ui-badge">분류함</span><span class="num">6,247장</span>
+          <span class="grow"></span>
+          <button class="ui-button ui-button--quiet ib" aria-label="보기" data-icon="adjust"></button>
+          <button class="ui-button ui-button--quiet ib" aria-label="폴더 더보기" data-icon="more"></button>
+        </div>
+        <div class="folder-shelf">
+          <div class="ui-section-label folder-shelf__label"><span class="ui-section-label__title">시리즈</span> <span class="ui-section-label__count">10</span><span class="ui-section-label__rule"></span></div>
+          <div class="home-shelf"><div class="home-shelf__track" data-shelf></div></div>
+        </div>
+        <div class="sort-group">
+          <div class="ui-section-label"><span class="ui-section-label__title">정리 대기</span> <span class="ui-section-label__count">232장</span><span class="ui-section-label__rule"></span>
+            <span class="ui-section-label__actions"><button class="ui-button ui-button--quiet">정리하기 <span data-icon="chevR"></span></button></span></div>
+          <div class="tiles" data-tiles="11" data-seed="40"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap"><b>A-2</b> 분류함 켜고 끄기 · 폴더 오른쪽 클릭(또는 폴더 화면 ⋯)의 한 항목</div>
+    <div class="row">
+      <div class="col">
+        <div class="stage" style="width: 520px; height: 400px;">
+          <nav class="frame__index" data-tree="menu" style="width: 240px; border: 1px solid var(--color-border);"></nav>
+          <div class="ctx ui-menu" style="left: 232px; top: 120px;" role="menu">
+            <button class="ui-menu__item"><span class="ui-menu__item-icon" data-icon="pin"></span><span class="ui-menu__item-label">고정</span></button>
+            <button class="ui-menu__item"><span class="ui-menu__item-icon" data-icon="folderPlus"></span><span class="ui-menu__item-label">하위 폴더 만들기</span></button>
+            <button class="ui-menu__item"><span class="ui-menu__item-icon" data-icon="pencil"></span><span class="ui-menu__item-label">이름 변경</span></button>
+            <button class="ui-menu__item"><span class="ui-menu__item-icon" data-icon="swatch"></span><span class="ui-menu__item-label">아이콘 및 색상</span></button>
+            <button class="ui-menu__item"><span class="ui-menu__item-icon" data-icon="move"></span><span class="ui-menu__item-label">폴더 이동</span></button>
+            <div class="menu-sep"></div>
+            <button class="ui-menu__item is-hl"><span class="ui-menu__item-icon" data-icon="stack"></span><span class="ui-menu__item-label">분류함으로 쓰기</span></button>
+            <div class="menu-sep"></div>
+            <button class="ui-menu__item ui-menu__item--destructive" aria-disabled="true"><span class="ui-menu__item-icon" data-icon="trash"></span><span class="ui-menu__item-label">삭제 — 하위 폴더 있음</span></button>
+          </div>
+        </div>
+        <p class="note" style="max-width: 520px; margin-top: 8px;">맨 위 폴더에만 나옵니다. 시리즈도 캐릭터도 없는 폴더(만화)는 누르는 즉시 바뀝니다. 켜진 폴더에서는 같은 항목이 굵게, 오른쪽에 작은 사각 표시와 함께 보이고 다시 누르면 끕니다. 끄면 그냥 폴더가 되고, 시리즈로 바뀌지는 않습니다.</p>
+      </div>
+      <div class="col">
+        <div class="stage">
+          <div class="ui-dialog" role="dialog" aria-label="게임을 분류함으로">
+            <h2 class="ui-dialog__title">게임을 분류함으로</h2>
+            <p class="dlg-p">분류함에는 캐릭터를 둘 수 없습니다. 게임에 있는 캐릭터를 옮길 시리즈를 골라 주세요.</p>
+            <div class="move-row">
+              <span class="ph ph40" data-ph="7"></span>
+              <span class="who"><b>베르스타몬</b><small>41장</small></span>
+              <span data-icon="arrowR"></span>
+              <span class="selectlike"><span class="v">기타 게임</span><span data-icon="chevD"></span></span>
+            </div>
+            <dl class="kv">
+              <div><dt>바로 안의 이미지</dt><dd>232장 <small>정리 대기로 남음</small></dd></div>
+              <div><dt>다시 확인</dt><dd>0장 <small>시리즈 등록만 해제</small></dd></div>
+            </dl>
+            <div class="ui-dialog__actions"><button class="ui-button ui-button--ghost">취소</button><button class="ui-button ui-button--primary">분류함으로 바꾸기</button></div>
+          </div>
+        </div>
+        <p class="note" style="max-width: 488px; margin-top: 8px;">지금 시리즈로 등록되어 캐릭터가 있는 폴더(게임)만 이 창이 뜹니다. 옮기기는 기존 “다른 시리즈로 이동”과 같아서 분석을 새로 시작하지 않습니다. 고르기 칸은 B의 시리즈 고르기를 그대로 엽니다(새 시리즈 포함).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== B ===================== -->
+  <section id="b" class="tight">
+    <h2 class="sec">B · 분류함에 캐릭터를 등록하려 할 때</h2>
+    <p class="note">새 캐릭터가 생기는 길은 네 곳입니다: <b>캐릭터에 넣기 → 새 캐릭터</b>, 폴더의 <b>캐릭터로 만들기</b>, 확인의 <b>새 캐릭터 제안 → 캐릭터로 등록</b>, 시리즈 화면의 <b>캐릭터 만들기</b>. 마지막은 이미 시리즈 안이라 그대로이고, 나머지 셋은 시리즈 칸에 분류함이 오면 같은 <b>시리즈 고르기</b>(새 공용 조각)를 엽니다.</p>
+    <p class="note">시리즈 고르기는 캐릭터 고르기와 같은 줄 모양입니다: 하위 시리즈를 이미지가 많은 순으로 보여 주고, 맨 아래 <b>새 시리즈</b>를 누르면 그 자리에서 이름을 적어 만듭니다. 분류함 안에 시리즈를 만드는 것은 자유입니다.</p>
+    <div class="cap"><b>B-1</b> 게임 정리 대기에서 12장을 골라 캐릭터에 넣기 → “민트” 입력 → 새 캐릭터 → 시리즈 고르기 → 새 시리즈 “이환”</div>
+    <div class="row">
+      <div class="stage" style="padding-bottom: 24px;">
+        <div class="character-assign-picker ui-menu" style="width: 360px;" role="listbox" aria-label="캐릭터에 넣기">
+          <div class="character-assign-picker__search ui-text-input" style="display:flex;align-items:center;">
+            <span data-icon="search"></span>
+            <button type="button" class="character-assign-picker__scope"><span>게임</span><span data-icon="x"></span></button>
+            <input type="search" value="민트" aria-label="캐릭터 찾기" style="flex:1;min-width:0;border:0;background:transparent;color:var(--color-text);font-size:var(--type-body);outline:0;">
+          </div>
+          <div class="character-assign-picker__scroll">
+            <div class="character-assign-picker__empty character-assign-picker__empty--scoped" style="color: var(--color-faint); font-size: var(--type-meta);">게임에 없음</div>
+            <section class="character-assign-picker__section">
+              <div class="ui-section-label character-assign-picker__section-label"><span class="ui-section-label__title">새 캐릭터</span><span class="ui-section-label__rule"></span></div>
+              <button type="button" class="character-assign-picker__create" style="background: var(--color-surface-hover);">
+                <span class="character-assign-picker__create-icon"><span data-icon="plus"></span></span>
+                <span style="flex:1">“민트” 만들기</span>
+                <span style="color: var(--color-faint); font-size: var(--type-meta);">시리즈 고르기</span><span data-icon="chevR" style="color: var(--color-faint);"></span>
+              </button>
+            </section>
+          </div>
+          <div class="character-assign-picker__meta">누르면 바로 넣기 · Ctrl+클릭 여러 명 · 시리즈 폴더로 옮김</div>
+        </div>
+        <div class="cap" style="margin: 8px 0 0;">1단계 · 게임은 분류함이라 “게임에 만들기” 대신 시리즈를 고르러 갑니다</div>
+      </div>
+
+      <div class="stage">
+        <div class="character-assign-picker ui-menu" style="width: 360px;" role="listbox" aria-label="시리즈 고르기">
+          <div class="picker-head"><button class="ui-button ui-button--quiet ib" aria-label="뒤로" data-icon="arrowL"></button><b>“민트”를 넣을 시리즈</b></div>
+          <div class="character-assign-picker__search ui-text-input" style="display:flex;align-items:center;">
+            <span data-icon="search"></span><input type="search" placeholder="시리즈 찾기" style="flex:1;min-width:0;border:0;background:transparent;color:var(--color-text);font-size:var(--type-body);outline:0;">
+          </div>
+          <div class="character-assign-picker__scroll" data-series-list="picker"></div>
+          <div class="picker-preview"><span data-icon="refresh"></span><span>이환 폴더 이미지 <b>12장</b>을 다시 확인합니다</span></div>
+        </div>
+        <div class="cap" style="margin: 8px 0 0;">2단계 · 하위 시리즈 10개 + 새 시리즈. 고르는 순간 아래 한 줄이 확인 범위를 알려 줍니다</div>
+      </div>
+
+      <div class="stage">
+        <div class="ui-dialog ui-dialog--wide" style="width: 480px;" role="dialog" aria-label="한 캐릭터 폴더 정리">
+          <h2 class="ui-dialog__title">한 캐릭터 폴더 정리</h2>
+          <div class="field"><span class="lbl">시리즈</span>
+            <span class="selectlike"><span class="v">게임 › 이환<small>새 시리즈</small></span><span data-icon="chevD"></span></span>
+          </div>
+          <div class="field"><span class="lbl">연결 대상</span><span class="selectlike"><span class="v">새 캐릭터</span><span data-icon="chevD"></span></span></div>
+          <div class="field"><span class="lbl">캐릭터 이름</span><span class="inputlike">민트</span></div>
+          <label class="chk"><input type="checkbox" class="ui-checkbox">하위 폴더 포함</label>
+          <label class="chk"><input type="checkbox" class="ui-checkbox" checked>전환 후 기존 폴더 정리</label>
+          <div class="tiles tiles--sm" data-tiles="6" data-seed="90" style="margin: 12px 0;"></div>
+          <div class="picker-preview" style="padding-left: 0; padding-right: 0;"><span data-icon="refresh"></span><span>18장 연결 · 이환 폴더 이미지 <b>18장</b>을 다시 확인합니다</span></div>
+          <div class="ui-dialog__actions"><button class="ui-button ui-button--ghost">취소</button><button class="ui-button ui-button--primary">캐릭터로 전환</button></div>
+        </div>
+        <div class="cap" style="margin: 8px 0 0; max-width: 480px;"><b>B-2</b> 폴더 게임 › 민트(18장)를 캐릭터로 만들기. 지금은 시리즈 칸에 조상 폴더(민트, 게임)가 나와 게임을 고를 수 있었습니다. 이제 분류함은 빠지고, 칸을 누르면 B-1 2단계의 목록이 열립니다. 새 캐릭터 제안의 “시리즈 폴더” 칸도 같습니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== C ===================== -->
+  <section id="c" class="tight">
+    <h2 class="sec">C · 등록 미리보기</h2>
+    <p class="note">“다른 시리즈로 이동” 창처럼 등록 직전에 숫자를 먼저 보여 줍니다. 크게 쓴 숫자가 <b>다시 확인할 이미지 수</b>이고, 그 아래 한 줄이 범위입니다. 시간은 10월 15일 실측(6,062장 2시간 30분, 장당 약 1.5초)으로 어림합니다.</p>
+    <p class="note"><b>1,000장 이상</b>이면 회색 경고 상자와 함께 등록 버튼에 장수가 들어갑니다. <b>범위 안에 다른 시리즈가 있으면</b> 붉은 경고로 바뀌고, 밝은 주 버튼은 안전한 쪽 “하위 시리즈 고르기”가 맡습니다. 그대로 등록은 보조 버튼으로 남깁니다.</p>
+    <div class="row">
+      <div class="col">
+        <div class="cap"><b>C-1</b> 일반 · 이환 12장</div>
+        <div class="stage">
+          <div class="ui-dialog" role="dialog" aria-label="민트 등록">
+            <h2 class="ui-dialog__title">민트 · 캐릭터 등록</h2>
+            <div class="scope-hero"><span class="scope-hero__num">12<small>장</small></span><span class="scope-hero__what"><b>이환</b> 폴더 이미지를 다시 확인합니다</span></div>
+            <dl class="kv">
+              <div><dt>시리즈</dt><dd><span class="path">게임 <span data-icon="chevR"></span> 이환</span><span class="ui-badge">새 시리즈</span></dd></div>
+              <div><dt>넣을 이미지</dt><dd>12장 <small>이환 폴더로 옮김</small></dd></div>
+              <div><dt>걸리는 시간</dt><dd>1분 안</dd></div>
+            </dl>
+            <div class="ui-dialog__actions"><button class="ui-button ui-button--ghost">취소</button><button class="ui-button ui-button--primary">등록</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="cap"><b>C-2</b> 큰 범위 · 리버스 2,659장</div>
+        <div class="stage">
+          <div class="ui-dialog" role="dialog" aria-label="블로니 등록">
+            <h2 class="ui-dialog__title">블로니 · 캐릭터 등록</h2>
+            <div class="scope-hero"><span class="scope-hero__num">2,659<small>장</small></span><span class="scope-hero__what"><b>리버스</b> 폴더와 하위 폴더 이미지를 다시 확인합니다</span></div>
+            <div class="scope-warn"><span data-icon="clock" data-size="20"></span>
+              <div class="scope-warn__body"><b>약 1시간 6분 걸립니다</b><p>작업 패널에서 멈출 수 있습니다.</p></div>
+            </div>
+            <dl class="kv">
+              <div><dt>시리즈</dt><dd><span class="path">게임 <span data-icon="chevR"></span> 리버스</span></dd></div>
+              <div><dt>범위</dt><dd>하위 폴더 15개 <small>다른 시리즈 없음</small></dd></div>
+            </dl>
+            <div class="ui-dialog__actions"><button class="ui-button ui-button--ghost">취소</button><button class="ui-button ui-button--primary">2,659장 확인하고 등록</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="cap"><b>C-3</b> 다른 시리즈 포함 · 분류함으로 바꾸기 전의 게임 6,247장</div>
+        <div class="stage">
+          <div class="ui-dialog" role="dialog" aria-label="베르스타몬 등록">
+            <h2 class="ui-dialog__title">베르스타몬 · 캐릭터 등록</h2>
+            <div class="scope-hero"><span class="scope-hero__num">6,247<small>장</small></span><span class="scope-hero__what"><b>게임</b> 폴더와 하위 폴더 이미지를 다시 확인합니다</span></div>
+            <div class="scope-warn scope-warn--strong"><span data-icon="warn" data-size="20"></span>
+              <div class="scope-warn__body"><b>다른 시리즈 10개가 범위에 들어 있습니다</b>
+                <div class="scope-warn__series"><span class="ui-badge ui-badge--count">리버스 2,659</span><span class="ui-badge ui-badge--count">젠레스 871</span><span class="ui-badge ui-badge--count">블아 612</span><span class="ui-badge ui-badge--count">니케 431</span><span class="ui-badge">외 6개</span></div>
+                <p>약 2시간 35분 걸립니다.</p>
+                <button class="ui-button ui-button--quiet">게임을 분류함으로…</button>
+              </div>
+            </div>
+            <div class="ui-dialog__actions"><button class="ui-button ui-button--ghost push">취소</button><button class="ui-button ui-button--secondary">그대로 등록</button><button class="ui-button ui-button--primary">하위 시리즈 고르기</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note" style="margin-top: 12px;">C-3은 아직 분류함으로 표시하지 않은 상위 폴더에서만 나옵니다(10월 15일 베르스타몬이 이 경우). “하위 시리즈 고르기”는 B-1 2단계의 목록을 엽니다. 시리즈 화면의 캐릭터 만들기 · 제안 등록 · 기타에서 올리기 · 폴더 등록 모두 같은 미리보기를 거칩니다.</p>
+    <p class="note">B-1 2단계와 폴더 등록 창처럼 이미 창이나 고르기 목록 안이면 작은 범위는 <b>한 줄</b>로만 알리고 창을 더 띄우지 않는 안도 함께 넣었습니다(아래 질문 3).</p>
+  </section>
+
+  <!-- ===================== D ===================== -->
+  <section id="d">
+    <h2 class="sec">D · 게임 정리 대기</h2>
+    <p class="note">바로 안의 이미지는 자동으로 옮기지 않습니다. 자동 태그가 어떤 시리즈 캐릭터 이름을 읽은 이미지는 그 시리즈 아래로 묶어 <b>한 번에 옮기기</b> 버튼을 두고, 나머지는 <b>추천 없음</b>에 둡니다. 몇 장만 빼거나 다른 곳으로 보내려면 골라서 아래 막대의 <b>시리즈로 옮기기</b>(B의 같은 목록)를 씁니다.</p>
+    <p class="note">옮기면 옮긴 이미지만 그 시리즈에서 확인합니다(리버스로 48장 → 48장). 근거 설명은 제목 옆 ⓘ 안에 둡니다.</p>
+    <div class="cap"><b>D-1</b> 사이드바의 정리 대기 선택 · 추천 없음에서 3장을 고른 상태</div>
+    <div class="frame" id="frameD">
+      <div class="frame__top"><span>에셋</span></div>
+      <nav class="frame__index" data-tree="sort"></nav>
+      <div class="main" style="padding-bottom: 96px;">
+        <div class="hdr">
+          <span class="crumb">게임 <span data-icon="chevR"></span></span><h3>정리 대기</h3><span class="num">232장</span>
+          <button class="ui-button ui-button--quiet ib" aria-label="정리 대기 도움말" data-icon="info"></button>
+          <span class="grow"></span>
+          <button class="ui-button ui-button--quiet ib" aria-label="보기" data-icon="adjust"></button>
+        </div>
+        <div class="sort-group">
+          <div class="ui-section-label"><span class="ui-section-label__title">리버스</span> <span class="ui-section-label__count">48장</span><span class="ui-section-label__rule"></span>
+            <span class="ui-section-label__actions"><button class="ui-button ui-button--secondary ui-button--sm">리버스로 옮기기</button></span></div>
+          <div class="tiles" data-tiles="10" data-seed="11"></div>
+        </div>
+        <div class="sort-group">
+          <div class="ui-section-label"><span class="ui-section-label__title">젠레스</span> <span class="ui-section-label__count">31장</span><span class="ui-section-label__rule"></span>
+            <span class="ui-section-label__actions"><button class="ui-button ui-button--secondary ui-button--sm">젠레스로 옮기기</button></span></div>
+          <div class="tiles" data-tiles="10" data-seed="27"></div>
+        </div>
+        <div class="sort-group">
+          <div class="ui-section-label"><span class="ui-section-label__title">니케</span> <span class="ui-section-label__count">12장</span><span class="ui-section-label__rule"></span>
+            <span class="ui-section-label__actions"><button class="ui-button ui-button--secondary ui-button--sm">니케로 옮기기</button></span></div>
+          <div class="tiles" data-tiles="10" data-seed="63"></div>
+        </div>
+        <div class="sort-group">
+          <div class="ui-section-label"><span class="ui-section-label__title">추천 없음</span> <span class="ui-section-label__count">141장</span><span class="ui-section-label__rule"></span></div>
+          <div style="display:flex;flex-direction:column;gap:2px;"><div class="tiles" data-tiles="10" data-seed="71" data-selected="1,2,4"></div>
+          <div class="tiles" data-tiles="10" data-seed="83"></div></div>
+        </div>
+        <div class="sort-bar-wrap">
+          <div class="dock-anchor">
+            <div class="sel-bar">
+              <b>3장 선택</b><span class="sep"></span>
+              <button class="ui-button ui-button--quiet" aria-expanded="false"><span data-icon="move"></span>시리즈로 옮기기</button>
+              <button class="ui-button ui-button--quiet"><span data-icon="userPlus"></span>캐릭터에 넣기</button>
+              <button class="ui-button ui-button--quiet"><span data-icon="trash"></span>휴지통으로</button>
+              <span class="sep"></span>
+              <button class="ui-button ui-button--quiet ib" aria-label="선택 해제" data-icon="x"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Questions ===================== -->
+  <section id="q">
+    <h2 class="sec">정할 것</h2>
+    <ol class="q">
+      <li><b>처음 분류함으로 둘 폴더</b> — 게임 · 만화 · 기타 셋으로 시작할까요? 오리지널은 그대로 시리즈입니다.</li>
+      <li><b>베르스타몬의 새 자리</b> — 기타 게임으로 옮길지, 새 시리즈(예: 디지몬)를 만들지.</li>
+      <li><b>작은 범위의 확인</b> — 1,000장 미만에 다른 시리즈도 없으면 C-1 창을 띄울지, B-1 2단계처럼 한 줄만 보여 주고 바로 등록할지.</li>
+      <li><b>경고 기준</b> — 1,000장 이상 회색 경고, 다른 시리즈 포함이면 붉은 경고. 숫자를 바꿀지.</li>
+      <li><b>분류함 위치</b> — 맨 위 폴더만 허용할지, 하위 폴더도 분류함이 될 수 있게 할지.</li>
+      <li><b>정리 대기 알림</b> — 홈의 “오늘 할 것”에도 “게임 정리 대기 232”를 넣을지, 사이드바에만 둘지.</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+const P = {
+  folder: 'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+  chevR: 'm8.25 4.5 7.5 7.5-7.5 7.5',
+  chevD: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  inbox: 'M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  check: 'm4.5 12.75 6 6 9-13.5',
+  arrowL: 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18',
+  arrowR: 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3',
+  warn: 'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z',
+  info: 'm11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z',
+  x: 'M6 18 18 6M6 6l12 12',
+  more: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  move: 'm9 13.5 3 3m0 0 3-3m-3 3v-6m1.06-4.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+  folderPlus: 'M12 10.5v6m3-3H9m4.06-7.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+  pencil: 'm16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125',
+  swatch: 'M4.098 19.902a3.75 3.75 0 0 0 5.304 0l6.401-6.402M6.75 21A3.75 3.75 0 0 1 3 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 0 0 3.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008Z',
+  pin: 'M16.5 3.75 20.25 7.5m-3.75-3.75-5.25 5.25-3.75.75-1.5 1.5 6.75 6.75 1.5-1.5.75-3.75 5.25-5.25m-3.75-3.75 3.75 3.75M9 15l-5.25 5.25',
+  trash: 'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
+  userPlus: 'M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z',
+  adjust: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75',
+  clock: 'M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  refresh: 'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99',
+};
+const svg = (name, size = 16) => `<svg class="i" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" style="width:${size}px;height:${size}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="${P[name]}"/></svg>`;
+
+// Stand-in pictures: gradients made only from the app's surface and accent tokens.
+function ph(seed) {
+  const a = (seed * 47) % 360, p1 = 8 + (seed * 13) % 22, p2 = 30 + (seed * 29) % 40, x = 20 + (seed * 37) % 60, y = 15 + (seed * 53) % 50;
+  return `background: radial-gradient(circle at ${x}% ${y}%, color-mix(in srgb, var(--color-accent) ${p1 + 10}%, transparent) 0 ${14 + seed % 9}%, transparent ${38 + seed % 14}%), linear-gradient(${a}deg, color-mix(in srgb, var(--color-accent) ${p1}%, var(--color-surface-elevated)), color-mix(in srgb, var(--color-border-strong) ${p2}%, var(--color-bg)));`;
+}
+
+// Child series of 게임 in sidebar order. 리버스, 젠레스, 기타 게임 and the totals are real; the rest are examples that add up to 6,015.
+const SERIES = [
+  { name: '격투게임', n: 88, c: 2 }, { name: '기타 게임', n: 342, c: 9 }, { name: '니케', n: 431, c: 22 }, { name: '닌텐도', n: 196, c: 6 },
+  { name: '리버스', n: 2659, c: 64 }, { name: '명조', n: 388, c: 17 }, { name: '블아', n: 612, c: 31 }, { name: '아이돌', n: 154, c: 4 },
+  { name: '젠레스', n: 871, c: 38 }, { name: '포켓몬', n: 274, c: 8 },
+];
+const fmt = n => n.toLocaleString('ko-KR');
+const COLORS = { 게임: '#7fa7d9', 만화: '#d9a35f', 기타: '#9aa0a6', 오리지널: '#b59ad9' };
+
+function row({ depth = 0, toggle = null, icon = 'folder', color = null, label, count = null, countHover = true, current = false, hover = false, cls = '' }) {
+  const tg = toggle === null ? '<span class="sp"></span>' : `<span class="tg">${svg(toggle === 'open' ? 'chevD' : 'chevR')}</span>`;
+  const ic = `<span class="fi" style="${color ? `color:${color}` : 'color:var(--color-muted)'}">${svg(icon)}</span>`;
+  const ct = count === null ? '' : `<span class="ct${countHover && !current ? ' hover' : ''}">${fmt(count)}</span>`;
+  return `<div class="t-row ${cls}${hover ? ' is-hover' : ''}" ${current ? 'aria-current="page"' : ''}>${tg}${ic}<span class="lb">${label}</span>${ct}</div>`;
+}
+function tree(mode) {
+  const game = mode !== 'menu';
+  const children = SERIES.map(s => `<li>${row({ label: s.name, count: s.n, toggle: s.name === '리버스' || s.name === '젠레스' ? 'closed' : null })}</li>`).join('');
+  const sortRow = `<li>${row({ icon: 'inbox', label: '정리 대기', count: 232, countHover: false, current: mode === 'sort', cls: 't-row--sort' })}</li>`;
+  return `<div class="ui-section-label"><span class="ui-section-label__title">폴더</span><span class="ui-section-label__rule"></span></div>
+  <ul class="tree">
+    <li>${row({ toggle: game ? 'open' : 'closed', color: COLORS.게임, label: '게임', count: 6247, current: mode === 'game' })}
+      ${game ? `<ul>${sortRow}${children}</ul>` : ''}</li>
+    <li>${row({ toggle: 'closed', color: COLORS.만화, label: '만화', count: 1543, hover: mode === 'menu' })}</li>
+    <li>${row({ toggle: 'closed', color: COLORS.기타, label: '기타', count: 1254 })}</li>
+    <li>${row({ color: COLORS.오리지널, label: '오리지널', count: 1031 })}</li>
+  </ul>`;
+}
+document.querySelectorAll('[data-tree]').forEach(el => { el.innerHTML = tree(el.dataset.tree); });
+
+// Folder shelf: the child series of 게임, as series cards.
+const shelf = document.querySelector('[data-shelf]');
+shelf.innerHTML = [...SERIES].sort((a, b) => b.n - a.n).map((s, i) => `<div class="folder-shelf__card"><button class="folder-shelf__card-open" type="button">
+  <span class="folder-shelf__placeholder ph" style="${ph(i * 7 + 3)}"></span>
+  <span class="folder-shelf__meta${i === 0 ? ' on' : ''}">${fmt(s.n)}장 · ${s.c}명</span>
+  <strong><span class="folder-shelf__name">${s.name}</span></strong></button></div>`).join('');
+
+// Tile rows with varied aspect ratios.
+document.querySelectorAll('[data-tiles]').forEach(el => {
+  const n = +el.dataset.tiles, seed = +el.dataset.seed, h = el.classList.contains('tiles--sm') ? 112 : 140;
+  const sel = (el.dataset.selected || '').split(',').filter(Boolean).map(Number);
+  el.innerHTML = Array.from({ length: n }, (_, i) => {
+    const r = [0.66, 0.75, 1, 1.33, 0.7, 1.5, 0.8][(seed + i * 3) % 7];
+    const on = sel.includes(i);
+    return `<span class="ph ui-selectable-media"${on ? ' aria-selected="true"' : ''} style="width:${Math.round(h * r)}px;${ph(seed + i)}">${on ? '<span class="ui-selection-check"></span>' : ''}</span>`;
+  }).join('');
+});
+document.querySelectorAll('[data-ph]').forEach(el => { el.setAttribute('style', ph(+el.dataset.ph)); });
+
+// Series list for the picker's second step (shared 시리즈 고르기 piece).
+const list = document.querySelector('[data-series-list=picker]');
+list.innerHTML = `<section class="character-assign-picker__section">
+    <div class="ui-section-label character-assign-picker__section-label"><span class="ui-section-label__title">게임</span> <span class="ui-section-label__count">시리즈 10</span><span class="ui-section-label__rule"></span></div>
+    ${[...SERIES].sort((a, b) => b.n - a.n).slice(0, 5).map((s, i) => `<button type="button" class="character-assign-picker__row">
+      <span class="series-thumb ph" style="${ph(i * 7 + 3)}"></span>
+      <span class="character-assign-picker__name">${s.name}<small>${s.c}명</small></span>
+      <span class="character-assign-picker__count">${fmt(s.n)}</span><span></span></button>`).join('')}
+    <div class="character-assign-picker__group-caption">외 5개 · 찾기로 좁히기</div>
+  </section>
+  <section class="character-assign-picker__section">
+    <div class="ui-section-label character-assign-picker__section-label"><span class="ui-section-label__title">새 시리즈</span><span class="ui-section-label__rule"></span></div>
+    <div class="create-open">
+      <div class="create-open__line">
+        <span class="character-assign-picker__create-icon">${svg('plus')}</span>
+        <span class="ui-text-input is-typing"><input type="text" value="이환" aria-label="새 시리즈 이름"></span>
+        <button class="ui-button ui-button--primary">만들기</button>
+      </div>
+      <small>게임 안에 새 폴더로 만들고 민트를 넣습니다</small>
+    </div>
+  </section>`;
+
+// ?only=a|b|c|d|q shows one section (used for screenshots).
+const only = new URLSearchParams(location.search).get('only');
+if (only) { document.querySelector('header').style.display = 'none'; document.querySelectorAll('.doc > section').forEach(s => { if (s.id !== only) s.style.display = 'none'; }); }
+
+// Inline icons
+document.querySelectorAll('[data-icon]').forEach(el => {
+  const size = +(el.dataset.size || 16);
+  el.insertAdjacentHTML('afterbegin', svg(el.dataset.icon, size));
+});
+</script>
+</body>
+</html>
