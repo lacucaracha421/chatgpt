@@ -275,3 +275,13 @@ class CaptureReservationAndCleanupTests(unittest.TestCase):
                 self.request()
         self.assertEqual(self.deleted, [])
         self.assertFalse(self.request()['created'])
+
+
+class PixivRefererTests(unittest.TestCase):
+    def test_pixiv_image_host_gets_pixiv_referer(self):
+        self.assertEqual(store._request_headers('i.pximg.net', 'image/*')['Referer'], 'https://www.pixiv.net/')
+
+    def test_other_hosts_send_no_referer(self):
+        for host in ('pbs.twimg.com', 'pximg.net.example.com', 'evilpximg.net'):
+            with self.subTest(host=host):
+                self.assertNotIn('Referer', store._request_headers(host, 'image/*'))

@@ -67,6 +67,14 @@ def _known_source_host(source: str, host: str, media_type: str) -> bool:
     return source == "web"
 
 
+def _request_headers(host: str, accept: str) -> dict[str, str]:
+    headers = {"User-Agent": "Lakomics-Collector/2.0", "Accept": accept}
+    # Pixiv's image host refuses requests that do not come from a pixiv page.
+    if host == "pximg.net" or host.endswith(".pximg.net"):
+        headers["Referer"] = "https://www.pixiv.net/"
+    return headers
+
+
 def _public_addresses(host: str) -> set[str]:
     try:
         rows = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -136,7 +144,7 @@ def _fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source:
             async with asyncio.timeout_at(started + download_budget(0)) as deadline:
                 async with _media_stream(
                     "GET", media_url,
-                    headers={"User-Agent": "Lakomics-Collector/2.0", "Accept": accept},
+                    headers=_request_headers(host, accept),
                     follow_redirects=False,
                     timeout=HTTP_TIMEOUT,
                 ) as response:
