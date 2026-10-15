@@ -50,6 +50,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "home_upcoming.register.<locals>.startup",
             "home_av_pick.register.<locals>.startup",
             "library_artists.register.<locals>.startup",
+            "cards.register.<locals>.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",
             "collection_release_checks.Worker.start",
             "release_calendar.register.<locals>.startup",
