@@ -16,6 +16,10 @@ use std::{
     sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
+use ureq::unversioned::{
+    resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
+    transport::{DefaultConnector, NextTimeout},
+};
 use url::Url;
 
 const HTML_LIMIT: usize = 512 * 1024;
@@ -54,32 +58,94 @@ struct Page {
     content_type: String,
     bytes: Vec<u8>,
 }
+fn public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || a == 0
+                || a >= 224
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 192 && b == 0 && c == 0)
+                || (a == 198 && (b == 18 || b == 19)))
+        }
+        std::net::IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map(|v| public_ip(v.into()))
+            .unwrap_or_else(|| {
+                let s = ip.segments();
+                // Only global unicast; exclude documentation and transition ranges.
+                (s[0] & 0xe000) == 0x2000
+                    && s[0] != 0x2002
+                    && !(s[0] == 0x2001 && (s[1] < 0x200 || s[1] == 0xdb8))
+            }),
+    }
+}
+#[derive(Debug)]
+struct PublicResolver;
+impl Resolver for PublicResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: NextTimeout,
+    ) -> std::result::Result<ResolvedSocketAddrs, ureq::Error> {
+        let addresses = DefaultResolver::default().resolve(uri, config, timeout)?;
+        if addresses
+            .iter()
+            .any(|address| !public_ip(address.ip()) && !(cfg!(test) && address.ip().is_loopback()))
+        {
+            return Err(ureq::Error::HostNotFound);
+        }
+        Ok(addresses)
+    }
+}
+fn network_url(value: &str) -> Result<Url> {
+    let url = web_url(value)?;
+    let local_test = cfg!(test) && url.host_str() == Some("127.0.0.1");
+    if url.scheme() != "https" && !local_test {
+        return Err("HTTPS 주소만 가져올 수 있습니다.".into());
+    }
+    Ok(url)
+}
 fn fetch(value: &str, image: bool, timeout: Duration) -> Result<Page> {
-    let mut url = web_url(value)?;
+    fetch_with_referer(value, image, timeout, None)
+}
+fn fetch_with_referer(
+    value: &str,
+    image: bool,
+    timeout: Duration,
+    referer: Option<&str>,
+) -> Result<Page> {
+    let mut url = network_url(value)?;
     let deadline = Instant::now() + timeout;
     for redirects in 0..=5 {
         let remaining = deadline
             .checked_duration_since(Instant::now())
             .ok_or("요청 시간이 초과되었습니다.")?;
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
+            .proxy(None)
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_global(Some(remaining))
-            .build()
-            .into();
-        let mut response = agent
-            .get(url.as_str())
-            .header("User-Agent", UA)
-            .header(
-                "Accept",
-                if image {
-                    "image/*"
-                } else {
-                    "text/html,image/*;q=0.8"
-                },
-            )
-            .call()
-            .map_err(|e| e.to_string())?;
+            .build();
+        let agent = ureq::Agent::with_parts(config, DefaultConnector::default(), PublicResolver);
+        let mut request = agent.get(url.as_str()).header("User-Agent", UA).header(
+            "Accept",
+            if image {
+                "image/*"
+            } else {
+                "text/html,application/json;q=0.9,image/*;q=0.8"
+            },
+        );
+        if let Some(referer) = referer.filter(|_| url.host_str() == Some("www.pixiv.net")) {
+            request = request.header("Referer", referer);
+        }
+        let mut response = request.call().map_err(|e| e.to_string())?;
         if response.status().is_redirection() {
             if redirects == 5 {
                 return Err("리디렉션이 너무 많습니다.".into());
@@ -89,7 +155,7 @@ fn fetch(value: &str, image: bool, timeout: Duration) -> Result<Page> {
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .ok_or("이동 주소가 없습니다.")?;
-            url = web_url(url.join(location).map_err(|e| e.to_string())?.as_str())?;
+            url = network_url(url.join(location).map_err(|e| e.to_string())?.as_str())?;
             continue;
         }
         if !response.status().is_success() {
@@ -113,12 +179,15 @@ fn fetch(value: &str, image: bool, timeout: Duration) -> Result<Page> {
             return Err("이미지 주소가 아닙니다.".into());
         }
         let limit = if image { IMAGE_LIMIT } else { HTML_LIMIT };
-        if response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<usize>().ok())
-            .is_some_and(|size| size > limit)
+        // Metadata is in the head: keep a bounded prefix of large HTML pages.
+        let html_prefix = !image && content_type.starts_with("text/html");
+        if !html_prefix
+            && response
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<usize>().ok())
+                .is_some_and(|size| size > limit)
         {
             return Err("응답 크기 제한을 초과했습니다.".into());
         }
@@ -126,7 +195,7 @@ fn fetch(value: &str, image: bool, timeout: Duration) -> Result<Page> {
         response
             .body_mut()
             .as_reader()
-            .take((limit + 1) as u64)
+            .take((limit + usize::from(!html_prefix)) as u64)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
         if bytes.len() > limit {
@@ -170,21 +239,46 @@ fn attributes(tag: &str) -> HashMap<String, String> {
         .collect()
 }
 fn text(value: &str) -> String {
-    // XML numeric references plus the common HTML title entities.
-    let value = value
-        .replace("&nbsp;", " ")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'");
-    let decoded = quick_xml::escape::unescape(&value)
+    static ENTITY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"&(?:#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]+);").unwrap()
+    });
+    // Decode independently so an unknown entity cannot prevent decoding the rest.
+    let decoded = ENTITY.replace_all(value, |c: &regex::Captures<'_>| {
+        quick_xml::escape::unescape_with(&c[0], |name| match name {
+            "nbsp" => Some(" "),
+            "copy" => Some("©"),
+            "reg" => Some("®"),
+            "trade" => Some("™"),
+            "hellip" => Some("…"),
+            "ndash" => Some("–"),
+            "mdash" => Some("—"),
+            "lsquo" => Some("‘"),
+            "rsquo" => Some("’"),
+            "ldquo" => Some("“"),
+            "rdquo" => Some("”"),
+            "laquo" => Some("«"),
+            "raquo" => Some("»"),
+            "middot" => Some("·"),
+            "bull" => Some("•"),
+            "eacute" => Some("é"),
+            "egrave" => Some("è"),
+            "aacute" => Some("á"),
+            "ouml" => Some("ö"),
+            "uuml" => Some("ü"),
+            "auml" => Some("ä"),
+            "times" => Some("×"),
+            "divide" => Some("÷"),
+            "yen" => Some("¥"),
+            "euro" => Some("€"),
+            _ => quick_xml::escape::resolve_predefined_entity(name),
+        })
         .map(|v| v.into_owned())
-        .unwrap_or(value);
-    decoded
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(1024)
-        .collect()
+        .unwrap_or_else(|_| c[0].to_string())
+    });
+    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+fn title_text(value: &str) -> String {
+    text(value).chars().take(200).collect()
 }
 fn parse(html: &str, base: &Url) -> Preview {
     let html = HIDDEN.replace_all(html, "");
@@ -195,15 +289,15 @@ fn parse(html: &str, base: &Url) -> Preview {
             attrs.get("property").or(attrs.get("name")),
             attrs.get("content"),
         ) {
-            if !value.trim().is_empty() {
-                values
-                    .entry(name.to_lowercase())
-                    .or_insert_with(|| text(value));
+            let value = text(value);
+            if !value.is_empty() {
+                values.entry(name.to_lowercase()).or_insert(value);
             }
         }
     }
     let title = values
         .get("og:title")
+        .or_else(|| values.get("twitter:title"))
         .cloned()
         .or_else(|| TITLE.captures(&html).map(|c| text(&c[1])))
         .filter(|v| !v.is_empty())
@@ -218,7 +312,7 @@ fn parse(html: &str, base: &Url) -> Preview {
                 .map(|url| url.to_string())
         });
     Preview {
-        title,
+        title: title.chars().take(200).collect(),
         site_name: values.remove("og:site_name"),
         image_url,
     }
@@ -226,17 +320,33 @@ fn parse(html: &str, base: &Url) -> Preview {
 
 fn decode(bytes: &[u8], content_type: &str) -> Result<String> {
     let charset = Regex::new(r#"(?i)charset\s*=\s*["']?([a-zA-Z0-9_-]+)"#).unwrap();
-    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(8192)]);
+    let head = HIDDEN.replace_all(&head, "");
+    let meta_charset = META.find_iter(&head).find_map(|tag| {
+        let attrs = attributes(tag.as_str());
+        attrs.get("charset").cloned().or_else(|| {
+            attrs
+                .get("http-equiv")
+                .filter(|v| v.eq_ignore_ascii_case("content-type"))?;
+            charset
+                .captures(attrs.get("content")?)
+                .map(|c| c[1].to_string())
+        })
+    });
     let label = charset
         .captures(content_type)
-        .or_else(|| charset.captures(&head))
         .map(|c| c[1].to_lowercase())
+        .or_else(|| meta_charset.map(|v| v.to_lowercase()))
         .unwrap_or_else(|| "utf-8".into());
+    if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        return Ok(String::from_utf8_lossy(&bytes[3..]).into_owned());
+    }
     if bytes.starts_with(&[0xff, 0xfe])
         || bytes.starts_with(&[0xfe, 0xff])
         || label.starts_with("utf-16")
     {
-        let be = bytes.starts_with(&[0xfe, 0xff]) || label == "utf-16be";
+        let be = bytes.starts_with(&[0xfe, 0xff])
+            || (!bytes.starts_with(&[0xff, 0xfe]) && label == "utf-16be");
         let offset =
             usize::from(bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff])) * 2;
         return String::from_utf16(
@@ -339,16 +449,189 @@ fn decode_legacy(bytes: &[u8], label: &str) -> Result<String> {
         String::from_utf8(out).map_err(|e| e.to_string())
     }
 }
-fn preview(url: &str) -> Result<Preview> {
-    let page = fetch(url, false, TIMEOUT)?;
-    if page.content_type.starts_with("image/") {
-        return Ok(Preview {
-            title: page.url.host_str().unwrap_or("").into(),
-            site_name: None,
-            image_url: Some(page.url.to_string()),
-        });
+#[derive(Debug, PartialEq)]
+enum Provider {
+    Twitter,
+    Youtube,
+    Pixiv,
+}
+fn fallback_url(url: &Url) -> Option<(Provider, Url)> {
+    let host = url.host_str()?.trim_start_matches("www.");
+    let path: Vec<_> = url.path_segments()?.collect();
+    let digits = |value: &str| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());
+    if matches!(
+        host,
+        "x.com" | "twitter.com" | "mobile.twitter.com" | "mobile.x.com"
+    ) {
+        let index = path.iter().position(|v| *v == "status")?;
+        let id = *path.get(index + 1)?;
+        if !digits(id) {
+            return None;
+        }
+        let mut endpoint = Url::parse("https://publish.twitter.com/oembed").ok()?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("url", &format!("https://twitter.com/i/status/{id}"))
+            .append_pair("omit_script", "true")
+            .append_pair("dnt", "true");
+        return Some((Provider::Twitter, endpoint));
     }
-    Ok(parse(&decode(&page.bytes, &page.content_type)?, &page.url))
+    if matches!(
+        host,
+        "youtube.com" | "m.youtube.com" | "music.youtube.com" | "youtu.be"
+    ) {
+        let id = if host == "youtu.be" {
+            path.first()?.to_string()
+        } else if matches!(path.first().copied(), Some("shorts" | "embed" | "live")) {
+            path.get(1)?.to_string()
+        } else if url.path() == "/watch" {
+            url.query_pairs().find(|(k, _)| k == "v")?.1.into_owned()
+        } else {
+            return None;
+        };
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return None;
+        }
+        let mut endpoint = Url::parse("https://www.youtube.com/oembed").ok()?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("url", &format!("https://www.youtube.com/watch?v={id}"))
+            .append_pair("format", "json");
+        return Some((Provider::Youtube, endpoint));
+    }
+    if host == "pixiv.net" {
+        let index = path.iter().position(|v| *v == "artworks")?;
+        let id = *path.get(index + 1)?;
+        if digits(id) {
+            return Some((
+                Provider::Pixiv,
+                Url::parse(&format!("https://www.pixiv.net/ajax/illust/{id}")).ok()?,
+            ));
+        }
+    }
+    None
+}
+fn fallback_preview(provider: &Provider, bytes: &[u8]) -> Result<Preview> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let string = |key: &str| value.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    let title = match provider {
+        Provider::Twitter => {
+            static PARAGRAPH: LazyLock<Regex> =
+                LazyLock::new(|| Regex::new(r"(?is)<p\b[^>]*>(.*?)</p\s*>").unwrap());
+            static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<[^>]*>").unwrap());
+            static BR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<br\s*/?>").unwrap());
+            let html = HIDDEN.replace_all(string("html"), "");
+            let body = PARAGRAPH
+                .captures(&html)
+                .map(|c| text(&TAG.replace_all(&BR.replace_all(&c[1], " "), "")))
+                .unwrap_or_default();
+            if body.is_empty() {
+                String::new()
+            } else {
+                let author = text(string("author_name"));
+                if author.is_empty() {
+                    body
+                } else {
+                    format!("{author}: {body}")
+                }
+            }
+        }
+        Provider::Youtube => title_text(string("title")),
+        Provider::Pixiv => {
+            if value.get("error").and_then(|v| v.as_bool()) == Some(true) {
+                return Err("작품 정보를 가져오지 못했습니다.".into());
+            }
+            title_text(
+                value
+                    .pointer("/body/title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            )
+        }
+    };
+    if title.is_empty() {
+        return Err("제목이 없습니다.".into());
+    }
+    Ok(Preview {
+        title: title.chars().take(200).collect(),
+        site_name: match provider {
+            Provider::Twitter => Some("X".into()),
+            Provider::Youtube => Some("YouTube".into()),
+            Provider::Pixiv => Some("pixiv".into()),
+        },
+        image_url: web_url(string("thumbnail_url")).ok().map(|v| v.to_string()),
+    })
+}
+fn preview(url: &str) -> Result<Preview> {
+    let original = network_url(url)?;
+    let fallback = fallback_url(&original);
+    let deadline = Instant::now() + TIMEOUT;
+    let mut result = fetch(
+        url,
+        false,
+        if fallback.is_some() {
+            TIMEOUT / 2
+        } else {
+            TIMEOUT
+        },
+    )
+    .and_then(|page| {
+        if page.content_type.starts_with("image/") {
+            return Ok(Preview {
+                title: page.url.host_str().unwrap_or("").into(),
+                site_name: None,
+                image_url: Some(page.url.to_string()),
+            });
+        }
+        Ok(parse(&decode(&page.bytes, &page.content_type)?, &page.url))
+    });
+    // Public APIs also work when the HTML request is blocked or only serves an app shell.
+    if let Some((provider, endpoint)) = fallback {
+        let generic = result
+            .as_ref()
+            .map(|p| {
+                let title = p.title.to_lowercase();
+                title.trim_start_matches("www.")
+                    == original.host_str().unwrap_or("").trim_start_matches("www.")
+                    || matches!(
+                        title.as_str(),
+                        "x" | "twitter"
+                            | "x / ?"
+                            | "youtube"
+                            | "- youtube"
+                            | "pixiv"
+                            | "x.com"
+                            | "twitter.com"
+                            | "www.youtube.com"
+                            | "youtube.com"
+                            | "www.pixiv.net"
+                            | "pixiv.net"
+                    )
+            })
+            .unwrap_or(true);
+        if generic {
+            if let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+                let fallback = fetch_with_referer(
+                    endpoint.as_str(),
+                    false,
+                    remaining.min(TIMEOUT),
+                    Some("https://www.pixiv.net/"),
+                )
+                .and_then(|page| fallback_preview(&provider, &page.bytes));
+                if let Ok(mut fallback) = fallback {
+                    if let Ok(previous) = &result {
+                        fallback.image_url = previous.image_url.clone().or(fallback.image_url);
+                    }
+                    result = Ok(fallback);
+                }
+            }
+        }
+    }
+    result
 }
 fn image_bytes(url: &str) -> Result<(Vec<u8>, image::ImageFormat)> {
     let page = fetch(url, true, TIMEOUT)?;
@@ -551,6 +834,136 @@ mod tests {
             let _ = stream.write_all(&response);
         });
         format!("http://{address}/page")
+    }
+    #[test]
+    fn title_priority_entities_whitespace_and_length() {
+        let base = Url::parse("https://example.org/").unwrap();
+        assert_eq!(parse("<title>Document</title><meta name='twitter:title' content='Twitter'><meta property='og:title' content='Open Graph'>", &base).title, "Open Graph");
+        assert_eq!(parse("<title>Document</title><meta name='twitter:title' content=' Twitter &amp; &#x1f600; &hellip; &unknown; &#65; '> ", &base).title, "Twitter & 😀 … &unknown; A");
+        assert_eq!(parse("<meta property='og:title' content=' &nbsp; '><meta name='twitter:title' content='  '><title> A\n  B &copy; </title>", &base).title, "A B ©");
+        assert_eq!(parse("<title>&amp;lt;</title>", &base).title, "&lt;");
+        assert_eq!(
+            parse(&format!("<title>{}</title>", "한".repeat(250)), &base)
+                .title
+                .chars()
+                .count(),
+            200
+        );
+        assert!(decode(
+            b"<script>charset=bad</script><meta charset=windows-1252><title>caf\xe9</title>",
+            "text/html"
+        )
+        .unwrap()
+        .contains("café"));
+        assert_eq!(
+            decode(
+                b"caf\xe9<meta charset=utf-8>",
+                "text/html; charset=windows-1252"
+            )
+            .unwrap(),
+            "café<meta charset=utf-8>"
+        );
+    }
+    #[test]
+    fn maps_only_known_public_provider_urls() {
+        for url in [
+            "https://x.com/person/status/123?s=20",
+            "https://twitter.com/i/web/status/123",
+        ] {
+            let (provider, endpoint) = fallback_url(&Url::parse(url).unwrap()).unwrap();
+            assert_eq!(provider, Provider::Twitter);
+            assert_eq!(endpoint.host_str(), Some("publish.twitter.com"));
+            assert!(endpoint
+                .query_pairs()
+                .any(|(k, v)| k == "url" && v == "https://twitter.com/i/status/123"));
+        }
+        for url in [
+            "https://youtu.be/abc-123?t=1",
+            "https://www.youtube.com/watch?v=abc-123",
+            "https://youtube.com/shorts/abc-123",
+        ] {
+            let (provider, endpoint) = fallback_url(&Url::parse(url).unwrap()).unwrap();
+            assert_eq!(provider, Provider::Youtube);
+            assert!(endpoint
+                .query_pairs()
+                .any(|(k, v)| k == "url" && v == "https://www.youtube.com/watch?v=abc-123"));
+        }
+        let (provider, endpoint) =
+            fallback_url(&Url::parse("https://www.pixiv.net/en/artworks/123").unwrap()).unwrap();
+        assert_eq!(provider, Provider::Pixiv);
+        assert_eq!(endpoint.as_str(), "https://www.pixiv.net/ajax/illust/123");
+        for url in [
+            "https://x.com/user",
+            "https://x.com/user/status/bad",
+            "https://x.com.evil.org/user/status/123",
+            "https://youtube.com/",
+            "https://pixiv.net/artworks/not-an-id",
+        ] {
+            assert!(fallback_url(&Url::parse(url).unwrap()).is_none());
+        }
+    }
+    #[test]
+    fn reads_provider_responses_with_bounded_local_fetch() {
+        let cases = [
+            (
+                Provider::Twitter,
+                serde_json::json!({"author_name":"작성자", "html":"<blockquote><p>본문 &amp; <a href='https://example.org'>링크</a><br>다음 줄</p>날짜</blockquote><script>bad()</script>"}),
+                "작성자: 본문 & 링크 다음 줄",
+            ),
+            (
+                Provider::Youtube,
+                serde_json::json!({"title":"영상 &quot;제목&quot;", "thumbnail_url":"https://example.org/t.jpg"}),
+                "영상 \"제목\"",
+            ),
+            (
+                Provider::Pixiv,
+                serde_json::json!({"error":false,"body":{"title":"작품 제목"}}),
+                "작품 제목",
+            ),
+        ];
+        for (provider, value, expected) in cases {
+            let body = serde_json::to_vec(&value).unwrap();
+            let mut response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+            response.extend(body);
+            let page = fetch(&server(response, Duration::ZERO), false, TIMEOUT).unwrap();
+            assert_eq!(
+                fallback_preview(&provider, &page.bytes).unwrap().title,
+                expected
+            );
+        }
+        assert!(fallback_preview(&Provider::Twitter, br#"{"html":"<p></p>"}"#).is_err());
+        assert!(fallback_preview(
+            &Provider::Pixiv,
+            br#"{"error":true,"body":{"title":"bad"}}"#
+        )
+        .is_err());
+    }
+    #[test]
+    fn large_html_keeps_head_and_network_policy_rejects_private_ips() {
+        let body = format!("<title>Head title</title>{}", "x".repeat(HTML_LIMIT));
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        assert_eq!(
+            preview(&server(response.into_bytes(), Duration::ZERO))
+                .unwrap()
+                .title,
+            "Head title"
+        );
+        assert!(network_url("http://example.org").is_err());
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.0.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "::1",
+            "::ffff:127.0.0.1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(!public_ip(ip.parse().unwrap()), "{ip}");
+        }
+        assert!(public_ip("8.8.8.8".parse().unwrap()));
+        assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
     }
     #[test]
     fn parses_meta_order_entities_relative_images_and_missing_tags() {

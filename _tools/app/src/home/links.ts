@@ -8,6 +8,36 @@ export function linkUrl(value: string): string | null {
   try { const url = new URL(value.trim()); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; }
 }
 export const domain = (url: string) => new URL(url).hostname.replace(/^www\./, "");
+// Older PC/tablet notes stored the hostname as a placeholder title.
+export const needsLinkTitle = (link: KeptLink) => !link.title.trim() || [domain(link.url), new URL(link.url).hostname].includes(link.title.trim());
+export function withLinkPreview(link: KeptLink, preview: LinkPreview): KeptLink {
+  if (!needsLinkTitle(link)) return link;
+  const title = needsLinkTitle({ ...link, title: preview.title }) ? link.title : preview.title;
+  const siteName = link.siteName || preview.siteName;
+  const imageUrl = link.imageUrl || (preview.imageUrl && linkUrl(preview.imageUrl)) || null;
+  if (title === link.title && siteName === link.siteName && imageUrl === (link.imageUrl ?? null)) return link;
+  return { ...link, title, siteName, imageUrl };
+}
+
+// The production API object lives for the app session, across Home remounts.
+// Cache failures too; queue both new links and backfills with one request at a time.
+const previewSessions = new WeakMap<object, { requests: Map<string, Promise<LinkPreview>>; tail: Promise<void>; nextAt: number }>();
+export function sessionLinkPreview(api: { preview: (url: string) => Promise<LinkPreview> }, url: string): Promise<LinkPreview> {
+  let session = previewSessions.get(api);
+  if (!session) { session = { requests: new Map(), tail: Promise.resolve(), nextAt: 0 }; previewSessions.set(api, session); }
+  const cached = session.requests.get(url);
+  if (cached) return cached;
+  const queue = session;
+  const request = queue.tail.then(async () => {
+    const delay = queue.nextAt - Date.now();
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+    try { return await api.preview(url); }
+    finally { queue.nextAt = Date.now() + 750; }
+  });
+  queue.requests.set(url, request);
+  queue.tail = request.then(() => {}, () => {});
+  return request;
+}
 export function readLinksId(root: string): string | null { try { return localStorage.getItem(KEY + root); } catch { return null; } }
 export function writeLinksId(root: string, id: string) { try { localStorage.setItem(KEY + root, id); } catch { /* Title lookup works without storage. */ } }
 export function findLinksNote(notes: Note[], savedId: string | null): Note | null {

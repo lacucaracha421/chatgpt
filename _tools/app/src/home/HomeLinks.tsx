@@ -13,7 +13,7 @@ import { Menu } from "../shared/ui/Menu";
 import { StableImage } from "../shared/ui/StableImage";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
-import { domain, findLinksNote, keepLink, linkTime, linkUrl, newLinksNote, parseLinks, readLinksId, serializeLinks, writeLinksId, type KeptLink, type LinkPreview } from "./links";
+import { domain, findLinksNote, keepLink, linkTime, linkUrl, needsLinkTitle, newLinksNote, parseLinks, readLinksId, serializeLinks, sessionLinkPreview, withLinkPreview, writeLinksId, type KeptLink, type LinkPreview } from "./links";
 import "./homeTools.css";
 import "./homeLinks.css";
 
@@ -51,15 +51,20 @@ export function HomeLinks({ store, root, onOpenNotes, expanded = false, onOpen, 
   try { links = parseLinks(note?.body ?? ""); } catch { parseError = "링크 보관 메모의 형식을 확인해 주세요. 원문은 메모에 보관되어 있습니다."; }
   const locked = !store || !state.ready || !state.unlocked || !!state.keyringLocked || !!note?.concealed || !!note?.readOnly;
   const disabled = locked || !!note?.conflict || !!parseError;
-  function mutate(change: (current: KeptLink[]) => KeptLink[], expectedId?: string) {
+  function mutate(change: (current: KeptLink[]) => KeptLink[], expectedId?: string, expectedRoot = root) {
     if (!store) return null;
     const snapshot = store.snapshot();
     const current = findLinksNote(snapshot.notes, id.current.value);
-    if (!snapshot.unlocked || snapshot.keyringLocked || current?.conflict || current?.concealed || current?.readOnly || (expectedId && current?.id !== expectedId)) return null;
+    if (id.current.root !== expectedRoot || !snapshot.ready || !snapshot.unlocked || snapshot.keyringLocked || current?.conflict || current?.concealed || current?.readOnly || (expectedId && current?.id !== expectedId)) return null;
     let next: KeptLink[];
-    try { next = change(parseLinks(current?.body ?? "")); }
+    try {
+      const previous = parseLinks(current?.body ?? "");
+      next = change(previous);
+      if (current && next.length === previous.length && next.every((link, index) => link === previous[index])) return current.id;
+    }
     catch { setError("링크 보관 메모의 형식을 확인해 주세요."); return null; }
     const updated = current ? { ...current, body: serializeLinks(next) } : newLinksNote(next);
+    if (current?.body === updated.body) return current.id;
     id.current.value = updated.id; writeLinksId(root, updated.id);
     store.edit(updated);
     void store.finish();
@@ -76,8 +81,8 @@ export function HomeLinks({ store, root, onOpenNotes, expanded = false, onOpen, 
     if (exists) return;
     setBusy(n => n + 1);
     try {
-      const preview = await api.preview(url);
-      mutate(current => current.map(link => link.url === url ? { ...link, title: preview.title || domain(url), siteName: preview.siteName, imageUrl: preview.imageUrl && linkUrl(preview.imageUrl) || null } : link), noteId);
+      const preview = await sessionLinkPreview(api, url);
+      mutate(current => current.map(link => link.url === url ? withLinkPreview(link, preview) : link), noteId);
     } catch { /* The saved URL remains usable if preview fails. */ }
     finally { setBusy(n => n - 1); }
   }
@@ -94,6 +99,23 @@ export function HomeLinks({ store, root, onOpenNotes, expanded = false, onOpen, 
   }
   const action = (operation: () => Promise<unknown>) => { void operation().catch(() => setError("작업을 완료하지 못했습니다. 다시 시도해 주세요.")); };
   const shown = (filter === "images" ? links.filter(link => link.imageUrl) : links).slice(0, expanded ? undefined : 4);
+  useEffect(() => {
+    if (disabled || !note) return;
+    let live = true;
+    const noteId = note.id;
+    void (async () => {
+      for (const link of shown.filter(needsLinkTitle)) {
+        if (!live) break;
+        try {
+          const preview = await sessionLinkPreview(api, link.url);
+          if (live) mutate(current => current.map(row => row.url === link.url ? withLinkPreview(row, preview) : row), noteId, root);
+        } catch { /* Keep the row usable; sessionLinkPreview caches failures. */ }
+      }
+    })();
+    return () => { live = false; };
+    // The body captures edits from other devices; never replace a title added while awaiting a preview.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, disabled, note?.id, note?.body, root, store, expanded, filter]);
   const body = <div className={expanded ? "home-links-view" : "home-tool__body"} onDragOver={event => { if (!disabled && (event.dataTransfer.types.includes("text/uri-list") || event.dataTransfer.types.includes("text/plain"))) { event.preventDefault(); event.stopPropagation(); } }}
     onDrop={event => { const text = event.dataTransfer.getData("text/uri-list").split(/\r?\n/).find(line => line && !line.startsWith("#")) || event.dataTransfer.getData("text/plain"); if (text) { event.preventDefault(); event.stopPropagation(); void add(text); } }}>
     <div className="home-links__bar">

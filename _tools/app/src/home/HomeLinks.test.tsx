@@ -8,7 +8,7 @@ vi.mock("../layout/ViewToolbar", () => ({ ViewToolbar: ({ title, leadingAction }
 beforeEach(() => localStorage.clear());
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 const row = (n: number, image = false): KeptLink => ({ url: `https://example.org/${n}`, title: `제목 ${n}`, savedAt: "2026-10-16T00:00:00Z", imageUrl: image ? `https://example.org/${n}.png` : null });
-async function mount(links: KeptLink[] = [], options: { expanded?: boolean; privacy?: boolean; unlocked?: boolean; conflict?: boolean; body?: string } = {}) {
+async function mount(links: KeptLink[] = [], options: { expanded?: boolean; privacy?: boolean; unlocked?: boolean; conflict?: boolean; body?: string; preview?: typeof homeLinksApi.preview } = {}) {
   let note: Note | undefined = links.length || options.body ? { ...newLinksNote(links), body: options.body ?? newLinksNote(links).body, conflict: !!options.conflict } : undefined;
   const request = vi.fn(async (operation: string, input?: unknown) => {
     if (operation === "save") { const draft = input as Note; note = { ...note, ...draft, localRevision: (note?.localRevision ?? 0) + 1, pending: false }; return note as never; }
@@ -16,9 +16,10 @@ async function mount(links: KeptLink[] = [], options: { expanded?: boolean; priv
   });
   const store = new NotesStore(request); await store.load();
   const api: typeof homeLinksApi = { preview: vi.fn(async () => ({ title: "미리보기", imageUrl: "https://example.org/preview.png" })), thumbnail: vi.fn(async () => "data:image/jpeg;base64,AA=="), importImages: vi.fn(async () => ({ imported: 1, message: null })), open: vi.fn(async () => {}), copy: vi.fn(async () => {}) };
+  if (options.preview) api.preview = options.preview;
   const onOpen = vi.fn(), onBack = vi.fn(), onOpenNotes = vi.fn();
-  render(<PrivacyProvider privacyMode={!!options.privacy} setPrivacyMode={() => {}}><HomeLinks root="fixture" store={store} api={api} expanded={options.expanded} onOpen={onOpen} onBack={onBack} onOpenNotes={onOpenNotes} /></PrivacyProvider>);
-  return { api, store, onOpen, onBack, request, onOpenNotes };
+  const view = render(<PrivacyProvider privacyMode={!!options.privacy} setPrivacyMode={() => {}}><HomeLinks root="fixture" store={store} api={api} expanded={options.expanded} onOpen={onOpen} onBack={onBack} onOpenNotes={onOpenNotes} /></PrivacyProvider>);
+  return { api, store, onOpen, onBack, request, onOpenNotes, view };
 }
 const paste = (url: string) => fireEvent.paste(screen.getByRole("textbox", { name: "URL 붙여넣기" }), { clipboardData: { getData: () => url } });
 it("pastes a URL into one note, saves the preview, and dedupes without another fetch", async () => {
@@ -63,7 +64,7 @@ it("retains a bare URL when preview fails and accepts dropped web URLs", async (
   expect(parseLinks(store.snapshot().notes[0].body)[0]).toMatchObject({ title: "example.org", url: "https://example.org/drop" });
 });
 it.each([{ unlocked: false }, { conflict: true }, { body: "손으로 쓴 메모 원문" }])("protects unavailable or damaged notes %j", async options => {
-  const { api, request } = await mount([row(1)], options);
+  const { api, request } = await mount([{ ...row(1), title: "" }], options);
   expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
   paste("https://example.org/new");
   expect(api.preview).not.toHaveBeenCalled();
@@ -94,4 +95,42 @@ it("copies and deletes through the per-link menu", async () => {
   fireEvent.click(await screen.findByRole("menuitem", { name: "삭제" }));
   await waitFor(() => expect(screen.queryByText("제목 1")).toBeNull());
   expect(parseLinks(store.snapshot().notes[0].body)).toEqual([]);
+});
+
+it("backfills missing and legacy hostname titles in place, serially and once per session", async () => {
+  let finish!: (value: { title: string }) => void;
+  const preview = vi.fn<typeof homeLinksApi.preview>()
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockRejectedValueOnce(new Error("offline"));
+  const { store, view, api } = await mount([{ ...row(1), title: "" }, { ...row(2), title: "example.org" }, row(3)], { preview });
+  await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
+  const article = screen.getAllByRole("article")[0];
+  vi.useFakeTimers();
+  await act(async () => { finish({ title: "실제 페이지 제목" }); });
+  expect(screen.getByText("실제 페이지 제목").closest("article")).toBe(article);
+  expect(parseLinks(store.snapshot().notes[0].body)[0].title).toBe("실제 페이지 제목");
+  await act(async () => { await vi.advanceTimersByTimeAsync(749); });
+  expect(preview).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(preview).toHaveBeenCalledTimes(2);
+  expect(preview).toHaveBeenLastCalledWith(row(2).url);
+  view.unmount();
+  render(<PrivacyProvider privacyMode={false} setPrivacyMode={() => {}}><HomeLinks root="fixture" store={store} api={api} onOpenNotes={() => {}} /></PrivacyProvider>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(preview).toHaveBeenCalledTimes(2);
+  expect(parseLinks(store.snapshot().notes[0].body)[2].title).toBe("제목 3");
+});
+
+it("preserves a title edited while backfill is pending", async () => {
+  let finish!: (value: { title: string }) => void;
+  const preview = vi.fn<typeof homeLinksApi.preview>(() => new Promise(resolve => { finish = resolve; }));
+  const { store } = await mount([{ ...row(1), title: "" }], { preview });
+  await waitFor(() => expect(preview).toHaveBeenCalledOnce());
+  await act(async () => {
+    const note = store.snapshot().notes[0];
+    store.edit({ ...note, body: newLinksNote([{ ...row(1), title: "내 제목" }]).body });
+    finish({ title: "미리보기 제목" });
+  });
+  expect(screen.getByText("내 제목")).toBeTruthy();
+  expect(parseLinks(store.snapshot().notes[0].body)[0].title).toBe("내 제목");
 });
