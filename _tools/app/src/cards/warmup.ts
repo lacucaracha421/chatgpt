@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { localArtUrl, type CardsApi, type CardState } from "./api";
+import { cutoutUrl, localArtUrl, type CardsApi, type CardState } from "./api";
 
 /**
  * Quiet background warm-up of the art of packs that are still sealed (CARD-GACHA-001).
@@ -69,6 +69,8 @@ export interface WarmOptions {
   busy?: () => boolean;
   /** Delay before checking again while busy. */
   retryMs?: number;
+  /** Warm cutout layers (local copy first, then the server ticket) instead of library art. */
+  cutouts?: boolean;
 }
 
 const warmed = new WeakMap<CardsApi, Set<string>>();
@@ -79,10 +81,11 @@ const warmed = new WeakMap<CardsApi, Set<string>>();
  */
 export function warmArt(api: CardsApi, ids: readonly string[], options: WarmOptions = {}): () => void {
   watchActivity();
-  const { concurrency = WARM_CONCURRENCY, load = defaultLoad, idle = defaultIdle, busy = userIsBusy, retryMs = 500 } = options;
+  const { concurrency = WARM_CONCURRENCY, load = defaultLoad, idle = defaultIdle, busy = userIsBusy, retryMs = 500, cutouts = false } = options;
   let done = warmed.get(api);
   if (!done) { done = new Set(); warmed.set(api, done); }
-  const queue = ids.filter(id => !done!.has(id));
+  const mark = (id: string) => cutouts ? `cutout:${id}` : id;
+  const queue = ids.filter(id => !done!.has(mark(id)));
   if (!queue.length) return () => undefined;
   let cancelled = false;
   const cancels = new Set<() => void>(), timers = new Set<number>();
@@ -106,9 +109,9 @@ export function warmArt(api: CardsApi, ids: readonly string[], options: WarmOpti
       await whenQuiet();
       if (cancelled) return;
       try {
-        const url = await localArtUrl(api, id);
+        const url = cutouts ? await cutoutUrl(api, id) : await localArtUrl(api, id);
         if (cancelled) return;
-        if (url && isLocalPreview(url)) { await load(url); done!.add(id); }
+        if (url && (cutouts || isLocalPreview(url))) { await load(url); done!.add(mark(id)); }
       } catch { /* Warming is best effort. */ }
     }
   };
@@ -120,16 +123,21 @@ export function warmArt(api: CardsApi, ids: readonly string[], options: WarmOpti
  * Starts the warm-up whenever the sealed packs' art list changes (app start, Home visit, a
  * newly granted pack) and stops it when Home goes away.
  *
- * Slice 4 hook: `warmTargets(state).cutouts` already lists ready cutout layers. They are not
- * warmed yet because the cutout ticket route only serves owned art; once it also serves art of
- * unopened packs, warm them here with `artUrl(api, id, true)` the same way.
+ * `warmTargets(state).cutouts` lists the cutout layers the server already has for those images.
+ * They are warmed the same way, but by `cutoutUrl`: this PC's own copy when it has one (nothing to
+ * download), else the server's ticket, which also serves art of sealed packs.
  */
 export function useCardWarmup(api: CardsApi, state: CardState | undefined, active = true, options?: WarmOptions) {
-  const key = warmTargets(state).art.join(",");
+  const targets = warmTargets(state), key = targets.art.join(","), cutoutKey = targets.cutouts.join(",");
   useEffect(() => {
     if (!active || !key) return;
     return warmArt(api, key.split(","), options);
     // `options` is a test seam and is not expected to change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, key, active]);
+  useEffect(() => {
+    if (!active || !cutoutKey) return;
+    return warmArt(api, cutoutKey.split(","), { ...options, cutouts: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, cutoutKey, active]);
 }

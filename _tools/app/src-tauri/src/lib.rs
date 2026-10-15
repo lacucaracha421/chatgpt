@@ -1,9 +1,11 @@
 mod activities;
+mod card_cutouts;
 mod catalog_source;
 mod catalog_transport;
 mod cloud;
 mod collectible_cors;
 mod commands;
+mod link_preview;
 mod exchange;
 mod extension_api;
 mod http_agent;
@@ -128,6 +130,8 @@ pub fn run() {
             );
             // File exchange (보내기/받기): native threads, so receiving continues in the tray.
             exchange::start(app.handle().clone());
+            // Card cutouts (카드 누끼 만들기): one background job, gated by the workload rules.
+            card_cutouts::start(app.handle().clone(), app_state.clone());
             // Private Vault: re-read the vault status only when drives are mounted or removed.
             let vault_handle = app.handle().clone();
             library::external_vault::start_mount_watcher(move || {
@@ -182,6 +186,7 @@ pub fn run() {
                     library.lock_encrypted_vault();
                 }
                 library::external_vault::stop_mount_watcher();
+                card_cutouts::stop();
                 window.app_handle().exit(0);
             }
         })
@@ -264,6 +269,9 @@ pub fn run() {
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
             activities::activity_snapshot,
+            link_preview::home_link_preview,
+            link_preview::home_link_thumbnail,
+            link_preview::home_link_import,
             activities::dismiss_activity,
             workload::workload_launch_settled,
             extension_api::report_picker_privacy,

@@ -76,6 +76,16 @@ impl SavedRuntime {
 }
 
 impl RuntimeConfig {
+    /// The interpreter of this runtime, for another worker that shares its environment.
+    pub(crate) fn python_path(&self) -> &Path {
+        &self.python
+    }
+
+    /// A script next to `scan_worker.py` (`character-runtime/` in dev and in the bundle).
+    pub(crate) fn sibling_script(&self, name: &str) -> PathBuf {
+        self.script.with_file_name(name)
+    }
+
     fn performance_args(&self) -> Vec<String> {
         self.performance_args_for(crate::workload::is_restricted())
     }

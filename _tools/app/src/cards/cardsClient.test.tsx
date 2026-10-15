@@ -6,7 +6,7 @@ import { CardAlbum, groupAlbum } from "./CardAlbum";
 import { HomeDailyCard } from "./HomeDailyCard";
 import { PackOpening } from "./PackOpening";
 import { TradingCard } from "./TradingCard";
-import { displayCards, operationId, saveResult, type CardsApi, type CardState, type OpenResult, type ServerCard } from "./api";
+import { cutoutUrl, displayCards, operationId, saveResult, type CardsApi, type CardState, type OpenResult, type ServerCard } from "./api";
 
 const serverCard = (changes: Partial<ServerCard> = {}): ServerCard => ({ slot: 0, characterId: "c1", characterName: "루나", seriesName: "별자리", tier: "sr", artAssetId: "a1", artWidth: 1000, artHeight: 1400, cutout: null, count: 1, level: 1, serial: null, isNew: true, firstDrawnAt: "2026-10-15T01:00:00Z", ...changes });
 const state = (changes: Partial<CardState> = {}): CardState => ({ version: 1, revision: 1, day: "2026-10-15", nextResetAt: "2026-10-15T20:00:00Z", unopened: [{ id: "d-20261015", kind: "daily", day: "2026-10-15" }], pendingKeep: [], prefetch: [], savedToday: 0, bonusThreshold: 50, bonusGranted: false, cover: { day: "2026-10-15", assetIds: ["cover1"] }, albumSummary: { cards: 1, total: 3 }, ...changes });
@@ -133,12 +133,53 @@ it("groups owned characters by series, chooses the best tier, pages and filters,
   const displayed = await displayCards(api, [serverCard({ tier: "n" }), serverCard({ tier: "lr" })]); expect(groupAlbum(displayed)[0][1].get("c1")?.[0].tier).toBe("lr");
 });
 
-it("masks card art and cutouts in privacy and never requests an unreported cutout", async () => {
-  const { api } = apiFixture(); const cards = await displayCards(api, [serverCard({ cutout: { assetId: "a1" } }), serverCard({ characterId: "c2" })]);
-  expect(vi.mocked(api.art).mock.calls.filter(([, cutout]) => cutout)).toHaveLength(1);
+it("masks card art and cutouts in privacy and never requests an unreported cutout from the server", async () => {
+  const { api } = apiFixture(); const cards = await displayCards(api, [serverCard({ tier: "ssr", cutout: { assetId: "a1" } }), serverCard({ characterId: "c2", tier: "ur", artAssetId: "a2" })]);
+  const cutoutCalls = vi.mocked(api.art).mock.calls.filter(([, cutout]) => cutout);
+  expect(cutoutCalls.filter(([id, , localOnly]) => !localOnly && id === "a2")).toHaveLength(0); // unreported: this PC's copy only, never a ticket
   const { container, rerender } = render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><TradingCard card={cards[0]} /></PrivacyProvider>);
   expect(container.querySelectorAll("img")).toHaveLength(0); expect(screen.getByLabelText("이미지 숨김")).toHaveClass("privacy-mask");
   rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><TradingCard card={cards[0]} /></PrivacyProvider>); expect(container.querySelectorAll("img")).toHaveLength(2);
+});
+
+it("resolves a cutout from this PC's copy first, then the server ticket, and only for SSR and above", async () => {
+  const { api } = apiFixture(), art = vi.mocked(api.art), local = new Set(["a-local", "a-both", "a-pc-only"]);
+  art.mockImplementation(async (id, cutout, localOnly) => {
+    if (!cutout) return `https://art.test/${id}.jpg`;
+    if (local.has(id)) return `http://lakomics.localhost/card-cutout/${id}`;
+    if (localOnly) throw new Error("no local copy");
+    return `https://ticket.test/${id}`;
+  });
+  const [onPc, both, remote, pcOnly, none, sr] = await displayCards(api, [
+    serverCard({ tier: "ssr", artAssetId: "a-local", cutout: { assetId: "a-local" } }),
+    serverCard({ tier: "lr", artAssetId: "a-both", cutout: { assetId: "a-both" } }),
+    serverCard({ tier: "ur", artAssetId: "a-remote", cutout: { assetId: "a-remote" } }),
+    serverCard({ tier: "ur", artAssetId: "a-pc-only", cutout: null }),   // made here, not listed by the server yet
+    serverCard({ tier: "lr", artAssetId: "a-none", cutout: null }),
+    serverCard({ tier: "sr", artAssetId: "a-sr", cutout: { assetId: "a-sr" } }),
+  ]);
+  expect(onPc.cutoutUrl).toBe("http://lakomics.localhost/card-cutout/a-local");
+  expect(both.cutoutUrl).toBe("http://lakomics.localhost/card-cutout/a-both");
+  expect(remote.cutoutUrl).toBe("https://ticket.test/a-remote");
+  expect(pcOnly.cutoutUrl).toBe("http://lakomics.localhost/card-cutout/a-pc-only");
+  expect(none.cutoutUrl).toBeUndefined();
+  expect(sr.cutoutUrl).toBeUndefined();
+  const asked = (id: string) => art.mock.calls.filter(([asset, cutout]) => asset === id && cutout);
+  expect(asked("a-local").every(([, , localOnly]) => localOnly)).toBe(true);           // no ticket when the copy is here
+  expect(asked("a-remote").map(([, , localOnly]) => !!localOnly)).toEqual([true, false]); // local first, then the ticket
+  expect(asked("a-none").every(([, , localOnly]) => localOnly)).toBe(true);            // never a ticket for an unreported cutout
+  expect(asked("a-sr")).toHaveLength(0);
+  expect(await cutoutUrl(api, "a-remote", false)).toBe("");
+});
+
+it("shows the pop-out layer only on SSR, UR and LR cards", () => {
+  for (const tier of ["n", "r", "sr", "ssr", "ur", "lr"] as const) {
+    const { container, unmount } = render(<TradingCard card={{ id: `x-${tier}`, characterName: "루나", seriesName: "별자리", tier, artUrl: "https://art.test/a.jpg", artWidth: 1000, artHeight: 1400, cutoutUrl: "https://art.test/a.png", count: 1, level: 1 }} />);
+    const popOut = ["ssr", "ur", "lr"].includes(tier);
+    expect(container.querySelector(".f-subj") !== null, tier).toBe(popOut);
+    expect(container.querySelector(`[data-tier="${tier}"]`)?.getAttribute("data-cut"), tier).toBe(popOut ? "1" : "0");
+    unmount();
+  }
 });
 
 it("does not cache a failed art lookup, so a later view can try again", async () => {

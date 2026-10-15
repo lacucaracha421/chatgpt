@@ -78,6 +78,32 @@ it("skips ids it already warmed, so only a changed list costs work", async () =>
   expect(load).toHaveBeenCalledTimes(3); expect(load).toHaveBeenLastCalledWith(preview("c"));
 });
 
+it("warms cutout layers from this PC's copy first and otherwise the server ticket", async () => {
+  const api = fakeApi([]), load = vi.fn(async (_url: string) => undefined);
+  api.art.mockImplementation(async (id: string, cutout?: boolean, localOnly?: boolean) => {
+    if (cutout && id === "here") return "http://lakomics.localhost/card-cutout/here";
+    if (localOnly) throw new Error("no local copy");
+    return `https://ticket.test/${id}${cutout ? ".png" : ""}`;
+  });
+  warmArt(api, ["here", "remote"], { load, idle, busy: () => false, cutouts: true }); await settle(50);
+  expect(load.mock.calls.map(([url]) => url).sort()).toEqual(["http://lakomics.localhost/card-cutout/here", "https://ticket.test/remote.png"]);
+  expect(api.art.mock.calls.filter(([id, cutout, localOnly]) => id === "here" && cutout && !localOnly)).toHaveLength(0);
+  warmArt(api, ["here", "remote"], { load, idle, busy: () => false, cutouts: true }); await settle(50);
+  expect(load).toHaveBeenCalledTimes(2); // already warmed
+  // Warming a cutout is not warming the art of the same id.
+  api.art.mockImplementation(async (id: string) => preview(id));
+  warmArt(api, ["here"], { load, idle, busy: () => false }); await settle(50);
+  expect(load).toHaveBeenCalledTimes(3);
+});
+
+it("the hook also warms the cutout ids of the prefetch list", async () => {
+  const api = fakeApi(["a", "b"]), load = vi.fn(async (_url: string) => undefined), options = { load, idle, busy: () => false };
+  api.art.mockImplementation(async (id: string, cutout?: boolean) => cutout ? `https://ticket.test/${id}.png` : preview(id));
+  renderHook(() => useCardWarmup(api, stateWith([{ packId: "d-20261015", assetIds: ["a", "b"], cutoutAssetIds: ["b"] }]), true, options));
+  await settle(50);
+  expect(load.mock.calls.map(([url]) => url).sort()).toEqual([preview("a"), preview("b"), "https://ticket.test/b.png"].sort());
+});
+
 it("the hook starts for a prefetch list, ignores a state without one, and re-runs when the list changes", async () => {
   const api = fakeApi(["a", "b"]), load = vi.fn(async () => undefined), options = { load, idle, busy: () => false };
   const { rerender, unmount } = renderHook(({ state }) => useCardWarmup(api, state, true, options), { initialProps: { state: undefined as CardState | undefined } });

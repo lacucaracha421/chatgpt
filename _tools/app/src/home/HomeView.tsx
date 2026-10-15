@@ -87,6 +87,7 @@ export type HomeViewProps = {
 
 export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, transferRoute }: HomeViewProps) {
   const [cardAlbum, setCardAlbum] = useState(false);
+  const [linksView, setLinksView] = useState(false);
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -371,6 +372,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const launchHost = useRef<HTMLDivElement>(null);
   useLaunchReady(!firstLoad, launchHost);
 
+  if (linksView) return <HomeLinkVault key={root} expanded store={store} root={root} onBack={() => setLinksView(false)} onOpenNotes={() => onNavigate({ kind: 'notes' })} />;
   if (cardAlbum) return <CardAlbum onBack={() => setCardAlbum(false)} onOpenAsset={onOpenAsset} onCharacter={id => {
     const target = characters.find(character => character.id === id);
     setCardAlbum(false);
@@ -405,7 +407,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
           <div className="home-tools">
             <HomeTransfer at={at} enabled={active && visible} route={transferRoute} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
             <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
-            <HomeLinkVault />
+            <HomeLinkVault key={root} store={store} root={root} onOpen={() => setLinksView(true)} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
           </div>
         </>}
       </div>

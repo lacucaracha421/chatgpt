@@ -2,7 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { nativeMediaUrl } from "../assets/mediaUrl";
 import { preloadImages } from "../shared/motion/viewportImages";
-import type { CardData, CardTier, PackCover } from "./types";
+import { hasCutoutLayer, type CardData, type CardTier, type PackCover } from "./types";
 
 export interface ServerCard {
   slot: number | null; characterId: string; characterName: string; seriesName: string;
@@ -79,6 +79,15 @@ export function localArtUrl(api: CardsApi, id: string): Promise<string> {
   cache.set(key, { expires: Date.now() + 240_000, job });
   return job;
 }
+/**
+ * The URL of a cutout layer. Order: this PC's own copy (made by 카드 누끼 만들기, served locally,
+ * no network), then the server's download ticket. `""` when neither exists.
+ */
+export async function cutoutUrl(api: CardsApi, assetId: string, onServer = true): Promise<string> {
+  const local = await api.art(assetId, true, true).catch(() => "");
+  if (local) return local;
+  return onServer ? artUrl(api, assetId, true) : "";
+}
 async function mapBounded<T, R>(items: readonly T[], fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length); let next = 0;
   await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
@@ -90,7 +99,8 @@ export async function displayCards(api: CardsApi, cards: readonly ServerCard[], 
   const displayed = await mapBounded(cards, async (card, index) => ({
     ...card, id: packId ? `${packId}:${card.slot ?? index}` : `${card.characterId}:${card.tier}`,
     artUrl: await artUrl(api, card.artAssetId),
-    cutoutUrl: card.cutout ? (await artUrl(api, card.cutout.assetId, true)) || undefined : undefined,
+    // A tier below SSR never uses a cutout. This PC may hold the copy before the server lists it.
+    cutoutUrl: hasCutoutLayer(card.tier) ? (await cutoutUrl(api, card.cutout?.assetId ?? card.artAssetId, !!card.cutout)) || undefined : undefined,
     serial: card.serial ?? undefined,
   }));
   await preloadImages(displayed.flatMap(card => [card.artUrl, ...(card.cutoutUrl ? [card.cutoutUrl] : [])]).filter(Boolean));

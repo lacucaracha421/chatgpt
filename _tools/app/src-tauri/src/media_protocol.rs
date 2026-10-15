@@ -358,6 +358,22 @@ pub(crate) fn media_response_with_range(
             None => empty_response(StatusCode::NOT_FOUND),
         });
     }
+    // The PC's own cutout copies (카드 누끼 만들기), keyed by asset id and model; no library needed.
+    if let Some(asset_id) = path.strip_prefix("/card-cutout/") {
+        if !crate::cloud::client::card_cutouts::valid_id(asset_id) {
+            return empty_response(StatusCode::BAD_REQUEST);
+        }
+        return match crate::card_cutouts::protocol_file(asset_id) {
+            Some((bytes, mime)) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime)
+                .header(CACHE_CONTROL, PREVIEW_CACHE_CONTROL)
+                .header(CONTENT_LENGTH, bytes.len().to_string())
+                .body(bytes)
+                .expect("cutout response is valid"),
+            None => empty_response(StatusCode::NOT_FOUND),
+        };
+    }
     if path.starts_with("/preview/") {
         let Some((asset_id, max)) = preview::parse(path) else {
             return empty_response(StatusCode::BAD_REQUEST);

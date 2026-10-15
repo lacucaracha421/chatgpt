@@ -394,6 +394,7 @@ pub(crate) fn workload_quit(app: tauri::AppHandle) {
         library.stop_video_similarity_scan();
         library.lock_encrypted_vault();
     }
+    crate::card_cutouts::stop();
     app.exit(0);
 }
 /// The window's close request, routed here by the webview (its close-requested

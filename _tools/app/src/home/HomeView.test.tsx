@@ -209,7 +209,7 @@ describe('Home attention', () => {
     expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('false');
     for (const name of ['전송', '빠른 메모', '링크 보관', '오늘의 카드']) expect(screen.getByRole('region', { name })).toBeTruthy();
     expect(screen.getByRole('button', { name: '앨범' })).toBeTruthy();
-    expect(screen.getByText('곧 추가됩니다')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: '링크 보관' })).getByRole('textbox', { name: 'URL 붙여넣기' })).toBeTruthy();
     // 지금 하는 중, 오늘의 그림 and 1년 전 오늘 are no longer on Home, and their reads are not made.
     for (const name of [/지금 하는 중/, /오늘의 그림/, /1년 전 오늘/]) expect(screen.queryByRole('region', { name })).toBeNull();
     expect(gateway.getHomeMedia).not.toHaveBeenCalled();

@@ -28,6 +28,8 @@ fn client(
 #[tauri::command]
 pub async fn card_state(state: State<'_, AppState>) -> Result<Value, CommandError> {
     let library = current_required(state)?;
+    // A new or opened pack changes what needs a cutout; let the background job look soon.
+    crate::card_cutouts::wake();
     tauri::async_runtime::spawn_blocking(move || {
         let (client, token) = client(&library)?;
         client.card_state(&token.expose())
@@ -106,7 +108,12 @@ pub async fn card_art_url(
             return Err(LibraryError::InvalidCloudResponse);
         }
         let cutout = cutout.unwrap_or(false);
-        if !cutout {
+        if cutout {
+            // This PC's own cutout copy first: no ticket, no download.
+            if let Some(url) = crate::card_cutouts::local_url(&asset_id) {
+                return Ok(url);
+            }
+        } else {
             match library.resolve_media(&asset_id, MediaVariant::Asset) {
                 Ok(_) => return Ok(format!("http://lakomics.localhost/preview/{asset_id}/1280")),
                 Err(LibraryError::MediaNotFound) | Err(LibraryError::AssetNotFound) => {}

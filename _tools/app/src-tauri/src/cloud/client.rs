@@ -4447,6 +4447,9 @@ mod home_publications;
 #[path = "cards.rs"]
 pub(crate) mod cards;
 
+#[path = "card_cutouts.rs"]
+pub(crate) mod card_cutouts;
+
 #[cfg(test)]
 mod album_likes_result_tests {
     use super::*;

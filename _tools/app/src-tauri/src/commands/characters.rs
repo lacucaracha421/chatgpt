@@ -133,7 +133,7 @@ pub async fn record_character_decision_batch(
         .map_err(Into::into)
 }
 
-pub(super) fn runtime_paths(
+pub(crate) fn runtime_paths(
     app: &tauri::AppHandle,
 ) -> Result<(std::path::PathBuf, std::path::PathBuf), CommandError> {
     use tauri::Manager;

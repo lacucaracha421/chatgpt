@@ -388,6 +388,11 @@ impl Library {
         }
         Ok(())
     }
+    /// True while automatic character analysis has work running or waiting; heavy
+    /// background jobs of other features hold back so only one model process runs.
+    pub(crate) fn character_work_active(&self) -> bool {
+        self.character_incremental_status().map_or(false, |status| status.work_active)
+    }
     pub fn character_incremental_status(&self) -> Result<Status> {
         let (running, work_active, persistent_error, mut active_work) = {
             let e = self

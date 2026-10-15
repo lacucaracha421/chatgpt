@@ -30,6 +30,8 @@ export interface CardDraw { packId: string; cards: readonly CardData[] }
 
 export const cardTiers: readonly CardTier[] = ["n", "r", "sr", "ssr", "ur", "lr"];
 export const tierRank = (tier: CardTier) => cardTiers.indexOf(tier);
+/** Only SSR, UR and LR cards have the pop-out layer; every other tier shows full art. */
+export const hasCutoutLayer = (tier: CardTier) => tierRank(tier) >= tierRank("ssr");
 export const tierClass = (tier: CardTier) => `card--${tier}${tierRank(tier) >= 3 ? " fa" : ""}`;
 
 /** Stable low-to-high order, retaining the last best card for the user's final flip. */

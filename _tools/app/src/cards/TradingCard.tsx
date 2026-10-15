@@ -5,13 +5,16 @@ import { createPointerTilt, useCardReducedMotion } from "./motion";
 import { printVariables } from "./printAssets";
 import { frameTexture } from "./frameTexture";
 import { luminanceMask } from "./luminance";
-import { tierClass, tierRank, type CardData } from "./types";
+import { hasCutoutLayer, tierClass, tierRank, type CardData } from "./types";
 import "./cards.css";
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { StableImage } from "../shared/ui/StableImage";
 
+/** The pop-out layer exists only for SSR/UR/LR; any other tier keeps the full-art look. */
+const cutoutOf = (card: CardData) => hasCutoutLayer(card.tier) ? card.cutoutUrl : undefined;
+
 function background(card: CardData) {
-  if (!card.cutoutUrl) return card.artUrl;
+  if (!cutoutOf(card)) return card.artUrl;
   const variants: BackgroundVariant[] = ["digital", "ribbon", "ornament", "aurora"];
   const hash = [...card.id].reduce((value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
   try { return renderBackground(variants[(hash + tierRank(card.tier)) % 4], card.tier, card.tint || "#6a3aa8"); }
@@ -30,13 +33,14 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
   const host = useRef<HTMLDivElement>(null);
   const reduced = useCardReducedMotion();
   const [teasing, setTeasing] = useState(false);
+  const cutout = cutoutOf(card);
   const art = useMemo(() => masked ? "" : background(card), [card, masked]);
   useEffect(() => {
     const node = host.current!; let live = true;
     node.style.removeProperty("--lum");
-    if (!masked && !card.cutoutUrl) void luminanceMask(card.artUrl).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
+    if (!masked && !cutout) void luminanceMask(card.artUrl).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
     return () => { live = false; };
-  }, [card.artUrl, card.cutoutUrl, masked]);
+  }, [card.artUrl, cutout, masked]);
   const frame = useMemo(() => {
     if (card.tier !== "n" && card.tier !== "r") return undefined;
     try { return `url("${frameTexture(card.tier)}")`; } catch { return undefined; }
@@ -54,7 +58,7 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
   const style = { ...printVariables, "--tint": card.tint || "#6a3aa8", "--c2": card.tint || "#6a3aa8" } as CSSProperties;
   return <div className="lkm-cards trading-card" style={style} data-reduced-motion={reduced}>
     <div ref={host} className={`card ${tierClass(card.tier)}${faceDown ? " down" : " revealed"}${teasing && faceDown ? " hover" : ""}${reduced ? " xfade" : ""}`}
-      data-tier={card.tier} data-cut={card.cutoutUrl ? "1" : "0"} data-subj={card.cutoutUrl ? "1" : "0"} data-samebg={card.cutoutUrl ? "0" : "1"}
+      data-tier={card.tier} data-cut={cutout ? "1" : "0"} data-subj={cutout ? "1" : "0"} data-samebg={cutout ? "0" : "1"}
       role={onReveal ? "button" : "img"} tabIndex={onReveal ? 0 : undefined}
       aria-label={faceDown ? "카드 뒤집기" : `${card.tier.toUpperCase()} ${card.characterName}, ${card.seriesName}, 보유 ${card.count}장, 레벨 ${card.level}`}
       onClick={() => { if (faceDown) onReveal?.(); }}
@@ -65,7 +69,7 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
         <div className="face front" aria-hidden={faceDown}>
           {masked ? <span className="f-bg privacy-mask" aria-label="이미지 숨김" /> : art && <StableImage className="f-bg" src={art} alt="" draggable={false} respectReducedMotion />}
           <div className="f-sheen" /><div className="f-etch" /><div className="f-shade" /><div className="f-frame" style={{ backgroundImage: frame }} /><div className="f-glare" /><div className="f-rainbow" /><div className="f-depth" />
-          {!masked && card.cutoutUrl && <div className="f-subjwrap"><StableImage className="f-subj" src={card.cutoutUrl} alt="" draggable={false} respectReducedMotion /></div>}
+          {!masked && cutout && <div className="f-subjwrap"><StableImage className="f-subj" src={cutout} alt="" draggable={false} respectReducedMotion /></div>}
           <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>
           <div className="f-cost"><span className="num">{rank + 1}</span></div>
           <div className={`f-dup${card.count > 9 ? " two" : ""}`}><span className="num">{card.count}</span></div>

@@ -40,6 +40,7 @@
       "../character-runtime/feature_cache.py": "character-runtime/feature_cache.py",
       "../character-runtime/profiling.py": "character-runtime/profiling.py",
       "../character-runtime/scan_worker.py": "character-runtime/scan_worker.py",
+      "../character-runtime/card_cutout.py": "character-runtime/card_cutout.py",
       "../character-runtime/gpu_providers.py": "character-runtime/gpu_providers.py",
       "../character-runtime/character_augmentation.py": "character-runtime/character_augmentation.py",
       "../character-runtime/character_head.py": "character-runtime/character_head.py",
