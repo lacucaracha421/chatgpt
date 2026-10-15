@@ -106,6 +106,53 @@ it('toggles notes without the info sheet, copies from the card, and consumes Bac
   fireEvent.click(toggle);
   expect(screen.queryByRole('button', {name:'1번 대사'})).toBeNull();
 });
+it.each(['Escape', '뷰어 닫기', 'Back'])('hides tablet translation overlays immediately when %s starts the viewer exit', async trigger => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
+  const animations: Animation[] = [];
+  Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: vi.fn(() => {
+    const animation = {cancel: vi.fn(), onfinish: null} as unknown as Animation;
+    animations.push(animation);
+    return animation;
+  })});
+  try {
+    vi.stubGlobal('matchMedia', () => ({matches: false}));
+    mocks.api.mockResolvedValue({...text, lines: [...text.lines, {original: '保存', korean: '위치 없는 문장'}]});
+    const backRef = {current: null as (() => boolean) | null};
+    render(<Viewer {...props} items={items} index={0} backRef={backRef}/>);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+    const notes = screen.getByRole('group', {name: '이미지 글자 번역'});
+    const unpositioned = screen.getByRole('region', {name: '위치 없는 번역'});
+    pointer('pointerDown', 92, 112); pointer('pointerUp', 92, 112);
+    const card = screen.getByRole('region', {name: '대사 번역'});
+    expect(notes).toBeVisible();
+    expect(unpositioned).toBeVisible();
+    expect(card).toBeVisible();
+    if (trigger === 'Back') {
+      act(() => {expect(backRef.current?.()).toBe(true);});
+      expect(card).not.toBeInTheDocument();
+      expect(notes).toBeVisible();
+      expect(props.onClose).not.toHaveBeenCalled();
+      act(() => {expect(backRef.current?.()).toBe(true);});
+    } else if (trigger === 'Escape') {
+      fireEvent.keyDown(screen.getByRole('dialog'), {key: 'Escape'});
+      expect(card).not.toBeInTheDocument();
+      expect(notes).toBeVisible();
+      expect(props.onClose).not.toHaveBeenCalled();
+      fireEvent.keyDown(screen.getByRole('dialog'), {key: 'Escape'});
+    } else fireEvent.click(screen.getByRole('button', {name: trigger}));
+    expect(document.querySelector('.viewer')).toHaveAttribute('data-viewer-closing', 'true');
+    expect(getComputedStyle(notes).display).toBe('none');
+    expect(getComputedStyle(unpositioned).display).toBe('none');
+    expect(card).not.toBeVisible();
+    expect(props.onClose).not.toHaveBeenCalled();
+    act(() => animations.find(animation => animation.onfinish)?.onfinish?.(new Event('finish') as AnimationPlaybackEvent));
+    expect(props.onClose).toHaveBeenCalledOnce();
+  } finally {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor);
+    else delete (HTMLElement.prototype as {animate?: unknown}).animate;
+  }
+});
 it('reads saved lines without coordinates without starting a surface swipe', async () => {
   mocks.api.mockResolvedValue({digest: 'unpositioned', lines: [{original: '保存された文章', korean: '저장된 번역'}]});
   render(<Viewer {...props} items={items} index={0}/>);

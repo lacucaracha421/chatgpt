@@ -6,6 +6,7 @@ import type { AssetSummary, ClassificationEntry, LibraryGateway } from "../libra
 import { AssetViewer, VIEWER_CHROME_IDLE_MS } from "./AssetViewer";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import type { AssetImageText } from "../library/types";
+import { readFileSync } from "node:fs";
 
 /** Gives the stage a 1200 x 800 box (jsdom measures none) so pointer positions map to the viewer's edge zones. */
 function measureStage() {
@@ -608,6 +609,55 @@ function textViewer(gateway: LibraryGateway, activeId: string | null = "a", extr
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
   return <LibraryProvider gateway={gateway}><AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), videoAsset("v", "v.mp4")]} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={item => <AssetInfoPanel assets={[item]} preview={false} />} {...extra} /></LibraryProvider>;
 }
+
+it.each(["Escape", "감상 화면 닫기", "뒤로"])("hides all translation overlays as soon as %s starts the viewer exit", async (trigger) => {
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/shared/viewer/image-text.css", "utf8").replace(/@import[^;]+;/g, "");
+  document.head.append(style);
+  onTestFinished(() => style.remove());
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+  const animations: Animation[] = [];
+  Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: vi.fn(() => {
+    const animation = { cancel: vi.fn(), onfinish: null } as unknown as Animation;
+    animations.push(animation);
+    return animation;
+  }) });
+  onTestFinished(() => {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, "animate", descriptor);
+    else delete (HTMLElement.prototype as { animate?: unknown }).animate;
+  });
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const gateway = { assetImageText: vi.fn().mockResolvedValue({ ...imageTextFixture, lines: [
+    ...imageTextFixture.lines, { original: "保存", korean: "위치 없는 문장" },
+  ] }) } as unknown as LibraryGateway;
+  const onClose = vi.fn();
+  render(textViewer(gateway, "a", { onClose }));
+  fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "정보 닫기" }));
+  const notes = screen.getByRole("group", { name: "이미지 글자 번역" });
+  const unpositioned = screen.getByRole("region", { name: "위치 없는 번역" });
+  fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
+  const card = screen.getByRole("region", { name: "대사 번역" });
+  expect(notes).toBeVisible();
+  expect(unpositioned).toBeVisible();
+  expect(card).toBeVisible();
+  if (trigger === "Escape") {
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    expect(card).not.toBeInTheDocument();
+    expect(notes).toBeVisible();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+  } else fireEvent.click(screen.getByRole("button", { name: trigger }));
+  expect(document.querySelector(".asset-viewer")).toHaveAttribute("data-viewer-closing", "true");
+  expect(getComputedStyle(notes).display).toBe("none");
+  expect(getComputedStyle(unpositioned).display).toBe("none");
+  expect(card).not.toBeVisible();
+  expect(onClose).not.toHaveBeenCalled();
+  // Keep the exit pending: notes must disappear before the media animation finishes.
+  act(() => animations.find(animation => animation.onfinish)?.onfinish?.(new Event("finish") as AnimationPlaybackEvent));
+  expect(onClose).toHaveBeenCalledOnce();
+});
 
 it("no text means no translation button or section even in the open information dock", async () => {
   const gateway = { assetImageText: vi.fn().mockResolvedValue(null), refreshAssetImageText: vi.fn().mockResolvedValue(null) } as unknown as LibraryGateway;
