@@ -101,6 +101,93 @@
     if (!done) { wrap = true; while (grow()) if (fits(f)) break; }
     return { x: r.x, y: r.y, w: r.w, h: r.h, f, padX, padY, wrap, widened, grown: Math.round(r.h - base.h) };
   }
+  // All variants use premeasured whole words. Never trade legibility for separation.
+  function noteVariants(fit, { W, H }, measure) {
+    if (fit.wrap) return [];
+    const variants = [];
+    for (const f of [...new Set([fit.f, MIN_FONT])]) {
+      for (const reduction of [0, 2]) {
+        const padX = Math.max(2, fit.padX - reduction), padY = Math.max(2, fit.padY - reduction);
+        const minWidth = Math.ceil(measure(f, { w: 2 * padX }, padX, padY, false).overflow + 2 * padX + 1);
+        for (const w of [...new Set([fit.w, Math.max(minWidth, fit.w * .9), Math.max(minWidth, fit.w * .8), minWidth])]) {
+          if (w > fit.w || w > W - 2 * EDGE) continue;
+          const m = measure(f, { w }, padX, padY, false);
+          const h = Math.max(fit.h - 2 * reduction, Math.ceil(m.height + 2 * padY));
+          if (m.overflow > .5 || h > H - 2 * EDGE) continue;
+          variants.push({ ...fit, w, h, f, padX, padY, wrap: false,
+            y: Math.min(fit.y, H - EDGE - h) });
+        }
+      }
+    }
+    return variants;
+  }
+  // Pure, bounded coordinate descent. Gap area wins first, then total distance from
+  // the fitted OCR anchors, then shape changes; vertical moves win equal ties.
+  // `variants` must have been validated with noteVariants before entering this pass.
+  function resolveOverlaps(rects, { W, H }) {
+    const result = rects.map(r => ({ ...r }));
+    const area = (a, b) => Math.max(0, Math.min(a.x + a.w + EDGE, b.x + b.w + EDGE) - Math.max(a.x, b.x)) *
+      Math.max(0, Math.min(a.y + a.h + EDGE, b.y + b.h + EDGE) - Math.max(a.y, b.y));
+    const distance = (r, anchor) => Math.hypot(r.x - anchor.x, r.y - anchor.y);
+    const better = (a, b) => {
+      for (let k = 0; k < a.length; k++) if (Math.abs(a[k] - b[k]) > .001) return a[k] < b[k];
+      return false;
+    };
+    for (let round = -1; round < 6; round++) {
+      let changed = false;
+      for (let i = 0; i < result.length; i++) {
+        const anchor = rects[i], current = result[i];
+        if (!result.some((r, j) => j !== i && area(current, r) > 0)) continue;
+        const cap = Math.max(48, .4 * Math.max(anchor.w, anchor.h));
+        const score = (r, limit = Infinity) => {
+          let overlap = 0;
+          for (let j = 0; j < result.length; j++) if (i !== j) {
+            overlap += area(r, result[j]);
+            if (overlap > limit + .001) return [overlap];
+          }
+          return [overlap, distance(r, anchor), Math.abs(r.w - anchor.w) + Math.abs(r.h - anchor.h) + Math.abs((r.f || 14) - (anchor.f || 14)), Math.abs(r.x - anchor.x)];
+        };
+        let best = current, bestScore = score(current);
+        const shapes = [...new Map([anchor, ...(anchor.variants || [])].map(r => [[r.w, r.h, r.f, r.padX, r.padY].join('/'), r])).values()];
+        const ranked = shapes.map(shape => ({ shape, score: score(shape) })).sort((a, b) => better(a.score, b.score) ? -1 : better(b.score, a.score) ? 1 : 0);
+        // Try shrinking at the anchor before movement, and bound the movement search
+        // to the three most promising shapes even in very dense OCR results.
+        for (const entry of ranked) if (distance(entry.shape, anchor) <= cap && better(entry.score, bestScore)) { best = entry.shape; bestScore = entry.score; }
+        // Give every neighbour its chance to shrink before displacing any anchor.
+        if (round === -1) {
+          if (best !== current) { result[i] = { ...best }; changed = true; }
+          continue;
+        }
+        if (bestScore[0] === 0 && bestScore[1] === 0) { result[i] = { ...best }; changed = true; continue; }
+        const blockers = result.filter((other, j) => j !== i && area(current, other) > 0)
+          .sort((a, b) => distance(a, current) - distance(b, current)).slice(0, 4);
+        for (const shape of [...new Set([anchor, current, ...ranked.slice(0, 3).map(entry => entry.shape)])]) {
+          const xs = [current.x, anchor.x], ys = [current.y, shape.y];
+          for (const other of blockers) {
+            xs.push(other.x - shape.w - EDGE, other.x + other.w + EDGE);
+            ys.push(other.y - shape.h - EDGE, other.y + other.h + EDGE);
+          }
+          const positions = [...new Set(ys)].map(y => [current.x, y]).concat([...new Set(xs)].map(x => [x, current.y]));
+          for (const [x0, y0] of positions) {
+            let x = clamp(x0, EDGE, Math.max(EDGE, W - EDGE - shape.w));
+            let y = clamp(y0, EDGE, Math.max(EDGE, H - EDGE - shape.h));
+            const d = Math.hypot(x - anchor.x, y - anchor.y);
+            if (d > cap) { x = anchor.x + (x - anchor.x) * cap / d; y = anchor.y + (y - anchor.y) * cap / d; }
+            if (x < EDGE || y < EDGE || x + shape.w > W - EDGE || y + shape.h > H - EDGE) continue;
+            const candidate = { ...shape, x, y }, candidateScore = score(candidate, bestScore[0]);
+            if (better(candidateScore, bestScore)) { best = candidate; bestScore = candidateScore; }
+          }
+        }
+        if (best !== current) { result[i] = best; changed = true; }
+      }
+      if (!changed && round >= 0) break;
+    }
+    const stacked = result.map((r, i) => result.some((other, j) => i !== j && area(r, other) > 0));
+    const order = result.map((_, i) => i).filter(i => stacked[i]).sort((a, b) =>
+      result[b].w * result[b].h - result[a].w * result[a].h || result[b].y - result[a].y || b - a);
+    order.forEach((i, rank) => { result[i].stacked = true; result[i].zIndex = rank + 2; });
+    return result;
+  }
   // The corner of the image where the button group covers the least note area.
   function chooseCorner(rects, W, H, pw, ph, margin = 8) {
     const corners = [["tr", W - margin - pw, margin], ["tl", margin, margin], ["br", W - margin - pw, H - margin - ph], ["bl", margin, H - margin - ph]];
@@ -111,6 +198,19 @@
       if (area < bestArea - 1) { best = corner; bestArea = area; }
     }
     return { corner: best[0], x: best[1], y: best[2], area: bestArea };
+  }
+  function choosePillPlacement(rects, frame, pw, ph, viewport) {
+    const { x, y, w, h } = frame, left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0;
+    const right = left + viewport.width, bottom = top + viewport.height;
+    // Keep the full toolbar's footprint even while collapsed, so expanding never
+    // moves the chip to a different edge or slides controls beyond the viewport.
+    const edge = Math.min(x + w, right), px = edge - pw;
+    if (px >= left && edge <= right) {
+      for (const [placement, py] of [["below", y + h + 6], ["above", y - ph - 6]]) {
+        if (py >= top && py + ph <= bottom) return { placement, x: px - x, y: py - y };
+      }
+    }
+    return { placement: "corner", ...chooseCorner(rects, w, h, pw, ph) };
   }
   const JAPANESE = /[぀-ヿ㐀-鿿]/;
   // Where the picture itself is drawn inside its <img> element. X crops tall pictures with
@@ -211,54 +311,112 @@
       Object.assign(overlay.surface.node.style, { left: view.x + "px", top: view.y + "px", width: view.w + "px", height: view.h + "px" });
       const d = frame.drawn, key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
       if (overlay.key !== key) { overlay.key = key; layoutNotes(session, { W: view.w, H: view.h, ox: d.x - view.x, oy: d.y - view.y, DW: d.w, DH: d.h }); }
+      placePill(session, view);
     }
     function layoutNotes(session, frame) {
       const overlay = session.overlay, { W, H } = frame;
       overlay.box.querySelector(".card")?.remove(); overlay.card = null;
-      const rects = [];
+      // One DOM measurement batch, followed by pure fitting/resolution and one write batch.
+      // Measure whole words at 14px; widths scale with font size, preserving keep-all.
+      const rack = doc.createElement("div");
+      rack.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;white-space:pre";
+      const measured = new Map();
+      for (const item of overlay.items) {
+        if (item.kind === "sfx") { item.node.style.display = ""; item.node.style.maxWidth = Math.max(40, W - 2 * EDGE) + "px"; continue; }
+        const words = item.inner.textContent.trim().split(/\s+/);
+        const probes = [...words, " "].map(word => {
+          const span = doc.createElement("span"); span.className = "nt"; span.textContent = word;
+          span.style.cssText = "display:inline-block;width:auto;font-size:14px;white-space:pre";
+          rack.append(span); return span;
+        });
+        measured.set(item, { words, probes });
+      }
+      overlay.box.append(rack);
+      for (const data of measured.values()) data.widths = data.probes.map(span => span.getBoundingClientRect().width);
+      const tags = new Map(overlay.items.filter(item => item.kind === "sfx").map(item => [item, { w: item.node.offsetWidth, h: item.node.offsetHeight }]));
+      const chipWidth = overlay.peekButton.offsetWidth || (touchMode(session) ? 50 : 42);
+      const pw = chipWidth + (overlay.pillActions.offsetWidth || 174) + 4;
+      overlay.pill.style.setProperty("--pill-width", pw + "px");
+      overlay.pill.style.setProperty("--chip-width", chipWidth + 4 + "px");
+      overlay.pillWidth = pw;
+      overlay.pillHeight = overlay.pill.offsetHeight || (touchMode(session) ? 44 : 32);
+      rack.remove();
+      const rects = [], visible = [];
       for (const item of overlay.items) {
         const geometry = lineGeometry(item.line, W, H, frame);
         // Text cropped out of the visible picture (X's timeline crop) gets no note.
-        item.node.style.display = geometry ? "" : "none";
         if (!geometry) continue;
+        visible.push(item);
         if (item.kind === "sfx") {
           // Sound effects get a small tag just below their text, or above it at the bottom edge.
-          const tag = item.node;
-          tag.style.maxWidth = Math.max(40, W - 2 * EDGE) + "px";
-          Object.assign(tag.style, { left: "0px", top: "0px" });
-          const tw = tag.offsetWidth, th = tag.offsetHeight, b = geometry.box;
+          const { w: tw, h: th } = tags.get(item), b = geometry.box;
           const x = clamp(b.x, EDGE, Math.max(EDGE, W - EDGE - tw));
           let y = b.y + b.h + 4;
           if (y + th > H - EDGE) y = b.y - 4 - th;
           if (y < EDGE) y = clamp(b.y + 4, EDGE, Math.max(EDGE, H - EDGE - th));
-          Object.assign(tag.style, { left: x + "px", top: y + "px" });
           rects.push({ x, y, w: tw, h: th });
           continue;
         }
-        const { node, inner } = item;
+        const { widths, words } = measured.get(item), gap = widths.at(-1);
         const measure = (f, r, padX, padY, wrap) => {
-          Object.assign(node.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px", padding: `${padY}px ${padX}px` });
-          inner.style.fontSize = f + "px"; inner.style.overflowWrap = wrap ? "anywhere" : "normal";
-          return { overflow: Math.max(0, inner.scrollWidth - inner.clientWidth), height: inner.offsetHeight };
+          const available = Math.max(1, r.w - 2 * padX), scale = f / MIN_FONT;
+          let lines = 1, used = 0, longest = 0;
+          for (let i = 0; i < words.length; i++) {
+            // A small rounding allowance keeps fractional glyph widths inside the note.
+            const width = widths[i] * scale + (widths[i] > 0 ? 1 : 0);
+            longest = Math.max(longest, width);
+            if (used && used + gap * scale + width > available) { lines++; used = 0; }
+            if (wrap && width > available) { lines += Math.ceil(width / available) - 1; used = width % available; }
+            else used += (used ? gap * scale : 0) + width;
+          }
+          return { overflow: wrap ? 0 : Math.max(0, longest - available), height: lines * f * 1.28 };
         };
         const fit = fitNote({ box: geometry.box, W, H, vertical: geometry.vertical, chars: geometry.chars, measure });
-        measure(fit.f, fit, fit.padX, fit.padY, fit.wrap);
-        node.style.borderRadius = Math.min(6, fit.h / 4, fit.w / 4) + "px";
-        rects.push({ x: fit.x, y: fit.y, w: fit.w, h: fit.h });
+        rects.push({ ...fit, variants: noteVariants(fit, frame, measure) });
       }
-      placePill(session, rects, W, H);
+      const resolved = resolveOverlaps(rects, frame), raised = resolved.length + 2;
+      overlay.box.style.setProperty("--note-top", String(raised));
+      overlay.pill.style.zIndex = String(raised + 1);
+      for (const item of overlay.items) item.node.style.display = visible.includes(item) ? "" : "none";
+      visible.forEach((item, i) => {
+        const fit = resolved[i], { node, inner } = item;
+        Object.assign(node.style, { left: fit.x + "px", top: fit.y + "px", zIndex: String(fit.zIndex || 1) });
+        node.classList.toggle("stacked", Boolean(fit.stacked));
+        if (!inner) return;
+        Object.assign(node.style, { width: fit.w + "px", height: fit.h + "px", padding: `${fit.padY}px ${fit.padX}px`, borderRadius: Math.min(6, fit.h / 4, fit.w / 4) + "px" });
+        inner.style.fontSize = fit.f + "px"; inner.style.overflowWrap = fit.wrap ? "anywhere" : "normal";
+      });
+      overlay.rects = resolved;
     }
-    function placePill(session, rects, W, H) {
-      const pill = session.overlay.pill, pw = pill.offsetWidth || 220, ph = pill.offsetHeight || (touchMode(session) ? 44 : 32);
-      const spot = chooseCorner(rects, W, H, pw, ph);
-      Object.assign(pill.style, { left: spot.x + "px", top: spot.y + "px" });
-      pill.dataset.corner = spot.corner;
+    function placePill(session, view) {
+      const overlay = session.overlay, pill = overlay.pill;
+      const spot = choosePillPlacement(overlay.rects, view, overlay.pillWidth, overlay.pillHeight, surfaces.viewport());
+      Object.assign(pill.style, { left: spot.x + overlay.pillWidth + "px", top: spot.y + "px" });
+      pill.dataset.placement = spot.placement;
+      if (spot.corner) pill.dataset.corner = spot.corner; else delete pill.dataset.corner;
     }
     function setPeek(session, on) {
       const overlay = session.overlay; if (!overlay || overlay.surface.closed) return;
-      overlay.box.classList.toggle("peek", on);
-      overlay.peekButton.setAttribute("aria-pressed", String(on));
+      overlay.box.classList.toggle("peek", on || overlay.original);
       if (on) { overlay.box.querySelector(".card")?.remove(); overlay.card = null; }
+    }
+    function toggleOriginal(session) {
+      const overlay = session.overlay;
+      overlay.original = !overlay.original;
+      const on = overlay.original;
+      setPeek(session, on);
+      overlay.box.classList.toggle("original", on);
+      overlay.peekButton.textContent = on ? "번역" : "원문";
+      overlay.peekButton.setAttribute("aria-label", on ? "번역 보기" : "원문 보기");
+      overlay.peekButton.setAttribute("aria-pressed", String(on));
+      overlay.pillActions.inert = on;
+      overlay.pillActions.setAttribute("aria-hidden", String(on));
+      overlay.pillActions.querySelectorAll("button").forEach(button => { button.tabIndex = on ? -1 : 0; button.disabled = on; });
+      for (const item of overlay.items) {
+        item.node.inert = on;
+        item.node.setAttribute("aria-hidden", String(on));
+        item.node.tabIndex = on ? -1 : 0;
+      }
     }
     // Press-and-hold on a note shows the original picture text for as long as it is held.
     function bindHold(session, node) {
@@ -282,6 +440,7 @@
       if (overlay.card && overlay.card.anchor === anchor) { closeCard(session); return; }
       closeCard(session);
       const card = doc.createElement("div"); card.className = "card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-label", "원문과 번역");
+      card.style.zIndex = String(overlay.items.length + 4);
       const showOriginal = line.original && normalized(line.original) !== normalized(line.korean);
       if (showOriginal) {
         const label = doc.createElement("span"); label.className = "lbl"; label.textContent = "원문";
@@ -315,7 +474,7 @@
       for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "touchstart", "touchend", "contextmenu", "dragstart", "click"]) {
         box.addEventListener(type, event => { event.stopPropagation(); if (type === "contextmenu" || type === "dragstart") event.preventDefault(); });
       }
-      const overlay = { surface, box, items: [], key: "", held: false, suppress: false, card: null, pill: null, peekButton: null };
+      const overlay = { surface, box, items: [], key: "", held: false, suppress: false, original: false, card: null, pill: null, peekButton: null };
       session.overlay = overlay;
       const pixels = readPixels(image, doc);
       lines.forEach(line => {
@@ -344,22 +503,26 @@
           openCard(session, node, line);
         });
         bindHold(session, node);
+        const raise = () => {
+          for (const other of overlay.items) other.node.classList.toggle("raised", other.node === node);
+        };
+        node.addEventListener("pointerenter", raise); node.addEventListener("pointerdown", raise); node.addEventListener("focus", raise);
         box.append(node); overlay.items.push(item);
       });
       buildPill(session, lines);
-      placeNotes(session); surfaces.reveal(surface);
+      // Popovers are display:none until revealed. Mount invisibly first so the
+      // toolbar and notes can be measured before the browser paints them.
+      surface.node.style.visibility = "hidden";
+      surfaces.reveal(surface); placeNotes(session);
       watchFollow(session);
       focusIfKeyboard(session);
     }
     function buildPill(session, lines) {
       const overlay = session.overlay, pill = doc.createElement("div");
       pill.className = "pill"; pill.setAttribute("role", "toolbar"); pill.setAttribute("aria-label", "번역 도구");
-      const peek = doc.createElement("button"); peek.type = "button"; peek.className = "peek-btn"; peek.textContent = "원문"; peek.title = "누르고 있는 동안 원문 보기";
-      peek.setAttribute("aria-label", "원문 보기 (누르고 있기)"); peek.setAttribute("aria-pressed", "false");
-      peek.addEventListener("pointerdown", event => { event.preventDefault(); setPeek(session, true); try { peek.setPointerCapture?.(event.pointerId); } catch {} });
-      for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) peek.addEventListener(type, () => setPeek(session, false));
-      peek.addEventListener("keydown", event => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); setPeek(session, true); } });
-      peek.addEventListener("keyup", event => { if (event.key === " " || event.key === "Enter") setPeek(session, false); });
+      const peek = doc.createElement("button"); peek.type = "button"; peek.className = "peek-btn"; peek.textContent = "원문";
+      peek.setAttribute("aria-label", "원문 보기"); peek.setAttribute("aria-pressed", "false");
+      peek.addEventListener("click", event => { if (event.isTrusted === true) toggleOriginal(session); });
       const copy = doc.createElement("button"), label = doc.createElement("span"); copy.type = "button"; copy.className = "act"; copy.dataset.action = "image.copy";
       label.textContent = "모두 복사"; label.setAttribute("aria-live", "polite"); copy.append(surfaces.icon("copy"), label);
       copy.addEventListener("click", event => { if (event.isTrusted === true) copyText(session, lines.map(line => line.korean).join("\n"), label, "모두 복사"); });
@@ -367,8 +530,10 @@
       const close = doc.createElement("button"); close.type = "button"; close.className = "x"; close.setAttribute("aria-label", "번역 닫기"); close.title = "번역 닫기"; close.append(surfaces.icon("close"));
       close.addEventListener("click", event => { if (event.isTrusted === true) dismiss(); });
       const sep = () => { const node = doc.createElement("span"); node.className = "sep"; node.setAttribute("aria-hidden", "true"); return node; };
-      pill.append(peek, sep(), copy); if (save) pill.append(save); pill.append(sep(), close);
-      overlay.box.append(pill); overlay.pill = pill; overlay.peekButton = peek;
+      const actions = doc.createElement("div"); actions.className = "pill-actions"; actions.setAttribute("aria-hidden", "false");
+      actions.append(sep(), copy); if (save) actions.append(save); actions.append(sep(), close);
+      pill.append(peek, actions);
+      overlay.box.append(pill); overlay.pill = pill; overlay.peekButton = peek; overlay.pillActions = actions;
     }
     function watchFollow(session) {
       const overlay = session.overlay, surfaceHost = overlay.surface.node;
@@ -677,5 +842,5 @@
     }
     return { translate, close: dismiss, get open() { return Boolean(current?.popover || current?.overlay); }, destroy() { dismiss(0); cache.clear(); } };
   }
-  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, chooseCorner, toneAround, lineGeometry, imageFrame, MIN_FONT };
+  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, noteVariants, resolveOverlaps, chooseCorner, choosePillPlacement, toneAround, lineGeometry, imageFrame, MIN_FONT };
 })();

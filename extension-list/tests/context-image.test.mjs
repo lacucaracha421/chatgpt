@@ -108,10 +108,10 @@ test('session rule registration failure does not disable other image translation
   assert.equal(f.warnings.length, 1);
 });
 
-test('imageModel defaults to Haiku 5.5, is validated, and changes only from extension pages', async () => {
+test('imageModel defaults to Sonnet 5.5, is validated, and changes only from extension pages', async () => {
   const f = worker({stored: {imageModel: 'google/gemma-4-26b-a4b-it'}});
   const settings = await f.handle({type: 'translation:settings'});
-  assert.equal(settings.imageModel, 'anthropic:claude-haiku-5-5', 'a text-only stored model falls back to the default');
+  assert.equal(settings.imageModel, 'anthropic:claude-sonnet-5-5', 'a text-only stored model falls back to the default');
   assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'google/gemini-3.5-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5']);
   assert.equal(settings.imageModels.some(item => item.id.includes('gemma')), false);
   assert.equal(settings.hasImageApiKey, true);
@@ -419,7 +419,7 @@ for (const touch of [false, true]) test(`translation notes sit over each text bl
   assert.equal(v.notes[0].style.left, '17px'); assert.equal(v.notes[0].style.top, '17px');
   assert.notEqual(v.notes[0].style.background, '', 'solid colour, no glass');
   assert.deepEqual([...v.pill.querySelectorAll('button')].map(button => button.textContent), ['원문', '모두 복사', '']);
-  assert.ok(v.pill.dataset.corner);
+  assert.equal(v.pill.dataset.placement, 'below');
   // follows scroll / resize
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 420, top: 70, bottom: 170, width: 300, height: 100})});
   f.doc.dispatchEvent(new f.w.Event('scroll'));
@@ -453,17 +453,38 @@ test('tapping a note opens a card with the original, the translation and a copy 
   f.actions.destroy(); f.close();
 });
 
-test('원문 shows the picture text while held; 모두 복사 copies every line; x closes', async () => {
+test('원문 toggles to a 번역 chip; note hold still peeks; 모두 복사 copies every line; x closes', async () => {
   const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
   await f.actions.activate('image.translate', f.context(), origin, gesture);
   const v = notesView(f), peek = v.pill.querySelector('.peek-btn'), copy = v.pill.querySelector('[data-action="image.copy"]');
   pointer(f, peek, 'pointerdown', 0, 0);
-  assert.equal(v.box.classList.contains('peek'), true); assert.equal(peek.getAttribute('aria-pressed'), 'true');
   pointer(f, peek, 'pointerup', 0, 0);
   assert.equal(v.box.classList.contains('peek'), false);
+  peek.click(); assert.equal(v.box.classList.contains('peek'), false, 'script-made clicks do not toggle');
+  f.user(() => peek.click());
+  assert.equal(v.box.classList.contains('peek'), true); assert.equal(v.box.classList.contains('original'), true);
+  assert.equal(peek.textContent, '번역'); assert.equal(peek.getAttribute('aria-pressed'), 'true');
+  assert.equal(peek.getAttribute('aria-label'), '번역 보기');
+  const actions = v.pill.querySelector('.pill-actions');
+  assert.equal(actions.inert, true); assert.equal(actions.getAttribute('aria-hidden'), 'true');
+  for (const button of actions.querySelectorAll('button')) {
+    assert.equal(button.tabIndex, -1); assert.equal(button.disabled, true);
+  }
+  for (const note of [...v.notes, ...v.tags]) {
+    assert.equal(note.inert, true); assert.equal(note.tabIndex, -1); assert.equal(note.getAttribute('aria-hidden'), 'true');
+  }
+  assert.equal(peek.disabled, false); assert.equal(peek.tabIndex, 0);
+  f.user(() => peek.click());
+  assert.equal(v.box.classList.contains('peek'), false); assert.equal(v.box.classList.contains('original'), false);
+  assert.equal(peek.textContent, '원문'); assert.equal(peek.getAttribute('aria-pressed'), 'false');
+  assert.equal(peek.getAttribute('aria-label'), '원문 보기');
+  assert.equal(actions.inert, false); assert.equal(actions.getAttribute('aria-hidden'), 'false');
+  for (const button of actions.querySelectorAll('button')) { assert.equal(button.tabIndex, 0); assert.equal(button.disabled, false); }
+  for (const note of [...v.notes, ...v.tags]) { assert.equal(note.inert, false); assert.equal(note.tabIndex, 0); assert.equal(note.getAttribute('aria-hidden'), 'false'); }
   // press-and-hold on a note
   pointer(f, v.notes[0], 'pointerdown', 5, 5); await f.timer.advance(219); assert.equal(v.box.classList.contains('peek'), false);
   await f.timer.advance(1); assert.equal(v.box.classList.contains('peek'), true);
+  assert.equal(peek.getAttribute('aria-pressed'), 'false', 'temporary note peek does not toggle original mode');
   pointer(f, v.notes[0], 'pointerup', 5, 5); assert.equal(v.box.classList.contains('peek'), false);
   f.user(() => v.notes[0].click()); assert.equal(notesView(f).card, null, 'the release after a hold is not a tap');
   copy.click(); assert.deepEqual(f.clipboard, [], 'only a real click copies');
@@ -472,6 +493,69 @@ test('원문 shows the picture text while held; 모두 복사 copies every line;
   assert.equal(copy.textContent, '복사됨'); await f.timer.advance(1600); assert.equal(copy.textContent, '모두 복사');
   f.user(() => v.pill.querySelector('.x').click()); await f.timer.advance(100);
   assert.equal(notesView(f).host, null);
+  f.actions.destroy(); f.close();
+});
+
+test('original mode folds save as well, closes an open card, and still closes on Escape', async () => {
+  const collector = {findCandidate: image => ({element: image, type: 'image'}), open() {}};
+  const f = page(undefined, {collector, touch: true, send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f), toggle = v.pill.querySelector('.peek-btn'), save = v.pill.querySelector('[data-action="image.lakomics"]');
+  f.user(() => v.notes[0].click()); assert.ok(notesView(f).card);
+  toggle.focus(); f.user(() => toggle.click());
+  assert.equal(notesView(f).card, null);
+  assert.equal(v.root.activeElement, toggle);
+  assert.equal(save.disabled, true); assert.equal(save.tabIndex, -1);
+  assert.equal(save.parentElement.getAttribute('aria-hidden'), 'true');
+  f.user(() => f.w.dispatchEvent(new f.w.KeyboardEvent('keydown', {key: 'Escape'})));
+  await f.timer.advance(100); assert.equal(notesView(f).host, null);
+  f.actions.destroy(); f.close();
+});
+
+test('toolbar collapse animates width and opacity and respects reduced motion without clipping outside controls', () => {
+  assert.match(css, /\.image-notes \.pill\{[^}]*overflow:hidden;[^}]*transition:width 160ms ease/);
+  assert.match(css, /\.image-notes \.pill-actions\{[^}]*transition:opacity 160ms ease/);
+  assert.match(css, /\.image-notes\.original \.pill\{width:var\(--chip-width\)\}/);
+  assert.match(css, /\.image-notes\.original \.pill-actions\{opacity:0;visibility:hidden;pointer-events:none/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\.image-notes \.pill,\.image-notes \.pill-actions,\.image-notes\.original \.pill-actions\{transition:none\}/);
+  assert.match(css, /\.image-notes\{[^}]*overflow:visible;pointer-events:none/);
+  assert.match(css, /\.image-notes \.pill\{[^}]*pointer-events:auto/);
+});
+
+test('toolbar placement prefers below, then above, then the least-overlap corner within the visual viewport', () => {
+  const f = page(), {choosePillPlacement, chooseCorner} = f.w.LakomicsContextImage;
+  const viewport = {width: 800, height: 600, offsetLeft: 20, offsetTop: 30};
+  const frame = {x: 100, y: 100, w: 400, h: 200}, pw = 220, ph = 32;
+  assert.deepEqual(plain(choosePillPlacement([], frame, pw, ph, viewport)), {placement: 'below', x: 180, y: 206});
+  assert.deepEqual(plain(choosePillPlacement([], {...frame, y: 400}, pw, ph, viewport)), {placement: 'above', x: 180, y: -38});
+  const tall = {...frame, y: 30, h: 600}, rects = [{x: 100, y: 0, w: 300, h: 100}];
+  assert.deepEqual(plain(choosePillPlacement(rects, tall, pw, ph, viewport)), {placement: 'corner', ...plain(chooseCorner(rects, 400, 600, pw, ph))});
+  assert.equal(choosePillPlacement([], {...frame, y: 30, h: 562}, pw, ph, viewport).placement, 'below', 'exact viewport fit');
+  assert.equal(choosePillPlacement([], {...frame, x: -300}, pw, ph, viewport).placement, 'corner', 'horizontal fit is required too');
+  f.close();
+});
+
+test('outside toolbar follows position-only scrolling and visual viewport changes and remains interactive', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
+  const viewport = new f.w.EventTarget();
+  Object.assign(viewport, {width: 800, height: 600, offsetLeft: 0, offsetTop: 0});
+  Object.defineProperty(f.w, 'visualViewport', {value: viewport});
+  let y = 50;
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width: 300, height: 200})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.equal(v.host.style.overflow, 'visible'); assert.equal(v.host.style.contain, 'layout style');
+  assert.equal(v.host.style.pointerEvents, 'none');
+  assert.equal(v.pill.dataset.placement, 'below'); assert.equal(v.pill.style.top, '206px');
+  y = 400; f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(v.pill.dataset.placement, 'above'); assert.equal(v.pill.style.top, '-38px');
+  viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(v.pill.dataset.placement, 'below');
+  viewport.offsetTop = 410; viewport.height = 200; viewport.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(v.pill.dataset.placement, 'corner');
+  viewport.offsetTop = 0; viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
+  f.user(() => v.pill.querySelector('[data-action="image.copy"]').click()); await f.timer.advance(0);
+  assert.equal(f.clipboard.length, 1, 'outside controls retain their handlers');
   f.actions.destroy(); f.close();
 });
 
@@ -561,6 +645,119 @@ test('note layout: starts at the OCR box, never below 14 px, widens only for the
   // a single word wider than the whole image is the only case that may break
   const huge = plain(fitNote({box: {x: 10, y: 10, w: 20, h: 20}, W: 60, H: 200, chars: 5, measure: textMeasure(['아주아주긴낱말입니다'])}));
   assert.equal(huge.wrap, true); assert.equal(huge.f, 14);
+});
+
+test('overlapping notes separate with a 4px gap, stay in frame, and resolve deterministically', () => {
+  const f = page(), {resolveOverlaps} = f.w.LakomicsContextImage;
+  const frame = {W: 300, H: 300};
+  for (const rects of [
+    [{x: 80, y: 80, w: 80, h: 40}, {x: 80, y: 110, w: 80, h: 40}],
+    [{x: 80, y: 80, w: 80, h: 40}, {x: 80, y: 110, w: 80, h: 40}, {x: 80, y: 140, w: 80, h: 40}],
+    [{x: 4, y: 4, w: 80, h: 40}, {x: 4, y: 30, w: 80, h: 40}],
+    [{x: 80, y: 256, w: 80, h: 40}, {x: 100, y: 256, w: 80, h: 40}],
+  ]) {
+    const before = structuredClone(rects), result = plain(resolveOverlaps(rects, frame));
+    assert.deepEqual(rects, before, 'inputs are immutable');
+    assert.deepEqual(plain(resolveOverlaps(rects, frame)), result);
+    result.forEach((r, i) => {
+      assert.ok(r.x >= 4 && r.y >= 4 && r.x + r.w <= 296 && r.y + r.h <= 296);
+      assert.ok(Math.hypot(r.x - rects[i].x, r.y - rects[i].y) <= Math.max(48, .4 * Math.max(r.w, r.h)) + .001);
+      result.slice(i + 1).forEach(other => assert.ok(r.x + r.w + 4 <= other.x + .001 || other.x + other.w + 4 <= r.x + .001 ||
+        r.y + r.h + 4 <= other.y + .001 || other.y + other.h + 4 <= r.y + .001, JSON.stringify(result)));
+    });
+  }
+  f.close();
+});
+
+test('blocked notes respect the movement cap; smaller notes and then upper notes stack above', () => {
+  const f = page(), {resolveOverlaps} = f.w.LakomicsContextImage;
+  const rects = [{x: 4, y: 4, w: 192, h: 192}, {x: 50, y: 50, w: 80, h: 80}, {x: 50, y: 70, w: 80, h: 80}];
+  const result = plain(resolveOverlaps(rects, {W: 200, H: 200}));
+  result.forEach((r, i) => {
+    assert.ok(r.x >= 4 && r.y >= 4 && r.x + r.w <= 196 && r.y + r.h <= 196);
+    assert.ok(Math.hypot(r.x - rects[i].x, r.y - rects[i].y) <= Math.max(48, .4 * Math.max(rects[i].w, rects[i].h)) + .001);
+    assert.equal(r.stacked, true);
+  });
+  assert.ok(result[1].zIndex > result[0].zIndex && result[2].zIndex > result[0].zIndex);
+  const upper = result[1].y <= result[2].y ? 1 : 2;
+  assert.ok(result[upper].zIndex > result[upper === 1 ? 2 : 1].zIndex);
+  f.close();
+});
+
+test('shrinking preserves whole words at 14px or above and resolves before displacing anchors', () => {
+  const f = page(), {noteVariants, resolveOverlaps} = f.w.LakomicsContextImage;
+  const frame = {W: 300, H: 300}, measure = textMeasure(['긴단어', '가', '나', '다']);
+  const fit = {x: 40, y: 50, w: 110, h: 60, f: 18, padX: 6, padY: 6, wrap: false};
+  const variants = plain(noteVariants(fit, frame, measure));
+  assert.ok(variants.some(r => r.w < fit.w));
+  assert.ok(variants.some(r => r.padX < fit.padX));
+  for (const r of variants) {
+    const m = measure(r.f, r, r.padX, r.padY, false);
+    assert.ok(r.f >= 14); assert.equal(r.wrap, false);
+    assert.equal(m.overflow, 0); assert.ok(m.height <= r.h - 2 * r.padY);
+  }
+  const result = plain(resolveOverlaps([{...fit, variants}, {x: 144, y: 50, w: 70, h: 60}], frame));
+  assert.equal(result[0].x, fit.x); assert.equal(result[0].y, fit.y);
+  assert.ok(result[0].w < fit.w); assert.ok(result[0].x + result[0].w + 4 <= result[1].x);
+  const reversed = plain(resolveOverlaps([{x: 144, y: 50, w: 70, h: 60}, {...fit, variants}], frame));
+  assert.equal(reversed[0].x, 144); assert.equal(reversed[0].y, 50, 'the first note waits for its neighbour to shrink');
+  assert.equal(reversed[1].x, fit.x); assert.equal(reversed[1].y, fit.y);
+  assert.deepEqual(plain(noteVariants({...fit, wrap: true}, frame, measure)), [], 'an already broken oversized word cannot shrink further');
+  f.close();
+});
+
+test('nonoverlapping notes are unchanged, even when smaller variants are available', () => {
+  const f = page(), {resolveOverlaps} = f.w.LakomicsContextImage;
+  const rects = [{x: 10, y: 10, w: 50, h: 40, variants: [{x: 10, y: 10, w: 40, h: 40}]}, {x: 100, y: 100, w: 70, h: 50}];
+  assert.deepEqual(plain(resolveOverlaps(rects, {W: 300, H: 300})), rects);
+  assert.deepEqual(plain(resolveOverlaps([], {W: 300, H: 300})), []);
+  f.close();
+});
+
+test('equal moves prefer vertical separation; a short frame allows horizontal separation', () => {
+  const f = page(), {resolveOverlaps} = f.w.LakomicsContextImage;
+  const rects = [{x: 80, y: 4, w: 40, h: 40}, {x: 80, y: 4, w: 40, h: 40}];
+  const vertical = plain(resolveOverlaps(rects, {W: 300, H: 300}));
+  assert.equal(vertical[0].x, 80); assert.equal(vertical[1].x, 80);
+  const horizontal = plain(resolveOverlaps(rects, {W: 300, H: 48}));
+  assert.equal(horizontal[0].y, 4); assert.equal(horizontal[1].y, 4);
+  assert.ok(Math.abs(horizontal[0].x - horizontal[1].x) >= 44);
+  f.close();
+});
+
+test('notes resolve again after resizing the visible image', async () => {
+  const lines = ['가', '나', '다'].map(korean => ({original: korean, korean, box: {x0: 400, y0: 400, x1: 700, y1: 550}}));
+  const f = page(undefined, {send: async () => ({ok: true, lines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const assertSeparated = () => {
+    const {notes} = notesView(f);
+    const rects = notes.map(node => ({x: parseFloat(node.style.left), y: parseFloat(node.style.top), w: parseFloat(node.style.width), h: parseFloat(node.style.height)}));
+    rects.forEach((r, i) => rects.slice(i + 1).forEach(b => assert.ok(r.x + r.w + 4 <= b.x + .001 || b.x + b.w + 4 <= r.x + .001 ||
+      r.y + r.h + 4 <= b.y + .001 || b.y + b.h + 4 <= r.y + .001)));
+    return rects;
+  };
+  const before = assertSeparated();
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: 50, width: 300, height: 300, right: 400, bottom: 350})});
+  f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.notDeepEqual(assertSeparated(), before);
+  f.actions.destroy(); f.close();
+});
+
+test('hover, touch-down and focus bring a note forward while cards and tools stay above notes', async () => {
+  const f = page(undefined, {touch: true, send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  v.notes[0].dispatchEvent(new f.w.Event('pointerenter'));
+  assert.equal(v.notes[0].classList.contains('raised'), true);
+  pointer(f, v.notes[1], 'pointerdown', 5, 5);
+  assert.equal(v.notes[0].classList.contains('raised'), false);
+  assert.equal(v.notes[1].classList.contains('raised'), true);
+  pointer(f, v.notes[1], 'pointerup', 5, 5);
+  f.user(() => v.notes[1].click());
+  assert.ok(Number(v.pill.style.zIndex) > Number(v.box.style.getPropertyValue('--note-top')));
+  assert.ok(Number(notesView(f).card.style.zIndex) > Number(v.pill.style.zIndex));
+  v.notes[0].focus(); assert.equal(v.notes[0].classList.contains('raised'), true);
+  f.actions.destroy(); f.close();
 });
 
 test('the button group takes the corner that covers the least note area', () => {
@@ -1166,7 +1363,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.43');
+  assert.equal(manifest.version, '3.5.44');
 });
 
 

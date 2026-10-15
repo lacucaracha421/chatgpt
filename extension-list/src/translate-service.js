@@ -44,7 +44,7 @@
   ]);
   const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
   const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
-  const DEFAULT_MODEL = MODELS[0].id, DEFAULT_FALLBACK = "google/gemma-4-26b-a4b-it", DEFAULT_IMAGE_MODEL = "anthropic:claude-haiku-5-5";
+  const DEFAULT_MODEL = MODELS[0].id, DEFAULT_FALLBACK = "google/gemma-4-26b-a4b-it", DEFAULT_IMAGE_MODEL = "anthropic:claude-sonnet-5-5";
   const DEFAULT_CONCURRENCY = 4;
   // Recently used translations are kept; writes are coalesced because every storage write
   // is delivered, old and new value, to each open X tab. The character cap keeps the
@@ -692,6 +692,10 @@
           { type: "text", text: "Read and translate all text in this image." },
         ] },
       ], model),
+      // 3.5 cannot disable reasoning. Leave room for it alongside the image's
+      // transcript, translation and boxes; keep other models and text requests
+      // on their existing cap. This is a ceiling, not a requested output length.
+      ...(model === "google/gemini-3.5-flash-lite" ? { max_tokens: 16384 } : {}),
       provider: { require_parameters: true, sort: "latency" },
       response_format: { type: "json_schema", json_schema: { name: "image_text_translation", strict: true, schema: core.image.convention(model) === "gemini" ? core.image.SCHEMA_GEMINI : core.image.SCHEMA } },
     };
@@ -719,7 +723,10 @@
     if (!result.ok) return result;
     const choice = result.data?.choices?.[0];
     const lines = choice?.finish_reason === "length" ? null : core.image.parseLines(choice?.message?.content, { convention: core.image.convention(result.model || model), width: prepared.width, height: prepared.height });
-    return lines ? { ok: true, lines, model: result.model } : { ok: false, code: "invalid_translation" };
+    // An unusable 3.5 answer (including reasoning without a final answer) is an
+    // image reading failure. The image UI already has a specific message for it.
+    return lines ? { ok: true, lines, model: result.model }
+      : { ok: false, code: (result.model || model) === "google/gemini-3.5-flash-lite" ? "image_unreadable" : "invalid_translation" };
   }
   // The page names its translation run so every batch lands in the same usage entry.
   function pageJob(value) {

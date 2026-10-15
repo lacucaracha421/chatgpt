@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.5.44 — 2026-10-16
+
+- Overlapping translation notes are separated (narrower shape first, then a small move,
+  4px apart); notes that still overlap stack smallest on top and come forward on hover
+  or touch.
+- 원문 is a toggle: in original mode only a small 번역 chip stays and the other buttons
+  fold away. The button group sits below (or above) the image when there is room.
+- Image translation defaults to Claude Sonnet 5.5. Gemini 3.5 Flash Lite image requests
+  get room for its mandatory reasoning; an unusable answer says the image was unreadable.
+
 ## 3.5.43 — 2026-10-16
 
 - Translation notes follow the visible part of cropped or letterboxed images (X timeline
