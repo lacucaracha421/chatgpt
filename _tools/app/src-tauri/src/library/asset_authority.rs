@@ -283,7 +283,12 @@ fn apply(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
         if old.entity_revision > p.entity_revision {
             return Ok(());
         }
-        if old.lifecycle == "tombstoned" && p.lifecycle != "tombstoned" {
+        // Only newer canonical state can revive an Asset. An old capture or receipt
+        // cannot turn the retained tombstone into a normal local row.
+        if old.lifecycle == "tombstoned"
+            && p.lifecycle != "tombstoned"
+            && (p.lifecycle != "normal" || p.entity_revision <= old.entity_revision)
+        {
             return invalid();
         }
         if old.sha256.is_some() && old.sha256 != p.sha256 {
@@ -309,6 +314,17 @@ fn apply(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
         "pending"
     };
     db.execute("INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,sha256,size_bytes,projection,materialization) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET lifecycle=excluded.lifecycle,entity_revision=excluded.entity_revision,sha256=excluded.sha256,size_bytes=excluded.size_bytes,projection=excluded.projection",params![p.asset_id,p.lifecycle,p.entity_revision,p.sha256,p.size_bytes.map(|size|size as i64),serde_json::to_string(p).map_err(|_|LibraryError::InvalidCloudResponse)?,status])?;
+    if p.lifecycle == "normal"
+        && prior.as_ref().is_some_and(|old| old.lifecycle != "normal")
+    {
+        // A previous import may have been complete before permanent deletion removed
+        // its row/files. Requeue under the same canonical identity, never a new ID.
+        db.execute(
+            "UPDATE asset_authority_state SET materialization=?,last_error=NULL WHERE asset_id=?",
+            params![status, p.asset_id],
+        )?;
+        db.execute("DELETE FROM asset_purge_pending WHERE asset_id=?", [&p.asset_id])?;
+    }
     // The local status is read before `local_projection` adopts the incoming lifecycle,
     // because adopting it is what rewrites `assets.status`.
     let local_status: Option<String> = db
@@ -856,8 +872,16 @@ impl Library {
                 let mut db = self.connection()?;
                 let tx = db.transaction()?;
                 // Keep byte-progress for identities present in both snapshots; replace confirmed rows only.
+                let same_identity = authority(&tx)?.is_some_and(|old|
+                    old.library == a.library && old.epoch == a.epoch && old.contract == a.contract);
                 for p in &all {
-                    apply_baseline(&tx, p)?;
+                    if same_identity {
+                        // Expired-history recovery is still the same revision lineage.
+                        // Replaying an older baseline must not revive a tombstone.
+                        apply(&tx, p)?;
+                    } else {
+                        apply_baseline(&tx, p)?;
+                    }
                 }
                 // Absence from the new baseline never deletes a local Asset (review H4).
                 let old = tx
@@ -2971,6 +2995,89 @@ mod tests {
             projection(&db, ID).unwrap().unwrap().lifecycle,
             "tombstoned"
         );
+    }
+
+    #[test]
+    fn explicit_save_revive_downloads_again_under_same_id_and_old_events_stay_inert() {
+        let (_temp, library, mut p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let path: String = library.connection().unwrap().query_row(
+            "SELECT relative_path FROM assets WHERE id=?", [ID], |row| row.get(0),
+        ).unwrap();
+        p.lifecycle = "tombstoned".into();
+        p.entity_revision = 2;
+        apply(&library.connection().unwrap(), &p).unwrap();
+        library.delete_accepted_purge_files().unwrap();
+        assert!(!library.root().join(&path).exists());
+        // A replayed legacy capture cannot allocate another local identity.
+        let source = library.root().join("old-capture.png");
+        fs::write(&source, media()).unwrap();
+        let request = IngestMediaRequest {
+            source_path: source, classification_id: None, source_url: None,
+            collected_at: p.collected_at.clone(), replace_duplicate_metadata: false,
+            source_published_at: None, creator_name: None, creator_handle: None,
+            creator_url: None, import_source: ImportSource::BrowserExtension,
+            import_batch_id: uuid::Uuid::new_v4().to_string(),
+        };
+        assert!(matches!(library.ingest_media(request),
+            Err(LibraryError::AssetAuthorityRejected { code, .. }) if code == "captureRequiresExplicitSave"));
+        let mut replay = p.clone();
+        replay.lifecycle = "normal".into();
+        replay.entity_revision = 1;
+        apply(&library.connection().unwrap(), &replay).unwrap();
+        rebaseline(&library, 1, vec![replay.clone()]);
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        replay.entity_revision = 2;
+        assert!(apply(&library.connection().unwrap(), &replay).is_err());
+
+        // The server's explicit-save event is newer than the retained tombstone.
+        p.lifecycle = "normal".into();
+        p.entity_revision = 3;
+        apply(&library.connection().unwrap(), &p).unwrap();
+        let pending = library.pending_materializations(false).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(serde_json::from_str::<AssetProjection>(&pending[0]).unwrap().asset_id, ID);
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr());
+        let client = CloudClient::new(&base).unwrap();
+        let worker = std::thread::spawn(move || {
+            for expected in [format!("/v1/library/assets/{ID}/media-ticket"), "/original".into()] {
+                let request = server.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap();
+                assert_eq!(request.url(), expected);
+                let body = if expected == "/original" { media() } else {
+                    serde_json::to_vec(&json!({"url":format!("{base}/original")})).unwrap()
+                };
+                request.respond(tiny_http::Response::from_data(body)).unwrap();
+            }
+        });
+        let mut result = AssetSyncResult::default();
+        library.materialize_candidates(&client, "test", &mut result, false).unwrap();
+        worker.join().unwrap();
+        assert_eq!(result.materialized, 1);
+        assert_eq!(result.materialization_failures, 0);
+        assert!(library.root().join(path).exists());
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE id='80000000-0000-4000-8000-000000000001' AND status='normal'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM cloud_sync_queue"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+        assert!(library.pending_materializations(false).unwrap().is_empty());
+        // Replaying the earlier tombstone after revival cannot delete it again.
+        replay.lifecycle = "tombstoned".into();
+        apply(&library.connection().unwrap(), &replay).unwrap();
+        assert_eq!(projection(&library.connection().unwrap(), ID).unwrap().unwrap().lifecycle, "normal");
+    }
+
+    #[test]
+    fn explicit_save_revive_from_trash_keeps_materialized_bytes() {
+        let (_temp, library, mut p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        p.lifecycle = "trash".into();
+        p.entity_revision = 2;
+        apply(&library.connection().unwrap(), &p).unwrap();
+        p.lifecycle = "normal".into();
+        p.entity_revision = 3;
+        apply(&library.connection().unwrap(), &p).unwrap();
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='normal'"), 1);
+        assert!(library.pending_materializations(false).unwrap().is_empty());
     }
 
     const OTHER: &str = "80000000-0000-4000-8000-0000000000b2";

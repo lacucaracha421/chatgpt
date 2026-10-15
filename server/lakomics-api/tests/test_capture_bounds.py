@@ -248,6 +248,7 @@ class CaptureReservationAndCleanupTests(unittest.TestCase):
         self.assertFalse(routes._capture_inflight)
 
     def test_promotion_rejection_also_removes_uncommitted_upload(self):
+        api_app.startup_asset_authority()
         with mock.patch.object(routes.authority, 'active_domain', return_value={'libraryId': 'library'}), mock.patch.object(
                 routes.asset_authority, 'promote_capture', side_effect=HTTPException(422, 'rejected')):
             with self.assertRaises(HTTPException) as error:

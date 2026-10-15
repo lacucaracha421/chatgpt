@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { findLinksNote, keepLink, linkUrl, newLinksNote, parseLinks, serializeLinks } from "./links";
+import { findLinksNote, keepLink, linkUrl, needsLinkTitle, newLinksNote, parseLinks, serializeLinks, withLinkPreview } from "./links";
 
 it("round trips a readable fenced note with preview metadata", () => {
   const links = [{ url: "https://example.org/", title: "한글 제목", imageUrl: "https://example.org/a.png", siteName: "예시", savedAt: "2026-10-16T00:00:00Z", imported: 2 }];
@@ -29,4 +29,14 @@ it("finds the dedicated note by saved id or oldest title and ignores trash", () 
   expect(findLinksNote([newer, oldest], null)?.id).toBe("old");
   expect(findLinksNote([newer, oldest], "new")?.id).toBe("new");
   expect(findLinksNote([{ ...oldest, deleted: true }, newer], "old")?.id).toBe("new");
+});
+it("recognizes old hostname placeholders and preserves existing titles and images", () => {
+  const link = { ...keepLink([], "https://www.example.org/page")[0], imageUrl: "https://example.org/original.png", imported: 2 };
+  expect(needsLinkTitle(link)).toBe(true);
+  expect(needsLinkTitle({ ...link, title: "www.example.org" })).toBe(true);
+  expect(needsLinkTitle({ ...link, title: "  " })).toBe(true);
+  const updated = withLinkPreview(link, { title: "페이지 제목", imageUrl: "https://example.org/replacement.png" });
+  expect(updated).toMatchObject({ title: "페이지 제목", imageUrl: link.imageUrl, imported: 2, savedAt: link.savedAt });
+  expect(withLinkPreview(updated, { title: "다른 제목" })).toBe(updated);
+  expect(withLinkPreview(link, { title: "www.example.org" })).toBe(link);
 });

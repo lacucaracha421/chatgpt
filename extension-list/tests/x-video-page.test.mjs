@@ -210,7 +210,7 @@ test('client validates bridge URLs and falls back unchanged when the page bridge
 test('page metadata supplies the selected MP4 when anonymous syndication returns a tombstone', async () => {
   const w = fixture(); ingest(w, { data: { tweetResult: { result: tweet(ID, [video()]) } } });
   let publicRequests = 0, capture;
-  const ctx = vm.createContext({ URL, URLSearchParams, AbortSignal,
+  const ctx = vm.createContext({ URL, URLSearchParams, AbortSignal, crypto: globalThis.crypto,
     chrome: { storage: { local: { get: async () => ({}), set: async () => {} } } },
     fetch: async () => { publicRequests++; return { ok: true, json: async () => ({ __typename: 'TweetTombstone', tombstone: {} }) }; },
     LakomicsListApi: { request: async (_path, options) => { capture = options.body; return { ok: true, data: { created: true, capture: { status: 'pending' } } }; } },

@@ -203,9 +203,11 @@
 
   async function confirm(payload, connection) {
     const params = new URLSearchParams({ source_url: payload.source_url, media_url: payload.media_url, classification_id: payload.classification_id });
+    params.set("request_id", payload.save_intent.request_id);
     const response = await globalThis.LakomicsListApi.request(`/v1/extension/captures/confirm?${params}`, { timeoutMs: 8000, expectedConnection: connection });
     if (!response.ok || !response.data?.found) return null;
-    return response.data?.capture || { status: "pending" };
+    const capture = response.data?.capture || { status: "pending" };
+    return response.data?.revived ? { ...capture, status: "pending", revived: true } : capture;
   }
 
   // Public resolution entry for callers that hold a candidate but not its media URL.
@@ -245,6 +247,9 @@
   }
 
   async function save({ candidate, classificationId, classificationPath = [], imageText }) {
+    // Created once per user action, before resolution/network waits. Transport
+    // retries reuse this payload; a later click gets a new intent.
+    const saveIntent = { request_id: crypto.randomUUID(), requested_at: new Date().toISOString() };
     const connection = await connectionIdentity();
     const resolved = await resolveXVideo(candidate);
     if (!resolved.ok) return resolved;
@@ -258,6 +263,7 @@
       published_at: candidate.publishedAt || null,
       media_type: type,
       source: source(candidate),
+      save_intent: saveIntent,
     };
     const lines = imageTextLines(imageText);
     if (lines.length) payload.image_text = lines;
@@ -268,9 +274,9 @@
       const capture = response.data?.capture || null;
       return {
         ok: true,
-        status: response.data?.created === false ? "duplicate" : "captured",
+        status: response.data?.revived ? "captured" : response.data?.created === false ? "duplicate" : "captured",
         capture,
-        captureStatus: capture?.status || "pending",
+        captureStatus: response.data?.revived ? "pending" : capture?.status || "pending",
       };
     }
     if ([0, 408, 429, 500, 502, 503, 504].includes(response.status)) {
@@ -278,7 +284,7 @@
       if (connection !== await connectionIdentity()) return { ok: false, code: "connection_changed" };
       if (confirmed) {
         await rememberRecent(candidate.sourceUrl, connection);
-        return { ok: true, status: "confirmed", capture: confirmed, captureStatus: confirmed.status || "pending" };
+        return { ok: true, status: confirmed.revived ? "captured" : "confirmed", capture: confirmed, captureStatus: confirmed.status || "pending" };
       }
     }
     if (response.status === 401) return { ok: false, code: "revoked" };

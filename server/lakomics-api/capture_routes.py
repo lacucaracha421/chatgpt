@@ -71,6 +71,11 @@ class ImageTextLine(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
+class CaptureSaveIntent(BaseModel):
+    request_id: uuid.UUID
+    requested_at: AwareDatetime
+
+
 class CaptureCreate(BaseModel):
     source_url: str
     media_url: str
@@ -79,6 +84,7 @@ class CaptureCreate(BaseModel):
     media_type: Literal["image", "video", "animated_gif"] = "image"
     source: Literal["x", "arca", "dcinside", "web"] = "x"
     image_text: list[ImageTextLine] | None = None
+    save_intent: CaptureSaveIntent | None = None
 
     @field_validator("image_text", mode="before")
     @classmethod
@@ -176,18 +182,14 @@ def _create_capture_reserved(capture, classification_id):
         ).fetchone()
 
     if existing:
-        with api.get_db() as db:
-            store_image_text(db, existing["id"], capture.image_text, api.now_iso())
-            db.commit()
-        return {
-            "ok": True,
-            "created": False,
-            "capture": dict(existing),
-        }
+        result = _existing_capture_save(capture, existing["id"])
+        if result is not None:
+            return result
 
-    capture_id = str(uuid.uuid4())
+    capture_id = existing["id"] if existing else str(uuid.uuid4())
     object_namespace = "videos" if capture.media_type == "video" else "images"
-    object_key = f"{object_namespace}/inbox/{capture_id}/original"
+    upload_id = str(uuid.uuid4()) if existing else capture_id
+    object_key = f"{object_namespace}/inbox/{upload_id}/original"
 
     try:
         stored = api.fetch_media_to_r2(
@@ -212,59 +214,31 @@ def _create_capture_reserved(capture, classification_id):
 
     try:
         with api.get_db() as db:
-            db.execute(
-                """
-                INSERT INTO captures (
-                    id,
-                    source_url,
-                    media_url,
-                    classification_id,
-                    object_key,
-                    content_type,
-                    size_bytes,
-                    published_at,
-                    status,
-                    created_at,
-                    imported_at,
-                    media_type
+            db.execute("BEGIN IMMEDIATE")
+            if existing:
+                # Pre-authority captures may lack a verified digest. Fetch the original
+                # again before resolving content identity; keep the unique capture row.
+                db.execute(
+                    "UPDATE captures SET object_key=?,content_type=?,size_bytes=?,media_type=? WHERE id=?",
+                    [object_key, content_type, size_bytes, stored_media_type, capture_id])
+            else:
+                db.execute(
+                    """
+                    INSERT INTO captures (
+                        id, source_url, media_url, classification_id, object_key,
+                        content_type, size_bytes, published_at, status, created_at,
+                        imported_at, media_type
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?)
+                    """,
+                    (capture_id, capture.source_url, capture.media_url, classification_id,
+                     object_key, content_type, size_bytes, capture.published_at, ts, stored_media_type),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?)
-                """,
-                (
-                    capture_id,
-                    capture.source_url,
-                    capture.media_url,
-                    classification_id,
-                    object_key,
-                    content_type,
-                    size_bytes,
-                    capture.published_at,
-                    ts,
-                    stored_media_type,
-                ),
-            )
             db.execute("UPDATE captures SET sha256=? WHERE id=?", [digest,capture_id])
             store_image_text(db, capture_id, capture.image_text, ts)
-            active = authority.active_domain(db, asset_authority.DOMAIN)
-            promotion_state = None
-            if active is not None:
-                if digest is None:
-                    raise HTTPException(422, detail={"code": "captureDigestUnavailable"})
-                try:
-                    _, asset_created = asset_authority.promote_capture(
-                        db, library_id=active["libraryId"], capture_id=capture_id,
-                        kind="gif" if stored_media_type == "animated_gif" else stored_media_type,
-                        object_key=object_key, content_type=content_type, size_bytes=size_bytes,
-                        sha256=digest, source_url=capture.source_url,
-                        collected_at=ts, source_published_at=capture.published_at,
-                        import_source="capture", classification_id=classification_id, now=ts)
-                    promotion_state = "promoted"
-                    db.execute("UPDATE captures SET status='imported',imported_at=? WHERE id=?",[ts,capture_id])
-                except HTTPException as exc:
-                    if not isinstance(exc.detail,dict) or exc.detail.get("code") not in ("duplicateInTrash","duplicateTombstoned"):
-                        raise
-                    promotion_state = exc.detail["code"]
-                db.execute("UPDATE captures SET promotion_state=? WHERE id=?",[promotion_state,capture_id])
+            row = db.execute("SELECT * FROM captures WHERE id=?", [capture_id]).fetchone()
+            asset_created, revived, _ = _promote_saved_capture(db, row, capture, ts)
+            saved_capture = dict(db.execute("SELECT * FROM captures WHERE id=?", [capture_id]).fetchone())
             db.commit()
             committed = True
     except BaseException as exc:
@@ -291,14 +265,9 @@ def _create_capture_reserved(capture, classification_id):
             ).fetchone()
 
         if existing:
-            with api.get_db() as db:
-                store_image_text(db, existing["id"], capture.image_text, api.now_iso())
-                db.commit()
-            return {
-                "ok": True,
-                "created": False,
-                "capture": dict(existing),
-            }
+            result = _existing_capture_save(capture, existing["id"])
+            if result is not None:
+                return result
 
         raise HTTPException(status_code=409, detail="Capture conflict")
 
@@ -310,24 +279,65 @@ def _create_capture_reserved(capture, classification_id):
 
     return {
         "ok": True,
-        "created": True,
-        "capture": {
-            "id": capture_id,
-            "source_url": capture.source_url,
-            "media_url": capture.media_url,
-            "classification_id": classification_id,
-            "object_key": object_key,
-            "content_type": content_type,
-            "size_bytes": size_bytes,
-            "published_at": capture.published_at,
-            "status": "imported" if promotion_state == "promoted" else "pending",
-            "sha256": digest,
-            "promotion_state": promotion_state,
-            "created_at": ts,
-            "imported_at": None,
-            "media_type": stored_media_type,
-        },
+        "created": existing is None,
+        "revived": revived,
+        "capture": saved_capture,
     }
+
+
+def _existing_capture_save(capture, capture_id):
+    with api.get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM captures WHERE id=?", [capture_id]).fetchone()
+        active = authority.active_domain(db, asset_authority.DOMAIN)
+        created, revived = False, False
+        if capture.save_intent is not None and active is not None:
+            if not row["sha256"]:
+                return None
+            created, revived, _ = _promote_saved_capture(db, row, capture, api.now_iso())
+        store_image_text(db, capture_id, capture.image_text, api.now_iso())
+        row = db.execute("SELECT * FROM captures WHERE id=?", [capture_id]).fetchone()
+        db.commit()
+    if created and api._image_thumbnail_worker is not None:
+        api._image_thumbnail_worker.wake()
+    return {"ok": True, "created": False, "revived": revived, "capture": dict(row)}
+
+
+def _promote_saved_capture(db, row, capture, now):
+    active = authority.active_domain(db, asset_authority.DOMAIN)
+    if active is None:
+        return False, False, None
+    if not row["sha256"]:
+        raise HTTPException(422, detail={"code": "captureDigestUnavailable"})
+    before = db.execute(
+        "SELECT lifecycle FROM asset_authority_state WHERE library_id=? AND sha256=?",
+        [active["libraryId"], row["sha256"]]).fetchone()
+    intent = None if capture.save_intent is None else {
+        **capture.save_intent.model_dump(mode="json"),
+        "source_url": capture.source_url, "media_url": capture.media_url,
+        "classification_id": row["classification_id"],
+    }
+    created, revived = False, False
+    try:
+        asset_id, created = asset_authority.promote_capture(
+            db, library_id=active["libraryId"], capture_id=row["id"],
+            kind="gif" if row["media_type"] == "animated_gif" else row["media_type"],
+            object_key=row["object_key"], content_type=row["content_type"], size_bytes=row["size_bytes"],
+            sha256=row["sha256"], source_url=row["source_url"], collected_at=row["created_at"],
+            source_published_at=row["published_at"], import_source="capture",
+            classification_id=row["classification_id"], now=now, save_intent=intent)
+        lifecycle = asset_authority.authority_lifecycle(db, active["libraryId"], asset_id)
+        revived = before is not None and before[0] != "normal" and lifecycle == "normal"
+        state = "promoted" if lifecycle == "normal" else (
+            "duplicateInTrash" if lifecycle == "trash" else "duplicateTombstoned")
+    except HTTPException as exc:
+        if not isinstance(exc.detail, dict) or exc.detail.get("code") not in ("duplicateInTrash", "duplicateTombstoned"):
+            raise
+        state = exc.detail["code"]
+    db.execute("UPDATE captures SET promotion_state=? WHERE id=?", [state, row["id"]])
+    if state == "promoted":
+        db.execute("UPDATE captures SET status='imported',imported_at=? WHERE id=?", [now, row["id"]])
+    return created, revived, state
 
 
 def store_image_text(db, capture_id, lines, now):
@@ -383,6 +393,7 @@ def list_pending_captures(
             SELECT captures.*, text.payload AS image_text_payload
             FROM captures LEFT JOIN capture_image_text AS text ON text.capture_id = captures.id
             WHERE captures.status = 'pending' AND (? IS NULL OR captures.id > ?)
+              AND COALESCE(captures.promotion_state,'') NOT IN ('duplicateInTrash','duplicateTombstoned')
             ORDER BY captures.id ASC
             LIMIT ?
             """,
@@ -398,7 +409,8 @@ def captures_status_head(db):
     Capture ids are random, so ``latest`` is the newest row's ``rowid``: it moves on every
     new capture even when an import leaves the pending count unchanged.
     """
-    pending = db.execute("SELECT COUNT(*) FROM captures WHERE status='pending'").fetchone()[0]
+    pending = db.execute("SELECT COUNT(*) FROM captures WHERE status='pending' "
+                         "AND COALESCE(promotion_state,'') NOT IN ('duplicateInTrash','duplicateTombstoned')").fetchone()[0]
     latest = db.execute("SELECT MAX(rowid) FROM captures").fetchone()[0]
     return {"pending": pending, "latest": latest}
 
@@ -406,6 +418,7 @@ def captures_status_head(db):
 def confirm_extension_capture(
     source_url: str, media_url: str, classification_id: str,
     authorization: str | None = Header(default=None),
+    request_id: str | None = None,
 ):
     api.require_extension_client(authorization)
     with api.get_db() as db:
@@ -413,7 +426,24 @@ def confirm_extension_capture(
             "SELECT id,status,media_type,content_type,created_at FROM captures WHERE source_url=? AND media_url=? AND classification_id=? ORDER BY created_at DESC LIMIT 1",
             (source_url, media_url, classification_id),
         ).fetchone()
-    return {"found": row is not None, "capture": dict(row) if row is not None else None}
+        revived = False
+        if request_id is not None:
+            active = authority.active_domain(db, asset_authority.DOMAIN)
+            if active is not None:
+                receipt = db.execute(
+                    "SELECT result_payload FROM asset_authority_receipts "
+                    "WHERE library_id=? AND epoch=? AND operation_id=? AND command_type='saveCapture'",
+                    [active["libraryId"], active["epoch"], f"capture-save:{request_id}"]).fetchone()
+                # An old capture row is not confirmation of this new user action.
+                if receipt is None:
+                    row = None
+                else:
+                    result = json.loads(receipt["result_payload"])
+                    if result.get("captureIdentity") != [source_url, media_url, classification_id]:
+                        row = None
+                    revived = bool(result.get("revived")) and row is not None
+    return {"found": row is not None, "revived": revived,
+            "capture": dict(row) if row is not None else None}
 
 
 def capture_download_ticket(

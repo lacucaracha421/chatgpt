@@ -494,7 +494,7 @@ def copy_capture_image_text(db, capture_id, asset_id, now):
 def promote_capture(db, *, library_id, capture_id, kind, object_key, content_type,
                     size_bytes, sha256, source_url=None, creator_name=None,
                     creator_handle=None, collected_at=None, source_published_at=None,
-                    import_source=None, classification_id=None, now=None):
+                    import_source=None, classification_id=None, now=None, save_intent=None):
     """Turn a validated Capture into a canonical Asset, exactly once.
 
     Idempotent on `(library, capture)`: the canonical Asset id is derived from the pair,
@@ -512,12 +512,20 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
     existing = db.execute(
         "SELECT asset_id FROM asset_authority_capture_map WHERE library_id=? AND capture_id=?",
         [library_id, capture_id]).fetchone()
+    duplicate = db.execute("SELECT asset_id,lifecycle FROM asset_authority_state "
+                           "WHERE library_id=? AND sha256=?", [library_id, sha256]).fetchone()
+    if existing is not None and (duplicate is None or duplicate[0] != existing[0]):
+        fail(409, "canonicalContentConflict", canonicalAssetId=existing[0])
+    revived = False
+    if duplicate is not None and save_intent is not None:
+        revived = _explicit_capture_save(
+            db, active=active, asset_id=duplicate[0], intent=save_intent,
+            classification_id=classification_id, object_key=object_key, now=timestamp)
+        if revived:
+            duplicate = (duplicate[0], NORMAL)
     if existing is not None:
         copy_capture_image_text(db, capture_id, existing[0], timestamp)
         return existing[0], False
-
-    duplicate = db.execute("SELECT asset_id,lifecycle FROM asset_authority_state "
-                           "WHERE library_id=? AND sha256=?", [library_id, sha256]).fetchone()
     if duplicate is not None and duplicate[1] != NORMAL:
         fail(409, "duplicateInTrash" if duplicate[1] == TRASH else "duplicateTombstoned",
              "이미 삭제된 동일한 자료입니다.", assetId=duplicate[0], lifecycle=duplicate[1])
@@ -579,7 +587,63 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
     _record_change(db, library_id=library_id, command_type="promoteCapture",
                    asset_id=asset_id, revision=1, operation_id=f"promote:{capture_id}",
                    delta={"asset": state_projection(row, asset_id)}, now=timestamp)
+    if save_intent is not None:
+        _explicit_capture_save(db, active=active, asset_id=asset_id, intent=save_intent,
+                               classification_id=classification_id, object_key=object_key,
+                               now=timestamp)
     return asset_id, True
+
+
+def _explicit_capture_save(db, *, active, asset_id, intent, classification_id, object_key, now):
+    """Only POST /captures supplies this intent; promotion/replay never manufactures it.
+
+    Use existing command receipts for retries, plus the original user-action time for
+    delayed requests and receipts that have aged out. Both checks are inside the same
+    write transaction as lifecycle, assignment and capture promotion.
+    """
+    library_id, epoch = active["libraryId"], active["epoch"]
+    operation_id = f"capture-save:{intent['request_id']}"
+    digest = hashlib.sha256(json.dumps(intent, sort_keys=True).encode()).hexdigest()
+    receipt = db.execute(
+        "SELECT payload_digest FROM asset_authority_receipts WHERE library_id=? AND epoch=? AND operation_id=?",
+        [library_id, epoch, operation_id]).fetchone()
+    if receipt is not None:
+        if receipt[0] != digest:
+            fail(409, "operationConflict", "같은 저장 요청 ID가 다른 내용으로 사용되었습니다.")
+        return False
+    current = state_row(db, library_id, asset_id)
+    requested = datetime.fromisoformat(intent["requested_at"].replace("Z", "+00:00"))
+    server_time = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    # Bound clock skew. The receipt still consumes a future-dated action immediately.
+    if requested > server_time + timedelta(minutes=5):
+        fail(422, "captureSaveClockSkew", "기기의 시간을 확인한 뒤 다시 저장해 주세요.")
+    changed = datetime.fromisoformat(current[14].replace("Z", "+00:00"))
+    revived = current[0] != NORMAL and requested > changed
+    if revived:
+        revision = current[1] + 1
+        db.execute(
+            "UPDATE asset_authority_state SET lifecycle='normal',entity_revision=?,"
+            "object_key=?,updated_at=?,lifecycle_changed_at=? WHERE library_id=? AND asset_id=?",
+            [revision, object_key, now, now, library_id, asset_id])
+        db.execute("UPDATE assets SET object_key=?,updated_at=? WHERE id=?",
+                   [object_key, now, asset_id])
+        classification = authority.require_active(
+            db, classification_authority.DOMAIN, library_id, classification_authority.CONTRACT_VERSION)
+        assignment = classification_authority.assignment_row(db, library_id, asset_id)
+        classification_authority.apply_command(
+            db, library_id=library_id, epoch=classification["epoch"],
+            contract_version=classification["contractVersion"],
+            command_type=classification_authority.ASSIGNMENT,
+            operation_id=str(uuid.uuid5(PROMOTION_NAMESPACE, operation_id)),
+            entity={"assetId": asset_id, "classificationId": classification_id,
+                    "expectedRevision": assignment["entity_revision"] if assignment else 0}, now=now)
+        _record_change(db, library_id=library_id, command_type="reviveCapture",
+                       asset_id=asset_id, revision=revision, operation_id=operation_id,
+                       delta={"asset": state_projection(state_row(db, library_id, asset_id), asset_id)}, now=now)
+    _save_receipt(db, library_id, epoch, operation_id, digest, "saveCapture", asset_id,
+                  {"revived": revived, "captureIdentity": [intent["source_url"], intent["media_url"],
+                                                           classification_id]}, now)
+    return revived
 
 
 def _record_change(db, *, library_id, command_type, asset_id, revision, operation_id, delta, now):
@@ -639,7 +703,7 @@ def register_replication(db, library_id, asset_id, now):
 # Lifecycle commands
 # ---------------------------------------------------------------------------
 
-#: Legal transitions. Trash is reversible; tombstone is not, at the logical layer.
+#: Ordinary commands cannot revive tombstones. Only a fresh explicit capture save can.
 _TRANSITIONS = {
     (NORMAL, TRASH): True,
     (TRASH, NORMAL): True,
@@ -693,8 +757,8 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
 
     target = {TRASH_ASSET: TRASH, RESTORE_ASSET: NORMAL, TOMBSTONE_ASSET: TOMBSTONED}[command_type]
     if not _TRANSITIONS.get((lifecycle, target), False):
-        # Tombstone is terminal at the logical layer: reviving it would resurrect an
-        # Asset whose deletion the change log already recorded.
+        # Ordinary restore and replay cannot revive a tombstone. Explicit capture
+        # saves use their own receipt/time-checked path above.
         fail(409, "lifecycleTransitionRefused",
              "허용되지 않는 상태 전이입니다.", assetId=asset_id,
              lifecycle=lifecycle, requested=target)

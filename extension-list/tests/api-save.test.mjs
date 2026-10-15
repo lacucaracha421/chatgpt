@@ -157,3 +157,44 @@ for (const scenario of ['translated', 'fractional', 'ordinary', 'invalid', 'empt
     } else assert.equal('image_text' in body, false);
   } finally { api.request = originalRequest; globalThis.chrome = originalChrome; }
 });
+
+test('each explicit save carries a fresh intent and revived saves read as normal pending saves', async () => {
+  const api = globalThis.LakomicsListApi, originalRequest = api.request, originalChrome = globalThis.chrome;
+  globalThis.chrome = { storage: { local: { get: async () => ({}), set: async () => {} } } };
+  const bodies = [];
+  api.request = async (_path, options) => {
+    bodies.push(options.body);
+    return { ok: true, data: { created: false, revived: bodies.length === 1, capture: { status: 'imported' } } };
+  };
+  try {
+    const input = { candidate: { type: 'image', source: 'web', sourceUrl: 'https://example.test/post', mediaUrl: 'https://example.test/a.png' }, classificationId: 'games' };
+    const revived = await globalThis.LakomicsSaveClient.save(input);
+    const duplicate = await globalThis.LakomicsSaveClient.save(input);
+    assert.equal(revived.status, 'captured');
+    assert.equal(revived.captureStatus, 'pending');
+    assert.equal(duplicate.status, 'duplicate');
+    assert.equal(duplicate.captureStatus, 'imported');
+    assert.match(bodies[0].save_intent.request_id, /^[0-9a-f-]{36}$/);
+    assert.notEqual(bodies[0].save_intent.request_id, bodies[1].save_intent.request_id);
+    assert.ok(Number.isFinite(Date.parse(bodies[0].save_intent.requested_at)));
+  } finally { api.request = originalRequest; globalThis.chrome = originalChrome; }
+});
+
+test('timeout confirmation identifies the same save intent and preserves revived pending wording', async () => {
+  const api = globalThis.LakomicsListApi, originalRequest = api.request, originalChrome = globalThis.chrome;
+  globalThis.chrome = { storage: { local: { get: async () => ({}), set: async () => {} } } };
+  let body;
+  api.request = async (path, options) => {
+    if (path === '/v1/captures') {
+      body = options.body;
+      return { ok: false, status: 504 };
+    }
+    assert.equal(new URL(`https://example.test${path}`).searchParams.get('request_id'), body.save_intent.request_id);
+    return { ok: true, data: { found: true, revived: true, capture: { status: 'imported' } } };
+  };
+  try {
+    const result = await globalThis.LakomicsSaveClient.save({ candidate: { type: 'image', source: 'web', sourceUrl: 'https://example.test/post', mediaUrl: 'https://example.test/a.png' }, classificationId: 'games' });
+    assert.equal(result.status, 'captured');
+    assert.equal(result.captureStatus, 'pending');
+  } finally { api.request = originalRequest; globalThis.chrome = originalChrome; }
+});

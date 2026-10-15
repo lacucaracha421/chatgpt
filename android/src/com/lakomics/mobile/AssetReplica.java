@@ -67,11 +67,11 @@ final class AssetReplica {
         }
         if(domain.contractVersion!=1) throw new IllegalArgumentException("Unsupported Asset contract");
         identity(head,domain);
-        if(head==null) {baseline(scope,domain);return true;}
+        if(head==null) {baseline(scope,domain,null);return true;}
         if(head.cursor==domain.cursor && skipUnchanged.getAsBoolean())return false;
         Snapshot local=read(scope);
         identity(local,domain);
-        if(local==null) {baseline(scope,domain);return true;}
+        if(local==null) {baseline(scope,domain,null);return true;}
         boolean changed=false;
         try {
             for(int page=0;page<2000;page++) {
@@ -88,7 +88,8 @@ final class AssetReplica {
                     String id=(String)projection.get("assetId");
                     if(!id.equals(change.get("assetId")))throw new IllegalArgumentException("Delta mismatch");
                     Map<String,Object> old=rows.get(id);
-                    if(old!=null && (number(projection,"entityRevision")<=number(old,"entityRevision") || (old.get("lifecycle").equals("tombstoned")&&!projection.get("lifecycle").equals("tombstoned"))))throw new IllegalArgumentException("Invalid lifecycle revision");
+                    if(old!=null && number(projection,"entityRevision")<=number(old,"entityRevision"))throw new IllegalArgumentException("Invalid lifecycle revision");
+                    validateRevive(old,projection);
                     rows.put(id,projection);
                 }
                 boolean more=bool(response,"hasMore");
@@ -99,10 +100,10 @@ final class AssetReplica {
             throw new IllegalArgumentException("Change traversal bound");
         } catch(AlbumReplica.HttpFailure failure) {
             if(!AlbumReplica.CODE_CURSOR_EXPIRED.equals(AlbumReplica.mapFailure(failure.status,failure.body,false).code))throw failure;
-            baseline(scope,domain);return true;
+            baseline(scope,domain,local);return true;
         }
     }
-    private void baseline(String scope, AlbumReplica.Domain domain) throws Exception {
+    private void baseline(String scope, AlbumReplica.Domain domain, Snapshot prior) throws Exception {
         Map<String,Map<String,Object>> rows=new TreeMap<>();String after="";Long cursor=null;
         for(int page=0;page<2000;page++) {
             String request=path(domain,"baseline")+"&limit=500"+(after.isEmpty()?"":"&after="+after)+(cursor==null?"":"&expectedCursor="+cursor);
@@ -110,12 +111,19 @@ final class AssetReplica {
             long current=number(response,"cursor");if(current<0||cursor!=null&&current!=cursor)throw new IllegalArgumentException("Baseline changed");cursor=current;
             List<?> items=list(response,"items");if(items.size()>500)throw new IllegalArgumentException("Page bound");
             String previous=after;
-            for(Object item:items) {Map<String,Object> p=projection(item);String id=(String)p.get("assetId");if(id.compareTo(previous)<=0||rows.put(id,p)!=null||rows.size()>250000)throw new IllegalArgumentException("Invalid baseline order");previous=id;}
+            for(Object item:items) {Map<String,Object> p=projection(item);String id=(String)p.get("assetId");validateRevive(prior==null?null:prior.rows.get(id),p);if(id.compareTo(previous)<=0||rows.put(id,p)!=null||rows.size()>250000)throw new IllegalArgumentException("Invalid baseline order");previous=id;}
             boolean more=bool(response,"hasMore");Object next=response.get("nextAfter");
             if(!more) {if(next!=null)throw new IllegalArgumentException("Invalid final page");save(scope,new Snapshot(domain.libraryId,domain.epoch,cursor,rows));return;}
             if(items.isEmpty()||!previous.equals(next))throw new IllegalArgumentException("Invalid baseline continuation");after=previous;
         }
         throw new IllegalArgumentException("Baseline traversal bound");
+    }
+    private static void validateRevive(Map<String,Object> old, Map<String,Object> next) {
+        // A fresh save advances the canonical revision. Old changes/baselines cannot
+        // revive a retained tombstone, and ordinary commands cannot move it to trash.
+        if(old!=null && "tombstoned".equals(old.get("lifecycle")) && !"tombstoned".equals(next.get("lifecycle"))
+            && (!"normal".equals(next.get("lifecycle")) || number(next,"entityRevision")<=number(old,"entityRevision")))
+            throw new IllegalArgumentException("Invalid lifecycle revival");
     }
     private static void identity(Header local,AlbumReplica.Domain domain) {
         if(local!=null && (!local.library.equals(domain.libraryId)||local.epoch!=domain.epoch))

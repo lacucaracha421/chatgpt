@@ -132,6 +132,21 @@ impl Library {
                 return Err(LibraryError::DuplicateOriginalCorrupt);
             }
         }
+        if identity.is_none() && request.import_source == ImportSource::BrowserExtension {
+            // A legacy inbox replay is not a new user save. Deleted server-owned
+            // content can only return through a newer normal authority projection.
+            let deleted: bool = self.connection()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE sha256=? AND lifecycle<>'normal')",
+                [&content_hash],
+                |row| row.get(0),
+            )?;
+            if deleted {
+                return Err(LibraryError::AssetAuthorityRejected {
+                    status: 409,
+                    code: "captureRequiresExplicitSave".into(),
+                });
+            }
+        }
         run_staging_hook(&staging_path);
 
         match kind {
