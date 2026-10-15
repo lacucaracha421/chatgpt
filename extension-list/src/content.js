@@ -473,8 +473,11 @@
           },
         });
         contextController = controller;
+        const selectionChip = globalThis.LakomicsSelectionChip?.create({ css, watchSession: createSessionWatcher,
+          canShow: event => !controller.current && controller.canTranslateTouch(event) });
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) controller.update(changes[globalThis.LakomicsContextModel.SETTINGS].newValue);
+          if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) selectionChip?.refresh();
         });
       }).catch(() => {});
     }
@@ -534,6 +537,7 @@
       twoFingerTimer = null; twoFingerCancelled = true;
     }
     function onTouchDown(event) {
+      if (event.composedPath?.().some(node => node?.tagName === "LAKOMICS-SELECTION-CHIP")) return;
       if (!touchPointers.size) translationGuard = null;
       if (!touchPointers.size) menuTouchGuard = null;
       if (event.pointerType !== "touch") return;

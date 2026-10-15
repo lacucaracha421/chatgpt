@@ -31,6 +31,7 @@
     function open(event, keyboard = false, touch = false) {
       const state = collector.state?.() || {};
       if (model.bypass(event, { ...config, hostname: model.topHostname(win), ...state }) || collector.controls?.(event)) return false;
+      if (!touch && model.pageOwnsMenu(event)) return false;
       if (!keyboard && !touch && (event.button !== 2 || event.pointerType === "touch")) return false;
       const target = keyboard ? doc.activeElement : event.composedPath?.().find(node => node?.nodeType === 1) || event.target;
       const context = model.snapshot(target, doc, win, collector.findCandidate);
@@ -100,6 +101,12 @@
       return true;
     }
     function contextmenu(event) { if (event.shiftKey) { close({ restore: false }); return; } open(event); }
+    function captureContextmenu(event) {
+      // Opt-in only: an unmarked custom menu and a blanket right-click blocker
+      // can use identical listeners. Never override that choice on every site.
+      if (event.shiftKey || !model.excluded(model.topHostname(win), config.priorityHosts)) return;
+      if (open(event)) event.stopImmediatePropagation();
+    }
     function keydown(event) {
       if (!current) { if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) open(event, true); return; }
       if (event.isTrusted !== true) return;
@@ -109,11 +116,13 @@
     }
     function outside(event) { if (current && !event.composedPath?.().includes(current.surface.node)) close({ immediate: event.button === 2 }); }
     const dismiss = () => close();
+    win.addEventListener("contextmenu", captureContextmenu, true);
     win.addEventListener("contextmenu", contextmenu); win.addEventListener("keydown", keydown);
     doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", dismiss, true); win.addEventListener("resize", dismiss); win.addEventListener("blur", dismiss); doc.addEventListener("visibilitychange", dismiss);
     win.visualViewport?.addEventListener("resize", dismiss); win.visualViewport?.addEventListener("scroll", dismiss);
     return { open, openTouch: event => open(event, false, true), close, keydown, canTranslateTouch, translateTouch, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
       close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); actions.destroy?.(); surfaces.destroy();
+      win.removeEventListener("contextmenu", captureContextmenu, true);
       win.removeEventListener("contextmenu", contextmenu); win.removeEventListener("keydown", keydown); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", dismiss, true); win.removeEventListener("resize", dismiss); win.removeEventListener("blur", dismiss); doc.removeEventListener("visibilitychange", dismiss);
       win.visualViewport?.removeEventListener("resize", dismiss); win.visualViewport?.removeEventListener("scroll", dismiss);
     } };

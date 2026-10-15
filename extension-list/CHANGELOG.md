@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.5.41 — 2026-10-16
+
+- Tablet: after a touch or pen text selection settles, a small "번역" chip appears near
+  the selection (above it, clear of the native toolbar, kept on screen) and translates
+  the selection in the existing popover; mouse selections never show it.
+- The custom right-click menu now opens on more sites: a capture-phase listener runs
+  before page handlers but yields to pages that own their menu (editors, maps, games,
+  a protected list), with a per-site switch in settings. Chrome's PDF viewer and other
+  restricted pages cannot host it; use Chrome's menu or Shift+right-click there.
+  Coverage notes: options/context-menu-coverage.md.
+
 ## 3.5.40 — 2026-10-13
 
 - Tablet: moving between pictures in the preview keeps the same surface (no flash), and a

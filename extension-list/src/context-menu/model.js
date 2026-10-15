@@ -7,7 +7,7 @@
       .map(host => String(host).trim().toLowerCase().replace(/\.$/, ""))
       .filter(host => /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(host)))];
   }
-  function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts), pageMode: value?.pageMode === "below" ? "below" : "replace" }; }
+  function settings(value) { return { enabled: value?.enabled !== false, excludedHosts: hosts(value?.excludedHosts), priorityHosts: hosts(value?.priorityHosts), pageMode: value?.pageMode === "below" ? "below" : "replace" }; }
   function excluded(host, list) { host = host.toLowerCase().replace(/\.$/, ""); return list.some(item => host === item || host.endsWith("." + item)); }
   function topHostname(win) {
     try { return win.top.location.hostname; } catch {}
@@ -42,6 +42,20 @@
   function bypass(event, { enabled = true, excludedHosts = [], hostname = "", phase = "idle", picker = false } = {}) {
     return event.isTrusted !== true || event.defaultPrevented || (event.shiftKey && event.key !== "F10") || !enabled || excluded(hostname, excludedHosts)
       || phase !== "idle" || picker || event.composedPath?.().some(node => node?.matches?.(ownSelector)) || Boolean(event.target?.closest?.(ownSelector));
+  }
+  // Conservative ownership signals, not a claim to detect every page listener.
+  // Plain inputs/contenteditable retain the existing translation/edit actions.
+  const nativeMenuSelector = [
+    "canvas, iframe, object, embed", '[role="application"], [role="menu"], [aria-haspopup="menu"]',
+    ".monaco-editor, .CodeMirror, .cm-editor, .ace_editor, .ProseMirror, .ql-editor, .tox, .ck-editor__editable",
+    ".leaflet-container, .mapboxgl-map, .maplibregl-map, .gm-style",
+  ].join(", ");
+  function pageOwnsMenu(event) {
+    const path = event.composedPath?.() || [];
+    // Include shadow hosts even for direct controller calls without a full path.
+    const nodes = new Set(path);
+    for (let node = path.find(node => node?.nodeType === 1) || event.target; node; node = node.parentElement || node.getRootNode?.().host) nodes.add(node);
+    return [...nodes].some(node => node?.matches?.(nativeMenuSelector) || node?.hasAttribute?.("oncontextmenu") || typeof node?.oncontextmenu === "function");
   }
   function sourceLanguage(text) {
     const letters = [...text].filter(char => /\p{Letter}/u.test(char));
@@ -208,5 +222,5 @@
     if (key === "ArrowUp") return current < 0 ? count - 1 : (current + count - 1) % count;
     return current;
   }
-  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, topHostname, mediaAt, mediaUrl, bypass, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
+  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, topHostname, mediaAt, mediaUrl, bypass, pageOwnsMenu, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
 })();

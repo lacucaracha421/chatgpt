@@ -16,6 +16,21 @@ test('context menu defaults on, persists switch/excluded hosts, and reloads with
 test('invalid site lines produce feedback and do not save malformed exclusions',async()=>{
   const f=await fixture();f.doc.getElementById('context-menu-excluded').value='https://example.com/path';f.doc.getElementById('context-menu-form').dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();assert.equal(f.memory['lakomics:context-menu:v1'],undefined);assert.match(f.doc.getElementById('context-menu-error').textContent,/호스트/);f.close();
 });
+
+test('priority hosts are opt-in, validated, persisted and preserved across other menu edits',async()=>{
+  const f=await fixture();const input=f.doc.getElementById('context-menu-priority');
+  assert.equal(input.value,'');
+  input.value='https://bad.test/path';f.doc.getElementById('context-menu-priority-form').dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();
+  assert.equal(f.memory['lakomics:context-menu:v1'],undefined);assert.match(f.doc.getElementById('context-menu-priority-error').textContent,/호스트/);
+  input.value=' Example.COM\nexample.com\nsub.site.test';f.doc.getElementById('context-menu-priority-form').dispatchEvent(new f.w.Event('submit',{cancelable:true}));await tick();
+  assert.deepEqual(f.memory['lakomics:context-menu:v1'].priorityHosts,['example.com','sub.site.test']);
+  const g=await fixture(f.memory['lakomics:context-menu:v1']);assert.equal(g.doc.getElementById('context-menu-priority').value,'example.com\nsub.site.test');
+  g.doc.getElementById('context-menu-excluded').value='example.com';g.doc.getElementById('context-menu-form').dispatchEvent(new g.w.Event('submit',{cancelable:true}));await tick();
+  const checkbox=g.doc.getElementById('context-menu-enabled');checkbox.checked=false;checkbox.dispatchEvent(new g.w.Event('change'));await tick();
+  assert.deepEqual(g.memory['lakomics:context-menu:v1'],{enabled:false,excludedHosts:['example.com'],priorityHosts:['example.com','sub.site.test']});
+  g.doc.getElementById('context-menu-priority').value='';g.doc.getElementById('context-menu-priority-form').dispatchEvent(new g.w.Event('submit',{cancelable:true}));await tick();
+  assert.deepEqual(g.memory['lakomics:context-menu:v1'].priorityHosts,[]);f.close();g.close();
+});
 test('X card has text tint, square-free 4px block radius, header/close control, and no colored stripe',async()=>{
   const x=await readFile(new URL('../src/x-translate.js',import.meta.url),'utf8');assert.equal(x.includes('border-left'),false);assert.match(x,/background:color-mix\(in srgb,currentColor 6%,transparent\)/);assert.match(x,/margin:8px 0 12px;padding:8px 12px 12px/);assert.match(x,/번역 닫기/);assert.match(x,/color-mix\(in srgb,currentColor 55%,transparent\)/);assert.match(x,/hover:none/);
 });

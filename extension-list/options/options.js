@@ -376,7 +376,7 @@
   }
   function validation(id, message) {
     const node = $(id); node.setAttribute("aria-invalid", String(Boolean(message))); node.classList.toggle("err", Boolean(message));
-    $(id === "translation-dictionary" ? "translation-dictionary-error" : "context-menu-error").textContent = message;
+    $(id === "translation-dictionary" ? "translation-dictionary-error" : id === "context-menu-priority" ? "context-menu-priority-error" : "context-menu-error").textContent = message;
   }
   const hostRe = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
   function hosts(raw) {
@@ -393,6 +393,18 @@
       context.excludedHosts = parsed.values; $("context-menu-count").textContent = `${parsed.values.length}개`;
       if (blur) contextEditor.normalized(raw, parsed.values.join("\n"));
       contextEditor.committed(raw); return { ok: true };
+    }));
+  });
+  const priorityEditor = textEditor("context-menu-priority", "context-menu-priority-form", async (raw, blur, write) => {
+    const parsed = hosts(raw);
+    if (blur) validation("context-menu-priority", parsed.bad < 0 ? "" : `${parsed.bad + 1}번째 줄: 주소 대신 호스트만`);
+    if (parsed.bad >= 0) return { ok: false };
+    if (!write) { priorityEditor.normalized(raw, parsed.values.join("\n")); return { ok: true }; }
+    return delayedBusy($("context-menu-status"), () => queued("context", async () => {
+      await chrome.storage.local.set({ [contextKey]: { ...context, priorityHosts: parsed.values } });
+      context.priorityHosts = parsed.values;
+      if (blur) priorityEditor.normalized(raw, parsed.values.join("\n"));
+      priorityEditor.committed(raw); return { ok: true };
     }));
   });
   const dictionaryEditor = textEditor("translation-dictionary", "translation-dictionary-form", async (raw, blur, write) => {
@@ -432,6 +444,8 @@
     if (!chrome.storage?.local) return;
     const stored = await chrome.storage.local.get([contextKey]), value = stored[contextKey];
     context = { enabled: value?.enabled !== false, excludedHosts: Array.isArray(value?.excludedHosts) ? value.excludedHosts : [], ...(value?.pageMode ? { pageMode: value.pageMode === "below" ? "below" : "replace" } : {}) };
+    if (Array.isArray(value?.priorityHosts)) context.priorityHosts = value.priorityHosts;
+    priorityEditor.receive((context.priorityHosts || []).join("\n"));
     $("context-menu-enabled").checked = context.enabled; $("context-menu-page-mode").value = context.pageMode || "replace"; contextEditor.receive(context.excludedHosts.join("\n"));
     $("context-menu-count").textContent = `${context.excludedHosts.length}개`; relationships();
   }

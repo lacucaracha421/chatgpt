@@ -80,6 +80,11 @@
     }
 
     async function load(session) {
+      if (session.context.selectionText) {
+        const result = await send({ type: "translation:context", kind: "translate.ko.inline", text: session.context.selectionText });
+        return result?.ok && typeof result.text === "string" && result.text.trim()
+          ? { ok: true, lines: [{ original: session.context.selectionText, korean: result.text }] } : { ok: false, code: result?.code };
+      }
       const { imageUrl: url, image } = session.context;
       if (/^https:/i.test(url)) {
         const result = await send({ type: "translation:image", url });
@@ -94,6 +99,7 @@
       if (session.popover) return session.popover;
       const surface = surfaces.host("lakomics-image-popover", session.context.image || session.context.target);
       const box = doc.createElement("div"); box.className = "popA"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "이미지 글자 번역"); box.tabIndex = -1; box.style.pointerEvents = "auto";
+      if (session.context.selectionText) box.setAttribute("aria-label", "선택한 글 번역");
       surface.root.append(box);
       const popover = { surface, box, copyTimer: 0, heightTimer: 0 };
       session.popover = popover;
@@ -147,6 +153,10 @@
       popover.place = () => {
         if (popover.detached) { popover.clamp(); return; }
         const image = session.context.image;
+        if (session.context.selectionRect) {
+          const rect = session.context.selectionRect;
+          popover.clamp(rect.left, rect.bottom + 16); return;
+        }
         if (!image?.isConnected || surface.closed) return;
         const rect = image.getBoundingClientRect(), view = surfaces.viewport();
         const outside = rect.bottom <= (view.offsetTop || 0) || rect.top >= (view.offsetTop || 0) + view.height || rect.right <= (view.offsetLeft || 0) || rect.left >= (view.offsetLeft || 0) + view.width;
@@ -250,7 +260,7 @@
     }
     function showPending(session) {
       fill(session, box => {
-        box.append(header("읽는 중"));
+        box.append(header(session.context.selectionText ? "번역 중" : "읽는 중"));
         const body = doc.createElement("div"); body.className = "pb";
         for (const width of ["70%", "90%", "55%"]) { const bar = doc.createElement("span"); bar.className = "sk"; bar.style.width = width; body.append(bar); }
         box.append(body);
@@ -261,7 +271,7 @@
     function showLines(session, lines) {
       session.imageText = lines;
       fill(session, box => {
-        box.append(header("이미지 글자 번역"));
+        box.append(header(session.context.selectionText ? "선택한 글 번역" : "이미지 글자 번역"));
         const body = doc.createElement("div"); body.className = "pb";
         if (!lines.length) { const none = doc.createElement("p"); none.className = "none"; none.textContent = "글자 없음"; body.append(none); box.append(body); return; }
         const list = doc.createElement("ol");
@@ -316,7 +326,7 @@
     }
     function showFailure(session, code) {
       fill(session, box => {
-        box.append(header("이미지 글자 번역"));
+        box.append(header(session.context.selectionText ? "선택한 글 번역" : "이미지 글자 번역"));
         const body = doc.createElement("div"); body.className = "pb";
         const text = doc.createElement("p"); text.className = "none bad"; text.setAttribute("role", "alert"); text.textContent = failureText(code); body.append(text);
         const retry = doc.createElement("button"); retry.className = "retry"; retry.type = "button"; retry.textContent = "다시 시도";
@@ -327,7 +337,7 @@
     }
 
     async function run(session) {
-      const context = session.context, key = `${context.imageModel || ""}\n${context.imageUrl}`, id = ++session.run;
+      const context = session.context, key = context.selectionText ? `selection\n${context.selectionText}` : `${context.imageModel || ""}\n${context.imageUrl}`, id = ++session.run;
       const cached = cache.get(key);
       if (cached) { showLines(session, cached); return; }
       const result = await globalThis.LakomicsContextSurfaces.delayed(() => load(session), () => { if (current === session && session.run === id && alive(context)) showPending(session); }, { win });
@@ -351,7 +361,7 @@
       }
     }
     function translate(context, event) {
-      if (!context.imageUrl) return;
+      if (!context.imageUrl && !context.selectionText) return;
       close(0);
       const session = { id: ++sequence, run: 0, context, popover: null, keyboard: event?.type === "keydown", focused: false, watcher: watchSession() };
       current = session;
