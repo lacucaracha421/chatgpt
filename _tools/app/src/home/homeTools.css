@@ -1,0 +1,40 @@
+/* Home tools row (전송 · 빠른 메모 · 링크 보관) and the 오늘의 카드 place (layout A, 2026-10-15). */
+.home-tools { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1fr) minmax(0,1.25fr); gap:var(--space-8); align-items:stretch; }
+.home-tool { min-width:0; }
+.home-tool > div:last-child, .home-tool__body { flex:1; min-width:0; display:flex; flex-direction:column; }
+.home-tool__body { gap:var(--space-2); }
+
+/* 전송: the whole tile takes a drop; the box shows the dashed edge while a drag is over it. */
+.home-drop { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-1); height:120px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; text-align:center; transition:background-color 90ms var(--ease-standard); cursor:copy; }
+.home-drop > svg { width:24px; height:24px; margin-bottom:var(--space-1); color:var(--color-muted); }
+.home-drop > span { max-width:100%; font-size:var(--type-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.home-drop > small { color:var(--color-faint); font-size:var(--type-meta); }
+.home-drop::after { content:""; position:absolute; inset:0; border:1px dashed transparent; border-radius:inherit; pointer-events:none; transition:border-color 90ms var(--ease-standard); }
+.home-drop:disabled { cursor:default; }
+.home-drop:disabled > span { color:var(--color-muted); }
+@media (hover:hover) { .home-drop:hover:not(:disabled) { background:var(--color-surface-hover); } }
+.home-drop:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--focus-width); }
+.home-transfer[data-over] .home-drop { background:var(--color-surface-hover); }
+.home-transfer[data-over] .home-drop::after { border-color:var(--color-accent); }
+.home-transfer__error { margin:0; color:var(--color-danger); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-sent__row { display:grid; grid-template-columns:16px minmax(0,1fr) auto; align-items:center; gap:var(--space-2); min-height:32px; border-bottom:1px solid var(--color-border); }
+.home-sent__row > svg { width:16px; height:16px; color:var(--color-faint); }
+.home-sent__row[data-state="failed"] > svg { color:var(--color-danger); }
+.home-sent__row > span:not(.home-sent__meter) { color:var(--color-text); font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.home-sent__row small { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
+.home-sent__meter { position:relative; width:16px; height:3px; border-radius:2px; background:var(--color-surface-hover); overflow:hidden; }
+.home-sent__meter > i { position:absolute; left:0; top:0; bottom:0; background:var(--color-muted); }
+
+/* 빠른 메모: a text area in the shared input look. Like the 메모 tab body it shows no blue focus line (user 2026-10-15); the caret marks focus. */
+textarea.ui-text-input.home-qmemo__text { display:block; flex:1; width:100%; height:auto; min-height:216px; resize:none; margin:0; padding:var(--space-3); line-height:1.75; }
+textarea.ui-text-input.home-qmemo__text:focus { box-shadow:none; }
+.home-qmemo__status { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); margin:0; color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+
+/* A place kept for a tool or card that is not built yet: one quiet line on the surface face. */
+.home-slot__empty { flex:1; min-height:120px; display:grid; place-items:center; background:var(--color-surface); border-radius:var(--radius-control); }
+.home-slot__empty .ui-empty-state--inline { margin:0; padding:0; }
+.home-daily-card { flex:none; }
+.home-daily-card__body { flex:none; height:268px; }
+
+@container home (max-width:1000px) { .home-tools { grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); } .home-tools > .home-slot { grid-column:1 / -1; } }
+@container home (max-width:700px) { .home-tools { grid-template-columns:minmax(0,1fr); } }

@@ -487,7 +487,8 @@ it("Home revisit shows retained content while its overview refresh is pending", 
   expect(document.querySelector(".home-view")).toBe(home);
   expect(document.querySelector(".home-view img")).toBe(thumbnail);
   expect(gateway.getHomeOverview).toHaveBeenCalledTimes(1);
-  expect(gateway.getRevisitSlate).toHaveBeenCalledTimes(1);
+  // Home no longer shows 1년 전 오늘, so it does not read the revisit slate.
+  expect(gateway.getRevisitSlate).not.toHaveBeenCalled();
   expect(gateway.releaseCalendar.calendar).toHaveBeenCalledTimes(1);
   expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledTimes(1);
   await advance(1200);

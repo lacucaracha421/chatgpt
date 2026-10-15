@@ -35,8 +35,8 @@ export function HomePresence({ items }: { items: Item[] }) {
   }, [items, reduce]);
   return <>{shown.map(i => <div className="home-presence" key={i.key} data-visible={i.visible} inert={!i.visible} aria-hidden={!i.visible}><div>{i.content}</div></div>)}</>;
 }
-export function HomeSection({ title, count, unit, onOpen, children }: { title: string; count?: number; unit?: string; onOpen?: () => void; children: ReactNode }) {
-  return <section className="home-attention-section" aria-label={title}><SectionLabel title={title} count={count} unit={unit} onOpen={onOpen} /><div>{children}</div></section>;
+export function HomeSection({ title, count, unit, onOpen, actions, children }: { title: string; count?: number; unit?: string; onOpen?: () => void; actions?: ReactNode; children: ReactNode }) {
+  return <section className="home-attention-section" aria-label={title}><SectionLabel title={title} count={count} unit={unit} actions={actions} onOpen={onOpen} /><div>{children}</div></section>;
 }
 /** `mark` and `formatValue` let a client swap the leading mark and the trailing value; the row layout stays shared. */
 export function HomeToday({ rows, onOpen, loading, animate = true, mark, formatValue }: { rows: AttentionRow[]; onOpen(row: AttentionRow): void; loading?: ReactNode; animate?: boolean; mark?(row: AttentionRow): ReactNode; formatValue?(row: AttentionRow): ReactNode }) {

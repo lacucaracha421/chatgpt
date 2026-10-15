@@ -2,6 +2,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { IngestOutcome, LibraryGateway } from "../library/types";
+import { nativeDropClaimed } from "./dropClaims";
 
 export type NativeFileDropEvent =
   | { type: "enter"; paths: string[]; position: { x: number; y: number } }
@@ -157,6 +158,12 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
       if (!optionsRef.current.enabled) {
         dragContainsExternalPaths = null;
         dragDisposition = "unknown";
+        setOver(false);
+        return;
+      }
+      // A piece that claims its own drops (Home's 전송 tile) keeps them out of the import.
+      if (nativeDropClaimed(event.position)) {
+        if (event.type === "drop") { dragContainsExternalPaths = null; dragDisposition = "unknown"; }
         setOver(false);
         return;
       }

@@ -18,8 +18,8 @@
 @media (prefers-reduced-motion:reduce) { .home-revisit__cell { transition:none; } }
 
 /* A single split keeps the day's last image level with the media column. */
-.home-pc-layout { --home-pc-gap:calc(var(--space-8) + var(--space-2)); min-height:100%; box-sizing:border-box; display:grid; /* Right column keeps its 1 : 1.75 share but stops at 500px, so a maximized window gives the rest to the left column. */ grid-template-columns:minmax(0,1fr) minmax(0,min(500px, calc((100% - var(--home-pc-gap)) / 2.75))); gap:var(--home-pc-gap); align-items:stretch; }
-.home-media-column, .home-day-column { min-width:0; display:flex; flex-direction:column; gap:var(--space-8); }
+.home-pc-layout { --home-pc-gap:calc(var(--space-8) + var(--space-2)); min-height:100%; box-sizing:border-box; display:grid; /* The right column (오늘의 카드, 오늘 할 것) stops at 400px, so a maximized window gives the rest to the calendar. */ grid-template-columns:minmax(0,1fr) minmax(0,min(400px, calc((100% - var(--home-pc-gap)) / 2.4))); gap:var(--home-pc-gap); align-items:stretch; }
+.home-media-column, .home-day-column { min-width:0; display:flex; flex-direction:column; gap:var(--space-6); }
 .home-media-column > .home-attention-section:only-child { margin-bottom:auto; }
 .home-day, .home-day > .home-attention-section, .home-day > .home-attention-section > div:last-child { min-height:0; flex:1; display:flex; flex-direction:column; }
 .home-day__waiting, .home-media-waiting { flex:1; min-height:520px; color:var(--color-muted); font-size:var(--type-meta); }
@@ -66,3 +66,10 @@
 .home-daily__favorite { display:block; margin-top:var(--space-1); color:var(--color-muted); font-size:var(--type-meta); }
 @container home (max-width:1000px) { .home-pc-layout { --home-pc-gap:var(--space-6); } .home-release-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } .home-playing { --case-height:192px; --cell-width:120px; } }
 @container home (max-width:700px) { .home-pc-layout { grid-template-columns:minmax(0,1fr); } .home-day-column { min-height:420px; } }
+
+/* A quiet text link in a section label's actions (전송 상세, 이후 N개, 전체). */
+.home-link { display:inline-flex; align-items:center; gap:var(--space-1); height:24px; padding:0 var(--space-1); border:0; border-radius:var(--radius-control); background:none; color:var(--color-muted); font:inherit; font-size:var(--type-meta); white-space:nowrap; cursor:pointer; transition:background-color 90ms var(--ease-standard), color 90ms var(--ease-standard); }
+.home-link > svg { width:14px; height:14px; }
+@media (hover:hover) { .home-link:hover { background:var(--color-surface-hover); color:var(--color-text); } }
+.home-link:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--focus-width); }
+@media (prefers-reduced-motion:reduce) { .home-link { transition:none; } }

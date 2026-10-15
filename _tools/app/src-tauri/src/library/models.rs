@@ -662,6 +662,9 @@ pub struct AssetDateBucketQuery {
     pub start_utc: String,
     pub end_utc: String,
     pub offset_minutes: i32,
+    #[serde(default)]
+    pub images_only: bool,
+    pub local_days: Option<Vec<UtcDateRange>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

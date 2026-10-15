@@ -11,7 +11,7 @@ use super::{
     models::{
         AspectRatioFilter, AssetCreatorSummary, AssetCursor, AssetDateBucket,
         AssetDateBucketQuery, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource,
-        MediaKindFilter, MediaSummary, VideoPreparationState,
+        MediaKindFilter, MediaSummary, UtcDateRange, VideoPreparationState,
     },
     Library,
 };
@@ -603,13 +603,53 @@ impl Library {
         if start >= end || !(-840..=840).contains(&query.offset_minutes) {
             return Err(LibraryError::InvalidAssetDateRange);
         }
+        // Home supplies exact midnights so a DST change never moves an image to a neighbor day.
+        let ranges = if let Some(days) = &query.local_days {
+            if days.is_empty() || days.len() > 31 {
+                return Err(LibraryError::InvalidAssetDateRange);
+            }
+            let mut previous_end = start;
+            let mut previous_date = None;
+            let mut normalized = Vec::with_capacity(days.len());
+            for day in days {
+                let date = chrono::NaiveDate::parse_from_str(&day.local_date, "%Y-%m-%d")
+                    .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+                let day_start = chrono::DateTime::parse_from_rfc3339(&day.start_utc)
+                    .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+                let day_end = chrono::DateTime::parse_from_rfc3339(&day.end_utc)
+                    .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+                if day_start != previous_end
+                    || day_start >= day_end
+                    || day_end > end
+                    || previous_date.is_some_and(|previous: chrono::NaiveDate| {
+                        previous.succ_opt() != Some(date)
+                    })
+                {
+                    return Err(LibraryError::InvalidAssetDateRange);
+                }
+                previous_end = day_end;
+                previous_date = Some(date);
+                // Use the same UTC text form as collected_at for indexed comparisons.
+                normalized.push(UtcDateRange {
+                    local_date: day.local_date.clone(),
+                    start_utc: day_start.with_timezone(&chrono::Utc)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    end_utc: day_end.with_timezone(&chrono::Utc)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                });
+            }
+            if previous_end != end {
+                return Err(LibraryError::InvalidAssetDateRange);
+            }
+            Some(serde_json::to_string(&normalized).expect("local day strings serialize"))
+        } else {
+            None
+        };
         let connection = self.connection()?;
-        let mut statement = connection.prepare(DATE_BUCKETS_SQL)?;
-        let mut rows = statement.query(params![
-            query.start_utc,
-            query.end_utc,
-            query.offset_minutes,
-        ])?;
+        let mut statement = connection.prepare(if ranges.is_some() { LOCAL_DATE_BUCKETS_SQL } else { DATE_BUCKETS_SQL })?;
+        let start = start.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let end = end.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut rows = statement.query(params![start, end, query.offset_minutes, query.images_only, ranges])?;
         let mut buckets = Vec::new();
         while let Some(row) = rows.next()? {
             let date: String = row.get(0)?;
@@ -1074,6 +1114,19 @@ FROM assets AS asset
 WHERE asset.status = 'normal'
 AND asset.collected_at >= ?1
 AND asset.collected_at < ?2
+AND (?4 = 0 OR asset.media_kind IN ('image','gif'))
+AND ?5 IS NULL
+GROUP BY date ORDER BY date DESC";
+
+// The existing (status, collected_at, id) index bounds each local day; only the requested window is read.
+const LOCAL_DATE_BUCKETS_SQL: &str = "SELECT json_extract(day.value, '$.localDate') AS date, COUNT(*) AS count
+FROM json_each(?5) AS day
+JOIN assets AS asset ON asset.status = 'normal'
+AND asset.collected_at >= json_extract(day.value, '$.startUtc')
+AND asset.collected_at < json_extract(day.value, '$.endUtc')
+WHERE asset.collected_at >= ?1 AND asset.collected_at < ?2
+AND (?4 = 0 OR asset.media_kind IN ('image','gif'))
+AND ?3 IS NOT NULL
 GROUP BY date ORDER BY date DESC";
 
 #[cfg(test)]
@@ -1145,6 +1198,8 @@ mod tests {
                 start_utc: "2026-07-31T15:00:00.000Z".into(),
                 end_utc: "2026-08-31T15:00:00.000Z".into(),
                 offset_minutes: 540,
+                images_only: false,
+                local_days: None,
             })
             .unwrap();
 
@@ -1155,6 +1210,57 @@ mod tests {
                 count: 1,
             }]
         );
+    }
+
+    #[test]
+    fn date_buckets_count_normal_images_across_local_dst_midnights() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        // New York's 2026-11-01 lasts 25 hours. Both instances of 01:30 belong to it.
+        for (id, at) in [
+            ("before", "2026-11-01T03:59:59.999Z"),
+            ("first", "2026-11-01T05:30:00.000Z"),
+            ("second", "2026-11-01T06:30:00.000Z"),
+            ("gif", "2026-11-02T04:59:59.999Z"),
+            ("next-day", "2026-11-02T05:00:00.000Z"),
+            ("outside", "2026-11-03T05:00:00.000Z"),
+            ("video", "2026-11-01T12:00:00.000Z"),
+            ("trash", "2026-11-01T12:00:00.000Z"),
+        ] {
+            insert_asset(&library, id, at);
+        }
+        {
+            // The library serializes database access, so this guard must end before it is used again.
+            let connection = library.connection().unwrap();
+            connection.execute("UPDATE assets SET media_kind='gif' WHERE id='gif'", []).unwrap();
+            connection.execute("UPDATE assets SET media_kind='video' WHERE id='video'", []).unwrap();
+            connection.execute("UPDATE assets SET status='trash', trashed_at='2026-11-02' WHERE id='trash'", []).unwrap();
+        }
+        let query = AssetDateBucketQuery {
+            start_utc: "2026-11-01T00:00:00-04:00".into(),
+            end_utc: "2026-11-03T00:00:00-05:00".into(),
+            offset_minutes: -240,
+            images_only: true,
+            local_days: Some(vec![
+                UtcDateRange { local_date: "2026-11-01".into(), start_utc: "2026-11-01T00:00:00-04:00".into(), end_utc: "2026-11-02T00:00:00-05:00".into() },
+                UtcDateRange { local_date: "2026-11-02".into(), start_utc: "2026-11-02T00:00:00-05:00".into(), end_utc: "2026-11-03T00:00:00-05:00".into() },
+            ]),
+        };
+        assert_eq!(library.list_asset_date_buckets(query.clone()).unwrap(), vec![
+            AssetDateBucket { date: "2026-11-02".into(), count: 1 },
+            AssetDateBucket { date: "2026-11-01".into(), count: 3 },
+        ]);
+        // The all-media caller retains its old behavior.
+        assert_eq!(library.list_asset_date_buckets(AssetDateBucketQuery { images_only: false, ..query.clone() }).unwrap()[1].count, 4);
+        let connection = library.connection().unwrap();
+        let plan = connection.prepare(&format!("EXPLAIN QUERY PLAN {}", super::LOCAL_DATE_BUCKETS_SQL)).unwrap()
+            .query_map(params!["2026-11-01T04:00:00.000Z", "2026-11-03T05:00:00.000Z", -240, true, "[]"], |row| row.get::<_, String>(3)).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap().join("\n");
+        assert!(plan.contains("assets_by_collected_at"), "{plan}");
+        drop(connection);
+        let mut invalid = query;
+        invalid.local_days.as_mut().unwrap()[1].start_utc = "2026-11-02T06:00:00Z".into();
+        assert!(matches!(library.list_asset_date_buckets(invalid), Err(LibraryError::InvalidAssetDateRange)));
     }
 
     #[test]

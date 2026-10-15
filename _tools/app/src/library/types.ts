@@ -1150,6 +1150,9 @@ export type AssetDateBucketQuery = {
   startUtc: string;
   endUtc: string;
   offsetMinutes: number;
+  imagesOnly?: boolean;
+  /** Exact local midnights, including offset changes within the window. */
+  localDays?: UtcDateRange[];
 };
 
 export type AssetAlbumPatch = {

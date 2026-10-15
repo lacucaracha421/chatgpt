@@ -1,4 +1,3 @@
-import { EmptyState } from "../shared/ui/EmptyState";
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AreaPainted, AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
@@ -10,7 +9,7 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
+import type { AssetDateBucket, AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import type { CharacterTarget } from "../characters/api";
 import { confirmSources, confirmTotal, type ConfirmScope, type ConfirmSources } from "../characters/confirmClient";
 import { ConfirmOverview } from "../characters/ConfirmOverview";
@@ -23,15 +22,17 @@ import { displayDate } from "../shared/displayDate";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Button } from "../shared/ui/Button";
-import { daysAfter, localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";
+import { localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { attentionRows } from "./homeAttentionModel";
-import { HomeSection, HomeToday, type HomeReleaseCard } from "./HomeAttention";
+import { HomeToday, type HomeReleaseCard } from "./HomeAttention";
 import { useHomeVisit } from "./useHomeVisit";
-import { HomeDay } from "./HomeRevisit";
-import { HomePlaying } from "./HomePlaying";
-import { HomeReleaseGrid } from "./HomeReleaseGrid";
-import { useHomeMedia } from "./useHomeMedia";
-import { useHomeRevisitDay } from "./useHomeRevisitDay";
+import { HomeCalendar } from "./HomeCalendar";
+import { calendarPayments, calendarSavedQuery, releaseCalendarModel } from "./homeCalendarModel";
+import { HomeTransfer, type PickFiles, type TransferRoute } from "./HomeTransfer";
+import { HomeQuickMemo } from "./HomeQuickMemo";
+import { HomeDailyCard, HomeLinkVault } from "./HomeSlots";
+import type { ExchangeStore } from "../exchange/exchangeStore";
+import type { DropSubscriber } from "../ingestion/useFileDrop";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
@@ -73,11 +74,17 @@ export type HomeViewProps = {
   classifications?: ClassificationEntry[];
   now?: () => Date;
   avLinkApi?: AvLinkApi;
+  /** The 전송 tile's exchange state, drop source and file picker; injectable for browser tests. */
+  exchange?: ExchangeStore;
+  subscribeDrops?: DropSubscriber;
+  pickFiles?: PickFiles;
+  /** How the 전송 tile's files travel; the direct network route comes later. */
+  transferRoute?: TransferRoute;
 };
 
-/** PC Home: media on the left, today's attention and memories on the right. */
+/** PC Home (layout A): the release calendar and the tools on the left, today's card and attention on the right. */
 
-export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, transferRoute }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -128,14 +135,11 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   }
   if (collectionsReady) initialReads.current.collections = true;
   if (overviewReady) initialReads.current.overview = true;
-  const mediaActive = active && initialReads.current.collections;
-  const overviewActive = mediaActive && initialReads.current.overview;
+  const readsActive = active && initialReads.current.collections;
+  const overviewActive = readsActive && initialReads.current.overview;
   const collectionVersion = useMemo(() => JSON.stringify(
     collections.map(work => [work.id, work.updatedAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   ), [collections]);
-  const mediaVersion = JSON.stringify([root, refreshVersion, shelfRetry, collectionVersion]);
-  const revisitDay = useHomeRevisitDay(now);
-  const media = useHomeMedia(gateway, revisitDay, mediaActive, mediaVersion);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
   // With a saved wishlist, the first load shows it and the library connection stays free for the
   // reads the first load needs; the reads start once Home is shown (or after a few seconds).
@@ -181,6 +185,20 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   }, [calendarApi, root, shelfRetry, active, visitNumber, deferReleaseReads]);
 
   const [queueRead, setQueueRead] = useState(0);
+  const [savedDays, setSavedDays] = useState<{ root: string; days: AssetDateBucket[] } | null>(null);
+  const [savedDaysSettled, setSavedDaysSettled] = useState<string | null>(null);
+  const [savedDaysError, setSavedDaysError] = useState(false);
+  const [savedDaysRetry, setSavedDaysRetry] = useState(0);
+  useEffect(() => {
+    if (!overviewActive || !gateway.listAssetDateBuckets) return;
+    let live = true;
+    void gateway.listAssetDateBuckets(calendarSavedQuery(today)).then(days => {
+      if (!live) return;
+      setSavedDays({ root, days });
+      setSavedDaysError(false);
+    }, () => { if (live) setSavedDaysError(true); }).finally(() => { if (live) setSavedDaysSettled(root); });
+    return () => { live = false; };
+  }, [gateway, root, today, refreshVersion, trashCount, overviewActive, savedDaysRetry]);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(Boolean(gateway.getHomeOverview));
   const [overviewError, setOverviewError] = useState(false);
@@ -279,7 +297,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const arrivalsReady = collectionsReady && (!tracking || Boolean(release.data && !release.loading && !release.error))
     && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry && calendarRead.visit === visitNumber));
   const visit = useHomeVisit(root, arrivalItems, today, visible, at.toISOString(), arrivalsReady);
-  const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => daysAfter(row.date, today) <= 14);
+  const upcoming = upcomingRows(collections, board, inbox, wishlist, today);
   const openRelease = (row: ReleaseRow & { token: string }) => {
     visit.opened(row.token);
     setReleaseNoticeError(null);
@@ -329,10 +347,10 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const shelfFailed = Boolean(release.error) || wishlistError;
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
   const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError)
-    || confirmExact && confirmQueue === null && !confirmError || Boolean(store && !notesState.ready);
+    || confirmExact && confirmQueue === null && !confirmError || Boolean(store && !notesState.ready)
+    || Boolean(gateway.listAssetDateBuckets) && savedDaysSettled !== root;
   // Opt-in timing log: which first-load input arrives last (no effect when the log is off).
   if (collectionsReady) pcStartupInput("home.collections");
-  if (media.data || media.failed) pcStartupInput("home.media");
   if (!shelfLoading) pcStartupInput("home.shelf");
   if (!(Boolean(gateway.getHomeOverview) && !overview && !overviewError)) pcStartupInput("home.overview");
   if (!(confirmExact && confirmQueue === null && !confirmError)) pcStartupInput("home.characterQueue");
@@ -341,7 +359,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   if (wishlistReady || wishlistError) pcStartupInput("home.wishlist");
   // Resolve the initial block arrangement together; subsequent reads leave it mounted.
   const layoutShown = useRef(false);
-  if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) {
+  if (collectionsReady && !shelfLoading && !attentionPending) {
     if (!layoutShown.current && duplicateCount === null) duplicateSlot.current = true;
     layoutShown.current = true;
   }
@@ -364,21 +382,27 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     ...upcoming.filter(row => !visit.arrivals.some(arrival => arrival.date === row.date && (arrival.volume ?? null) === (row.volume ?? null) && (arrival.key === row.key || arrival.collection?.id === row.collectionId && !!row.collectionId)))
       .map(row => ({ key: row.key, name: row.name, date: row.date, detail: releaseKind(row.kind, row.volume), cover: releaseCover(row), onOpen: () => openUpcoming(row) })),
   ];
+  const calendar = releaseCalendarModel(releaseCards, today, 2, {
+    payments: calendarPayments(notesState.keyringLocked ? [] : notesState.notes, today),
+    saved: savedDays?.root === root ? savedDays.days : [],
+  });
   return <div className="home-view" ref={launchHost}>
     <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{displayDate(at, at)}</span> {weekdayLabel(at)}</span>} />
     <div className="home-scroll"><div className="home-content home-pc-layout" aria-busy={firstLoad}>
       <div className="home-media-column">
         {firstLoad ? <div className="home-media-waiting"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <>
-          <HomePlaying collections={collections} records={media.data?.playing ?? []} privacyMode={privacyMode} active={active}
-            onOpen={id => onNavigate({ kind: 'collection', collectionId: id })} onAll={() => onNavigate({ kind: 'collections', typeFilter: 'game', showcase: false })} />
-          <HomeSection title="2주 안에 발매" count={releaseCards.length} onOpen={() => onNavigate(calendarView())}>
-            {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : shelfLoading ? <Skeleton label="신간 정보" /> : <EmptyState inline className="home-attention-empty" title="2주 안에 예정된 발매가 없습니다" />}
-            {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
-          </HomeSection>
+          <HomeCalendar model={calendar} at={at} onOpenCalendar={() => onNavigate(calendarView())} onOpenNote={noteId => onNavigate({ kind: 'notes', noteId })} />
+          {savedDaysError && <p role="status">저장한 이미지 수를 확인할 수 없습니다 <Button variant="quiet" onClick={() => setSavedDaysRetry(value => value + 1)}>다시 시도</Button></p>}
+          {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
+          <div className="home-tools">
+            <HomeTransfer at={at} enabled={active && visible} route={transferRoute} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
+            <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
+            <HomeLinkVault />
+          </div>
         </>}
-        {media.failed && <Button variant="quiet" onClick={retryShelf}>홈 미디어 다시 시도</Button>}
       </div>
       <div className="home-day-column">
+      {!firstLoad && <HomeDailyCard />}
       {!firstLoad && todayRows.length > 0 && <HomeToday rows={todayRows} animate={false} onOpen={row => {
         if (row.noteId) onNavigate({ kind: 'notes', noteId: row.noteId });
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }
@@ -386,7 +410,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         else todos.find(todo => todo.key === row.key)?.open();
       }} />}
       {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}
-      <HomeDay data={firstLoad ? null : media.data} failed={media.failed} pending={media.pending} quiet={!todayRows.length && !attentionPending && !reviewUnknown.length} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />
       </div>
     </div></div>
     {dialogs}
