@@ -36,9 +36,10 @@
 .crv-character__t .crv-split { white-space: normal; overflow-wrap: anywhere; }
 .crv-character__t b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 500; }
 .crv-character .crv-count { font-size: 22px; }
-/* Characters far from 학습 인식: one quiet toggle under the series, their rows use the ordinary grid. */
+/* Characters far from 학습 인식 share one fold at the bottom, grouped by series. */
 .crv-folded { min-width: 0; }
-.crv-folded__toggle { margin: 4px 0 0 2px; color: var(--color-muted); }
+.crv-folded__series { padding-top: var(--space-3); }
+.crv-folded__series h3 { margin: 0 0 var(--space-2); font-size: var(--type-meta); font-weight: 500; color: var(--color-muted); }
 
 .crv-chevron { width: 15px; height: 15px; flex: none; color: var(--color-muted); }
 

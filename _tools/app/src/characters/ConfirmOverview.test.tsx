@@ -5,6 +5,7 @@ import type { CharacterTarget } from "./api";
 import { ConfirmOverview } from "./ConfirmOverview";
 import { confirmSourceFor, shadowItem } from "./confirmTestKit";
 import type { TaggerReviewItem } from "./taggerReviewClient";
+import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 
 // A stand-in for the suggestion cards: its button is the moment a registration or merge has been stored.
 vi.mock("./suggestions/CharacterSuggestions", () => ({
@@ -114,7 +115,7 @@ it("reads the list again when a suggestion is registered, so its tag-read images
   expect(await within(await screen.findByRole("region", { name: "백합" })).findByRole("button", { name: "백합 › 키사키 확인 1건" })).toHaveTextContent("태그 추천 1");
 });
 
-it("folds the 인식 추천 of far characters behind 더 보기, counts only the rest, and opens a folded character on its own", async () => {
+it("moves folded characters to one bottom section, keeps counted totals, and toggles and opens their rows", async () => {
   const sources = confirmSourceFor({
     candidates: [shadowItem("c1", "hina", "히나"), shadowItem("f1", "kisaki", "키사키", { folded: true }), shadowItem("f2", "kisaki", "키사키", { folded: true })],
     doubtful: [],
@@ -125,21 +126,65 @@ it("folds the 인식 추천 of far characters behind 더 보기, counts only the
   const series = await screen.findByRole("region", { name: "백합" });
   expect(series).toHaveTextContent("1건");
   expect(within(series).queryByRole("button", { name: /키사키/ })).toBeNull();
-  await user.click(within(series).getByRole("button", { name: "더 보기 (1명)" }));
-  const folded = within(series).getByRole("button", { name: "백합 › 키사키 확인 2건" });
+  expect(within(series).queryByRole("button", { name: /더 보기/ })).toBeNull();
+  expect(screen.queryByText("확인할 항목이 없습니다.")).toBeNull();
+  const learning = screen.getByRole("region", { name: "배우는 중인 캐릭터" });
+  expect(learning).toBe(learning.parentElement?.lastElementChild);
+  const toggle = within(learning).getByRole("button", { name: "배우는 중인 캐릭터 1명" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(within(learning).queryByRole("button", { name: /키사키/ })).toBeNull();
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const folded = within(learning).getByRole("button", { name: "백합 › 키사키 확인 2건" });
   await user.click(folded);
   expect(onOpen).toHaveBeenLastCalledWith({ series: { id: "series", name: "백합" }, target: { id: "kisaki", name: "키사키" } });
   // The series total and the whole list leave the folded ones out.
   expect(screen.getByRole("button", { name: "백합 전체 확인 1건" })).toBeInTheDocument();
-  await user.click(within(series).getByRole("button", { name: "접기" }));
-  expect(within(series).queryByRole("button", { name: /키사키/ })).toBeNull();
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(within(learning).queryByRole("button", { name: /키사키/ })).toBeNull();
+  expect(learning.querySelector(".ui-fold")).toHaveAttribute("inert");
 });
 
-it("keeps a series that only has folded characters reachable and counts nothing for it", async () => {
+it("omits zero-count series from the main list and shows the empty notice above the folded section", async () => {
   const sources = confirmSourceFor({ candidates: [shadowItem("f1", "kisaki", "키사키", { folded: true })], doubtful: [] });
   render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />);
-  const series = await screen.findByRole("region", { name: "백합" });
-  expect(within(series).getByRole("button", { name: "더 보기 (1명)" })).toBeInTheDocument();
-  expect(within(series).queryByRole("button", { name: /전체 확인/ })).toBeNull();
+  const learning = await screen.findByRole("region", { name: "배우는 중인 캐릭터" });
+  expect(screen.getByText("확인할 항목이 없습니다.")).toBeInTheDocument();
+  expect(document.querySelector(".crv-groups .crv-group")).toBeNull();
+  expect(screen.queryByRole("region", { name: "백합" })).toBeNull();
   expect(screen.queryByRole("button", { name: "전체 확인" })).toBeNull();
+  await userEvent.setup().click(within(learning).getByRole("button", { name: "배우는 중인 캐릭터 1명" }));
+  expect(within(learning).getByRole("button", { name: "백합 › 키사키 확인 1건" })).toBeInTheDocument();
+});
+
+it("groups folded characters from every series at the bottom and preserves expansion across filtering and refresh", async () => {
+  const allTargets = [...targets, { ...targets[1], id: "aru", seriesClassificationId: "other", displayName: "아루" }];
+  const sources = confirmSourceFor({ candidates: [
+    shadowItem("c1", "hina", "히나"),
+    shadowItem("f1", "kisaki", "키사키", { folded: true }),
+    shadowItem("f2", "aru", "아루", { folded: true }),
+  ] });
+  const tree = (version: number) => <WorkspaceChromeProvider scope="confirm"><ChromeTarget name="navigation" />
+    <ConfirmOverview sources={sources} targets={allTargets} seriesName={id => id === "series" ? "백합" : "다른 시리즈"}
+      version={version} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />
+  </WorkspaceChromeProvider>;
+  const view = render(tree(0));
+  const learning = await screen.findByRole("region", { name: "배우는 중인 캐릭터" });
+  const user = userEvent.setup();
+  const toggle = within(learning).getByRole("button", { name: "배우는 중인 캐릭터 2명" });
+  expect(document.querySelectorAll(".crv-groups .crv-group")).toHaveLength(1);
+  expect(within(screen.getByRole("navigation", { name: "확인 시리즈" })).queryByRole("button", { name: /다른 시리즈/ })).toBeNull();
+  await user.click(toggle);
+  const first = within(learning).getByRole("region", { name: "백합" });
+  const second = within(learning).getByRole("region", { name: "다른 시리즈" });
+  expect(within(first).getByRole("heading", { name: "백합" })).toBeInTheDocument();
+  expect(within(first).getByRole("button", { name: "백합 › 키사키 확인 1건" })).toBeInTheDocument();
+  expect(within(second).getByRole("heading", { name: "다른 시리즈" })).toBeInTheDocument();
+  expect(within(second).getByRole("button", { name: "다른 시리즈 › 아루 확인 1건" })).toBeInTheDocument();
+  await user.click(within(screen.getByRole("navigation", { name: "확인 시리즈" })).getByRole("button", { name: /^백합\s*1$/ }));
+  view.rerender(tree(1));
+  await act(async () => {});
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(within(second).getByRole("button", { name: "다른 시리즈 › 아루 확인 1건" })).toBeInTheDocument();
 });

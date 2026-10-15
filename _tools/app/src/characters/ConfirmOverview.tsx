@@ -13,6 +13,7 @@ import type { CharacterTarget } from "./api";
 import { confirmSources, readConfirmItems, type ConfirmScope, type ConfirmSources } from "./confirmClient";
 import { CONFIRM_KINDS, confirmGroups, confirmKindLabel, emptyConfirmCounts, tallyConfirm, type ConfirmCharacter, type ConfirmCounts, type ConfirmGroup, type ConfirmKind, type ConfirmTally } from "./confirmModel";
 import "../home/characterReview.css";
+import "../shared/fold.css";
 
 type Props = {
   targets: readonly CharacterTarget[];
@@ -38,7 +39,7 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
   useBackHandler(onBack, 50);
   const [tallies, setTallies] = useState<ConfirmTally[] | null>(null);
   const [foldedTallies, setFoldedTallies] = useState<ConfirmTally[]>([]);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [expanded, setExpanded] = useState(false);
   const [reading, setReading] = useState(false);
   const [unread, setUnread] = useState<ConfirmKind[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -63,16 +64,17 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
   }, [sources, restricted, version, retry]);
 
   const groups = useMemo(() => tallies ? confirmGroups(tallies, targets, seriesName, foldedTallies) : [], [tallies, foldedTallies, targets, seriesName]);
-  // Series that only have folded characters are listed under their name but hold nothing to count.
+  // Only counted series belong in the main list; all folded characters share the bottom section.
   const counted = useMemo(() => groups.filter(group => group.counts.total > 0), [groups]);
+  const foldedGroups = useMemo(() => groups.filter(group => group.folded.length > 0), [groups]);
   const totals = useMemo(() => groups.reduce((sum, group) => {
     for (const kind of CONFIRM_KINDS) sum[kind] += group.counts[kind];
     sum.total += group.counts.total;
     return sum;
   }, emptyConfirmCounts()), [groups]);
-  const current = groups.find(group => seriesKey(group) === selected);
+  const current = counted.find(group => seriesKey(group) === selected);
   // A series that emptied out after a review falls back to 전체.
-  const shown = current ? [current] : groups;
+  const shown = current ? [current] : counted;
 
   const index = <nav className="crv-index" aria-label="확인 시리즈">
     {!restricted && suggestionCount > 0 && <>
@@ -97,11 +99,10 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
     body = <div className="crv-notice" role="alert"><p>{error}</p><Button size="sm" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>;
   } else if (!tallies) {
     body = null;
-  } else if (groups.length === 0) {
-    body = <div className="crv-notice" role="status"><p>확인할 항목이 없습니다.</p></div>;
   } else {
     body = <>
       {unread.length > 0 && <div className="crv-notice" role="status"><p>{unread.map(kind => confirmKindLabel[kind]).join(" · ")} 목록은 읽지 못해 세지 않았습니다.</p><Button size="sm" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>}
+      {counted.length === 0 && <div className="crv-notice" role="status"><p>확인할 항목이 없습니다.</p></div>}
       <div className="crv-groups" aria-busy={reading || undefined}>
         {shown.map(group => <section key={seriesKey(group)} className="crv-group" aria-label={group.seriesName}>
           <header className="crv-group__head">
@@ -115,10 +116,10 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
           <div className="crv-characters">
             {group.characters.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
           </div>
-          {group.folded.length > 0 && <FoldedCharacters group={group} privacyMode={privacyMode} open={expanded.has(seriesKey(group))} onOpen={onOpen}
-            onToggle={() => setExpanded(previous => { const next = new Set(previous); if (!next.delete(seriesKey(group))) next.add(seriesKey(group)); return next; })} />}
         </section>)}
       </div>
+      {foldedGroups.length > 0 && <FoldedCharacters groups={foldedGroups} privacyMode={privacyMode} open={expanded} onOpen={onOpen}
+        onToggle={() => setExpanded(previous => !previous)} />}
     </>;
   }
 
@@ -175,13 +176,19 @@ function CharacterRow({ group, character, privacyMode, onOpen }: { group: Confir
  * 인식 추천 of characters still far from switching to 학습 인식: kept out of the counts, one step away.
  * Opening a character here lists everything it has, folded items included.
  */
-function FoldedCharacters({ group, privacyMode, open, onToggle, onOpen }: { group: ConfirmGroup; privacyMode: boolean; open: boolean; onToggle: () => void; onOpen: (scope: ConfirmScope) => void }) {
-  return <div className="crv-folded">
-    <Button size="sm" variant="ghost" className="crv-folded__toggle" aria-expanded={open} onClick={onToggle}>
-      {open ? "접기" : `더 보기 (${group.folded.length.toLocaleString()}명)`}
-    </Button>
-    {open && <div className="crv-characters" aria-label={`${group.seriesName} 더 보기`}>
-      {group.folded.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
-    </div>}
-  </div>;
+function FoldedCharacters({ groups, privacyMode, open, onToggle, onOpen }: { groups: ConfirmGroup[]; privacyMode: boolean; open: boolean; onToggle: () => void; onOpen: (scope: ConfirmScope) => void }) {
+  return <section className="crv-folded" aria-label="배우는 중인 캐릭터">
+    <SectionLabel title="배우는 중인 캐릭터" count={groups.reduce((sum, group) => sum + group.folded.length, 0)} unit="명"
+      collapsible={{ open, onToggle, controls: "crv-folded-characters" }} />
+    <div id="crv-folded-characters" className="ui-fold" data-open={open} inert={!open} aria-hidden={!open}>
+      <div className="ui-fold__inner">
+        {groups.map(group => <section key={seriesKey(group)} className="crv-folded__series" aria-label={group.seriesName}>
+          <h3>{group.seriesName}</h3>
+          <div className="crv-characters">
+            {group.folded.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
+          </div>
+        </section>)}
+      </div>
+    </div>
+  </section>;
 }
