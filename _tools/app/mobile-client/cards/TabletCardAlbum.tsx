@@ -119,7 +119,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
     backRef.current = () => { if (viewerOpen) closeViewer(); else onClose(); return true; };
     return () => { backRef.current = null; };
   }, [backRef, viewerOpen, closeViewer, onClose]);
-  return <div className="tablet-cards tablet-card-album">
+  return <div className="tablet-cards tablet-card-album" data-viewer-open={viewerOpen}>
     <TopBar title="카드 앨범" back={{label: '홈으로', onClick: onClose}} loading={pending && '카드 앨범 불러오는 중'}/>
     <div className="tablet-card-album__filters" role="group" aria-label="카드 등급">
       <FilterChip aria-pressed={tier === 'all'} onClick={() => setTier('all')}>전체</FilterChip>

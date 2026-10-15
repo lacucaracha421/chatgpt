@@ -38,3 +38,10 @@
 @keyframes card-viewer-fade { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .card-viewer, .card-viewer__layer--in, .card-viewer__layer--out { animation:none; } .card-viewer__info { transition:none; } }
 .card-viewer[data-reduced="true"], .card-viewer[data-reduced="true"] .card-viewer__layer--in, .card-viewer[data-reduced="true"] .card-viewer__layer--out { animation:none; }
+
+/* Touch screens: a smaller card and no stacked drop-shadow filters, which stalled the tablet GPU at full size. */
+@media (pointer: coarse) {
+  .card-viewer { --viewer-h: 70vh; }
+  @supports (height: 1dvh) { .card-viewer { --viewer-h: 70dvh; } }
+  .card-viewer__card .card, .card-viewer__card .card * { filter: none !important; }
+}

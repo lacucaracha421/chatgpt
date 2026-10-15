@@ -54,3 +54,6 @@ button.tablet-daily-card__pack { appearance:none; border:0; background:transpare
 .tablet-card-album__tiers i { font-size:var(--type-meta); font-style:normal; color:var(--color-faint); opacity:.35; }
 .tablet-card-album__tiers [data-owned="true"] { opacity:1; color:var(--color-text); }
 .tablet-card-album__more { display:grid; place-items:center; padding:var(--space-4) 0; }
+
+/* The full-screen viewer covers the album: stop painting the blended card grid behind it (tablet freeze, 2026-10-16). */
+.tablet-card-album[data-viewer-open="true"] .tablet-card-album__list { visibility: hidden; }
