@@ -40,7 +40,7 @@
 .notes-key { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius-tile); padding: 12px; } .notes-key:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
 
-.notes-body:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--space-1); border-radius: var(--radius-sm); }
+/* No blue focus line on the memo body (user 2026-10-15); the caret marks focus, as in 빠른 메모. */
 .notes-recovery-qr { align-self: flex-start; background: var(--color-text); border-radius: var(--radius-sm); }
 
 /* Notes v2: colour tint, rendered text, checklists, labels, secret notes. */
