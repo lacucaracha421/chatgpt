@@ -638,6 +638,154 @@ test('notes survive the cache, close on navigation, and a located answer replace
   f.actions.destroy(); f.close();
 });
 
+function pixivPage(options = {}) {
+  const f = page('<header style="position:sticky;top:0"></header><div style="overflow:auto"><div style="overflow:hidden"><a id="art" href="https://i.pximg.net/img-original/art_p0.png"><picture><img id="preload" hidden src="https://i.pximg.net/img-master/art_p0.png"><img id="pic" loading="lazy" src="https://i.pximg.net/img-master/art_p0.png"></picture></a></div></div>', options);
+  f.domContext = image => ({...f.context(), target: f.doc.getElementById('art'), image});
+  f.replaceImage = () => {
+    const old = f.doc.getElementById('pic'), next = old.cloneNode();
+    next.src = 'https://i.pximg.net/img-original/art_p0.png';
+    next.getBoundingClientRect = () => ({left: 100, right: 300, top: 550, bottom: 750, width: 200, height: 200});
+    old.replaceWith(next); return next;
+  };
+  f.assertSingle = () => {
+    const hosts = [...f.doc.querySelectorAll('lakomics-image-markers')];
+    assert.equal(hosts.length, 1, 'one overlay for the visible artwork');
+    assert.equal(hosts.reduce((n, host) => n + f.roots.get(host).querySelectorAll('[role="toolbar"]').length, 0), 1);
+    assert.equal(f.doc.querySelectorAll('lakomics-image-popover').length, 0, 'waiting window retired atomically');
+    return notesView(f);
+  };
+  return f;
+}
+
+test('pixiv replacement during a pending answer follows the visible image, not its hidden duplicate', async () => {
+  let finish;
+  const f = pixivPage({send: () => new Promise(resolve => { finish = resolve; })});
+  const context = f.domContext(f.img);
+  const work = f.actions.activate('image.translate', context, origin, gesture);
+  await f.timer.advance(400);
+  const replacement = f.replaceImage();
+  finish({ok: true, lines: noteLines}); await f.timer.advance(600); await work;
+  const v = f.assertSingle();
+  assert.equal(v.host.style.visibility, 'visible');
+  assert.equal(v.host.style.top, '550px');
+  assert.equal(context.image, replacement);
+  assert.equal(v.pill.dataset.placement, 'above');
+  f.actions.destroy(); f.close();
+});
+
+test('pixiv replacement after translation reuses the host across mutations, resize and periodic layout', async () => {
+  const f = pixivPage({send: async () => ({ok: true, lines: noteLines})});
+  const context = f.domContext(f.img);
+  await f.actions.activate('image.translate', context, origin, gesture);
+  const host = f.assertSingle().host, replacement = f.replaceImage();
+  await f.timer.advance(50);
+  assert.equal(context.image, replacement);
+  for (const type of ['resize', 'scroll']) f.w.dispatchEvent(new f.w.Event(type));
+  await f.timer.advance(1000);
+  const v = f.assertSingle();
+  assert.equal(v.host, host); assert.equal(v.host.style.visibility, 'visible');
+  assert.equal(v.host.style.top, '550px'); assert.equal(f.sent.length, 1);
+  f.actions.destroy(); f.close();
+});
+
+test('independent image action owners cannot leave toolbars above and below the same pixiv image', async () => {
+  const f = pixivPage({send: async () => ({ok: true, lines: noteLines})});
+  const surfaces = f.w.LakomicsContextSurfaces.createSurfaces({doc: f.doc, win: f.w, css});
+  const other = f.w.LakomicsContextImage.create({doc: f.doc, win: f.w, surfaces, send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.domContext(f.img), origin, gesture);
+  const old = notesView(f).host;
+  const replacement = f.replaceImage();
+  await other.translate({...f.domContext(replacement), imageUrl: replacement.src}, gesture);
+  assert.equal(old.isConnected, false);
+  f.assertSingle();
+  // An old owner must neither clear the new owner nor resurrect a cached host beside it.
+  f.actions.destroy(); f.assertSingle();
+  await other.translate({...f.domContext(replacement), imageUrl: replacement.src}, gesture);
+  await f.timer.advance(1000); f.assertSingle();
+  other.destroy(); f.close();
+});
+
+test('pixiv anchor targets resolve the visible picture without using the collector element as its image', async () => {
+  const collector = {findCandidate: image => ({type: 'image', element: image.closest('a'), mediaUrl: image.closest('a').href}), open() {}};
+  const f = pixivPage({collector, send: async () => ({ok: true, lines: noteLines})});
+  const context = f.domContext(f.doc.getElementById('art'));
+  await f.actions.activate('image.translate', context, origin, gesture);
+  assert.equal(context.image, f.img);
+  assert.equal(f.assertSingle().host.style.visibility, 'visible');
+  assert.equal(notesView(f).pill.querySelectorAll('[data-action="image.lakomics"]').length, 1);
+  f.actions.destroy(); f.close();
+});
+
+test('one pixiv action owner keeps one group through duplicate activations, lazy source changes and placement changes', async () => {
+  const replies = [];
+  const f = pixivPage({send: () => new Promise(resolve => replies.push(resolve))});
+  const context = f.domContext(f.img);
+  const first = f.actions.activate('image.translate', context, origin, gesture);
+  const second = f.actions.activate('image.translate', {...f.domContext(f.img), touch: true}, origin, gesture);
+  replies[1]({ok: true, lines: noteLines}); await second;
+  replies[0]({ok: true, lines: noteLines}); await first;
+  const host = f.assertSingle().host;
+  f.img.src = 'https://i.pximg.net/img-original/art_p0.png';
+  let y = 550;
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width: 200, height: 200})});
+  f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(f.assertSingle().pill.dataset.placement, 'above');
+  y = 0;
+  Object.defineProperty(f.w, 'innerHeight', {value: 200});
+  f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(f.assertSingle().pill.dataset.placement, 'corner');
+  await f.timer.advance(1000); assert.equal(f.assertSingle().host, host);
+  // Reopening from cache also replaces, rather than appends, the group.
+  await f.actions.activate('image.translate', {...context}, origin, gesture);
+  f.assertSingle(); assert.equal(f.sent.length, 2);
+  f.actions.destroy(); f.close();
+});
+
+test('another image owner retires a pending pixiv request and its waiting surface', async () => {
+  let finish;
+  const f = pixivPage({send: () => new Promise(resolve => { finish = resolve; })});
+  const first = f.actions.activate('image.translate', f.domContext(f.img), origin, gesture);
+  await f.timer.advance(400); assert.ok(f.popover());
+  const other = f.w.LakomicsContextImage.create({doc: f.doc, win: f.w,
+    surfaces: f.w.LakomicsContextSurfaces.createSurfaces({doc: f.doc, win: f.w, css}),
+    send: async () => ({ok: true, lines: noteLines})});
+  await other.translate(f.domContext(f.img), gesture);
+  const host = f.assertSingle().host;
+  finish({ok: true, lines: noteLines}); await f.timer.advance(600); await first;
+  assert.equal(f.assertSingle().host, host, 'the old response cannot recreate a second group');
+  f.actions.destroy(); other.destroy(); f.close();
+});
+
+test('a different owner also removes a pixiv toolbar still in its close animation', async () => {
+  const f = pixivPage({send: async () => ({ok: true, lines: noteLines})});
+  await f.actions.activate('image.translate', f.domContext(f.img), origin, gesture);
+  const old = notesView(f);
+  f.user(() => old.pill.querySelector('.x').click());
+  const other = f.w.LakomicsContextImage.create({doc: f.doc, win: f.w,
+    surfaces: f.w.LakomicsContextSurfaces.createSurfaces({doc: f.doc, win: f.w, css}),
+    send: async () => ({ok: true, lines: noteLines})});
+  await other.translate(f.domContext(f.img), gesture);
+  assert.equal(old.host.isConnected, false); f.assertSingle();
+  await f.timer.advance(500); f.assertSingle();
+  other.destroy(); f.actions.destroy(); f.close();
+});
+
+test('pixiv replacement retargets ResizeObserver and the existing save button to the current image', async () => {
+  let opened, resize;
+  const observed = [];
+  const collector = {findCandidate: image => ({type: 'image', element: image, mediaUrl: image.src}), open: candidate => { opened = candidate; }};
+  const f = pixivPage({collector, send: async () => ({ok: true, lines: noteLines})});
+  f.w.ResizeObserver = class { constructor(callback) { resize = callback; } observe(image) { observed.push(image); } disconnect() {} };
+  await f.actions.activate('image.translate', f.domContext(f.img), origin, gesture);
+  const replacement = f.replaceImage();
+  resize();
+  assert.deepEqual(observed, [f.img, replacement]);
+  const v = f.assertSingle();
+  f.user(() => v.pill.querySelector('[data-action="image.lakomics"]').click());
+  assert.equal(opened.element, replacement);
+  f.actions.destroy(); f.close();
+});
+
 test('reopening a cached image during its exit leaves exactly one toolbar, including after relayout', async () => {
   const collector = {findCandidate: image => ({element: image, type: 'image'}), open() {}};
   const f = page(undefined, {collector, send: async () => ({ok: true, lines: noteLines})});
@@ -1507,7 +1655,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.45');
+  assert.equal(manifest.version, '3.5.46');
 });
 
 

@@ -4,6 +4,9 @@
   // lays the answer as small translation notes directly over each text block of the image.
   // Waiting, failure, empty and selection-text answers use a small window (popA) instead.
   const MAX_EDGE = 1568;
+  // Image actions may be owned by different controllers in the same document.
+  // Their pending requests and fading hosts must share one lifetime.
+  const imageOwners = new WeakMap();
   const messages = {
     image_unavailable: "이미지를 불러오지 못했어요", image_too_large: "이미지가 너무 커요", image_type: "지원하지 않는 이미지 형식이에요",
     image_unreadable: "이미지를 읽지 못했어요", api_key_missing: "API 키가 필요해요", worker_timeout: "시간이 너무 오래 걸렸어요", timeout: "시간이 너무 오래 걸렸어요",
@@ -270,6 +273,44 @@
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
     const touchMode = session => Boolean(session.context.touch || win.matchMedia?.("(hover: none) and (pointer: coarse)").matches);
 
+    function visibleImage(image) {
+      if (image?.tagName !== "IMG" || !image.isConnected) return false;
+      const rect = image.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      for (let node = image; node; node = node.parentElement) {
+        const style = win.getComputedStyle(node);
+        if (node.hidden || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+      }
+      return true;
+    }
+    function contextImage(context) {
+      if (context.image?.tagName === "IMG") return context.image;
+      for (const target of [context.image, context.target, context.candidate?.element]) {
+        const image = target?.closest?.("img");
+        if (image) return image;
+        const images = [...(target?.querySelectorAll?.("img") || [])].filter(visibleImage);
+        if (images.length === 1) return images[0];
+      }
+      return null;
+    }
+    function followImage(session) {
+      const image = session.context.image, anchor = session.imageAnchor;
+      if (image?.isConnected || !anchor?.scope.isConnected) return image;
+      // Stay in this picture's slot: a document-wide URL lookup can pick a
+      // preload or a second occurrence of the artwork. An unchanged original
+      // link also identifies lazy img-master -> img-original replacements.
+      const candidates = [...anchor.scope.querySelectorAll("img")].filter(visibleImage);
+      const exact = candidates.filter(node => (node.currentSrc || node.src) === anchor.url);
+      const linked = candidates.filter(node => anchor.link && node.closest("a[href]")?.href === anchor.link);
+      const matches = exact.length ? exact : linked;
+      if (matches.length !== 1) return image;
+      session.context.image = matches[0];
+      if (session.overlay?.observer) {
+        session.overlay.observer.disconnect(); session.overlay.observer.observe(matches[0]);
+      }
+      return matches[0];
+    }
+
     // Hides or restores everything of this session while the Lakomics picker is open.
     function setPicker(session, hidden) {
       if (current !== session) return;
@@ -319,8 +360,9 @@
       return true;
     }
     function placeNotes(session, { checkOnly = false } = {}) {
-      const overlay = session.overlay, image = session.context.image;
+      const overlay = session.overlay;
       if (!overlay || overlay.surface.closed) return;
+      const image = followImage(session);
       const rect = image?.isConnected ? image.getBoundingClientRect() : null, empty = !rect || rect.width <= 0 || rect.height <= 0;
       const frame = empty ? null : frameOf(image, rect), view = frame?.view, gone = empty || !(view.w > 0 && view.h > 0);
       const documentCoordinates = usesDocumentCoordinates(image);
@@ -492,9 +534,9 @@
       Object.assign(card.style, { left: clamp(a.x + a.w / 2 - cw / 2, EDGE, Math.max(EDGE, W - EDGE - cw)) + "px", top: top + "px" });
     }
     function showNotes(session, lines) {
-      dropPopover(session, 90);
+      dropPopover(session, 0);
       dropOverlay(session, 0);
-      const image = session.context.image;
+      const image = followImage(session);
       const surface = surfaces.host("lakomics-image-markers", image, true, { documentCoordinates: usesDocumentCoordinates(image) }), box = doc.createElement("div");
       surface.node.dataset.touch = String(touchMode(session));
       box.className = "image-notes"; box.setAttribute("role", "group"); box.setAttribute("aria-label", "이미지 글자 번역");
@@ -622,13 +664,13 @@
         return result?.ok && typeof result.text === "string" && result.text.trim()
           ? { ok: true, lines: [{ original: session.context.selectionText, korean: result.text }] } : { ok: false, code: result?.code };
       }
-      const { imageUrl: url, image } = session.context;
+      const { imageUrl: url } = session.context;
       if (/^https:/i.test(url)) {
         const result = await send({ type: "translation:image", url });
         // Only a failed download falls back to the copy already loaded in the page.
         if (result?.ok || result?.code !== "image_unavailable") return result;
       } else if (/^data:image\//i.test(url) && url.length < 11000000) return send({ type: "translation:image", dataUrl: url });
-      const dataUrl = captureImage(image, doc);
+      const dataUrl = captureImage(followImage(session), doc);
       return dataUrl ? send({ type: "translation:image", dataUrl }) : { ok: false, code: "image_unavailable" };
     }
 
@@ -677,7 +719,7 @@
       };
       popover.place = () => {
         if (popover.detached) { popover.clamp(); return; }
-        const image = session.context.image;
+        const image = followImage(session);
         if (session.context.selectionRect) {
           const rect = session.context.selectionRect;
           popover.clamp(rect.left, rect.bottom + 16); return;
@@ -838,6 +880,7 @@
       if (session.overlay) button.className = "act";
       button.append(surfaces.icon("download"), "저장");
       button.addEventListener("click", event => {
+        const image = followImage(session);
         if (event.isTrusted !== true || current !== session || !alive(session.context) || !image.isConnected) return;
         const touch = touchMode(session);
         if (event.pointerType === "touch" || (touch && event.detail > 0)) button.blur();
@@ -888,6 +931,8 @@
       // A dismissed session can still be fading when a cached image is reopened.
       // Retire that host too, even though `current` has already been cleared.
       if (exitingOverlay) { exitingOverlay.surface.node.remove(); exitingOverlay = null; }
+      // Retain ownership during the exit so another controller can retire it.
+      if (!ms && imageOwners.get(doc) === dismiss) imageOwners.delete(doc);
       const session = current; if (!session) return; current = null; session.watcher?.stop();
       win.clearTimeout(session.copyTimer);
       dropPopover(session, ms); dropOverlay(session, ms);
@@ -895,9 +940,16 @@
     function translate(context, event) {
       if (!context.imageUrl && !context.selectionText) return;
       dismiss(0);
+      if (!context.selectionText) {
+        context.image = contextImage(context);
+        imageOwners.get(doc)?.(0);
+        imageOwners.set(doc, dismiss);
+      }
       const session = { id: ++sequence, run: 0, context, popover: null, overlay: null, copyTimer: 0, pickerOpen: false, keyboard: event?.type === "keydown", focused: false, watcher: watchSession() };
+      const image = context.image, scope = image?.closest?.("a[href]") || image?.parentElement;
+      if (scope) session.imageAnchor = { scope, url: image.currentSrc || image.src, link: image.closest("a[href]")?.href };
       current = session;
-      session.watcher.watch(() => { context.departed = true; dismiss(0); });
+      session.watcher.watch(() => { if (current === session) { context.departed = true; dismiss(0); } });
       return run(session);
     }
     return { translate, close: dismiss, get open() { return Boolean(current?.popover || current?.overlay); }, destroy() { dismiss(0); cache.clear(); } };

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.46 — 2026-10-16
+
+- Image translation keeps exactly one overlay and button group per image even when two
+  translations start for it, follows an image the page re-renders (pixiv), and skips
+  hidden duplicate images.
+
 ## 3.5.45 — 2026-10-16
 
 - Translation notes and their button group scroll with the page natively (no jitter);
