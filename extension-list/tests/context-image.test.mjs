@@ -112,7 +112,7 @@ test('imageModel defaults to Sonnet 5.5, is validated, and changes only from ext
   const f = worker({stored: {imageModel: 'google/gemma-4-26b-a4b-it'}});
   const settings = await f.handle({type: 'translation:settings'});
   assert.equal(settings.imageModel, 'anthropic:claude-sonnet-5-5', 'a text-only stored model falls back to the default');
-  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'google/gemini-3.5-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5']);
+  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5']);
   assert.equal(settings.imageModels.some(item => item.id.includes('gemma')), false);
   assert.equal(settings.hasImageApiKey, true);
   assert.equal((await f.handle({type: 'translation:update', imageModel: 'google/gemma-4-26b-a4b-it'}, own)).code, 'invalid_model');
@@ -120,7 +120,7 @@ test('imageModel defaults to Sonnet 5.5, is validated, and changes only from ext
   assert.equal((await f.handle({type: 'translation:update', imageModel: 'anthropic:claude-sonnet-5-5'}, sender)).code, 'forbidden_sender');
   assert.equal((await f.handle({type: 'translation:update', imageModel: 'anthropic:claude-sonnet-5-5'}, own)).imageModel, 'anthropic:claude-sonnet-5-5');
   assert.equal(f.memory['lakomics:translation:v1'].imageModel, 'anthropic:claude-sonnet-5-5');
-  assert.equal((await f.handle({type: 'translation:update', imageModel: 'google/gemini-3.5-flash-lite'}, own)).imageModel, 'google/gemini-3.5-flash-lite');
+  assert.equal((await f.handle({type: 'translation:update', imageModel: 'google/gemini-3.1-flash-lite'}, own)).imageModel, 'google/gemini-3.1-flash-lite');
   assert.equal(f.memory['lakomics:translation:v1'].contextModel ?? '', '', 'other settings stay untouched');
   const noKey = worker({keys: {apiKey: 'or-key', anthropicApiKey: ''}});
   assert.equal((await noKey.handle({type: 'translation:settings'})).hasImageApiKey, false);
@@ -239,10 +239,10 @@ test('Anthropic request carries a base64 image block, the structured schema, Kor
 });
 
 test('Gemini through OpenRouter takes an image_url data part and a strict JSON schema', async () => {
-  const f = worker({model: 'google/gemini-3.5-flash-lite', pictures: {[IMG]: image({type: 'image/jpeg', size: 20})}});
+  const f = worker({model: 'google/gemini-3.1-flash-lite', pictures: {[IMG]: image({type: 'image/jpeg', size: 20})}});
   const result = await f.handle({type: 'translation:image', url: IMG});
   assert.equal(result.ok, true);
-  assert.equal(result.model, 'google/gemini-3.5-flash-lite');
+  assert.equal(result.model, 'google/gemini-3.1-flash-lite');
   const call = f.calls[0];
   assert.equal(call.url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(call.init.headers.authorization, 'Bearer or-key');
@@ -1752,7 +1752,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.48');
+  assert.equal(manifest.version, '3.5.49');
 });
 
 
@@ -1919,7 +1919,7 @@ test('Gemini boxes are [ymin,xmin,ymax,xmax] and are converted to x0,y0,x1,y1', 
     {original: 'b', korean: '나', kind: 'dialogue', box: [10, 20, 30]},
     {original: 'c', korean: '다', kind: 'dialogue', box: [900, 950, 1200, 1100]},
   ]);
-  const f = worker({model: 'google/gemini-3.5-flash-lite', pictures: {[IMG]: image({type: 'image/jpeg', size: 20})}, reply});
+  const f = worker({model: 'google/gemini-3.1-flash-lite', pictures: {[IMG]: image({type: 'image/jpeg', size: 20})}, reply});
   const result = await f.handle({type: 'translation:image', url: IMG});
   assert.deepEqual(plain(result.lines.map(line => line.box)), [{x0: 200, y0: 100, x1: 600, y1: 300}, null, {x0: 950, y0: 900, x1: 1000, y1: 1000}]);
   assert.equal(result.lines.length, 3, 'an unusable box keeps its line');

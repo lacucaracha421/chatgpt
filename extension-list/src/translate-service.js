@@ -100,7 +100,8 @@
   // The right-click menu model: "" follows the X translation model, otherwise any known model.
   function validContextModel(value) { return MODEL_BY_ID.has(value) ? value : ""; }
   // Image text translation needs a model that reads pictures: Claude (Anthropic) or Gemini.
-  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && (model.provider === "anthropic" || model.id.startsWith("google/gemini-"))); }
+  // Gemini 3.5 Flash Lite is left out: its image answers kept failing (user 2026-10-16).
+  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.id.startsWith("google/gemini-"))); }
   function validImageModel(value) { return isVisionModel(value) ? value : DEFAULT_IMAGE_MODEL; }
   function concurrency() { return MODEL_BY_ID.get(settings?.model)?.concurrency || DEFAULT_CONCURRENCY; }
   function isAnthropic(model) { return MODEL_BY_ID.get(model)?.provider === "anthropic"; }
@@ -692,10 +693,6 @@
           { type: "text", text: "Read and translate all text in this image." },
         ] },
       ], model),
-      // 3.5 cannot disable reasoning. Leave room for it alongside the image's
-      // transcript, translation and boxes; keep other models and text requests
-      // on their existing cap. This is a ceiling, not a requested output length.
-      ...(model === "google/gemini-3.5-flash-lite" ? { max_tokens: 16384 } : {}),
       provider: { require_parameters: true, sort: "latency" },
       response_format: { type: "json_schema", json_schema: { name: "image_text_translation", strict: true, schema: core.image.convention(model) === "gemini" ? core.image.SCHEMA_GEMINI : core.image.SCHEMA } },
     };
@@ -723,10 +720,7 @@
     if (!result.ok) return result;
     const choice = result.data?.choices?.[0];
     const lines = choice?.finish_reason === "length" ? null : core.image.parseLines(choice?.message?.content, { convention: core.image.convention(result.model || model), width: prepared.width, height: prepared.height });
-    // An unusable 3.5 answer (including reasoning without a final answer) is an
-    // image reading failure. The image UI already has a specific message for it.
-    return lines ? { ok: true, lines, model: result.model }
-      : { ok: false, code: (result.model || model) === "google/gemini-3.5-flash-lite" ? "image_unreadable" : "invalid_translation" };
+    return lines ? { ok: true, lines, model: result.model } : { ok: false, code: "invalid_translation" };
   }
   // The page names its translation run so every batch lands in the same usage entry.
   function pageJob(value) {

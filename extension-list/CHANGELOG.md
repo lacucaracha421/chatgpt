@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.49 — 2026-10-16
+
+- Gemini 3.5 Flash Lite is no longer offered for image text translation (its image
+  answers kept failing); a stored choice falls back to the default (Claude Sonnet 5.5).
+
 ## 3.5.48 — 2026-10-16
 
 - Fix: since 3.5.43, text positions converted from pixel answers were fractional and were
