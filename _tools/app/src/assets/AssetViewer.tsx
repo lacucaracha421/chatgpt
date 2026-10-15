@@ -19,7 +19,7 @@ import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
-import { ImageTextMarkers, imageTextMarkerPositions } from "../shared/viewer/ImageTextMarkers";
+import { ImageTextNotes, type ImageTextNotesHandle } from "../shared/viewer/ImageTextNotes";
 import { ImageTextContext } from "../shared/viewer/ImageTextContext";
 import { useDisplayedImage } from "../shared/viewer/useDisplayedImage";
 import { NO_VIEWER_ZONES, sameViewerZones, viewerZonesAt, viewerZonesShown, type ViewerZoneSet } from "../shared/viewer/viewerZones";
@@ -157,8 +157,13 @@ export function AssetViewer({
     detachWheelRef.current = () => stage.removeEventListener("wheel", listener);
   }, []);
   const wheelHandlerRef = useRef<(event: globalThis.WheelEvent) => void>(() => undefined);
+  const notesRef = useRef<ImageTextNotesHandle>(null);
   const panRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   // Ctrl+wheel zoom for images: scale around the pointer, drag to pan while zoomed; resets per asset.
+  const [textGesture, setTextGesture] = useState(false);
+  const textGestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(textGestureTimer.current), []);
+  const holdTextLayout = () => { setTextGesture(true); clearTimeout(textGestureTimer.current); textGestureTimer.current = setTimeout(() => setTextGesture(false), 140); };
   const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 });
   const videoPlayerRef = useRef<VideoPlayerHandle>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
@@ -193,7 +198,8 @@ export function AssetViewer({
   const selectTextRow = (line: number) => {
     selectText(line);
     if (!textCurrent || !displayed || zoom.scale <= 1 || !stageRef.current || selectedLine === line) return;
-    const marker = imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, zoom.scale).find(position => position.index === line);
+    const box = lines[line]?.box;
+    const marker = box ? { x: box.x0 / 1000 * displayed.rect.width, y: box.y0 / 1000 * displayed.rect.height } : null;
     if (!marker) return;
     const stage = stageRef.current;
     const x = stage.clientWidth / 2 + zoom.x + (marker.x - displayed.rect.width / 2) * zoom.scale;
@@ -208,8 +214,7 @@ export function AssetViewer({
     clearTimeout(textPanTimer.current);
     textPanTimer.current = setTimeout(() => setTextPanning(false), 200);
   };
-  const openText = () => { setInfoOpen(true); setTextOpen(true); };
-  const toggleText = () => { if (infoOpen && textOpen) setTextOpen(false); else openText(); };
+  const toggleText = () => setTextOpen(open => !open);
 
   /** Recomputes which overlays are shown; returns whether an open menu or panel holds the top bar (nothing announces when that ends, so the idle clock re-checks). */
   const refreshZones = useCallback(() => {
@@ -327,6 +332,7 @@ export function AssetViewer({
   const dateLabel = [displayDate(asset.collectedAt), displayTime(asset.collectedAt)].filter(Boolean).join(" ");
   const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
   const handleDialogClose = () => {
+    if (notesRef.current?.dismissCard()) return;
     if (infoOpen) { setInfoOpen(false); return; }
     motion.close();
   };
@@ -348,6 +354,7 @@ export function AssetViewer({
       const bounds = stageRef.current.getBoundingClientRect();
       const px = event.clientX - (bounds.left + bounds.width / 2);
       const py = event.clientY - (bounds.top + bounds.height / 2);
+      holdTextLayout();
       setZoom((current) => {
         const scale = Math.min(VIEWER_MAX_ZOOM, Math.max(1, current.scale * Math.exp(-event.deltaY * 0.002)));
         if (scale === 1) return { scale: 1, x: 0, y: 0 };
@@ -381,6 +388,7 @@ export function AssetViewer({
       if (seekable && isSpace(event) && !typesText(event.target)) event.preventDefault();
     }}
     onKeyDown={(event) => {
+      if (event.key === "Escape" && notesRef.current?.dismissCard()) { event.preventDefault(); event.stopPropagation(); return; }
       if (event.key === "Escape" && infoOpen) {
         event.preventDefault();
         event.stopPropagation();
@@ -389,7 +397,7 @@ export function AssetViewer({
       }
       // Typing in a field inside the viewer (the character picker search) must not trigger viewer shortcuts.
       if (typesText(event.target)) return;
-      if (event.key.toLowerCase() === "t" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && !event.defaultPrevented && hasText && textCurrent && renderInfo) {
+      if (event.key.toLowerCase() === "t" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && !event.defaultPrevented && hasText && textCurrent) {
         event.preventDefault(); toggleText(); revealChrome(); return;
       }
       const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
@@ -439,6 +447,7 @@ export function AssetViewer({
       <div className={`asset-viewer__stage${showFilmstrip ? " asset-viewer__stage--filmstrip" : ""}${seekable ? " asset-viewer__stage--video" : ""}`} ref={attachStage}
         onPointerDown={(event) => {
           if (zoom.scale === 1 || event.button !== 0 || (event.target instanceof HTMLElement && event.target.closest("button, a, input, .ui-menu, .asset-viewer__character-popover"))) return;
+          setTextGesture(true);
           panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
           event.currentTarget.setPointerCapture?.(event.pointerId);
         }}
@@ -449,8 +458,8 @@ export function AssetViewer({
           panRef.current = { pointerId: pan.pointerId, x: event.clientX, y: event.clientY };
           setZoom((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
         }}
-        onPointerUp={() => { panRef.current = null; }}
-        onPointerCancel={() => { panRef.current = null; }}
+        onPointerUp={() => { panRef.current = null; setTextGesture(false); }}
+        onPointerCancel={() => { panRef.current = null; setTextGesture(false); }}
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
           <div className="asset-viewer__topbar" {...overlayHover("top")}>
@@ -461,7 +470,7 @@ export function AssetViewer({
               {metaLabel && <small>{metaLabel}</small>}
             </span>
             <span className="asset-viewer__spacer" />
-            {hasText && textCurrent && renderInfo && <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${infoOpen && textOpen ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="번역" aria-expanded={infoOpen && textOpen} onClick={openText}><LanguageIcon aria-hidden="true" /><span>번역</span></Button>}
+            {hasText && textCurrent && <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${textOpen ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="번역" aria-pressed={textOpen} onClick={toggleText}><LanguageIcon aria-hidden="true" /><span>번역</span></Button>}
             {renderCharacterPicker && <span className="asset-viewer__action-anchor">
               <Button className="asset-viewer__vbtn asset-viewer__vbtn--text" variant="ghost" aria-label="캐릭터" aria-expanded={characterOpen} aria-haspopup="dialog" onClick={() => setCharacterOpen((open) => !open)}><UserIcon aria-hidden="true" /><span>캐릭터</span></Button>
               {characterOpen && <div className="asset-viewer__character-popover" onPointerDown={(event) => event.stopPropagation()}>{renderCharacterPicker(asset, closeCharacterPicker)}</div>}
@@ -492,7 +501,7 @@ export function AssetViewer({
               : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className={`asset-viewer__media${textPanning ? " asset-viewer__media--panning" : ""}`} style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
         </div>
         </ViewerMediaContextMenu>
-        {hasText && displayed && <ImageTextMarkers lines={lines} selected={selectedLine} open={infoOpen && textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning} />}
+        {hasText && displayed && <ImageTextNotes ref={notesRef} key={displayed.src} lines={lines} selected={selectedLine} open={textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning || textGesture} animatePan={textPanning} />}
         {replacementFailed && <div className="asset-viewer__load-error" role="status">이미지를 불러오지 못했습니다. 다른 자산으로 이동하면 다시 시도합니다.</div>}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">

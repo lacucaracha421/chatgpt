@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import type { ImageRect } from "./ImageTextMarkers";
+import type { ImageRect } from "./imageTextNoteLayout";
 
 type DisplayedImage = { src: string; rect: ImageRect };
 

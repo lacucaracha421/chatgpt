@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -556,6 +556,10 @@ const imageTextFixture: AssetImageText = { digest: "first", lines: [
 ] };
 
 function textViewer(gateway: LibraryGateway, activeId: string | null = "a", extra = {}) {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(300);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
   return <LibraryProvider gateway={gateway}><AssetViewer items={[asset("a", "a.png"), asset("b", "b.png"), videoAsset("v", "v.mp4")]} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={item => <AssetInfoPanel assets={[item]} preview={false} />} {...extra} /></LibraryProvider>;
 }
 
@@ -566,6 +570,24 @@ it("no text means no translation button or section even in the open information 
   fireEvent.click(screen.getByRole("button", { name: "정보" }));
   expect(screen.queryByRole("button", { name: "번역" })).toBeNull();
   expect(document.querySelector('[data-info-section="image-text"]')).toBeNull();
+});
+
+it("toggles translation notes without an information dock and closes the card before the viewer", async () => {
+  const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture) } as unknown as LibraryGateway;
+  const onClose = vi.fn();
+  render(textViewer(gateway, "a", {renderInfo: undefined, onClose}));
+  const toggle = await screen.findByRole("button", {name: "번역"});
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByRole("complementary")).toBeNull();
+  fireEvent.click(screen.getByRole("button", {name: "1번 대사"}));
+  expect(screen.getByRole("region", {name: "대사 번역"})).toHaveTextContent("ねえ있잖아");
+  fireEvent.keyDown(screen.getByRole("dialog"), {key: "Escape"});
+  expect(screen.queryByRole("region", {name: "대사 번역"})).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole("button", {name: "1번 대사"})).toBeNull();
 });
 
 it("starts folded; button/T unfold; marker and row selection link both ways and clear on a second click", async () => {
@@ -583,6 +605,7 @@ it("starts folded; button/T unfold; marker and row selection link both ways and 
   expect(screen.getByRole("button", { name: "1번 대사" })).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(screen.getByRole("button", { name: /응.*はい/ }));
   expect(screen.getByRole("button", { name: "2번 대사" })).toHaveAttribute("aria-pressed", "true");
+  expect(Number(screen.getByRole("button", { name: "2번 대사" }).style.zIndex)).toBeGreaterThan(Number(screen.getByRole("button", { name: "1번 대사" }).style.zIndex));
   fireEvent.click(screen.getByRole("button", { name: "2번 대사" }));
   expect(screen.getByRole("button", { name: /응.*はい/ })).toHaveAttribute("aria-pressed", "false");
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "t" });
@@ -605,6 +628,7 @@ it("holds outgoing rows until the decoded slot swap, then swaps rows/markers and
   const { rerender } = render(textViewer(gateway));
   fireEvent.load(screen.getByRole("img", { name: "a.png" }));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
   fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
   let decode!: () => void;
   const spare = document.querySelector<HTMLImageElement>('.asset-viewer__media[src$="/asset/b"]')!;
@@ -612,12 +636,12 @@ it("holds outgoing rows until the decoded slot swap, then swaps rows/markers and
   rerender(textViewer(gateway, "b"));
   fireEvent.load(spare);
   await waitFor(() => expect(gateway.assetImageText).toHaveBeenCalledWith("b"));
-  expect(screen.getByText("있잖아")).toBeInTheDocument();
-  expect(screen.queryByText("다음 그림")).toBeNull();
+  expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
+  expect(within(document.querySelector(".image-text-section")!).queryByText("다음 그림")).toBeNull();
   expect(document.querySelector('[data-line="0"]')).toHaveAttribute("aria-pressed", "false");
   await act(async () => { decode(); });
-  await screen.findByText("다음 그림");
-  expect(screen.queryByText("있잖아")).toBeNull();
+  await within(document.querySelector(".image-text-section")!).findByText("다음 그림");
+  expect(within(document.querySelector(".image-text-section")!).queryByText("있잖아")).toBeNull();
   expect(screen.getByRole("button", { name: /번역.*1줄/ })).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByRole("button", { name: "1번 대사" })).toHaveAttribute("aria-pressed", "false");
   expect(screen.queryByRole("button", { name: "2번 대사" })).toBeNull();
@@ -628,10 +652,11 @@ it("refreshes only changed digests and retains the local rows during refresh", a
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText | null>(done => { resolve = done; })) } as unknown as LibraryGateway;
   render(textViewer(gateway));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  expect(screen.getByText("있잖아")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
+  expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
   await act(async () => resolve({ digest: "changed", lines: [{ ...imageTextFixture.lines[0], korean: "갱신된 번역" }] }));
-  expect(screen.getByText("갱신된 번역")).toBeInTheDocument();
-  expect(screen.queryByText("있잖아")).toBeNull();
+  expect(within(document.querySelector(".image-text-section")!).getByText("갱신된 번역")).toBeInTheDocument();
+  expect(within(document.querySelector(".image-text-section")!).queryByText("있잖아")).toBeNull();
 });
 
 it("ignores changed lines under an unchanged digest", async () => {
@@ -639,9 +664,10 @@ it("ignores changed lines under an unchanged digest", async () => {
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture), refreshAssetImageText: vi.fn(() => new Promise<AssetImageText>(done => { resolve = done; })) } as unknown as LibraryGateway;
   render(textViewer(gateway));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
   await act(async () => resolve({ ...imageTextFixture, lines: [{ ...imageTextFixture.lines[0], korean: "잘못 바뀐 내용" }] }));
-  expect(screen.queryByText("잘못 바뀐 내용")).toBeNull();
-  expect(screen.getByText("있잖아")).toBeInTheDocument();
+  expect(within(document.querySelector(".image-text-section")!).queryByText("잘못 바뀐 내용")).toBeNull();
+  expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
 });
 
 it("shows a delayed busy label after 400ms when the current image text is still loading", async () => {
@@ -659,7 +685,7 @@ it("shows a delayed busy label after 400ms when the current image text is still 
     act(() => vi.advanceTimersByTime(0));
     expect(screen.getByText("불러오는 중")).toBeInTheDocument();
     await act(async () => resolve(imageTextFixture));
-    expect(screen.getByText("있잖아")).toBeInTheDocument();
+    expect(within(document.querySelector(".image-text-section")!).getByText("있잖아")).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(400));
     act(() => vi.advanceTimersByTime(400));
     expect(screen.queryByText("불러오는 중")).toBeNull();
@@ -675,13 +701,14 @@ it("pans an off-screen row marker into view over 200ms without changing zoom", a
   Object.defineProperties(image, { offsetWidth: { configurable: true, value: 600 }, offsetHeight: { configurable: true, value: 300 }, naturalWidth: { configurable: true, value: 200 }, naturalHeight: { configurable: true, value: 100 } });
   fireEvent.load(image);
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
+  fireEvent.click(screen.getByRole("button", { name: "정보" }));
   fireEvent.wheel(stage, { ctrlKey: true, deltaY: -600, clientX: 0, clientY: 0 });
   const before = image.style.transform;
   fireEvent.click(screen.getByRole("button", { name: /응.*はい/ }));
   expect(image.style.transform).not.toBe(before);
   expect(image.style.transform.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
   expect(image).toHaveClass("asset-viewer__media--panning");
-  expect(document.querySelector(".image-text-markers")).toHaveAttribute("data-panning", "true");
+  expect(document.querySelector(".image-text-notes")).toHaveAttribute("data-panning", "true");
   await waitFor(() => expect(image).not.toHaveClass("asset-viewer__media--panning"));
 });
 
@@ -692,7 +719,7 @@ it("does not expose translations on an NSFW cover", async () => {
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()} nsfwFilter><LibraryProvider gateway={gateway}><AssetViewer items={[explicit]} activeId="e" onActiveIdChange={vi.fn()} onClose={vi.fn()} renderInfo={item => <AssetInfoPanel assets={[item]} preview={false} />} /></LibraryProvider></PrivacyProvider>);
   fireEvent.click(screen.getByRole("button", { name: "정보" }));
   expect(gateway.assetImageText).not.toHaveBeenCalled();
-  expect(document.querySelector(".image-text-section, .image-text-markers")).toBeNull();
+  expect(document.querySelector(".image-text-section, .image-text-notes")).toBeNull();
 });
 
 it.each([{ activeId: "v" }, { mediaSource: "vault" }, { privacyMode: true }])("videos/vault/privacy have no translation UI or requests (%j)", async props => {
@@ -701,7 +728,7 @@ it.each([{ activeId: "v" }, { mediaSource: "vault" }, { privacyMode: true }])("v
   fireEvent.click(screen.getByRole("button", { name: "정보" }));
   expect(gateway.assetImageText).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "번역" })).toBeNull();
-  expect(document.querySelector(".image-text-section, .image-text-markers")).toBeNull();
+  expect(document.querySelector(".image-text-section, .image-text-notes")).toBeNull();
 });
 
 it("warms only the next library image, never vault, private or video media", () => {

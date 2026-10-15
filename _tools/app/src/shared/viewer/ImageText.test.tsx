@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ImageTextSection } from "./ImageTextSection";
-import { ImageTextMarkers, imageTextMarkerPositions } from "./ImageTextMarkers";
+import { ImageTextNotes, type ImageTextNotesHandle } from "./ImageTextNotes";
+import { createRef } from "react";
+import { act } from "@testing-library/react";
 import type { ImageTextLine } from "../../library/types";
 
 afterEach(cleanup);
@@ -37,35 +39,63 @@ it("scrolls the selected row inside the designated reading surface only", () => 
   expect(dock.scrollTop).toBe(80);
 });
 
-it("anchors at top-left plus half a badge, nudges overlaps and clamps at every image edge", () => {
-  expect(imageTextMarkerPositions(lines, 100, 100)).toEqual([{ index: 0, x: 10, y: 10 }, { index: 1, x: 10, y: 34 }]);
-  expect(imageTextMarkerPositions(lines, 100, 100, 2)).toEqual([{ index: 0, x: 5, y: 5 }, { index: 1, x: 5, y: 17 }]);
-  const outside = [{ original: "a", korean: "a", box: { x0: 1100, y0: -100, x1: 1200, y1: 0 } }];
-  expect(imageTextMarkerPositions(outside, 100, 100)).toEqual([{ index: 0, x: 90, y: 10 }]);
-});
-
-it("renders only positioned markers, counter-scales and hides folded markers from interaction", () => {
-  const select = vi.fn();
-  const props = { lines, selected: 1, onSelect: select, rect: { left: 10, top: 20, width: 100, height: 100 }, zoom: { scale: 2, x: 30, y: 40 } };
-  const { container, rerender } = render(<ImageTextMarkers {...props} open />);
+it("draws solid translated notes only for boxed lines, toggles them and raises the selected row", () => {
+  const onSelect = vi.fn();
+  const props = {lines, onSelect, rect: {left: 10, top: 20, width: 400, height: 600}, zoom: {scale: 2, x: 30, y: 40}};
+  const {container, rerender} = render(<ImageTextNotes {...props} selected={null} open/>);
   expect(screen.getAllByRole("button")).toHaveLength(2);
-  expect(screen.getByRole("button", { name: "1번 대사" })).toHaveAttribute("data-muted", "true");
-  expect(screen.getByRole("button", { name: "2번 대사" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "2번 대사" }).style.transform).toContain("scale(0.5)");
-  fireEvent.click(screen.getByRole("button", { name: "1번 대사" }));
-  expect(select).toHaveBeenCalledWith(0);
-  rerender(<ImageTextMarkers {...props} open={false} />);
+  expect(screen.getByRole("button", {name: "1번 대사"})).toHaveTextContent("있잖아");
+  expect(screen.queryByText("끝")).toBeNull();
+  rerender(<ImageTextNotes {...props} selected={1} open/>);
+  const note = screen.getByRole("button", {name: "2번 대사"});
+  expect(note).toHaveAttribute("aria-pressed", "true");
+  expect(Number(note.style.zIndex)).toBeGreaterThan(Number(screen.getByRole("button", {name: "1번 대사"}).style.zIndex));
+  rerender(<ImageTextNotes {...props} selected={1} open={false}/>);
   expect(screen.queryByRole("button")).toBeNull();
   expect(container.firstElementChild).toHaveAttribute("inert");
 });
 
-it("leaves pointer taps to the surface while retaining marker keyboard activation", () => {
+it("opens an original/translation card, copies the translation and reports a copy failure", async () => {
+  const onCopy = vi.fn().mockResolvedValue(undefined);
+  render(<ImageTextNotes lines={lines} selected={null} open onSelect={vi.fn()} rect={{left:0,top:0,width:400,height:600}} zoom={{scale:1,x:0,y:0}} onCopy={onCopy}/>);
+  fireEvent.click(screen.getByRole("button", {name: "1번 대사"}));
+  expect(screen.getByRole("region", {name: "대사 번역"})).toHaveTextContent("ねえ있잖아");
+  await act(async () => fireEvent.click(screen.getByRole("button", {name: "복사"})));
+  expect(onCopy).toHaveBeenCalledWith("있잖아");
+  expect(screen.getByRole("status")).toHaveTextContent("복사됨");
+  onCopy.mockRejectedValue(new Error("denied"));
+  await act(async () => fireEvent.click(screen.getByRole("button", {name: "복사"})));
+  expect(screen.getByRole("status")).toHaveTextContent("복사하지 못했습니다");
+  const escape = new KeyboardEvent("keydown", {key:"Escape", bubbles:true, cancelable:true});
+  fireEvent(screen.getByRole("region"), escape);
+  expect(escape.defaultPrevented).toBe(true);
+  expect(screen.queryByRole("region")).toBeNull();
+});
+
+it("holds layout through zoom/pan, transforms the previous notes and refits at screen size on settle", () => {
+  const props = {lines, selected:null, open:true, onSelect:vi.fn(), rect:{left:0,top:0,width:400,height:600}};
+  const {container, rerender} = render(<ImageTextNotes {...props} zoom={{scale:1,x:0,y:0}}/>);
+  const note = screen.getByRole("button", {name:"1번 대사"});
+  const width = note.style.width;
+  rerender(<ImageTextNotes {...props} zoom={{scale:2,x:30,y:40}} panning/>);
+  expect(note.style.width).toBe(width);
+  expect((container.firstElementChild as HTMLElement).style.transform).toContain("scale(2)");
+  expect(container.firstElementChild).not.toHaveAttribute("inert");
+  rerender(<ImageTextNotes {...props} zoom={{scale:2,x:30,y:40}}/>);
+  expect((container.firstElementChild as HTMLElement).style.transform).toContain("scale(1)");
+  expect(parseFloat(note.style.fontSize)).toBeGreaterThanOrEqual(14);
+});
+
+it("routes touch taps through the surface hit test and retains keyboard activation", () => {
+  const ref = createRef<ImageTextNotesHandle>();
   const onSelect = vi.fn();
-  const {container} = render(<ImageTextMarkers lines={lines} selected={null} open onSelect={onSelect} rect={{left:0,top:0,width:400,height:600}} zoom={{scale:1,x:0,y:0}} surfaceTap size={24}/>);
-  const marker = screen.getByRole("button", {name:"1번 대사"});
+  const {container} = render(<ImageTextNotes ref={ref} lines={[lines[0]]} selected={null} open onSelect={onSelect} rect={{left:0,top:0,width:400,height:600}} zoom={{scale:1,x:0,y:0}} surfaceTap/>);
+  const note = screen.getByRole("button", {name:"1번 대사"});
   expect(container.firstElementChild).toHaveAttribute("data-surface-tap", "true");
-  fireEvent.click(marker, {detail:1});
-  expect(onSelect).not.toHaveBeenCalled();
-  fireEvent.click(marker, {detail:0});
+  act(() => expect(ref.current?.tap(parseFloat(note.style.left)+2,parseFloat(note.style.top)+2)).toBe(true));
   expect(onSelect).toHaveBeenCalledWith(0);
+  expect(screen.getByRole("region")).toBeTruthy();
+  expect(ref.current?.tap(390,590)).toBe(false);
+  fireEvent.click(note, {detail:0});
+  expect(onSelect).toHaveBeenCalledTimes(2);
 });

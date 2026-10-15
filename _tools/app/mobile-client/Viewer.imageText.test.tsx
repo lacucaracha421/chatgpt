@@ -31,7 +31,10 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(1000);
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({left: 0, top: 0, width: 800, height: 1000, right: 800, bottom: 1000} as DOMRect);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    const width = this.tagName === 'SPAN' && this.style.position === 'fixed' ? [...(this.textContent ?? '')].length * (parseFloat(this.style.fontSize) || 14) : 800;
+    return {left:0,top:0,width,height:1000,right:width,bottom:1000} as DOMRect;
+  });
   vi.stubGlobal('PointerEvent', class extends MouseEvent {
     pointerId: number;
     constructor(type: string, options: PointerEventInit = {}) {super(type, options); this.pointerId = options.pointerId ?? 1;}
@@ -49,11 +52,33 @@ async function loaded(id = 'a') {
 async function unfold() {
   await loaded();
   fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+  expect(screen.getByRole('button', {name: '1번 대사'})).toBeTruthy();
+  expect(document.querySelector('.viewer-reading-sheet')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '미디어 정보', exact: true}));
   await screen.findByRole('button', {name: /첫 번역/});
 }
 function pointer(type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y: number, pointerId = 1) {
   fireEvent[type](document.querySelector('.viewer-surface')!, {pointerId, clientX: x, clientY: y, button: 0});
 }
+it('toggles notes without the info sheet, copies from the card, and consumes Back for the card', async () => {
+  const backRef = {current: null as (() => boolean) | null};
+  const copy = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('navigator', {clipboard: {writeText: copy}, userAgent: 'test'});
+  render(<Viewer {...props} items={items} index={0} backRef={backRef}/>);
+  await loaded();
+  const toggle = screen.getByRole('button', {name:'번역', exact:true});
+  fireEvent.click(toggle);
+  expect(document.querySelector('.viewer-reading-sheet, .viewer-info-dock, .image-text-section')).toBeNull();
+  pointer('pointerDown', 92, 112); pointer('pointerUp', 92, 112);
+  expect(screen.getByRole('region', {name:'대사 번역'})).toHaveTextContent('原文첫 번역');
+  fireEvent.click(screen.getByRole('button', {name:'복사', exact:true}));
+  await waitFor(() => expect(copy).toHaveBeenCalledWith('첫 번역'));
+  act(() => {expect(backRef.current?.()).toBe(true);});
+  expect(screen.queryByRole('region', {name:'대사 번역'})).toBeNull();
+  expect(props.onClose).not.toHaveBeenCalled();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole('button', {name:'1번 대사'})).toBeNull();
+});
 it('does not fetch or offer translation without the flag or for video, vault and privacy covers', async () => {
   for (const options of [
     {items: [{...items[0], has_image_text: undefined}]},
@@ -80,7 +105,7 @@ it('fetches once, starts folded and turns the info sheet into a non-dimming 46% 
   expect(getComputedStyle(document.querySelector('.viewer-reading-sheet')!).height).toBe('46%');
   expect(getComputedStyle(document.querySelector('.viewer-surface')!).bottom).toBe('46%');
   expect(document.querySelector('.viewer')).toHaveAttribute('data-filmstrip-visible', 'false');
-  expect(document.querySelector<HTMLElement>('.image-text-markers')!.style.getPropertyValue('--image-text-marker-size')).toBe('24px');
+  expect(parseFloat(screen.getByRole('button', {name:'1번 대사'}).style.fontSize)).toBeGreaterThanOrEqual(14);
   expect(getComputedStyle(screen.getByRole('button', {name: '1번 대사'})).pointerEvents).toBe('none');
   expect(style.textContent).toContain('--touch-target:44px');
   expect(style.textContent).toContain('--type-meta:13px');
@@ -107,12 +132,12 @@ it('keeps unfolded across pages, clears selection and swaps rows with the displa
   expect(screen.getByRole('button', {name: /첫 번역/})).toHaveAttribute('aria-pressed', 'false');
   await loaded('b');
   expect(await screen.findByRole('button', {name: /둘째 번역/})).toHaveAttribute('aria-pressed', 'false');
-  expect(screen.queryByText('첫 번역')).toBeNull();
+  expect(screen.queryAllByText('첫 번역')).toHaveLength(0);
   expect(screen.getByRole('button', {name: /번역.*1줄/})).toHaveAttribute('aria-expanded', 'true');
   view.rerender(<Viewer {...props} items={items} index={0}/>); await loaded();
   expect(mocks.api).toHaveBeenCalledTimes(2);
 });
-it('closes and folds with the grip or Android Back, restores the filmstrip and starts a fresh opening folded', async () => {
+it('closes the list with the grip or Android Back while retaining notes, and starts a fresh opening folded', async () => {
   const backRef = {current: null as (() => boolean) | null};
   const view = render(<Viewer {...props} items={items} index={0} backRef={backRef}/>); await unfold();
   const grip = document.querySelector('.bottom-sheet-drag-area')!;
@@ -120,7 +145,8 @@ it('closes and folds with the grip or Android Back, restores the filmstrip and s
   fireEvent.pointerUp(grip, {pointerId: 1, clientX: 200, clientY: 680});
   expect(document.querySelector('.viewer-reading-sheet')).toBeNull();
   expect(document.querySelector('.viewer')).toHaveAttribute('data-filmstrip-visible', 'true');
-  fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+  expect(screen.getByRole('button', {name:'1번 대사'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: '미디어 정보', exact: true}));
   act(() => {expect(backRef.current?.()).toBe(true);});
   expect(document.querySelector('.viewer-reading-sheet')).toBeNull();
   expect(props.onClose).not.toHaveBeenCalled();
@@ -141,7 +167,7 @@ it('removes translation UI on 404 and caches the missing response for this sessi
   await waitFor(() => expect(screen.queryByRole('button', {name: '번역', exact: true})).toBeNull());
   fireEvent.click(screen.getByRole('button', {name: '미디어 정보', exact: true}));
   expect(document.querySelector('.image-text-section')).toBeNull();
-  expect(document.querySelector('.image-text-markers')).toBeNull();
+  expect(document.querySelector('.image-text-notes')).toBeNull();
   view.rerender(<Viewer {...props} items={items} index={1}/>); await loaded('b');
   view.rerender(<Viewer {...props} items={items} index={0}/>); await loaded();
   expect(mocks.api).toHaveBeenCalledTimes(2);
@@ -170,6 +196,7 @@ it('shows the busy label only after 400ms for a flagged image', async () => {
     render(<Viewer {...props} items={items} index={0}/>);
     await act(async () => {await Promise.resolve();});
     fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
+    fireEvent.click(screen.getByRole('button', {name: '미디어 정보', exact: true}));
     act(() => vi.advanceTimersByTime(399));
     expect(screen.queryByText('불러오는 중')).toBeNull();
     act(() => vi.advanceTimersByTime(1));
@@ -188,7 +215,7 @@ it('keeps the reading sheet on an unflagged page and swaps away its old rows wit
   expect(screen.getByRole('button', {name: /첫 번역/})).toBeTruthy();
   await loaded('b');
   expect(document.querySelector('.image-text-section')).toBeNull();
-  expect(document.querySelector('.image-text-markers')).toBeNull();
+  expect(document.querySelector('.image-text-notes')).toBeNull();
   expect(document.querySelector('.viewer-reading-sheet')).toBeTruthy();
   expect(mocks.api).toHaveBeenCalledTimes(1);
 });
@@ -197,7 +224,7 @@ it('does not fetch text or expose translation through an NSFW cover', () => {
   render(<Viewer {...props} items={[{...items[0], contentRating: 'e'}]} index={0}/>);
   expect(screen.queryByRole('button', {name: '번역', exact: true})).toBeNull();
   expect(document.querySelector('.image-text-section')).toBeNull();
-  expect(document.querySelector('.image-text-markers')).toBeNull();
+  expect(document.querySelector('.image-text-notes')).toBeNull();
   expect(mocks.api).not.toHaveBeenCalled();
 });
 
@@ -210,6 +237,6 @@ it('pans to an off-screen row marker in 200ms without changing zoom', async () =
   pointer('pointerMove', 292, 112, 2); pointer('pointerUp', 292, 112, 2); pointer('pointerUp', 92, 112, 1);
   fireEvent.click(screen.getByRole('button', {name: /첫 번역/}));
   expect(image.style.transform).toBe('translate(400px, 500px) scale(2)');
-  expect(document.querySelector('.image-text-markers')).toHaveAttribute('data-panning', 'true');
+  expect(document.querySelector('.image-text-notes')).toHaveAttribute('data-panning', 'true');
   expect(getComputedStyle(image).transition).toBe('transform 200ms var(--ease-standard)');
 });

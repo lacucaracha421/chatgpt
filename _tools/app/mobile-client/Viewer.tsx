@@ -18,7 +18,7 @@ import {catalogPerfEnabled} from './catalogPerf';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
-import {ViewerInfo} from './ViewerInfo';
+import {ViewerInfo, writeClipboard} from './ViewerInfo';
 import {usePrivacyMode} from './privacyMode';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {useViewerMotion} from '../src/shared/viewer/useViewerMotion';
@@ -29,7 +29,7 @@ import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 import {contentCross, EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 
 import {ImageTextContext} from '../src/shared/viewer/ImageTextContext';
-import {ImageTextMarkers, imageTextMarkerPositions} from '../src/shared/viewer/ImageTextMarkers';
+import {ImageTextNotes, type ImageTextNotesHandle} from '../src/shared/viewer/ImageTextNotes';
 import {useDisplayedImage} from '../src/shared/viewer/useDisplayedImage';
 import {useImageText} from '../src/shared/viewer/useImageText';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
@@ -164,7 +164,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       if (exclusionOpen.current) { setExclusion(null); return true; }
       if (pickersOpen.current.classificationOpen) { setClassificationOpen(false); return true; }
       if (pickersOpen.current.albumOpen) { setAlbumOpen(false); return true; }
-      if (infoOpen.current) { setInfo(false); setTextOpen?.(false); return true; }
+      if (notesRef.current?.dismissCard()) return true;
+      if (infoOpen.current) { setInfo(false); return true; }
       return motion.back();
     };
     return () => { backRef.current = null; };
@@ -201,9 +202,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(() => setSelection(null), [asset.id]);
   const reading = !vault && info && !!textOpen;
   const halfSheet = reading && !landscape;
-  const closeInfo = () => {setInfo(false); setTextOpen?.(false);};
-  const markerSize = surfaceElement ? parseFloat(getComputedStyle(surfaceElement).getPropertyValue('--badge-height')) || 24 : 24;
-  const markerHitSize = surfaceElement ? parseFloat(getComputedStyle(surfaceElement).getPropertyValue('--touch-target')) || 44 : 44;
+  const closeInfo = () => {setInfo(false);};
+  const notesRef = useRef<ImageTextNotesHandle>(null);
+  const [textGesture, setTextGesture] = useState(false);
   const [textPanning, setTextPanning] = useState(false);
   useEffect(() => {
     if (!textPanning) return;
@@ -214,23 +215,15 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     if (!textCurrent) return;
     setSelection(selectedLine === line ? null : {assetId: asset.id, line});
     if (!fromRow || selectedLine === line || !displayed || transform.scale <= 1 || !surface.current) return;
-    const marker = imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, transform.scale, markerSize).find(position => position.index === line);
+    const box = lines[line]?.box;
+    const marker = box ? {x: box.x0 / 1000 * displayed.rect.width, y: box.y0 / 1000 * displayed.rect.height} : null;
     if (!marker) return;
     const stage = surface.current;
     const x = stage.clientWidth / 2 + transform.x + (marker.x - displayed.rect.width / 2) * transform.scale;
     const y = stage.clientHeight / 2 + transform.y + (marker.y - displayed.rect.height / 2) * transform.scale;
-    if (x >= markerSize / 2 && x <= stage.clientWidth - markerSize / 2 && y >= 56 + markerSize / 2 && y <= stage.clientHeight - markerSize / 2) return;
+    if (x >= 14 && x <= stage.clientWidth - 14 && y >= 56 + 14 && y <= stage.clientHeight - 14) return;
     setTextPanning(true);
     setTransform(clamp(transform.scale, (displayed.rect.width / 2 - marker.x) * transform.scale, (displayed.rect.height / 2 - marker.y) * transform.scale));
-  };
-  const markerAt = (clientX: number, clientY: number) => {
-    if (!reading || !hasText || !textCurrent || !displayed || !surface.current) return undefined;
-    const stage = surface.current.getBoundingClientRect();
-    return imageTextMarkerPositions(lines, displayed.rect.width, displayed.rect.height, transform.scale, markerSize).find(marker => {
-      const x = stage.left + displayed.rect.left + displayed.rect.width / 2 + transform.x + (marker.x - displayed.rect.width / 2) * transform.scale;
-      const y = stage.top + displayed.rect.top + displayed.rect.height / 2 + transform.y + (marker.y - displayed.rect.height / 2) * transform.scale;
-      return Math.abs(clientX - x) <= markerHitSize / 2 && Math.abs(clientY - y) <= markerHitSize / 2;
-    })?.index;
   };
   const imageText = displayedId && (hasText || (textEligible && textCurrent && textBusy)) ? {
     assetId: displayedId, lines, selected: selectedLine, open: !!textOpen,
@@ -402,8 +395,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const imageSrc = original || (!vault ? decoded?.url : undefined) || asset.preview;
   const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
   const filmstripVisible = !halfSheet && !vault && items.length > 1 && !videoPlaying && (chrome || asset.kind === 'video');
-  return <ImageTextContext value={imageText}><Dialog open title="미디어 감상" variant="fullscreen" onClose={motion.close} onKeyDown={event => {
-    if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); setTextOpen?.(false); return; }
+  return <ImageTextContext value={imageText}><Dialog open title="미디어 감상" variant="fullscreen" onClose={() => {if (!notesRef.current?.dismissCard()) motion.close();}} onKeyDown={event => {
+    if (event.key === 'Escape' && notesRef.current?.dismissCard()) { event.preventDefault(); return; }
+    if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); return; }
     if (event.target instanceof HTMLVideoElement || (event.target instanceof HTMLElement && event.target.closest('.video-player'))) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
     revealChrome();
@@ -422,7 +416,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         {!vault&&<span className="viewer-spacer"/>}
         <div className="viewer-actions">
           {!vault&&<>
-            {textAvailable&&<ViewerAction label="번역" icon={LanguageIcon} active={reading} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(true);setTextOpen?.(true);revealChrome();}}/>}
+            {textAvailable&&<ViewerAction label="번역" icon={LanguageIcon} active={!!textOpen} onClick={() => {setTextOpen?.(!textOpen);revealChrome();}}/>}
             <ViewerAction label="앨범" icon={RectangleStackIcon} active={albumOpen} onClick={() => {setInfo(false); setTextOpen?.(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
             <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false); setTextOpen?.(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 빼기`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
@@ -438,11 +432,12 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (g.points.size === 1) Object.assign(g, {startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, moved:false, pinched:false});
-        if (g.points.size >= 2) { g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
+        if (g.points.size >= 2) { setTextGesture(true); g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
       }} onPointerMove={event => {
         const g = gesture.current; if (!g.points.has(event.pointerId)) return;
         g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (Math.hypot(event.clientX - g.startX, event.clientY - g.startY) >= 8) g.moved = true;
+        if (g.moved || g.pinched) setTextGesture(true);
         if (asset.kind!=='video' && g.points.size === 2 && g.distance > 0) {
           const scale = Math.min(5, Math.max(1, g.scale * distance() / g.distance));
           setTransform(current => clamp(scale,current.x,current.y));
@@ -461,13 +456,13 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         g.points.delete(event.pointerId);
         if (g.points.size === 1) { const remaining = [...g.points.values()][0]; g.lastX = remaining.x; g.lastY = remaining.y; }
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
-        const marker = g.points.size === 0 && !g.moved && !g.pinched && Math.hypot(dx, dy) < 8 ? markerAt(event.clientX, event.clientY) : undefined;
-        if (marker !== undefined) {selectText(marker); return;}
+        if (g.points.size === 0) setTextGesture(false);
+        if (g.points.size === 0 && !g.moved && !g.pinched && Math.hypot(dx, dy) < 8 && notesRef.current?.tap(event.clientX, event.clientY)) return;
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && !halfSheet && g.startY > event.currentTarget.getBoundingClientRect().bottom - 160 && dy < -40 && Math.abs(dy) > Math.abs(dx)) { setStripGrown(true); revealChrome(); }
         else if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
         else if (g.points.size === 0 && !g.moved && !g.pinched && asset.kind === 'video') videoTap(event.clientX, event.clientY);
         else if (g.points.size === 0 && !g.moved && !g.pinched) { setStripGrown(false); if (stripGrown) revealChrome(); else setChrome(value => !value); }
-      }} onPointerCancel={() => {gesture.current.pinched = true; gesture.current.points.clear();}}>
+      }} onPointerCancel={() => {gesture.current.pinched = true; gesture.current.points.clear();setTextGesture(false);}}>
         {asset.kind === 'video' ? <VideoPlayerSurface
           key={retry}
           asset={playerAsset}
@@ -508,7 +503,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
             {asset.preview && !placeholderGone && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
             <StableImage decodeFirst={false} className="viewer-image" src={original!} alt={vault.label(asset)} draggable={false} onLoad={fullLoaded} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded ? 1 : 0}}/>
           </> : imageSrc ? <StableImage className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} onError={() => setError('이미지를 표시하지 못했습니다.')} onPreloadError={() => setError('이미지를 표시하지 못했습니다.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline"><BusyLabel busy={!error} idle={error ? '미리보기를 표시할 수 없습니다.' : null}>이미지 불러오는 중</BusyLabel></div>}
-        {hasText && displayed && <ImageTextMarkers lines={lines} selected={selectedLine} open={reading} onSelect={selectText} rect={displayed.rect} zoom={transform} size={markerSize} interactive={textCurrent} surfaceTap panning={textPanning}/>}
+        {hasText && displayed && <ImageTextNotes key={displayed.src} ref={notesRef} onCopy={writeClipboard} lines={lines} selected={selectedLine} open={!!textOpen} onSelect={selectText} rect={displayed.rect} zoom={transform} interactive={textCurrent} surfaceTap panning={textPanning || textGesture} animatePan={textPanning}/>}
       </div>
       {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
