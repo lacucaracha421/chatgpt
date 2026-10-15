@@ -16,9 +16,11 @@ type Props = {store: NotesStore | null; root: string; privacy: boolean; onOpenNo
 const openInBrowser = (url: string) => native('openExternal', {url});
 
 /** Only a stored https thumbnail is loaded; the tablet has no preview fetcher, so the PC fills previews in. */
+// No empty thumbnail box (user 2026-10-16): a link without a usable https image shows text only.
 function Thumb({url, privacy}: {url?: string | null; privacy: boolean}) {
+  if (!url || !/^https:\/\//.test(url)) return null;
   if (privacy) return <span className="home-tab-link__thumb"><span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /></span>;
-  return <span className="home-tab-link__thumb">{url && /^https:\/\//.test(url) && <StableImage src={url} alt="" loading="lazy" />}</span>;
+  return <span className="home-tab-link__thumb"><StableImage src={url} alt="" loading="lazy" /></span>;
 }
 
 /**

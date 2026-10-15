@@ -530,7 +530,9 @@ describe('tablet Home tools', () => {
     await act(async () => {localStorage.setItem(PRIVACY_MODE_KEY, '1'); window.dispatchEvent(new Event(PRIVACY_MODE_EVENT));});
     const section = screen.getByRole('region', {name: '링크 보관'});
     expect(section.querySelectorAll('img')).toHaveLength(0);
-    expect(section.querySelectorAll('.home-cover-placeholder.is-private')).toHaveLength(3);
+    // Only the link with a usable https image keeps a (masked) thumbnail; the others show text only.
+    expect(section.querySelectorAll('.home-cover-placeholder.is-private')).toHaveLength(1);
+    expect(section.querySelectorAll('.home-tab-link__thumb')).toHaveLength(1);
     view.unmount();
   });
   it('opens a kept link outside the app', async () => {

@@ -134,6 +134,9 @@ export function HomeLinks({ store, root, onOpenNotes, expanded = false, onOpen, 
 
 function LinkThumbnail({ url, masked, api }: { url?: string | null; masked: boolean; api: typeof homeLinksApi }) {
   const [loaded, setLoaded] = useState<{ url: string; src: string } | null>(null);
-  useEffect(() => { let live = true; if (url && !masked) void api.thumbnail(url).then(src => { if (live) setLoaded({ url, src }); }, () => undefined); return () => { live = false; }; }, [url, masked, api]);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => { let live = true; if (url && !masked) void api.thumbnail(url).then(src => { if (live) setLoaded({ url, src }); }, () => { if (live) setFailed(url); }); return () => { live = false; }; }, [url, masked, api]);
+  // No empty thumbnail box (user 2026-10-16): only links with an image that loads (or is masked) get one.
+  if (!url || failed === url) return null;
   return <span className={`home-link__thumb${masked ? " privacy-mask" : ""}`} aria-label={masked ? "이미지 숨김" : undefined}>{!masked && loaded && loaded.url === url && <StableImage src={loaded.src} alt="" />}</span>;
 }
