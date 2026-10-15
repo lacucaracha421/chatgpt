@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ImageRect } from "./imageTextNoteLayout";
 
-type DisplayedImage = { src: string; rect: ImageRect };
+type DisplayedImage = { src: string; image: HTMLImageElement; ready: boolean; rect: ImageRect };
 
 /** Observe the painted StableImage slot, including an already decoded prefetched slot swap. */
 export function useDisplayedImage(element: HTMLDivElement | null, selector = "[data-viewer-media] img.asset-viewer__media:not([data-stable-image-loading])") {
@@ -20,8 +20,8 @@ export function useDisplayedImage(element: HTMLDivElement | null, selector = "[d
       const ratio = image.naturalWidth && image.naturalHeight ? image.naturalWidth / image.naturalHeight : width / height;
       const fittedWidth = Math.min(width, height * ratio) || 0;
       const fittedHeight = Math.min(height, width / ratio) || 0;
-      const next = { src: image.getAttribute("src") ?? "", rect: { left: (element.clientWidth - fittedWidth) / 2, top: (element.clientHeight - fittedHeight) / 2, width: fittedWidth, height: fittedHeight } };
-      setDisplayed(previous => previous?.src === next.src && Object.keys(next.rect).every(key => previous.rect[key as keyof ImageRect] === next.rect[key as keyof ImageRect]) ? previous : next);
+      const next = { src: image.getAttribute("src") ?? "", image, ready: image.complete && image.naturalWidth > 0 && image.naturalHeight > 0, rect: { left: (element.clientWidth - fittedWidth) / 2, top: (element.clientHeight - fittedHeight) / 2, width: fittedWidth, height: fittedHeight } };
+      setDisplayed(previous => previous?.src === next.src && previous.image === image && previous.ready === next.ready && Object.keys(next.rect).every(key => previous.rect[key as keyof ImageRect] === next.rect[key as keyof ImageRect]) ? previous : next);
     };
     read();
     // React's slot commit has finished. Flush before the browser paints so rows/markers never
