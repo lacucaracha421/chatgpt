@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.50 — 2026-10-16
+
+- Saving an image again after it was deleted in Lakomics (even after emptying the trash)
+  now brings it back in the chosen folder; each save carries a fresh request id so old
+  captures and replays never revive deleted assets.
+
 ## 3.5.49 — 2026-10-16
 
 - Gemini 3.5 Flash Lite is no longer offered for image text translation (its image
