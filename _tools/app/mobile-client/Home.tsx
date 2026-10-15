@@ -218,7 +218,6 @@ export function Home(props: HomeProps) {
     { key: 'similar', label: '유사 이미지 검토', count: d.todos.similar, unit: '쌍' },
     { key: 'pending', label: '처리 대기', count: d.todos.pending, unit: '건' },
     ...(props.review.enabled ? [{ key: 'confirm', label: '확인', count: d.characterSettled ? d.todos.character ?? 0 : null, unit: '건' }] : []),
-    { key: 'duplicates', label: '중복 판본', count: d.todos.duplicates, unit: '건' },
   ];
   const connections = [
     ...(d.offline || d.serverProblem ? [{ key: 'server', label: '서버', value: d.offline ? '연결 안 됨' : '요청을 처리할 수 없음', tone: 'off' }] : []),

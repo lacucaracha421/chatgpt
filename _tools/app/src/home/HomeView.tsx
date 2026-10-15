@@ -37,7 +37,6 @@ import type { DropSubscriber } from "../ingestion/useFileDrop";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
-import { readDuplicateCount } from "./duplicateCount";
 import { pcStartupInput, pcStartupRead } from "../shared/pcPerfLog";
 import { readCalendarSourcesCache, readWishlistCache, writeCalendarSourcesCache, writeWishlistCache } from "./homeReleaseCache";
 import "./home.css";
@@ -231,8 +230,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const [reviewOverview, setReviewOverview] = useState(false);
   const [reviewRead, setReviewRead] = useState(0);
   const [confirmQueue, setConfirmQueue] = useState<ConfirmQueue | null>(null);
-  const [duplicateCount, setDuplicateCount] = useState<number | null>(null);
-  const [duplicateError, setDuplicateError] = useState(false);
   const [confirmError, setConfirmError] = useState(false);
   const sources = useMemo<ConfirmSources | null>(() => confirmSource ?? (native() ? confirmSources : null), [confirmSource]);
   // Lightweight mode skips the exact count (it reads the recognition lists); the tag count of the Home
@@ -251,12 +248,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   }, [sources, restricted, queueRead, active]);
   useEffect(() => {
     if (!active) return;
-    let live = true;
     onQueuesRequested?.();
-    void readDuplicateCount(gateway).then((count) => {
-      if (live) { setDuplicateCount(count); setDuplicateError(false); }
-    }, () => { if (live) setDuplicateError(true); });
-    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, queueRead, refreshVersion, active]);
 
@@ -281,7 +273,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const fieldFailed = (field: HomeOverview["failed"][number]) => overviewError || Boolean(overview?.failed.includes(field));
   const reviewUnknown = [
     {key: "confirm", label: "확인", unknown: confirmExact ? confirmQueue === null || confirmError : Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("tagger")), failed: confirmExact ? confirmError : fieldFailed("tagger")},
-    {key: "duplicates", label: "중복 판본", unknown: duplicateCount === null || duplicateError, failed: duplicateError},
     {key: "unsorted", label: "미분류 에셋", unknown: unsortedCount === null, failed: false},
     {key: "av-link", label: "AV 품번", unknown: !privacyMode && avLinkCount === null, failed: false},
     {key: "pending", label: "처리 대기", unknown: Boolean(gateway.getHomeOverview) && (!overview || fieldFailed("server") || (overview.server?.configured && overview.server.capturesPending === null)), failed: fieldFailed("server"), settled: Boolean(overview?.server) && !fieldFailed("server")},
@@ -289,7 +280,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const todos = [
     { key: "confirm", label: "확인", count: confirmTotalNow, open: () => setReviewOverview(true) },
     { key: "similar", label: "유사 이미지 검토", count: reviewCount, unit: "쌍", open: go({ kind: "similarity_review" }) },
-    { key: "duplicates", label: "중복 판본", count: duplicateCount ?? 0, open: () => setDialog({ kind: "duplicates" }) },
     { key: "unsorted", label: "미분류 에셋", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },
     { key: "av-link", label: "AV 품번", count: privacyMode ? 0 : avLinkCount ?? 0, open: go({ kind: "collections", typeFilter: "av", showcase: false }) },
     { key: "pending", label: "처리 대기", count: overview?.server?.capturesPending ?? 0, open: go({ kind: "settings", section: "connection" }) },
@@ -321,14 +311,9 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   // status center shows. The overview's one-shot reading of the server watch is only the fallback: it
   // can predate the first watch result and would keep "연결 안 됨" until the next overview read.
   if (!gateway.authoritySyncHealth && overview?.server?.configured && !overview.server.live && !problems.some(row => row.key === 'server')) problems.unshift({ key: 'server', label: '서버', value: '연결 안 됨', tone: 'off', view: { kind: 'settings', section: 'connection' } });
-  // Keep a late count's row in place for this visit, including a zero result.
-  const duplicateSlot = useRef(false);
-  const reservedTodos = duplicateSlot.current || duplicateCount === null
-    ? [...todos.filter(todo => todo.key !== 'duplicates'), { key: 'duplicates', label: '중복 판본', count: 1 }]
-    : todos;
-  const todayRows = attentionRows(notesState.notes, reservedTodos, problems, today).map(row => ({ ...row,
-    value: row.key === 'duplicates' ? duplicateCount === null ? ' ' : duplicateCount.toLocaleString() : row.value,
-    disabled: row.key === 'duplicates' ? duplicateCount === null : row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
+  // 중복 판본 is no longer a Home to-do (user 2026-10-16: most resolve automatically); its review stays in the catalog.
+  const todayRows = attentionRows(notesState.notes, todos, problems, today).map(row => ({ ...row,
+    disabled: row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
 
   const cover = (row: ReleaseRow | UpcomingRow) => {
     if (privacyMode) return null;
@@ -363,7 +348,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   // Resolve the initial block arrangement together; subsequent reads leave it mounted.
   const layoutShown = useRef(false);
   if (collectionsReady && !shelfLoading && !attentionPending) {
-    if (!layoutShown.current && duplicateCount === null) duplicateSlot.current = true;
     layoutShown.current = true;
   }
   const firstLoad = !layoutShown.current;

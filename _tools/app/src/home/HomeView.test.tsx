@@ -164,37 +164,12 @@ describe('Home attention', () => {
     expect(gateway.getHomeOverview).toHaveBeenCalledTimes(overviewReads);
   });
 
-  it('releases Home and the splash while duplicates are pending, then fills the reserved row', async () => {
-    resetLaunchSplashForTests();
-    let finish!: (value: number) => void;
-    gateway.getCatalogReviewCount = vi.fn().mockReturnValueOnce(new Promise<number>(resolve => { finish = resolve; }));
-    render(<LaunchSplash />);
+  it('no longer reads or lists 중복 판본 on Home (user 2026-10-16)', async () => {
+    gateway.getCatalogReviewCount = vi.fn().mockResolvedValue(14);
     const { view } = renderHome();
     await waitFor(() => expect(view.container.querySelector('.home-pc-layout')).toHaveAttribute('aria-busy', 'false'));
-    const row = screen.getByRole('button', { name: /중복 판본/ });
-    expect(row).toBeDisabled();
-    const parent = row.parentElement;
-    await waitFor(() => expect(document.querySelector('.launch-splash')).toBeNull());
-    expect(gateway.getCatalogReviewCount).toHaveBeenCalledOnce();
-    expect(gateway.listCatalogReview).not.toHaveBeenCalled();
-    await act(async () => finish(3));
-    expect(screen.getByRole('button', { name: /중복 판본/ })).toBe(row);
-    expect(row.parentElement).toBe(parent);
-    expect(row).toHaveTextContent('3');
-    expect(row).not.toBeDisabled();
-  });
-  it('counts the actionable pending dialog queue and refreshes after a duplicate decision', async () => {
-    const rows = Array.from({ length: 95 }, (_, id) => ({ leftAnchor: `${id}:left`, rightAnchor: `${id}:right`, state: 'pending', actionable: true }));
-    gateway.listCatalogReview.mockResolvedValue({ rows: [...rows, { state: 'confirm', actionable: true }, { state: 'pending', actionable: false }], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
-    renderHome();
-    await userEvent.click(await screen.findByRole('button', { name: /중복 판본95/ }));
-    const dialog = await screen.findByRole('dialog', { name: '중복 후보 검토' });
-    gateway.listCatalogReview.mockResolvedValue({ rows: rows.slice(1), inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Save duplicate decision' }));
-    expect(await screen.findByRole('button', { name: /중복 판본94/ })).toBeVisible();
-    await userEvent.click(within(dialog).getByRole('button', { name: '닫기' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '중복 후보 검토' })).toBeNull());
-    expect(screen.getByRole('button', { name: /중복 판본94/ })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /중복 판본/ })).toBeNull();
+    expect(gateway.getCatalogReviewCount).not.toHaveBeenCalled();
   });
   it('holds the first layout until the first reads arrive, then shows the calendar, tools and card place, and opens the release calendar', async () => {
     let finish!: (value: HomeOverview) => void;
