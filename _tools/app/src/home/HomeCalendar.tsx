@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { PhotoIcon } from "@heroicons/react/24/outline";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
@@ -20,6 +21,8 @@ type Props = {
   /** Opens the release calendar view. */
   onOpenCalendar: () => void;
   onOpenNote?: (noteId: string) => void;
+  /** A client's own controls beside the section's links (the tablet's week arrows). */
+  extraActions?: ReactNode;
 };
 
 /** Cover stack of one cell: the first cover in front, up to two more behind it. */
@@ -76,9 +79,10 @@ function Cell({ day, at, onOpenNote }: { day: CalendarDay<HomeReleaseCard>; at: 
   </div>;
 }
 
-export function HomeCalendar({ model, at, onOpenCalendar, onOpenNote }: Props) {
+export function HomeCalendar({ model, at, onOpenCalendar, onOpenNote, extraActions }: Props) {
   const { days, earlier, later } = model;
   const actions = <>
+    {extraActions}
     {earlier.length > 0 && <Menu label={`지난 NEW ${earlier.length}개`} triggerClassName="home-link" align="end"
       items={earlier.map(entry => ({ id: entry.key, label: [releaseDisplayTitle(entry.name), entry.date ? displayDate(entry.date, at) : "", entry.detail].filter(Boolean).join(" · "), onSelect: entry.onOpen }))}
       trigger={<>지난 NEW <span className="numeric">{earlier.length}개</span></>} />}

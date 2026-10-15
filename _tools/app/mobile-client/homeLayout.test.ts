@@ -1,17 +1,21 @@
 import {readFileSync} from 'node:fs';
 import {expect, it} from 'vitest';
 
-it('places media on the left and attention above the image on the right in landscape; portrait follows DOM order with horizontal shelves', () => {
-  const css = readFileSync('mobile-client/home.css', 'utf8');
-  expect(css).toContain('.home-tablet-media-column { grid-column:1;');
-  expect(css).toContain('.home-tablet-day-column { grid-column:2; }');
-  expect(css).toContain('@media (orientation:portrait), (max-width:700px)');
-  expect(css).toContain('.home-tablet-layout { display:flex; flex-direction:column;');
-  expect(css).toContain('.home-tablet-media-column, .home-tablet-day-column { display:contents; }');
-  for (const [index, section] of ['today', 'playing', 'releases', 'day'].entries()) expect(css).toContain(`.home-tablet-${section} { order:${index}; }`);
-  expect(css).toContain('grid-auto-flow:column;');
-  expect(css).toContain('min-height:44px; min-width:44px;');
+it('stacks the PC parts in one column, pairs card with 오늘 할 것 and memo with links, and keeps touch targets at 44px', () => {
+  const css = readFileSync('mobile-client/homeTablet/homeTablet.css', 'utf8');
+  expect(css).toContain('.home-tablet-layout { min-height:100%; display:flex; flex-direction:column;');
+  expect(css).toContain('.home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));');
+  expect(css).toContain('.home-tablet-pair.is-single { grid-template-columns:minmax(0,1fr); }');
+  expect(css).toContain('@media (orientation:portrait) and (max-width:700px) { .home-tablet-pair { grid-template-columns:minmax(0,1fr); } }');
+  expect(css).toContain('.home-tablet-week { touch-action:pan-y; }');
+  expect(css).toMatch(/\.home-tablet-week__nav \.ui-icon-button \{ min-width:44px; min-height:44px; \}/);
+  expect(css).toMatch(/\.home-cal__payment\.ui-button[^{]*\{ min-height:44px; \}/);
+  expect(css).toMatch(/\.home-tab-link \{[^}]*min-height:48px/);
+  expect(css).toMatch(/\.home-tab-sent li \{[^}]*min-height:44px/);
+  const base = readFileSync('mobile-client/home.css', 'utf8');
+  expect(base).toContain('min-height:44px; min-width:44px;');
+  // The removed sections leave no layout rules behind.
+  for (const gone of ['home-tablet-media-column', 'home-tablet-day-column', 'home-tablet-playing', 'home-tablet-releases', 'home-tablet-day ']) expect(base).not.toContain(gone);
   const shared = readFileSync('src/home/home.css', 'utf8');
   expect(shared).toMatch(/home-daily__image[^}]*object-fit:contain/);
-  expect(shared).toMatch(/home-daily__backdrop[^}]*blur/);
 });

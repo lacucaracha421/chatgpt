@@ -40,6 +40,7 @@ import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from
 import {RectangleStackIcon, ChevronRightIcon, PlayIcon, Squares2X2Icon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {Exchange} from './Exchange';
+import {TabletCardAlbum} from './cards/TabletCardAlbum';
 import {useExchange} from './useExchange';
 import {sendingSummary} from './homeDashboard';
 
@@ -161,6 +162,8 @@ export function App() {
   // 보내기/받기: a utility screen opened from the Home header or an arrival toast.
   const [exchangeOpen,setExchangeOpen]=useState(false);
   const exchangeBack=useRef<(()=>boolean)|null>(null);
+  const [cardAlbumOpen,setCardAlbumOpen]=useState(false);
+  const cardAlbumBack=useRef<(()=>boolean)|null>(null);
   const [artistsOpen,setArtistsOpen]=useState(false),[artistSelection,setArtistSelection]=useState<LibraryArtist|null>(null),[calendarOpen,setCalendarOpen]=useState(false),[calendarKind,setCalendarKind]=useState<'game'|'movie'|undefined>();
   const calendarBack=useRef<(()=>boolean)|null>(null);
   const artistsBack=useRef<(()=>boolean)|null>(null);
@@ -281,7 +284,7 @@ export function App() {
   const loadInFlight = useRef(false), loadInterrupted = useRef(false);
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
+  const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, cardAlbumOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, cardAlbumOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
   const clearSelection=useCallback(()=>{setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
@@ -733,6 +736,7 @@ export function App() {
       else if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
       else if (state.fault) setFault(null);
       else if (state.exchangeOpen) {if (!exchangeBack.current?.()) setExchangeOpen(false);}
+      else if (state.cardAlbumOpen) {if (!cardAlbumBack.current?.()) setCardAlbumOpen(false);}
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
       // The 확인 list covers the app too; it closes its zoom first, then itself, and the overview beneath it follows.
       else if (state.review) {if (!reviewBack.current?.()) closeReview();}
@@ -1000,7 +1004,7 @@ export function App() {
   const reviewCount=useSimilarityReviewCount(status.configured&&!similarity,similarityClosed,status.endpoint)??0;
   const reviewLibrary=characterReviewLibrary(characterIndex);
   const closeReview=()=>{setReview(null);setReviewClosed(n=>n+1);};
-  const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||!!review||reviewOverview||trash.open||exchangeOpen||artistsOpen||calendarOpen;
+  const paused=moreOpen||area!=='assets'||settings||!!viewer||!!fault||similarity||!!review||reviewOverview||trash.open||exchangeOpen||cardAlbumOpen||artistsOpen||calendarOpen;
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
@@ -1099,7 +1103,7 @@ export function App() {
   // Full-screen layers are pushed in from the right over the page and pop back the same way; the
   // page beneath stays put. Artists replaces the page only once it has covered it.
   const searchLayer=useMotionSurface('layer'),calendarLayer=useMotionSurface('layer'),artistsLayer=useMotionSurface('layer'),settingsLayer=useMotionSurface('layer');
-  const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),reviewOverviewLayer=useMotionSurface('layer'),reviewLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer');
+  const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),reviewOverviewLayer=useMotionSurface('layer'),reviewLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer'),cardAlbumLayer=useMotionSurface('layer');
   const classificationToast=useMotionSurface('toast'),exchangeToast=useMotionSurface('toast');
   const artistsCovered=useLayerCovered(artistsOpen);
   const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onFavorite={albumTree?.adopted?value=>void selectionActions.run(value?'like':'unlike'):undefined} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterShortcut={null} characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button variant="ghost" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>}{page.view.album&&<Button size="icon" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/></Button>}<span className="selection-action-notice" role={selectionActions.notice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
@@ -1139,7 +1143,7 @@ export function App() {
   const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<TopBarActions/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
-    <Home onUnsortedCount={setUnsortedCount} items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
+    <Home onUnsortedCount={setUnsortedCount} notes={findStore} onAlbum={()=>setCardAlbumOpen(true)} items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:!!reviewLibrary,refreshKey:`${characterIndex?.revision}:${reviewClosed}`}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onUnclassified={() => {const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
@@ -1221,6 +1225,7 @@ export function App() {
     {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}
+    {cardAlbumOpen && status.configured && <div className="tablet-layer" ref={cardAlbumLayer}><TabletCardAlbum backRef={cardAlbumBack} onClose={()=>setCardAlbumOpen(false)}/></div>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key} ref={exchangeToast} data-state="open"><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}
   </div></MotionScope></MoreContext.Provider></FindContext.Provider>;
 }

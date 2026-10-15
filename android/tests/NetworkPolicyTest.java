@@ -319,6 +319,10 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/assets/asset_A-1/image-text","GET"));
  for(String method:new String[]{"POST","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/library/assets/asset_A-1/image-text",method));
  for(String path:new String[]{"/v1/library/assets//image-text","/v1/library/assets/../image-text","/v1/library/assets/a%2fb/image-text","/v1/library/assets/a/image-text/extra"})reject(()->NetworkPolicy.api(path,"GET"));
+ // CARD-GACHA-001: card state/album/pack reads, open/keep commands and the cutout ticket; publisher routes stay closed.
+ for(String path:new String[]{"/v1/cards/state","/v1/cards/album","/v1/cards/album?after=abc_-&limit=50","/v1/cards/packs/d-20261016","/v1/cards/packs/b-20261016"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/cards/packs/d-20261016/open","/v1/cards/packs/b-20261016/keep","/v1/cards/cutouts/asset_A-1/ticket"}){pass(()->NetworkPolicy.api(path,"POST"));for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/cards/cutouts/prepare","/v1/cards/cutouts/asset_A-1/complete","/v1/cards/cutout-candidates","/v1/cards/packs/d-20261016/keep/extra","/v1/cards/packs/x-20261016/open","/v1/cards/packs/d-2026101/open","/v1/cards/packs/d-202610161/open","/v1/cards/packs/D-20261016","/v1/cards/packs/d-20261016/","/v1/cards/packs/../state","/v1/cards/packs/d-20261016/reset","/v1/cards/state/","/v1/cards/album/extra","/v1/cards/cutouts//ticket","/v1/cards/cutouts/a%2fb/ticket","/v1/cards/cutouts/../ticket","/v1/cards/cutouts/a/ticket/extra","/v1/cards","/v1/cards/"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

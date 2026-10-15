@@ -4,8 +4,7 @@ import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {artworkVariant, collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleasesModel';
-import {Cover} from './CoverGroup';
-import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisitRead, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
+import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchangeModel';
 import {api, native} from './transport';
@@ -16,17 +15,19 @@ import {usePrivacyMode} from './privacyMode';
 import type {Asset, Ticket} from './types';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
-import {Badge, EmptyState, Skeleton} from './ui';
+import {Badge, Skeleton} from './ui';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
-import {HomeSection, type HomeReleaseCard} from '../src/home/HomeAttention';
+import type {HomeReleaseCard} from '../src/home/HomeAttention';
 import {TabletHomeToday} from './HomeToday';
-import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
-import {HomePlayingShelf} from '../src/home/HomePlayingShelf';
-import {HomeDay} from '../src/home/HomeRevisit';
-import {LightCase} from '../src/collections/case/LightCase';
-import {workCasePlatform} from '../src/collections/case/CollectionCase';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
-import {HomeAssetImage, useTabletHomeDaily} from './HomeMedia';
+import {HomeQuickMemo} from '../src/home/HomeQuickMemo';
+import {calendarPayments, releaseCalendarModel} from '../src/home/homeCalendarModel';
+import type {NotesStore} from '../src/notes/store';
+import {TabletDailyCard} from './cards/TabletDailyCard';
+import {TabletLinks} from './homeTablet/TabletLinks';
+import {TabletTransfer} from './homeTablet/TabletTransfer';
+import {TabletWeekStrip} from './homeTablet/TabletWeekStrip';
+import {tabletHomeNotes} from './homeTablet/notesStore';
 import {contentCross, EASE_STANDARD, reducedMotion} from '../src/shared/motion/curves';
 import {attentionRows} from '../src/home/homeAttentionModel';
 import {useHomeVisit} from '../src/home/useHomeVisit';
@@ -38,6 +39,7 @@ import {deletedTrashNotes} from '../src/safety/trashSections';
 import {setTabletTrashCount} from './trashCounts';
 import '../src/home/home.css';
 import './home.css';
+import './homeTablet/homeTablet.css';
 
 export interface HomeProps {
   onUnsortedCount?(count: number | null): void;
@@ -49,7 +51,12 @@ export interface HomeProps {
   review: {enabled: boolean; refreshKey: unknown}; similarityKey: unknown;
   onPending(): void; onReview(): void; onSimilarity(): void; onDuplicates(): void; onExchange(): void;
   onReleases(): void; onWork(id: string): void; onSettings(): void; onRecent(): void; onLibrary(): void; onUnclassified(): void;
+  /** No longer used: Home has no 다시 보기 section. */
   onRevisit?(key: string, title: string): void; onArtists?(): void; onNotes(id?: string): void; onRefresh?(): void;
+  /** Opens the card album from 오늘의 카드. */
+  onAlbum?(): void;
+  /** The notes store 빠른 메모 and 링크 보관 write through; Home keeps its own per server when absent. */
+  notes?: NotesStore;
 }
 
 function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: HomeCover | null; alt: string; privacy?: boolean; className?: string}) {
@@ -125,13 +132,6 @@ function HomeMangaCover({item, revision, label, active}: {item: CollectionSummar
   return url ? <StableImage className="collection-art" src={url} alt={label} /> : <span data-cover-pending={collectionCover(item)||item.coverAssetId?"true":undefined} data-perf-image-pending={catalogPerfEnabled()&&!!(collectionCover(item)||item.coverAssetId)?"true":undefined} className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
 }
 
-function HomePlayingCase({item, revision, active, privacy, selected}: {item: CollectionSummary; revision: string; active: boolean; privacy: boolean; selected: boolean}) {
-  const front = useHomeArtwork(item, revision, active && !privacy);
-  const spine = useHomeArtwork(item, revision, active && !privacy, item.spineArtworkId ?? null, null);
-  return <LightCase selected={selected} frontPending={!privacy && !!(collectionCover(item) || item.coverAssetId) && !front} spinePending={!privacy && !!item.spineArtworkId && !spine}
-    data={{title: item.name, author: item.author, publisher: item.publisher, developer: item.developer, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: privacy ? null : front || null, spine: privacy ? null : spine || null, privacy}} />;
-}
-
 const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
 
 function UpcomingDetailSheet({entry, interested, privacy, noticeError, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; noticeError: boolean; onToggle(): void; onClose(): void}) {
@@ -147,6 +147,12 @@ export function Home(props: HomeProps) {
   const [shelfScope, setShelfScope] = useState<string | null>(null);
   const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, review: props.review, exchange: props.exchange, shelfEnabled: shelfScope === props.scope});
   useEffect(() => {props.onUnsortedCount?.(d.summary?.unclassified ?? null);}, [props.onUnsortedCount, d.summary?.unclassified]);
+  const notesStore = useMemo(() => props.notes ?? tabletHomeNotes(props.scope), [props.notes, props.scope]);
+  // The dedicated 빠른 메모 / 링크 보관 notes load with Home and re-read when the notes change elsewhere.
+  useEffect(() => {
+    if (paused) return;
+    void (notesStore.snapshot().ready ? notesStore.refresh() : notesStore.load());
+  }, [notesStore, paused, d.refreshKey]);
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   useEffect(() => {if (memos && !memos.locked) setTabletTrashCount(props.scope, 'notes', deletedTrashNotes(memos.notes).length);}, [props.scope, memos]);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
@@ -162,8 +168,6 @@ export function Home(props: HomeProps) {
       eventIds: events.map(event => event.id),
     }, 'POST', false, props.scope).catch(() => setReleaseNoticeError(entry.id)).finally(() => controller.abort());
   };
-  const revisitRead = useHomeRevisitRead(!paused, props.scope, d.refreshKey);
-  const revisit = revisitRead.value;
   const homeScroll = useRef<HTMLDivElement>(null);
   const refreshHome = () => { d.retry(); props.onRefresh?.(); };
   const pull = usePullToRefresh(homeScroll, refreshHome, props.busy, paused);
@@ -222,26 +226,21 @@ export function Home(props: HomeProps) {
     ...(d.catalogJob?.state === 'failed' ? [{ key: 'catalog', label: '카탈로그', value: '갱신 실패', tone: 'off' }] : []),
   ];
   const rows = attentionRows(memos?.notes ?? [], reviewRows, connections, today);
-  const dateGroup = revisit?.find(group => group.key === 'date' && group.count > 0);
   const releaseCards: HomeReleaseCard[] = [
     ...visit.arrivals.map(e => ({key: e.key, name: e.name, date: e.date, detail: e.external ? upcomingKind[e.external.kind] : e.detail === '발매됨' ? KIND_LABEL[works.get(e.workId)?.type ?? 'game'] : e.detail, fresh: true,
       cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name),
       onOpen: () => {visit.opened(e.token); if (e.external) openTitle(e.external); else props.onWork(e.workId);}})),
     ...future.filter(row => !visit.arrivals.some(e => e.key === row.key && e.date === row.date)),
   ];
-  const playing = (shelf?.works ?? []).filter(work => work.type === 'game' && work.status === 'playing' || work.type === 'movie' && work.status === 'watching');
   const attentionPending = !memos || reviewRows.some(row => row.count === null);
-  const quiet = rows.length === 0 && !attentionPending;
-  const daily = useTabletHomeDaily(!paused && revisit !== null && !dateGroup && quiet, props.scope, revisitRead.day, d.refreshKey);
-  const dayPending = revisit === null || quiet && !dateGroup && !daily.value && !daily.failed;
   // Full publication paging can occupy the bridge for many pages. Let the small
   // first-screen reads finish first, while keeping the existing first-load and
   // persisted-shelf display rules (including an uncached launch's complete shelf).
   useEffect(() => {
-    if (!paused && !attentionPending && !dayPending && upcoming.ready && d.shelfPrerequisitesReady) setShelfScope(props.scope);
-  }, [paused, attentionPending, dayPending, upcoming.ready, d.shelfPrerequisitesReady, props.scope]);
+    if (!paused && !attentionPending && upcoming.ready && d.shelfPrerequisitesReady) setShelfScope(props.scope);
+  }, [paused, attentionPending, upcoming.ready, d.shelfPrerequisitesReady, props.scope]);
   const layoutShown = useRef(false);
-  if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem) && !dayPending) layoutShown.current = true;
+  if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem)) layoutShown.current = true;
   const firstLoad = !layoutShown.current;
   if(!firstLoad)startupMark('homeReadyMs');
   // On app start the launch splash covers this first load, then leaves with Home's first images.
@@ -252,41 +251,31 @@ export function Home(props: HomeProps) {
     const animation = host?.animate?.([{opacity: 0}, {opacity: 1}], {duration: contentCross.enter, easing: EASE_STANDARD});
     return () => animation?.cancel();
   }, [firstLoad]);
-  const nextDayData = revisit === null ? null : {playing: [], dailyAsset: daily.value?.asset ? {id: daily.value.asset.id, collectedAt: daily.value.asset.collected_at ?? '', favorite: true} : null,
-    anniversary: dateGroup ? {id: 'date', kind: 'date' as const, title: dateGroup.title, reason: '', revision: 0, assetIds: dateGroup.items.map(asset => asset.id)} : null};
-  const nextDay = {scope: props.scope, data: nextDayData, group: dateGroup, asset: daily.value?.asset, quiet: quiet && daily.value?.available === true};
-  const keptDay = useRef(nextDay);
-  if (keptDay.current.scope !== props.scope || !dayPending && (!daily.failed || daily.value || dateGroup || !quiet)) keptDay.current = nextDay;
-  const day = keptDay.current;
-  const image = (id: string, variant: 'thumbnail' | 'original', className?: string) => {
-    const asset = day.asset?.id === id ? day.asset : day.group?.items.find(item => item.id === id);
-    return asset ? className ? <HomeAssetImage key={id} asset={asset} variant={variant} className={className} paused={paused} /> : <Cover asset={asset} paused={paused} /> : null;
-  };
+  // The PC's shared two-week model; ledger payments come from the on-device notes. Saved-image counts have no tablet source.
+  const calendar = releaseCalendarModel(releaseCards, today, 2, {payments: calendarPayments(memos && !memos.locked ? memos.notes : [], today)});
   return <div className={`home-scroll home-attention-mobile${privacy ? ' is-private' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
     {firstLoad ? <div className="home-media-waiting" aria-busy="true"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <div className="home-tablet-layout">
-    <div className="home-tablet-day-column">
-    {rows.length > 0 && <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
-      if (row.noteId) props.onNotes(row.noteId);
-      else if (row.key === 'unsorted') props.onUnclassified();
-      else if (row.key === 'similar') props.onSimilarity();
-      else if (row.key === 'pending') props.onPending();
-      else if (row.key === 'confirm') props.onReview();
-      else if (row.key === 'duplicates') props.onDuplicates();
-      else if (row.key === 'connection:exchange') props.onExchange();
-      else if (row.key.startsWith('connection:')) props.onSettings();
-    }} /></div>}
-    <div className="home-tablet-day"><HomeDay data={day.data} failed={daily.failed || revisitRead.failed} pending={revisitRead.pending} quiet={day.quiet} privacyMode={privacy} image={image} emptyAnniversary anniversaryCount={day.group?.count}
-      onOpenAsset={day.group && props.onRevisit ? () => props.onRevisit?.('date', day.group!.title) : undefined} />
-      {(daily.failed || revisitRead.failed) && <button className="home-interest-action" onClick={refreshHome}>다시 시도</button>}
-    </div></div>
-    <div className="home-tablet-media-column">
-    <div className="home-tablet-playing"><HomePlayingShelf onOpen={props.onWork} works={playing.map(work => ({id: work.id, name: work.name, platform: work.ownedPlatform || work.platforms || KIND_LABEL[work.type], score: work.myScore ?? null,
-      case: selected => <HomePlayingCase item={work} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} selected={selected} />}))} /></div>
-    <div className="home-tablet-releases"><HomeSection title="2주 안에 발매" count={releaseCards.length} onOpen={props.onReleases}>
-      {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : <EmptyState inline className="home-attention-empty" title="2주 안에 예정된 발매가 없습니다" />}
-    </HomeSection></div>
-    </div></div>}
+    <TabletWeekStrip model={calendar} at={at} onOpenCalendar={props.onReleases} onOpenNote={props.onNotes} />
+    <div className={`home-tablet-pair${rows.length ? '' : ' is-single'}`}>
+      <div className="home-tablet-card"><TabletDailyCard privacy={privacy} root={props.scope} active={!paused} onOpenAlbum={() => props.onAlbum?.()} /></div>
+      {rows.length > 0 && <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
+        if (row.noteId) props.onNotes(row.noteId);
+        else if (row.key === 'unsorted') props.onUnclassified();
+        else if (row.key === 'similar') props.onSimilarity();
+        else if (row.key === 'pending') props.onPending();
+        else if (row.key === 'confirm') props.onReview();
+        else if (row.key === 'duplicates') props.onDuplicates();
+        else if (row.key === 'connection:exchange') props.onExchange();
+        else if (row.key.startsWith('connection:')) props.onSettings();
+      }} /></div>}
+    </div>
+    <div className="home-tablet-pair">
+      <HomeQuickMemo store={notesStore} root={props.scope} onOpenNotes={() => props.onNotes()} />
+      <TabletLinks store={notesStore} root={props.scope} privacy={privacy} onOpenNotes={() => props.onNotes()} />
+    </div>
+    <TabletTransfer exchange={props.exchange} onOpenDetail={props.onExchange} />
+    </div>}
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
     {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} noticeError={releaseNoticeError === detail.id} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
   </div>;

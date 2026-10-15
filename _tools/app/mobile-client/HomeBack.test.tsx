@@ -20,6 +20,8 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
   <button onClick={props.onUnclassified}>home 미분류</button>
   <button onClick={props.onLibrary}>home 라이브러리</button>
   <button onClick={props.onReview}>home 확인</button>
+  <button onClick={() => props.onAlbum?.()}>home 앨범</button>
+  <span aria-label="home-notes">{props.notes ? 'shared' : 'none'}</span>
 </div>}));
 // The review overview and the review: stand-ins that close on Back like the real ones.
 vi.mock('./CharacterReviewOverview', () => ({CharacterReviewOverview:({backRef,onOpen,onClose,refreshKey}:{backRef:MutableRefObject<(() => boolean)|null>;onOpen(scope:unknown):void;onClose():void;refreshKey:unknown}) => {
@@ -42,6 +44,11 @@ const {area} = vi.hoisted(() => ({area:(name:string) => ({active,backRef,onRetur
 vi.mock('./Collections', () => ({Collections:area('collections-screen')}));
 vi.mock('./ReleaseCalendar', () => ({ReleaseCalendar:({onClose}:{onClose():void}) => <section aria-label="calendar-screen"><button onClick={onClose}>calendar close</button></section>}));
 vi.mock('./Notes', () => ({Notes:area('notes-screen')}));
+// The card album: a stand-in that follows the screen contract (a backRef that closes it).
+vi.mock('./cards/TabletCardAlbum', () => ({TabletCardAlbum:({backRef,onClose}:{backRef:MutableRefObject<(() => boolean)|null>;onClose():void}) => {
+  backRef.current = () => {onClose(); return true;};
+  return <section aria-label="card-album-screen"><button onClick={onClose}>album close</button></section>;
+}}));
 vi.mock('./Catalog', () => ({Catalog:area('catalog-screen')}));
 import {App} from './App';
 
@@ -201,4 +208,21 @@ it('opens unsorted from Home rather than restoring the last Library folder, then
   expect(mocks.api.mock.calls.some(([path]) => path.includes('toc=1') && path.includes('unclassified=1'))).toBe(true);
   back();
   expect((await screen.findByLabelText('홈 대시보드')).scrollTop).toBe(240);
+});
+
+it('opens the card album from Home as a layer, and Back returns to the same Home', async () => {
+  const home = await startHome();
+  fireEvent.click(screen.getByRole('button',{name:'home 앨범'}));
+  await screen.findByRole('region',{name:'card-album-screen'});
+  back();
+  await waitFor(() => expect(screen.queryByRole('region',{name:'card-album-screen'})).toBeNull());
+  expect(onHome()).toBe(true);
+  expect(screen.getByLabelText('홈 대시보드')).toBe(home);
+  expect(home.scrollTop).toBe(300);
+  expect(finished()).toBe(false);
+});
+
+it('hands Home the notes store the 메모 tab uses', async () => {
+  await startHome();
+  expect(screen.getByLabelText('home-notes').textContent).toBe('shared');
 });

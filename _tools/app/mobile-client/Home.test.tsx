@@ -12,13 +12,18 @@ import {resetHomeSourceCache} from './homeCache';
 import {commitUpcomingWishlist} from './upcomingWishlistOutbox';
 import {PRIVACY_MODE_KEY, PRIVACY_MODE_EVENT} from './privacyMode';
 import {LaunchSplash, resetLaunchSplashForTests} from '../src/shared/launch/LaunchSplash';
+import {resetTabletHomeNotes} from './homeTablet/notesStore';
+import {parseLinks, serializeLinks} from '../src/home/links';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn(), mediaTicket: vi.fn()}));
 vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api, native: mocks.native}; });
 vi.mock('./media', () => ({loadThumbnail: mocks.loadThumbnail, mediaTicket: mocks.mediaTicket}));
+// The card slot belongs to the cards worker; Home only places it and passes privacy and the album callback.
+vi.mock('./cards/TabletDailyCard', () => ({TabletDailyCard: ({privacy, onOpenAlbum}: {privacy: boolean; onOpenAlbum(): void}) =>
+  <section aria-label="오늘의 카드" data-privacy={String(privacy)}><button onClick={onOpenAlbum}>앨범 열기</button></section>}));
 
 const works: CollectionSummary[] = [
-  {id: 'night', name: '밤의 도서관', type: 'manga', showcase: false, releaseWatch: {enabled: true, available: true}, ownedVolumes: [{editionIndex: 0, count: 3}], releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: [{volumeNumber: 4, date: '2026-09-16', status: 'released'}, {volumeNumber: 5, date: '2026-10-08', status: null}]}, mangadex: null}},
+  {id: 'night', name: '밤의 도서관', type: 'manga', showcase: false, releaseWatch: {enabled: true, available: true}, ownedVolumes: [{editionIndex: 0, count: 3}], releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: [{volumeNumber: 4, date: '2026-09-23', status: 'released'}, {volumeNumber: 5, date: '2026-10-08', status: null}]}, mangadex: null}},
   {id: 'sea', name: '바다의 시간', type: 'manga', showcase: false, releaseWatch: {enabled: true, available: true}, ownedVolumes: [{editionIndex: 0, count: 1}], releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: [{volumeNumber: 2, date: '2026-10-15', status: 'upcoming'}]}, mangadex: null}},
 ];
 const item = (id: string, at = '2026-09-25T11:00:00Z'): Asset => ({id, kind: 'image', width: 600, height: 800, collected_at: at, thumbnail_available: true});
@@ -37,7 +42,7 @@ const props = (overrides: Partial<HomeProps> = {}): HomeProps => ({items: [item(
 beforeEach(() => {
   vi.useFakeTimers({toFake: ['Date']}); vi.setSystemTime(new Date(2026, 8, 25, 14, 32));
   window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: false}}));
-  localStorage.clear(); resetHomeSourceCache(); setOutboxConnection('https://a.example'); resetReleaseStore(); mocks.api.mockReset(); mocks.native.mockReset(); mocks.loadThumbnail.mockReset();
+  localStorage.clear(); resetHomeSourceCache(); resetTabletHomeNotes(); setOutboxConnection('https://a.example'); resetReleaseStore(); mocks.api.mockReset(); mocks.native.mockReset(); mocks.loadThumbnail.mockReset();
   notes = pinnedNotes(); server = {offline: false, summary: {total: 1500, images: 1200, videos: 300, collections: {game: 10, manga: 20, movie: 30, av: 40}, addedToday: 12, addedThisWeek: 80, unclassified: 7, todayStart: '2026-09-25T00:00:00Z', weekStart: '2026-09-22T00:00:00Z', listGeneration: 'a'.repeat(64)}, upcoming: {version: 1, revision: 2, entries: [upcomingEntry], wishlist: [upcomingEntry], pending: []}, avPick: {version: 1, pick: {personId: 'p1', name: '라라', workCount: 12, cover: null, latestWork: {code: 'LW-1', title: '최근 작품', date: '2026-09-24'}}}, artists: {artists: [{id: 'ranzu', label: 'Ranzu', main: true, assetCount: 38, coverAssetIds: ['r1']}]}};
   mocks.loadThumbnail.mockImplementation(async (asset: Asset) => ({...asset, preview: `blob:${asset.id}`}));
   mocks.mediaTicket.mockImplementation(async (asset: Asset, variant: string) => ({url: `https://img.example/${asset.id}/${variant}`}));
@@ -95,9 +100,9 @@ describe('shared Home attention on tablet', () => {
     expect(screen.getByRole('status',{name:'홈 미디어'})).toBeTruthy();
     await act(async()=>pages.forEach(page=>page.finish({ready:true,revision:'r1',items:[],nextCursor:'next'})));
     expect(pages).toHaveLength(6);
-    expect(screen.queryByRole('region',{name:/^2주 안에 발매/})).toBeNull();
+    expect(screen.queryByRole('region',{name:/^발매 캘린더/})).toBeNull();
     await act(async()=>pages.slice(3).forEach(page=>page.finish({ready:true,revision:'r1',items:page.path.includes('type=manga')?works:[],nextCursor:null})));
-    await screen.findByRole('region',{name:/^2주 안에 발매/});
+    await screen.findByRole('region',{name:/^발매 캘린더/});
     expect(readHomeShelf(props().scope)?.value.works).toEqual(works);
   });
   it('shows the kept shelf before paging finishes and converges to the refreshed shelf', async () => {
@@ -110,7 +115,8 @@ describe('shared Home attention on tablet', () => {
     mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/collections?')
       ? new Promise(finish => pages.push({finish, path})) : read(path, ...args));
     render(<Home {...props()}/>);
-    await screen.findByRole('region', {name: /^2주 안에 발매/});
+    await screen.findByRole('region', {name: /^발매 캘린더/});
+    fireEvent.click(screen.getByRole('button', {name: '다음 주'}));
     expect(screen.getByText('Kept Game')).toBeTruthy();
     await waitFor(()=>expect(pages).toHaveLength(3));
     expect(readHomeShelf(props().scope)?.value.revision).toBe('r0');
@@ -129,6 +135,7 @@ describe('shared Home attention on tablet', () => {
     // A new process has an empty module store but retains the complete input.
     cleanup(); resetReleaseStore(); resetHomeSourceCache(); pages.length = 0;
     render(<Home {...props()}/>);
+    fireEvent.click(await screen.findByRole('button', {name: '다음 주'}));
     await screen.findByText('Refreshed Game');
     await waitFor(()=>expect(pages).toHaveLength(3));
   });
@@ -144,25 +151,35 @@ describe('shared Home attention on tablet', () => {
     });
     render(<Home {...props()}/>);
     await act(async () => {});
-    expect(screen.queryByRole('region', {name: /^2주 안에 발매/})).toBeNull();
+    expect(screen.queryByRole('region', {name: /^발매 캘린더/})).toBeNull();
     expect(screen.getByRole('status', {name: '홈 미디어'})).toBeTruthy();
   });
 
-  it('groups the shared PC pieces into media and day columns and omits totals, picks and memo cards', async () => {
+  it('stacks the PC parts in order: week, card with 오늘 할 것, memo with links, transfer; none of the removed sections', async () => {
     server.upcoming = {version:1, entries:[upcomingEntry], wishlist:[upcomingEntry]};
     render(<Home {...props({captures:[item('pending')]})}/>);
     const today = await screen.findByRole('region', {name:'오늘 할 것'});
     await waitFor(()=>expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['미분류 에셋7장', '유사 이미지 검토6쌍', '처리 대기1건', '중복 판본2건', 'Todo남은 항목 1개1개']));
     expect(today.querySelectorAll('.ui-badge--icon')).toHaveLength(5);
     expect(today.querySelector('.home-attention-mark')).toBeNull();
-    expect(document.querySelector('.home-tablet-layout')).toBeTruthy();
-    expect(document.querySelector('.home-tablet-day-column')?.querySelectorAll('section')).toHaveLength(2);
-    expect(document.querySelector('.home-tablet-media-column')?.querySelectorAll('section')).toHaveLength(1);
-    await screen.findByRole('region', {name:/^2주 안에 발매/});
-    const regions = screen.getAllByRole('region').map(r => r.getAttribute('aria-label'));
-    expect(regions).toEqual(['오늘 할 것','1년 전 오늘','2주 안에 발매']);
-    for (const name of ['자산 현황','AV 배우','작가','메모','검토','이어지는 시리즈']) expect(screen.queryByRole('region',{name})).toBeNull();
-    expect(mocks.api.mock.calls.some(([path]) => ['/v1/home/av-pick','/v1/library/artists'].includes(path))).toBe(false);
+    await screen.findByRole('region', {name:/^발매 캘린더/});
+    expect(screen.getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['발매 캘린더','오늘의 카드','오늘 할 것','빠른 메모','링크 보관','전송']);
+    const layout = document.querySelector('.home-tablet-layout')!;
+    const pairs = [...layout.querySelectorAll(':scope > .home-tablet-pair')];
+    expect(pairs).toHaveLength(2);
+    expect(within(pairs[0] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['오늘의 카드','오늘 할 것']);
+    expect(within(pairs[1] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['빠른 메모','링크 보관']);
+    for (const name of ['1년 전 오늘','오늘의 한 장','지금 하는 중','2주 안에 발매','자산 현황','AV 배우','작가','메모','검토','이어지는 시리즈']) expect(screen.queryByRole('region',{name})).toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => ['/v1/home/av-pick','/v1/library/artists'].includes(path) || path.startsWith('/v1/library/revisit') || path.startsWith('/v1/albums/'))).toBe(false);
+    expect(mocks.native.mock.calls.some(([op]) => op === 'albumTree')).toBe(false);
+  });
+  it('hands the card slot privacy and the album callback', async () => {
+    const p = props({onAlbum: vi.fn()}); render(<Home {...p}/>);
+    const card = await screen.findByRole('region', {name:'오늘의 카드'});
+    expect(card.getAttribute('data-privacy')).toBe('false');
+    fireEvent.click(within(card).getByRole('button', {name:'앨범 열기'})); expect(p.onAlbum).toHaveBeenCalledOnce();
+    await act(async () => {localStorage.setItem(PRIVACY_MODE_KEY, '1'); window.dispatchEvent(new Event(PRIVACY_MODE_EVENT));});
+    expect(screen.getByRole('region', {name:'오늘의 카드'}).getAttribute('data-privacy')).toBe('true');
   });
   it('omits today when every known attention source is empty', async () => {
     notes=[]; server.summary={...(server.summary as object),unclassified:0};
@@ -173,7 +190,9 @@ describe('shared Home attention on tablet', () => {
       return read(path,...args);
     });
     render(<Home {...props()}/>);
-    await screen.findByRole('region', {name:'1년 전 오늘'}); expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
+    await screen.findByRole('region', {name:/^발매 캘린더/}); expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
+    expect(screen.getByRole('region', {name:'오늘의 카드'})).toBeTruthy();
+    expect(document.querySelector('.home-tablet-pair.is-single')).toBeTruthy();
   });
   it.each(['2026-09-24', '2026-09-25'])('never marks an unwished Korean calendar movie NEW on %s, including a saved pending arrival', async date => {
     const key = 'lakomics.home.visit.v1:https://a.example';
@@ -239,26 +258,26 @@ describe('shared Home attention on tablet', () => {
   });
   it('keeps NEW across tab visits, then clears it only when the item is opened', async () => {
     const p = props(); const view = render(<Home {...p}/>);
-    const fresh = await screen.findByRole('region',{name:/^2주 안에 발매/});
+    const fresh = await screen.findByRole('region',{name:/^발매 캘린더/});
     expect(within(fresh).getByText('NEW')).toBeTruthy();
     view.unmount(); const next = render(<Home {...p}/>);
-    const card = await within(await screen.findByRole('region',{name:/^2주 안에 발매/})).findByRole('button',{name:/4권.*밤의 도서관/});
+    const card = await within(await screen.findByRole('region',{name:/^발매 캘린더/})).findByRole('button',{name:/밤의 도서관.*4권/});
     expect(within(card).getByText('NEW')).toBeTruthy();
     fireEvent.click(card); expect(p.onWork).toHaveBeenCalledWith('night');
     await waitFor(() => expect(screen.queryByText('NEW')).toBeNull());
     next.unmount(); render(<Home {...p}/>);
-    await screen.findByRole('region',{name:/^2주 안에 발매/});
+    await screen.findByRole('region',{name:/^발매 캘린더/});
     expect(screen.queryByText('NEW')).toBeNull();
   });
   it('keeps tasks and covers during refresh rather than showing placeholders', async () => {
     const p = props(); render(<Home {...p}/>);
     await screen.findByRole('button',{name:/Todo남은 항목/});
-    const before = within(await screen.findByRole('region',{name:/^2주 안에 발매/})).getByRole('button',{name:/4권.*밤의 도서관/});
+    const before = within(await screen.findByRole('region',{name:/^발매 캘린더/})).getByRole('button',{name:/밤의 도서관.*4권/});
     const read = mocks.native.getMockImplementation()!;
     mocks.native.mockImplementation((op,...args) => op === 'notesState' ? new Promise(() => {}) : read(op,...args));
     fireEvent(window, new CustomEvent('lakomics-sync-signals',{detail:{notes:'changed'}}));
     expect(screen.getByRole('button',{name:/Todo남은 항목/})).toBeTruthy();
-    expect(within(screen.getByRole('region',{name:/^2주 안에 발매/})).getByRole('button',{name:/4권.*밤의 도서관/})).toBe(before);
+    expect(within(screen.getByRole('region',{name:/^발매 캘린더/})).getByRole('button',{name:/밤의 도서관.*4권/})).toBe(before);
   });
   it('shows a connection problem only when a read fails and offers its owning screen', async () => {
     server.offline = true; const p = props(); render(<Home {...p}/>);
@@ -266,14 +285,12 @@ describe('shared Home attention on tablet', () => {
     fireEvent.click(button); expect(p.onSettings).toHaveBeenCalled();
     expect(screen.queryByText('동기화됨')).toBeNull();
   });
-  it('excludes releases past fourteen days and shows the anniversary empty state on a busy day', async () => {
+  it('excludes releases past fourteen days from the calendar', async () => {
     server.upcoming = {entries:[],wishlist:[{...upcomingEntry,date:'2026-10-10'}]};
-    const original = mocks.api.getMockImplementation()!;
-    mocks.api.mockImplementation((path,...args) => path.startsWith('/v1/library/revisit') ? Promise.resolve({bundles:[]}) : original(path,...args));
     render(<Home {...props()}/>);
-    await screen.findByRole('region',{name:/^2주 안에 발매/});
+    await screen.findByRole('region',{name:/^발매 캘린더/});
+    fireEvent.click(screen.getByRole('button',{name:'다음 주'}));
     expect(screen.queryByText('Hades II')).toBeNull();
-    expect(screen.getByText('1년 전 오늘 저장한 이미지가 없습니다')).toBeTruthy();
   });
 });
 
@@ -284,7 +301,7 @@ it('shows owned game and movie releases since the last visit without a wishlist'
   mocks.api.mockImplementation((path,...args)=>{
     if(path.startsWith('/v1/collections?')) {
       const type=new URL(path,'https://test').searchParams.get('type');
-      return Promise.resolve({ready:true,revision:'r1',items:type==='manga'?works:[{id:type,name:`owned ${type}`,type,releaseDate:'2026-09-24'}],nextCursor:null});
+      return Promise.resolve({ready:true,revision:'r1',items:type==='manga'?works:[{id:type,name:`owned ${type}`,type,releaseDate:type==='game'?'2026-09-24':'2026-09-25'}],nextCursor:null});
     }
     return original(path,...args);
   });
@@ -338,28 +355,6 @@ it('preserves the visit after a failed release read and advances after a success
 });
 
 
-it('holds the complete arrangement until a delayed cold revisit reply', async () => {
-  const read = mocks.api.getMockImplementation()!;
-  let finish!: (value: unknown) => void;
-  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(resolve => {finish = resolve;}) : read(path, ...args));
-  render(<Home {...props()}/>);
-  expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy(); await waitFor(() => expect(finish).toBeTypeOf('function')); expect(screen.queryByRole('button', {name: /Todo남은 항목/})).toBeNull();
-  expect(screen.queryByRole('region', {name: /^2주 안에 발매/})).toBeNull();
-  await act(async () => {finish(revisitReply);});
-  expect(screen.getByRole('region', {name: '1년 전 오늘'}).querySelector('.home-revisit')).toBeTruthy();
-  expect(await screen.findByRole('region', {name: /^2주 안에 발매/})).toBeTruthy();
-});
-
-it('restores the same-day revisit snapshot on the first render after a process-style cache reset', async () => {
-  const first = render(<Home {...props()}/>);
-  await screen.findByRole('region', {name: '1년 전 오늘'});
-  first.unmount(); resetHomeSourceCache();
-  const read = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(() => {}) : read(path, ...args));
-  render(<Home {...props()}/>);
-  expect(await screen.findByRole('region', {name: '1년 전 오늘'})).toBeTruthy();
-});
-
 it('makes no HTTP source reads during nine minutes of visible idle with live signals', async () => {
   vi.useFakeTimers();
   const signals = {collections: 'r1', releases: 1, listGeneration: 'a', catalog: 1, upcoming: 1, notes: 1};
@@ -372,76 +367,6 @@ it('makes no HTTP source reads during nine minutes of visible idle with live sig
   expect(mocks.api).toHaveBeenCalledTimes(initial);
   await act(async () => {window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: true, signals: {...signals, upcoming: 2}}}));});
   expect(mocks.api).toHaveBeenCalledTimes(initial + 1);
-});
-
-it('uses the shared shelf only for playing games and watching movies and opens the work', async () => {
-  const read = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation((path, ...args) => {
-    if (path.startsWith('/v1/collections?')) {
-      const type = new URL(path, 'https://test').searchParams.get('type');
-      const items = type === 'manga' ? works : [
-        {id: `${type}-active`, name: `active ${type}`, type, showcase: false, status: type === 'game' ? 'playing' : 'watching', ownedPlatform: 'PS5', myScore: 4.5},
-        {id: `${type}-done`, name: `done ${type}`, type, showcase: false, status: 'done'},
-      ];
-      return Promise.resolve({ready: true, revision: 'r1', items, nextCursor: null});
-    }
-    return read(path, ...args);
-  });
-  const p = props(); render(<Home {...p} />);
-  const shelf = await screen.findByRole('region', {name: '지금 하는 중'});
-  expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(2);
-  fireEvent.click(within(shelf).getByRole('button', {name: 'active game 열기'}));
-  expect(p.onWork).toHaveBeenCalledWith('game-active');
-  expect(within(shelf).queryByText('done game')).toBeNull();
-  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual(['오늘 할 것', '1년 전 오늘', '지금 하는 중', '2주 안에 발매']);
-});
-
-function quietDay() {
-  notes = []; server.summary = {...(server.summary as object), unclassified: 0};
-  const read = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation((path, ...args) => {
-    if (path.startsWith('/v1/library/similarity/review')) return Promise.resolve({ready: true, counts: {open: 0}});
-    if (path.startsWith('/v1/mobile-catalog/duplicates')) return Promise.resolve({counts: {undecided: 0}});
-    if (path.startsWith('/v1/library/revisit')) return Promise.resolve({bundles: []});
-    if (path.startsWith('/v1/albums/likes')) return Promise.resolve({albumId: 'likes', memberships: []});
-    if (path.startsWith('/v1/albums/assets')) return Promise.resolve({items: [item('favorite', '2023-07-18T12:00:00Z')], hasMore: false, nextCursor: null});
-    return read(path, ...args);
-  });
-  const nativeRead = mocks.native.getMockImplementation()!;
-  mocks.native.mockImplementation((op, ...args) => op === 'albumTree' ? Promise.resolve({adopted: true, libraryId: 'library', epoch: 1, albums: []}) : nativeRead(op, ...args));
-}
-
-it('shows the whole daily favorite only on a quiet day and masks both copies', async () => {
-  quietDay();
-  render(<Home {...props()} />);
-  const daily = await screen.findByRole('region', {name: '오늘의 한 장'});
-  expect(within(daily).getByText('2023.7.18에 저장')).toBeTruthy();
-  expect(screen.queryByRole('region', {name:/오늘 할 것/})).toBeNull();
-  await waitFor(() => expect(daily.querySelectorAll('img')).toHaveLength(2));
-  await act(async () => {localStorage.setItem(PRIVACY_MODE_KEY, '1'); window.dispatchEvent(new Event(PRIVACY_MODE_EVENT));});
-  expect(daily.querySelectorAll('img')).toHaveLength(0);
-});
-
-it('keeps the old shelf and daily image while a pull refresh is pending', async () => {
-  quietDay(); const p = props(); render(<Home {...p} />);
-  const daily = await screen.findByRole('region', {name: '오늘의 한 장'});
-  const card = screen.getByRole('button', {name:/4권.*밤의 도서관/});
-  const read = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/albums/assets') || path.startsWith('/v1/collections?') ? new Promise(() => {}) : read(path, ...args));
-  const home = screen.getByLabelText('홈');
-  fireEvent.touchStart(home, {touches:[{clientX:0,clientY:0}]});
-  fireEvent.touchMove(home, {touches:[{clientX:0,clientY:150}]}); fireEvent.touchEnd(home);
-  expect(screen.getByRole('region', {name: '오늘의 한 장'})).toBe(daily);
-  expect(screen.getByRole('button', {name:/4권.*밤의 도서관/})).toBe(card);
-});
-
-it('keeps the quiet-day slot as the anniversary empty state when album authority is unavailable', async () => {
-  quietDay();
-  const read = mocks.native.getMockImplementation()!;
-  mocks.native.mockImplementation((op, ...args) => op === 'albumTree' ? Promise.resolve({adopted: false}) : read(op, ...args));
-  render(<Home {...props()} />);
-  expect(await screen.findByText('1년 전 오늘 저장한 이미지가 없습니다')).toBeTruthy();
-  expect(screen.queryByRole('region', {name: '오늘의 한 장'})).toBeNull();
 });
 
 it('does not read favorites or show the daily fallback while attention is present', async () => {
@@ -461,28 +386,176 @@ it('includes an owned upcoming game from the replica without a wishlist', async 
     return read(path, ...args);
   });
   const p = props(); render(<Home {...p} />);
+  fireEvent.click(await screen.findByRole('button', {name: '다음 주'}));
   const card = await screen.findByRole('button', {name: /owned future/});
-  expect(within(card).getByText('9.28 · 게임')).toBeTruthy();
-  expect(within(card).getByText('D-3')).toBeTruthy();
+  expect(within(card).getByText('게임')).toBeTruthy();
+  expect(within(card.closest('.home-cal__day') as HTMLElement).getByText('D-3')).toBeTruthy();
   fireEvent.click(card); expect(p.onWork).toHaveBeenCalledWith('owned-game');
 });
 
 it('covers the first Home load on app start with the launch splash, leaves when Home is ready, and never returns', async () => {
   resetLaunchSplashForTests();
-  const read = mocks.api.getMockImplementation()!;
-  let finish!: (value: unknown) => void;
-  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(resolve => {finish = resolve;}) : read(path, ...args));
+  const read = mocks.native.getMockImplementation()!;
+  const finish: (() => void)[] = [];
+  mocks.native.mockImplementation((op, ...args) => op === 'notesState' ? new Promise(resolve => finish.push(() => resolve({unlocked: true, notes, lastSyncedAt: null}))) : read(op, ...args));
   const splash = render(<LaunchSplash elapsed={() => 0}/>);
   const first = render(<Home {...props()}/>);
-  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  await waitFor(() => expect(finish.length).toBeGreaterThan(0));
   expect(screen.getByRole('status', {name: 'Lakomics 여는 중'}).hasAttribute('data-state')).toBe(false);
   expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy();
-  await act(async () => {finish(revisitReply);});
+  await act(async () => {finish.forEach(done => done());});
   await waitFor(() => expect(document.querySelector('.launch-splash')).toBeNull());
   first.unmount(); resetHomeSourceCache();
-  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(() => undefined) : read(path, ...args));
+  mocks.native.mockImplementation((op, ...args) => op === 'notesState' ? new Promise(() => undefined) : read(op, ...args));
   render(<Home {...props()}/>);
   expect(screen.getByLabelText('홈').querySelector('[aria-busy=true]')).toBeTruthy();
   expect(document.querySelector('.launch-splash')).toBeNull();
   splash.unmount();
+});
+
+/** The on-device notes backend: saves land in `notes`, so the next state read returns them. */
+function notesBackend() {
+  const saves: Note[] = [];
+  const read = mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation(async (op: string, input?: unknown) => {
+    if (op === 'notesSave') {
+      const draft = input as Note, previous = notes.find(entry => entry.id === draft.id);
+      const saved = {...previous, ...draft, createdAt: previous?.createdAt ?? '2026-09-25T00:00:00Z', localRevision: (previous?.localRevision ?? 0) + 1, pending: false, conflict: false} as Note;
+      notes = [saved, ...notes.filter(entry => entry.id !== draft.id)]; saves.push(saved);
+      return saved;
+    }
+    if (op === 'notesSync') return {unlocked: true, notes, lastSyncedAt: '2026-09-25T05:00:00Z'};
+    return read(op, input);
+  });
+  return saves;
+}
+const savedBodies = (saves: Note[], title: string) => saves.filter(entry => entry.title === title).map(entry => entry.body);
+
+describe('tablet Home calendar week', () => {
+  it('shows this week with today as the filled date, swipes to next week and back, and keeps the arrows in range', async () => {
+    render(<Home {...props()}/>);
+    const region = await screen.findByRole('region', {name: /^발매 캘린더/});
+    expect(region.querySelectorAll('.home-cal__day')).toHaveLength(7);
+    expect(region.querySelector('.home-cal__day[data-tense="today"] .home-cal__date')?.textContent).toBe('25');
+    expect(region.querySelector('.home-cal__day')?.textContent).toContain('9.21');
+    expect(screen.queryByText('Hades II')).toBeNull();
+    expect((screen.getByRole('button', {name: '이전 주'}) as HTMLButtonElement).disabled).toBe(true);
+    const strip = document.querySelector('.home-tablet-week')!;
+    // A mostly vertical drag is the page scrolling, not a swipe.
+    fireEvent.touchStart(strip, {touches: [{clientX: 300, clientY: 100}]});
+    fireEvent.touchEnd(strip, {changedTouches: [{clientX: 200, clientY: 260}]});
+    expect(screen.queryByText('Hades II')).toBeNull();
+    fireEvent.touchStart(strip, {touches: [{clientX: 300, clientY: 100}]});
+    fireEvent.touchEnd(strip, {changedTouches: [{clientX: 200, clientY: 110}]});
+    expect(await screen.findByText('Hades II')).toBeTruthy();
+    expect(region.querySelector('.home-cal__day')?.textContent).toContain('9.28');
+    expect((screen.getByRole('button', {name: '다음 주'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.touchStart(strip, {touches: [{clientX: 100, clientY: 100}]});
+    fireEvent.touchEnd(strip, {changedTouches: [{clientX: 260, clientY: 100}]});
+    await waitFor(() => expect(screen.queryByText('Hades II')).toBeNull());
+    fireEvent.click(screen.getByRole('button', {name: '다음 주'}));
+    fireEvent.click(await screen.findByRole('button', {name: /Hades II/}));
+    expect(await screen.findByRole('dialog', {name: 'Hades II'})).toBeTruthy();
+  });
+  it('places ledger payments of the week and opens their note', async () => {
+    notes = [note('ledger', {type: 'ledger', title: '가계부', pinned: false, income: null, recurring: [{id: 'r', name: '넷플릭스', amount: 17000, every: 1, unit: 'month', start: '2026-08-27', trial: false, until: null, remindDays: 0, memo: '', order: 'a'}], planned: []})];
+    const p = props(); render(<Home {...p}/>);
+    const payment = await screen.findByRole('button', {name: /넷플릭스 17,000원/});
+    expect(payment.closest('.home-cal__day')?.textContent).toContain('27');
+    fireEvent.click(payment); expect(p.onNotes).toHaveBeenCalledWith('ledger');
+  });
+  it('opens the release calendar from the section', async () => {
+    const p = props(); render(<Home {...p}/>);
+    fireEvent.click(await screen.findByRole('button', {name: '발매 캘린더 전체'})); expect(p.onReleases).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('tablet Home tools', () => {
+  it('saves 빠른 메모 by itself into one plain note titled 빠른 메모, and keeps editing the same note', async () => {
+    notes = []; const saves = notesBackend();
+    render(<Home {...props()}/>);
+    const memo = await screen.findByRole('textbox', {name: '빠른 메모'});
+    await waitFor(() => expect((memo as HTMLTextAreaElement).disabled).toBe(false));
+    fireEvent.change(memo, {target: {value: '우유 사기'}});
+    await waitFor(() => expect(savedBodies(saves, '빠른 메모')).toContain('우유 사기'), {timeout: 3000});
+    expect(saves[0]).toMatchObject({title: '빠른 메모', pinned: false});
+    fireEvent.change(memo, {target: {value: '우유 사기 / 계란'}});
+    await waitFor(() => expect(savedBodies(saves, '빠른 메모')).toContain('우유 사기 / 계란'), {timeout: 3000});
+    expect(new Set(saves.filter(entry => entry.title === '빠른 메모').map(entry => entry.id)).size).toBe(1);
+  });
+  it('shows the PC-written 빠른 메모 and writes back to that note', async () => {
+    notes = [note('qm', {title: '빠른 메모', body: 'PC에서 쓴 글', pinned: false})]; const saves = notesBackend();
+    render(<Home {...props()}/>);
+    const memo = await screen.findByRole('textbox', {name: '빠른 메모'});
+    await waitFor(() => expect((memo as HTMLTextAreaElement).value).toBe('PC에서 쓴 글'));
+    fireEvent.change(memo, {target: {value: 'PC에서 쓴 글 + 태블릿'}});
+    fireEvent.blur(memo);
+    await waitFor(() => expect(saves.at(-1)).toMatchObject({id: 'qm', body: 'PC에서 쓴 글 + 태블릿'}), {timeout: 3000});
+  });
+  it('keeps a pasted link in the shared 링크 보관 note format, without a preview, and ignores a repeat', async () => {
+    notes = []; const saves = notesBackend();
+    render(<Home {...props()}/>);
+    const input = await screen.findByRole('textbox', {name: 'URL 붙여넣기'});
+    await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false));
+    fireEvent.paste(input, {clipboardData: {getData: () => 'https://www.example.org/a'}});
+    await waitFor(() => expect(savedBodies(saves, '링크 보관')).toHaveLength(1));
+    const rows = parseLinks(savedBodies(saves, '링크 보관')[0]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({url: 'https://www.example.org/a', title: 'example.org'});
+    expect(rows[0].imageUrl).toBeUndefined();
+    expect(saves[0].body.startsWith('링크 보관\n\n```json')).toBe(true);
+    expect(await screen.findByRole('button', {name: /example\.org.*example\.org/})).toBeTruthy();
+    fireEvent.change(input, {target: {value: 'https://www.example.org/a'}});
+    fireEvent.click(screen.getByRole('button', {name: '보관'}));
+    await act(async () => {await Promise.resolve();});
+    for (const body of savedBodies(saves, '링크 보관')) expect(parseLinks(body)).toHaveLength(1);
+    fireEvent.change(input, {target: {value: 'not a url'}});
+    fireEvent.click(screen.getByRole('button', {name: '보관'}));
+    expect((await screen.findAllByRole('status')).some(status => status.textContent?.includes('http 또는 https'))).toBe(true);
+  });
+  it('shows PC-filled previews, loads only https thumbnails and masks them in privacy mode', async () => {
+    const kept = [
+      {url: 'https://a.example/1', title: '첫 글', siteName: 'A 사이트', imageUrl: 'https://img.example/1.png', savedAt: '2026-09-25T09:00:00Z'},
+      {url: 'https://b.example/2', title: 'b.example', savedAt: '2026-09-24T09:00:00Z'},
+      {url: 'https://c.example/3', title: '평문 이미지', imageUrl: 'http://img.example/3.png', savedAt: '2026-09-23T09:00:00Z'},
+    ];
+    notes = [{...note('links', {title: '링크 보관', pinned: false}), body: serializeLinks(kept)}];
+    const view = render(<Home {...props()}/>);
+    const first = await screen.findByRole('button', {name: /첫 글.*A 사이트/});
+    await waitFor(() => expect(first.querySelector('img')?.getAttribute('src')).toBe('https://img.example/1.png'));
+    expect(screen.getByRole('button', {name: /b\.example.*b\.example/})).toBeTruthy();
+    expect(screen.getByRole('button', {name: /평문 이미지/}).querySelector('img')).toBeNull();
+    await act(async () => {localStorage.setItem(PRIVACY_MODE_KEY, '1'); window.dispatchEvent(new Event(PRIVACY_MODE_EVENT));});
+    const section = screen.getByRole('region', {name: '링크 보관'});
+    expect(section.querySelectorAll('img')).toHaveLength(0);
+    expect(section.querySelectorAll('.home-cover-placeholder.is-private')).toHaveLength(3);
+    view.unmount();
+  });
+  it('opens a kept link outside the app', async () => {
+    notes = [{...note('links', {title: '링크 보관', pinned: false}), body: serializeLinks([{url: 'https://a.example/1', title: '첫 글', savedAt: '2026-09-25T09:00:00Z'}])}];
+    render(<Home {...props()}/>);
+    fireEvent.click(await screen.findByRole('button', {name: /첫 글/}));
+    await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('openExternal', {url: 'https://a.example/1'}));
+  });
+  it('sends files to the PC through the exchange picker and lists the latest sends', async () => {
+    const p = props({exchange: exchange(true)}); render(<Home {...p}/>);
+    fireEvent.click(await screen.findByRole('button', {name: 'PC로 파일 보내기'}));
+    await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('exchangeSend', {toDevice: 'pc'}));
+    const list = screen.getByRole('list', {name: '최근 보낸 파일'});
+    expect(within(list).getByText('스케치.zip')).toBeTruthy();
+    expect(within(list).getByText('업로드 중')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', {name: /^상세/})); expect(p.onExchange).toHaveBeenCalled();
+  });
+  it('cannot send while the exchange is not set up and says why', async () => {
+    render(<Home {...props({exchange: {...exchange(), tokenConfigured: false}})}/>);
+    const send = await screen.findByRole('button', {name: /토큰/});
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.native.mock.calls.some(([op]) => op === 'exchangeSend')).toBe(false);
+  });
+  it('shows a failed pick as a message', async () => {
+    mocks.native.mockImplementation(async (op: string) => { if (op === 'exchangeSend') throw new Error('파일을 읽지 못했습니다'); return op === 'notesState' ? {unlocked: true, notes, lastSyncedAt: null} : {url: 'https://example.invalid/cover', expires_in: 300}; });
+    render(<Home {...props({exchange: exchange()})}/>);
+    fireEvent.click(await screen.findByRole('button', {name: 'PC로 파일 보내기'}));
+    expect((await screen.findByRole('alert')).textContent).toContain('파일을 읽지 못했습니다');
+  });
 });

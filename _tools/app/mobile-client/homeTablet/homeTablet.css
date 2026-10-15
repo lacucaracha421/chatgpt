@@ -1,0 +1,44 @@
+/* Tablet Home (HOME-REDESIGN-001): one column of the PC's parts, in the order of the PC's layout A. */
+.home-tablet-layout { min-height:100%; display:flex; flex-direction:column; gap:var(--space-8); }
+.home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); align-items:start; }
+.home-tablet-pair.is-single { grid-template-columns:minmax(0,1fr); }
+.home-tablet-card, .home-tablet-today { min-width:0; }
+
+/* This week as one row: the PC cells, shorter, with touch-sized targets and the week arrows. */
+.home-tablet-week { touch-action:pan-y; }
+.home-tablet-week__nav { display:inline-flex; align-items:center; }
+.home-tablet-week__nav .ui-icon-button { min-width:44px; min-height:44px; }
+.home-attention-mobile .home-cal__day { height:auto; min-height:176px; }
+.home-attention-mobile .home-cal__payments { min-height:0; }
+.home-attention-mobile .home-cal__payment.ui-button, .home-attention-mobile .home-cal__payment.ui-menu__trigger { min-height:44px; }
+.home-attention-mobile .home-cal .home-cal__item { min-height:44px; }
+.home-attention-mobile .ui-section-label__actions .home-link { min-height:44px; min-width:44px; }
+.home-cal__cover > .collection-art, .home-cal__cover > .home-home-image, .home-cal__cover > .home-cover-placeholder { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+
+/* 빠른 메모 and 링크 보관 side by side. */
+.home-attention-mobile textarea.ui-text-input.home-qmemo__text { min-height:216px; font-size:var(--type-body); }
+.home-attention-mobile .home-qmemo__status .ui-button, .home-tab-links__status .ui-button { min-height:44px; }
+.home-tab-links__input { display:flex; align-items:center; gap:var(--space-2); background:var(--color-surface); border-radius:var(--radius-control); }
+.home-tab-links__input .ui-text-input { flex:1; min-width:0; width:100%; min-height:44px; background:transparent; }
+.home-tab-links__icon { flex:none; width:16px; height:16px; margin-left:var(--space-3); color:var(--color-muted); stroke-width:1.5; }
+.home-tab-links__status { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); margin:0; color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-tab-link { display:flex; align-items:center; gap:var(--space-3); width:100%; min-height:48px; padding:var(--space-1) 0; border:0; border-bottom:1px solid var(--color-border); background:none; color:var(--color-text); font:inherit; text-align:left; }
+.home-tab-link__thumb { display:block; flex:none; width:48px; height:32px; overflow:hidden; background:var(--color-surface); }
+.home-tab-link__thumb img, .home-tab-link__thumb .home-cover-placeholder { display:block; width:100%; height:100%; object-fit:cover; }
+.home-tab-link__copy { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.home-tab-link__copy > span, .home-tab-link__copy small { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.home-tab-link__copy > span { font-size:var(--type-body); line-height:var(--line-ui); }
+.home-tab-link__copy small { color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+
+/* 전송: one wide button, then the latest sends. */
+.home-tab-transfer__send { display:flex; align-items:center; justify-content:center; gap:var(--space-2); width:100%; min-height:64px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; font-size:var(--type-body); }
+.home-tab-transfer__send > svg { width:24px; height:24px; color:var(--color-muted); }
+.home-tab-transfer__send:disabled { color:var(--color-muted); }
+.home-tab-transfer__error { margin:0; color:var(--color-danger); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-tab-sent { list-style:none; margin:0; padding:0; }
+.home-tab-sent li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--space-3); min-height:44px; border-bottom:1px solid var(--color-border); }
+.home-tab-sent li > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--type-body); }
+.home-tab-sent li small { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
+.home-tab-sent li[data-tone="error"] small { color:var(--color-danger); }
+
+@media (orientation:portrait) and (max-width:700px) { .home-tablet-pair { grid-template-columns:minmax(0,1fr); } }
