@@ -33,6 +33,22 @@ mod tests {
         assert!(!response.headers().contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
     }
     #[test]
+    fn note_sampling_thumbnail_is_cors_clean_only_for_app_origins() {
+        for origin in ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"] {
+            let mut response = image();
+            allow_cover_canvas(&mut response, Some(origin), "/thumbnail/id/v1");
+            assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], origin);
+            assert_eq!(response.headers()[header::VARY], "Origin");
+            assert!(!response.headers().contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+        }
+        // The visible img sends no Origin; it cannot be made origin-clean retroactively.
+        for origin in [None, Some("null"), Some("https://example.com")] {
+            let mut response = image();
+            allow_cover_canvas(&mut response, origin, "/thumbnail/id/v1");
+            assert!(!response.headers().contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+        }
+    }
+    #[test]
     fn app_can_read_original_images_for_the_game() {
         let mut response = image();
         allow_cover_canvas(&mut response, Some("tauri://localhost"), "/asset/id");

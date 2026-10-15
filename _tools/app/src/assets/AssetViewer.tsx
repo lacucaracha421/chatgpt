@@ -502,7 +502,7 @@ export function AssetViewer({
               : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className={`asset-viewer__media${textPanning ? " asset-viewer__media--panning" : ""}`} style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
         </div>
         </ViewerMediaContextMenu>
-        {hasText && displayed && <ImageTextNotes ref={notesRef} key={displayed.src} image={displayed.ready ? displayed.image : null} lines={lines} selected={selectedLine} open={textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning || textGesture} animatePan={textPanning} />}
+        {hasText && displayed && <ImageTextNotes ref={notesRef} key={displayed.src} image={displayed.ready ? displayed.image : null} thumbnailSrc={displayedAsset ? assetThumbnailUrl(displayedAsset) : undefined} lines={lines} selected={selectedLine} open={textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning || textGesture} animatePan={textPanning} />}
         {replacementFailed && <div className="asset-viewer__load-error" role="status">이미지를 불러오지 못했습니다. 다른 자산으로 이동하면 다시 시도합니다.</div>}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">

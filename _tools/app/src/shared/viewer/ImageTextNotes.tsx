@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } fr
 import type { ImageTextLine } from "../../library/types";
 import { reducedMotion, EASE_STANDARD } from "../motion/curves";
 import { layoutImageTextNotes, lineGeometry, type ImageRect, type ImageZoom } from "./imageTextNoteLayout";
-import { DEFAULT_TONE, readNotePixels, toneAround, type NoteTone } from "./imageTextNoteTone";
+import { DEFAULT_TONE, readNotePixels, readNoteThumbnail, toneAround, type NotePixels, type NoteTone } from "./imageTextNoteTone";
 import "./image-text.css";
 
 export type ImageTextNotesHandle = { tap: (clientX: number, clientY: number) => boolean; dismissCard: () => boolean };
@@ -11,17 +11,24 @@ const browserCopy = (text: string) => navigator.clipboard.writeText(text);
 export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
   lines: ImageTextLine[]; selected: number | null; open: boolean; onSelect: (index: number) => void;
   rect: ImageRect; zoom: ImageZoom; panning?: boolean; animatePan?: boolean; interactive?: boolean;
-  surfaceTap?: boolean; onCopy?: (text: string) => Promise<void>; image?: HTMLImageElement | null;
-}>(function ImageTextNotes({ lines, selected, open, onSelect, rect, zoom, panning = false, animatePan = false, interactive = true, surfaceTap = false, onCopy = browserCopy, image = null }, ref) {
+  surfaceTap?: boolean; onCopy?: (text: string) => Promise<void>; image?: HTMLImageElement | null; thumbnailSrc?: string;
+}>(function ImageTextNotes({ lines, selected, open, onSelect, rect, zoom, panning = false, animatePan = false, interactive = true, surfaceTap = false, onCopy = browserCopy, image = null, thumbnailSrc }, ref) {
   const root = useRef<HTMLDivElement>(null);
   const [tones, setTones] = useState<NoteTone[]>([]);
   useLayoutEffect(() => {
-    const pixels = readNotePixels(image);
-    setTones(lines.map(line => {
-      const geometry = pixels && lineGeometry(line, pixels.width, pixels.height);
-      return geometry ? toneAround(pixels, geometry.box) : DEFAULT_TONE;
-    }));
-  }, [image, lines]);
+    let active = true;
+    const apply = (pixels: NotePixels | null) => {
+      if (active) setTones(lines.map(line => {
+        const geometry = pixels && lineGeometry(line, pixels.width, pixels.height);
+        return geometry ? toneAround(pixels, geometry.box) : DEFAULT_TONE;
+      }));
+    };
+    if (thumbnailSrc) {
+      apply(null);
+      void readNoteThumbnail(image, thumbnailSrc).then(apply);
+    } else apply(readNotePixels(image));
+    return () => { active = false; };
+  }, [image, lines, thumbnailSrc]);
   const [layout, setLayout] = useState(() => ({ lines, scale: zoom.scale, notes: layoutImageTextNotes(lines, rect.width * zoom.scale, rect.height * zoom.scale, (word, font) => word.length * font) }));
   const [hovered, setHovered] = useState<number | null>(null);
   const [card, setCard] = useState<number | null>(null);

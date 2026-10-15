@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { DEFAULT_TONE, readNotePixels, toneAround, type NotePixels } from "./imageTextNoteTone";
+import { DEFAULT_TONE, readNotePixels, readNoteThumbnail, toneAround, type NotePixels } from "./imageTextNoteTone";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function solid(rgb: number[], width = 64, height = 64): NotePixels {
   const data = new Uint8ClampedArray(width * height * 4);
   for (let i = 0; i < data.length; i += 4) data.set([...rgb, 255], i);
@@ -70,4 +70,37 @@ it("returns and caches the fallback on canvas errors, without reading undecoded 
   expect(context.getImageData).toHaveBeenCalledOnce();
   getContext.mockReturnValue(null);
   expect(readNotePixels(decodedImage())).toBeNull();
+});
+
+it("waits for the anonymous thumbnail to load, shares pending reads and invalidates reused slots", async () => {
+  const samples: HTMLImageElement[] = [];
+  vi.stubGlobal("Image", vi.fn(function () { const sample = decodedImage(); samples.push(sample); return sample; }));
+  const pixels = solid([18, 20, 22], 256, 128);
+  const context = { drawImage: vi.fn(), getImageData: vi.fn().mockReturnValue(pixels) };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const visible = decodedImage();
+  const first = readNoteThumbnail(visible, "http://lakomics.localhost/thumbnail/a/v1");
+  expect(readNoteThumbnail(visible, "http://lakomics.localhost/thumbnail/a/v1")).toBe(first);
+  expect(samples).toHaveLength(1);
+  expect(samples[0].crossOrigin).toBe("anonymous");
+  expect(samples[0].src).toBe("http://lakomics.localhost/thumbnail/a/v1?note-tone=1");
+  expect(context.drawImage).not.toHaveBeenCalled();
+  samples[0].dispatchEvent(new Event("load"));
+  expect(await first).toBe(pixels);
+  expect(context.drawImage).toHaveBeenCalledExactlyOnceWith(samples[0], 0, 0, 256, 128);
+  expect(visible.crossOrigin).toBeNull();
+  visible.src = "http://lakomics.localhost/asset/b";
+  const next = readNoteThumbnail(visible, "http://lakomics.localhost/thumbnail/b/v2");
+  expect(samples).toHaveLength(2);
+  samples[1].dispatchEvent(new Event("error"));
+  expect(await next).toBeNull();
+  expect(context.getImageData).toHaveBeenCalledOnce();
+});
+
+it("does not request a thumbnail for an absent or unready displayed image", async () => {
+  const createImage = vi.fn();
+  vi.stubGlobal("Image", createImage);
+  expect(await readNoteThumbnail(null, "http://lakomics.localhost/thumbnail/a")).toBeNull();
+  expect(await readNoteThumbnail(document.createElement("img"), "http://lakomics.localhost/thumbnail/a")).toBeNull();
+  expect(createImage).not.toHaveBeenCalled();
 });

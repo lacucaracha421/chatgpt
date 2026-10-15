@@ -40,8 +40,31 @@ export function toneAround(pixels: NotePixels | null, box: NoteBox): NoteTone {
 }
 
 const pixelCache = new WeakMap<HTMLImageElement, { src: string; pixels: NotePixels | null }>();
+const thumbnailCache = new WeakMap<HTMLImageElement, { src: string; thumbnailSrc: string; pixels: Promise<NotePixels | null> }>();
 
-/** Read the already decoded displayed element once; never fetch or decode a second image. */
+/** The visible media is loaded without CORS. Read a small, app-owned thumbnail separately. */
+export function readNoteThumbnail(image: HTMLImageElement | null, thumbnailSrc: string): Promise<NotePixels | null> {
+  if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return Promise.resolve(null);
+  const src = image.currentSrc || image.src;
+  const cached = thumbnailCache.get(image);
+  if (cached?.src === src && cached.thumbnailSrc === thumbnailSrc) return cached.pixels;
+  const pixels = new Promise<NotePixels | null>(resolve => {
+    const sample = new Image();
+    // Set before src so the media protocol receives Origin and the canvas stays origin-clean.
+    sample.crossOrigin = "anonymous";
+    sample.onload = () => { sample.onload = sample.onerror = null; resolve(readNotePixels(sample)); };
+    sample.onerror = () => { sample.onload = sample.onerror = null; resolve(null); };
+    // Older immutable tile responses were cached without CORS headers/Vary: Origin.
+    // Give sampling its own cache key, without changing the visible tile or original.
+    const url = new URL(thumbnailSrc);
+    url.searchParams.set("note-tone", "1");
+    sample.src = url.href;
+  });
+  thumbnailCache.set(image, { src, thumbnailSrc, pixels });
+  return pixels;
+}
+
+/** Read a loaded, origin-clean element once, downscaled to a 256px long edge. */
 export function readNotePixels(image: HTMLImageElement | null): NotePixels | null {
   if (!image?.complete || !image.naturalWidth || !image.naturalHeight) return null;
   const src = image.currentSrc || image.src;
