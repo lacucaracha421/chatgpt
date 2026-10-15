@@ -535,6 +535,103 @@ test('toolbar placement prefers below, then above, then the least-overlap corner
   f.close();
 });
 
+test('outside strips reject media intersections and nearby pages keep the least-overlap corner', () => {
+  const f = page(), {choosePillPlacement, chooseCorner} = f.w.LakomicsContextImage;
+  const viewport = {width: 1000, height: 1000}, frame = {x: 200, y: 200, w: 400, h: 300};
+  const rects = [{x: 150, y: 0, w: 250, h: 100}], pw = 220, ph = 100;
+  const below = {x: 380, y: 590, w: 220, h: 200};
+  assert.equal(choosePillPlacement(rects, frame, pw, ph, viewport, [below]).placement, 'above', 'even a strip intersection more than 80px away blocks below');
+  const above = {x: 380, y: 10, w: 220, h: 100};
+  assert.deepEqual(plain(choosePillPlacement(rects, frame, pw, ph, viewport, [below, above])),
+    {placement: 'corner', ...plain(chooseCorner(rects, frame.w, frame.h, pw, ph))});
+  for (const gap of [0, 79, 80]) {
+    assert.equal(choosePillPlacement([], frame, 220, 32, viewport, [{x: 200, y: 500 + gap, w: 400, h: 300}]).placement, 'corner');
+  }
+  assert.equal(choosePillPlacement([], frame, 220, 32, viewport, [{x: 200, y: 581, w: 400, h: 300}]).placement, 'below');
+  f.close();
+});
+
+function mediaRect(node, left, top, width, height) {
+  Object.defineProperty(node, 'getBoundingClientRect', {configurable: true, value: () => ({left, top, width, height, right: left + width, bottom: top + height})});
+}
+
+test('three touching pixiv pages with two translated overlays keep both groups inside their own page', async () => {
+  const f = page('<picture><img id="pic" src="https://img.test/p0.png"></picture><picture><img id="p1" src="https://img.test/p1.png"></picture><picture><img id="p2" src="https://img.test/p2.png"></picture>', {send: async () => ({ok: true, lines: noteLines})});
+  const pages = [...f.doc.querySelectorAll('img')];
+  pages.forEach((image, i) => {
+    mediaRect(image, 100, 50 + i * 200, 400, 200);
+    mediaRect(image.parentElement, 100, 50 + i * 200, 400, 200);
+  });
+  const translated = [];
+  for (const image of pages.slice(0, 2)) {
+    const context = {...f.context(), image, target: image, imageUrl: image.src};
+    await f.actions.activate('image.translate', context, origin, gesture);
+    const host = [...f.doc.querySelectorAll('lakomics-image-markers')].find(node => !translated.some(entry => entry.host === node));
+    const pill = f.roots.get(host).querySelector('.pill');
+    if (!translated.length) {
+      // This controller retires its previous session. Retain a rendered snapshot
+      // to exercise the reported DOM with two translated pages still present.
+      const retained = host.cloneNode();
+      const root = retained.attachShadow({mode: 'closed'});
+      root.append(pill.cloneNode(true));
+      const r = image.getBoundingClientRect(); mediaRect(retained, r.left, r.top, r.width, r.height);
+      f.doc.documentElement.append(retained);
+      translated.push({host: retained, pill: root.querySelector('.pill'), image});
+    } else translated.push({host, pill, image});
+  }
+  assert.equal(f.doc.querySelectorAll('lakomics-image-markers').length, 2);
+  for (const {pill, image} of translated) {
+    const v = {pill}, rect = image.getBoundingClientRect();
+    assert.equal(v.pill.dataset.placement, 'corner');
+    const width = parseFloat(v.pill.style.getPropertyValue('--pill-width'));
+    const x = rect.left + parseFloat(v.pill.style.left) - width;
+    const y = rect.top + parseFloat(v.pill.style.top);
+    assert.ok(x >= rect.left && x + width <= rect.right);
+    assert.ok(y >= rect.top && y + 32 <= rect.bottom);
+    for (const other of pages.filter(node => node !== image)) {
+      const r = other.getBoundingClientRect();
+      assert.equal(x < r.right && x + width > r.left && y < r.bottom && y + 32 > r.top, false, 'a group never covers another page');
+    }
+  }
+  f.actions.destroy(); f.close();
+});
+
+for (const tag of ['img', 'video', 'canvas', 'picture', 'lakomics-image-markers']) {
+  test(`neighbouring ${tag} load, resize and removal re-evaluate the toolbar without moving its image`, async () => {
+    const f = page('<picture><img id="pic" src="https://img.test/a.png"></picture>', {send: async () => ({ok: true, lines: noteLines})});
+    mediaRect(f.img, 100, 100, 400, 200);
+    mediaRect(f.img.parentElement, 100, 100, 400, 200);
+    await f.actions.activate('image.translate', f.context(), origin, gesture);
+    const v = notesView(f), originalTop = v.host.style.top;
+    assert.equal(v.pill.dataset.placement, 'below', 'the own picture wrapper does not block free space');
+    const neighbour = f.doc.createElement(tag);
+    mediaRect(neighbour, 100, 300, 400, 0); f.doc.body.append(neighbour);
+    await f.timer.advance(60);
+    assert.equal(v.pill.dataset.placement, 'below', 'zero-size lazy media does not block');
+    mediaRect(neighbour, 100, 300, 400, 200);
+    neighbour.dispatchEvent(new f.w.Event(tag === 'video' ? 'loadedmetadata' : 'load'));
+    assert.equal(v.pill.dataset.placement, 'corner', 'a captured load event immediately updates neighbours');
+    mediaRect(neighbour, 100, 500, 400, 200);
+    await f.timer.advance(500);
+    assert.equal(v.pill.dataset.placement, 'below', 'fallback detects neighbour resize/movement without any mutation');
+    mediaRect(neighbour, 100, 300, 400, 200); neighbour.setAttribute('data-loaded', 'true');
+    await f.timer.advance(60);
+    assert.equal(v.pill.dataset.placement, 'corner', 'mutation checks include neighbour geometry');
+    neighbour.hidden = true; await f.timer.advance(60);
+    assert.equal(v.pill.dataset.placement, 'below', 'hidden content is ignored');
+    neighbour.hidden = false; await f.timer.advance(60);
+    assert.equal(v.pill.dataset.placement, 'corner');
+    neighbour.remove(); await f.timer.advance(60);
+    assert.equal(v.pill.dataset.placement, 'below');
+    assert.equal(v.host.style.top, originalTop, 'only the neighbouring content changed');
+    f.actions.destroy();
+    const afterClose = v.pill.style.cssText;
+    f.img.dispatchEvent(new f.w.Event('load')); await f.timer.advance(1000);
+    assert.equal(v.pill.style.cssText, afterClose, 'load tracking stops on close');
+    f.close();
+  });
+}
+
 test('document notes and outside toolbar scroll natively without rewriting position; zoom relayout remains interactive', async () => {
   const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
   const viewport = new f.w.EventTarget();
@@ -1655,7 +1752,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.46');
+  assert.equal(manifest.version, '3.5.47');
 });
 
 

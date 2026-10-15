@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.47 — 2026-10-16
+
+- On stacked manga pages (pixiv multi-page works) the translation button group stays
+  inside its own image when another image or overlay is within 80px, so it no longer
+  lands on the neighbouring page; layout re-checks when lazy pages load.
+
 ## 3.5.46 — 2026-10-16
 
 - Image translation keeps exactly one overlay and button group per image even when two

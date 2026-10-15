@@ -202,15 +202,19 @@
     }
     return { corner: best[0], x: best[1], y: best[2], area: bestArea };
   }
-  function choosePillPlacement(rects, frame, pw, ph, viewport) {
+  function choosePillPlacement(rects, frame, pw, ph, viewport, neighbours = []) {
     const { x, y, w, h } = frame, left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0;
     const right = left + viewport.width, bottom = top + viewport.height;
     // Keep the full toolbar's footprint even while collapsed, so expanding never
     // moves the chip to a different edge or slides controls beyond the viewport.
     const edge = Math.min(x + w, right), px = edge - pw;
-    if (px >= left && edge <= right) {
+    // Nearby pages share no usable outside edge. Keep ownership unambiguous,
+    // even when the space on the opposite side of this page is still empty.
+    const nearby = neighbours.some(r => r.x < x + w && r.x + r.w > x && r.y <= y + h + 80 && r.y + r.h >= y - 80);
+    if (!nearby && px >= left && edge <= right) {
       for (const [placement, py] of [["below", y + h + 6], ["above", y - ph - 6]]) {
-        if (py >= top && py + ph <= bottom) return { placement, x: px - x, y: py - y };
+        const blocked = neighbours.some(r => r.x < edge && r.x + r.w > px && r.y < py + ph && r.y + r.h > py);
+        if (!blocked && py >= top && py + ph <= bottom) return { placement, x: px - x, y: py - y };
       }
     }
     return { placement: "corner", ...chooseCorner(rects, w, h, pw, ph) };
@@ -359,6 +363,24 @@
       }
       return true;
     }
+    function pillNeighbours(session, view) {
+      const neighbours = [], reach = Math.max(80, (session.overlay.pillHeight || 44) + 6);
+      // Read candidate rects first; only check ancestor visibility for media in
+      // the small region that can affect this toolbar. Ignore our own picture
+      // wrapper and host, including any media inside extension shadow roots.
+      for (const node of doc.querySelectorAll("img,video,canvas,picture,lakomics-image-markers")) {
+        if (node === session.context.image || node === session.overlay.surface.node || node.contains(session.context.image)) continue;
+        const r = node.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0) || r.left >= view.x + view.w || r.left + r.width <= Math.min(view.x, view.x + view.w - session.overlay.pillWidth) || r.top > view.y + view.h + reach || r.top + r.height < view.y - reach) continue;
+        let visible = true;
+        for (let parent = node; parent; parent = parent.parentElement) {
+          const style = win.getComputedStyle(parent);
+          if (parent.hidden || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") { visible = false; break; }
+        }
+        if (visible) neighbours.push({ x: r.left, y: r.top, w: r.width, h: r.height });
+      }
+      return neighbours;
+    }
     function placeNotes(session, { checkOnly = false } = {}) {
       const overlay = session.overlay;
       if (!overlay || overlay.surface.closed) return;
@@ -370,7 +392,8 @@
       // Compare document geometry, not viewport geometry: ordinary scrolling
       // must not rewrite the host or flip the toolbar between above and below.
       const d = frame?.drawn;
-      const geometry = JSON.stringify([documentCoordinates, gone, session.pickerOpen, x, y, view?.w, view?.h, d && [d.x - view.x, d.y - view.y, d.w, d.h]]);
+      const neighbours = gone ? [] : pillNeighbours(session, view);
+      const geometry = JSON.stringify([documentCoordinates, gone, session.pickerOpen, x, y, view?.w, view?.h, d && [d.x - view.x, d.y - view.y, d.w, d.h], neighbours.map(r => [r.x - view.x, r.y - view.y, r.w, r.h])]);
       if (checkOnly && overlay.geometry === geometry) return;
       overlay.geometry = geometry;
       const modeChanged = overlay.documentCoordinates !== documentCoordinates;
@@ -382,7 +405,7 @@
       Object.assign(overlay.surface.node.style, { left: x + "px", top: y + "px", width: view.w + "px", height: view.h + "px" });
       const key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
       if (overlay.key !== key) { overlay.key = key; layoutNotes(session, { W: view.w, H: view.h, ox: d.x - view.x, oy: d.y - view.y, DW: d.w, DH: d.h }); }
-      placePill(session, view);
+      placePill(session, view, neighbours);
     }
     function layoutNotes(session, frame) {
       const overlay = session.overlay, { W, H } = frame;
@@ -459,9 +482,9 @@
       });
       overlay.rects = resolved;
     }
-    function placePill(session, view) {
+    function placePill(session, view, neighbours) {
       const overlay = session.overlay, pill = overlay.pill;
-      const spot = choosePillPlacement(overlay.rects, view, overlay.pillWidth, overlay.pillHeight, surfaces.viewport());
+      const spot = choosePillPlacement(overlay.rects, view, overlay.pillWidth, overlay.pillHeight, surfaces.viewport(), neighbours);
       Object.assign(pill.style, { left: spot.x + overlay.pillWidth + "px", top: spot.y + "px" });
       pill.dataset.placement = spot.placement;
       if (spot.corner) pill.dataset.corner = spot.corner; else delete pill.dataset.corner;
@@ -623,6 +646,8 @@
       win.addEventListener("resize", overlay.follow);
       win.addEventListener("orientationchange", overlay.follow);
       win.visualViewport?.addEventListener("resize", overlay.follow);
+      doc.addEventListener("load", overlay.follow, true);
+      doc.addEventListener("loadedmetadata", overlay.follow, true);
       if (win.ResizeObserver) { overlay.observer = new win.ResizeObserver(() => placeNotes(session)); overlay.observer.observe(session.context.image); }
       if (win.MutationObserver) {
         overlay.mutations = new win.MutationObserver(records => {
@@ -649,6 +674,7 @@
       const overlay = session.overlay; if (!overlay) return;
       session.overlay = null;
       doc.removeEventListener("scroll", overlay.scroll, true); win.removeEventListener("resize", overlay.follow); win.removeEventListener("orientationchange", overlay.follow);
+      doc.removeEventListener("load", overlay.follow, true); doc.removeEventListener("loadedmetadata", overlay.follow, true);
       win.visualViewport?.removeEventListener("resize", overlay.follow); win.visualViewport?.removeEventListener("scroll", overlay.scroll);
       overlay.mutations?.disconnect(); win.clearTimeout(overlay.layoutTimer); win.clearTimeout(overlay.checkTimer);
       overlay.observer?.disconnect(); win.removeEventListener("keydown", overlay.onKey, true); doc.removeEventListener("pointerdown", overlay.outside, true);
