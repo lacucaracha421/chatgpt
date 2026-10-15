@@ -508,6 +508,10 @@ class CardRoutes(HomeFixture):
         self.ok(self.complete("unowned"))
         self.assertEqual(self.ticket("unowned").status_code, 404)
         self.ok(self.state())
+        with self.get_db() as db:
+            # Pre-drawn art of an unopened pack is allowed too (see the upcoming-pack tests); drop it here.
+            db.execute("DELETE FROM card_pending")
+            db.commit()
         self.ok(self.prepare())
         self.ok(self.complete())
         self.ok(self.ticket())  # cover grants access without album ownership
@@ -520,6 +524,79 @@ class CardRoutes(HomeFixture):
             db.execute("INSERT INTO asset_authority_state VALUES('library','art1','trashed')")
             db.commit()
         self.assertEqual(self.ticket().status_code, 404)
+
+    def set_pending(self, pack, cards_):
+        """Fix the pre-drawn slots: [(tier, art asset id, character id)]."""
+        with self.get_db() as db:
+            for slot, (tier, art, character) in enumerate(cards_):
+                db.execute("UPDATE card_pending SET tier=?,art_asset_id=?,character_id=? WHERE pack_id=? AND slot=?",
+                           [tier, art, character, pack, slot])
+            db.commit()
+
+    def candidates(self):
+        return self.ok(self.client.get(PREFIX + "/cutout-candidates", headers=self.publisher))
+
+    def test_candidates_list_predrawn_art_first_then_pending_keep_then_album(self):
+        self.second_character()
+        with self.get_db() as db:
+            add_image(db, "art4")
+            db.execute("INSERT INTO mobile_character_members VALUES('character:c1','all',1,'art4')")
+            db.commit()
+        self.predraw(["n"] * 5)
+        self.set_pending("d-20261015", [("ssr", "art2", "c2"), ("ur", "art3", "c2"), ("lr", "art1", "c1"),
+                                       ("n", "art2", "c2"), ("sr", "art4", "c1")])
+        reply = self.candidates()
+        self.assertEqual(reply, {"assetIds": ["art2", "art3", "art1"]})  # no tiers, no N/R/SR art, no duplicates
+        self.assertEqual(set(reply), {"assetIds"})
+        self.ok(self.open())
+        self.assertEqual(self.candidates(), {"assetIds": ["art2", "art3", "art1"]})  # waiting for a keep
+        self.force_pack()
+        self.predraw(["n"] * 5)
+        self.set_pending("b-20261015", [("lr", "art4", "c1"), ("n", "art1", "c1"), ("n", "art1", "c1"),
+                                       ("n", "art1", "c1"), ("n", "art1", "c1")])
+        self.assertEqual(self.candidates()["assetIds"], ["art4", "art2", "art3", "art1"])  # unopened packs first
+        self.ok(self.keep(slots=[]))
+        self.assertEqual(self.candidates()["assetIds"], ["art4"])  # a decided pack stops being a candidate
+        self.ok(self.open("b-20261015", "operation-2"))
+        self.ok(self.keep("b-20261015", slots=[0]))
+        self.assertEqual(self.candidates()["assetIds"], ["art4"])  # the kept LR now comes from the album
+        self.ok(self.prepare(assetId="art4"))
+        self.ok(self.complete("art4"))
+        self.assertEqual(self.candidates()["assetIds"], [])
+
+    def test_expired_and_invisible_art_is_not_a_candidate(self):
+        self.predraw(["ssr"] * 5)
+        self.assertEqual(self.candidates()["assetIds"], ["art1"])
+        self.ok(self.open())
+        self.now.return_value += timedelta(days=cards.KEEP_DAYS + 1)
+        self.assertEqual(self.candidates()["assetIds"], [])
+        self.now.return_value = NOW
+        with self.get_db() as db:
+            self.activate(db, "assets")
+            db.execute("INSERT INTO asset_authority_state VALUES('library','art1','trashed')")
+            db.commit()
+        self.assertEqual(self.candidates()["assetIds"], [])
+
+    def test_ticket_allows_ready_cutouts_of_predrawn_and_pending_keep_packs_only(self):
+        self.second_character()
+        self.predraw(["n"] * 5)
+        self.set_pending("d-20261015", [("n", "art1", "c1")] * 5)
+        # With fewer than five liked images the daily cover falls back to character art;
+        # pin it so art2 is used by nothing here.
+        self.state()
+        with self.get_db() as db:
+            db.execute("UPDATE card_state SET cover_json=? WHERE singleton=1", [json.dumps(["art1"])])
+            db.commit()
+        for asset in ("art1", "art2"):
+            self.ok(self.prepare(assetId=asset))
+            self.ok(self.complete(asset))
+        self.ok(self.ticket("art1"))  # art of a pre-drawn unopened pack, whatever its tier
+        self.assertEqual(self.ticket("art2").status_code, 404)  # no pack, album or cover uses it
+        self.ok(self.open())
+        self.ok(self.ticket("art1"))  # opened, waiting for a keep
+        self.assertEqual(self.ticket("art2").status_code, 404)
+        self.now.return_value += timedelta(days=cards.KEEP_DAYS + 1)
+        self.assertEqual(self.ticket("art1").status_code, 404)  # expired without a decision
 
     def test_strict_bodies_size_limits_and_pack_ids(self):
         for value in ({}, {"operationId": True}, {"operationId": ""}, {"operationId": "x", "extra": 1}):

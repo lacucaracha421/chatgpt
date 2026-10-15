@@ -427,6 +427,23 @@ def _prefetch(db, packs):
     return result
 
 
+def _upcoming_art(db, now):
+    """(art asset id, tier) of the cards clients will see soon, soonest first: pre-drawn unopened
+    packs, then opened packs still waiting for a keep. Duplicates show the album's first art, as at open."""
+    result = []
+    for pack in db.execute("SELECT id FROM card_packs WHERE opened_at IS NULL ORDER BY day,id").fetchall():
+        rows = db.execute("SELECT * FROM card_pending WHERE pack_id=? ORDER BY slot", [pack["id"]]).fetchall()
+        if len(rows) == 5:
+            result += [(card["artAssetId"], card["tier"]) for card in _simulate(db, rows, [])]
+    for pack in db.execute("SELECT id,opened_at FROM card_packs WHERE opened_at IS NOT NULL AND kept_at IS NULL "
+                           "AND expired_at IS NULL ORDER BY opened_at,id").fetchall():
+        if now >= _expires_at(pack["opened_at"]):
+            continue
+        rows = db.execute("SELECT * FROM card_draws WHERE pack_id=? ORDER BY slot", [pack["id"]]).fetchall()
+        result += [(card["artAssetId"], card["tier"]) for card in _simulate(db, rows, [])]
+    return result
+
+
 def _cover_view(db, day):
     row = db.execute("SELECT cover_day,cover_json FROM card_state WHERE singleton=1").fetchone()
     if row[0] != day.isoformat():
@@ -623,11 +640,16 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
         require_publisher(authorization)
         with get_db() as db:
             asset_visibility.install(db)
-            ids = [r[0] for r in db.execute("SELECT DISTINCT a.art_asset_id FROM card_album a "
-                "JOIN visible_assets v ON v.id=a.art_asset_id WHERE a.tier IN ('ssr','ur','lr') AND v." + IMAGE_SQL +
-                " AND NOT EXISTS (SELECT 1 FROM card_cutouts c WHERE c.asset_id=a.art_asset_id AND c.state='ready') "
-                "ORDER BY a.art_asset_id")]
-        return {"assetIds": ids}
+            # Unopened packs first, then packs awaiting a keep, then the album: the order of need.
+            wanted = [asset_id for asset_id, tier in _upcoming_art(db, _now()) if tier in TIERS[3:]]
+            wanted += [r[0] for r in db.execute("SELECT DISTINCT art_asset_id FROM card_album "
+                                                "WHERE tier IN ('ssr','ur','lr') ORDER BY art_asset_id")]
+            wanted = list(dict.fromkeys(wanted))
+            usable = {r[0] for r in db.execute(
+                "SELECT v.id FROM visible_assets v WHERE v." + IMAGE_SQL + " AND v.id IN (SELECT value FROM json_each(?)) "
+                "AND NOT EXISTS (SELECT 1 FROM card_cutouts c WHERE c.asset_id=v.id AND c.state='ready')",
+                [json.dumps(wanted)])}
+        return {"assetIds": [asset_id for asset_id in wanted if asset_id in usable]}
 
     @app.post(PREFIX + "/cutouts/{asset_id}/ticket")
     def ticket(asset_id: str, authorization: str | None = Header(default=None)):
@@ -640,8 +662,12 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
                              "WHERE c.asset_id=? AND c.state='ready' AND v." + IMAGE_SQL, [asset_id]).fetchone()
             owned = db.execute("SELECT 1 FROM card_album WHERE art_asset_id=? LIMIT 1", [asset_id]).fetchone()
             cover = _cover_view(db, card_day(_now()))
-            if row is None or not (owned or cover and asset_id in cover["assetIds"]):
-                fail(404, "cutoutUnavailable", "No owned card or today's cover uses this cutout.")
+            # Art of a pre-drawn pack is warmed before it is opened: the prefetch lists these ids.
+            allowed = bool(owned or cover and asset_id in cover["assetIds"])
+            if row is not None and not allowed:
+                allowed = asset_id in {art for art, _ in _upcoming_art(db, _now())}
+            if row is None or not allowed:
+                fail(404, "cutoutUnavailable", "No owned card, upcoming pack or today's cover uses this cutout.")
         return {"url": presign_get(row["object_key"], TICKET_SECONDS), "expires_in": TICKET_SECONDS,
                 "sha256": row["sha256"], "size_bytes": row["size_bytes"], "content_type": row["content_type"]}
 
