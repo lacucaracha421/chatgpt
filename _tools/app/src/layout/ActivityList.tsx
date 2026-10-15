@@ -72,7 +72,7 @@ const ActivityRow = memo(function ActivityRow({ item }: { item: ActivityItem }) 
       <Icon className="activity-row__icon" aria-hidden="true" />
       <div className="activity-row__body">
         <div className="activity-row__line"><span className="activity-row__name">{item.label}</span>
-          <span className="activity-row__count">{[count, item.pausedReason].filter(Boolean).join(" · ")}</span></div>
+          <span className="activity-row__count">{[count, item.pausedReason, item.repeat && `×${item.repeat.toLocaleString()}`].filter(Boolean).join(" · ")}</span></div>
         {detail && <div className="activity-row__detail" title={detail}>{detail}</div>}
       </div>
       {item.total != null && item.total > 0 && item.state === "running" && <span className="activity-row__meter" role="progressbar" aria-label={`${item.label} 진행률`} aria-valuemin={0} aria-valuemax={item.total} aria-valuenow={Math.min(item.done, item.total)}><span style={{ width: `${Math.min(100, item.done / item.total * 100)}%` }} /></span>}

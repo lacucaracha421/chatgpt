@@ -9,6 +9,8 @@ export type ActivityItem = {
   total?: number | null;
   detail?: string | null;
   countText?: string;
+  /** Finished rows folded into this one (same title, subtitle and outcome); only set above 1. */
+  repeat?: number;
   pauseGroup?: string | null;
   pausedReason?: string | null;
   error?: string | null;
@@ -64,7 +66,25 @@ export class ActivityTimeline {
       }
     }
     sections.recent.sort((a, b) => (this.entries.get(b.id)?.finished ?? 0) - (this.entries.get(a.id)?.finished ?? 0));
-    sections.recent = sections.recent.slice(0, 10);
+    sections.recent = groupRecent(sections.recent).slice(0, 10);
     return sections;
   }
+}
+
+/**
+ * Folds identical finished rows (same title, subtitle and outcome) into the newest one. The folded row keeps a
+ * key derived from its content, so a new duplicate updates the count in place instead of replacing the row.
+ * Input is newest first; dismissing the folded row dismisses every member.
+ */
+function groupRecent(items: ActivityItem[]): ActivityItem[] {
+  const groups = new Map<string, ActivityItem[]>();
+  for (const item of items) {
+    const key = JSON.stringify([item.label, item.detail ?? "", item.state, item.error ?? ""]);
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return [...groups].map(([key, members]) => {
+    const dismissals = members.map(member => member.dismiss).filter((close): close is () => void => Boolean(close));
+    return { ...members[0], id: `recent:${key}`, repeat: members.length > 1 ? members.length : undefined,
+      dismiss: dismissals.length ? () => dismissals.forEach(close => close()) : undefined };
+  });
 }

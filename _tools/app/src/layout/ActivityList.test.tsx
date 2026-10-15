@@ -63,3 +63,13 @@ it("removes rows instantly when reduced motion is requested", () => {
   rerender(<ActivityList sections={sections()} />);
   expect(screen.queryByText("motion")).not.toBeInTheDocument();
 });
+
+it("shows a folded recent result with a quiet count and one dismiss", () => {
+  const close = vi.fn();
+  render(<ActivityList sections={sections({ recent: [{ ...job("recent:x", "done"), label: "게시", repeat: 6, dismiss: close }, job("other", "done")] })} />);
+  expect(screen.getByRole("button", { name: /최근 끝남/ })).toHaveTextContent("2");
+  act(() => screen.getByRole("button", { name: /최근 끝남/ }).click());
+  expect(screen.getByRole("group", { name: "최근 끝남" })).toHaveTextContent("×6");
+  act(() => screen.getByRole("button", { name: "게시 닫기" }).click());
+  expect(close).toHaveBeenCalledTimes(1);
+});
