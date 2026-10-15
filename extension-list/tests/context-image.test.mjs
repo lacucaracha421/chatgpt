@@ -233,7 +233,7 @@ test('Anthropic request carries a base64 image block, the structured schema, Kor
   assert.deepEqual(schema.properties.lines.items.properties.kind, {type: 'string', enum: ['dialogue', 'sfx']});
   assert.match(call.body.system, /"kind" is "sfx" for a sound effect/);
   assertBoxSchema(schema);
-  for (const rule of ['speech', 'thoughts', 'narration/captions', 'labels characters react to', 'large, prominent sound effects', 'watermarks', 'artist signatures', 'credits', 'URLs', 'social handles', 'site/patreon notices', 'small or repeated', 'clothes/props', '0–1000', 'top-left']) assert.ok(call.body.system.includes(rule), rule);
+  for (const rule of ['speech', 'thoughts', 'narration/captions', 'labels characters react to', 'large, prominent sound effects', 'watermarks', 'artist signatures', 'credits', 'URLs', 'social handles', 'site/patreon notices', 'small or repeated', 'clothes/props', 'pixel coordinates', '800 px wide', '600 px high', 'top-left']) assert.ok(call.body.system.includes(rule), rule);
   assert.equal(JSON.stringify(result).includes('ant-key'), false);
   assert.equal(Object.keys(f.memory).some(key => key.startsWith('lakomics:translation-cache:v4:')), false, 'the X cache is not used');
 });
@@ -253,7 +253,10 @@ test('Gemini through OpenRouter takes an image_url data part and a strict JSON s
   assert.equal(user.content[1].type, 'text');
   assert.equal(call.body.response_format.type, 'json_schema');
   assert.equal(call.body.response_format.json_schema.strict, true);
-  assertBoxSchema(call.body.response_format.json_schema.schema);
+  const geminiBox = call.body.response_format.json_schema.schema.properties.lines.items.properties.box;
+  assert.deepEqual(plain(geminiBox), {type: 'array', items: {type: 'integer'}});
+  assert.match(system.content, /[ymin, xmin, ymax, xmax]/); assert.match(system.content, /0–1000/);
+  assert.equal(system.content.includes('px wide'), false, 'Gemini is not asked for pixels');
   assert.equal(call.body.provider.require_parameters, true);
 });
 
@@ -1163,7 +1166,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.42');
+  assert.equal(manifest.version, '3.5.43');
 });
 
 
@@ -1245,4 +1248,101 @@ for (const outcome of ['cancelled', 'saved', 'temporary', 'unavailable', 'throws
     assert.equal(root.activeElement, save, 'keyboard activation retains focus-visible on a touch device');
   }
   f.actions.destroy(); f.close();
+});
+
+// ---------------------------------------------------------------- where the picture really is
+test('imageFrame finds the picture inside its element: cover crops, contain letterboxes, position moves it', () => {
+  const f = page(); const {imageFrame} = f.w.LakomicsContextImage;
+  const rect = {left: 100, top: 50, width: 300, height: 400};
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} vs ${b}`);
+  // fill (default) and an unknown picture size: the element is the picture
+  assert.deepEqual(plain(imageFrame({rect}).view), {x: 100, y: 50, w: 300, h: 400});
+  // a 1:3 tall strip in a 300x400 box with object-fit: cover keeps the width and crops the height (centred)
+  const cover = imageFrame({rect, natural: {width: 400, height: 1200}, fit: 'cover', position: '50% 50%'});
+  near(cover.drawn.w, 300); near(cover.drawn.h, 900); near(cover.drawn.y, 50 - 250);
+  assert.deepEqual(plain(cover.view), {x: 100, y: 50, w: 300, h: 400}, 'only the element is visible');
+  // object-position: top shows the picture's top
+  near(imageFrame({rect, natural: {width: 400, height: 1200}, fit: 'cover', position: '50% 0%'}).drawn.y, 50);
+  near(imageFrame({rect, natural: {width: 400, height: 1200}, fit: 'cover', position: 'center top'}).drawn.y, 50);
+  near(imageFrame({rect, natural: {width: 400, height: 1200}, fit: 'cover', position: 'top'}).drawn.y, 50);
+  near(imageFrame({rect, natural: {width: 400, height: 1200}, fit: 'cover', position: 'bottom'}).drawn.y, 50 - 500);
+  // contain letterboxes a wide picture: full width, centred vertically, visible area is the picture only
+  const contain = imageFrame({rect, natural: {width: 600, height: 300}, fit: 'contain'});
+  near(contain.drawn.w, 300); near(contain.drawn.h, 150); near(contain.drawn.y, 50 + 125);
+  assert.deepEqual(plain(contain.view), plain(contain.drawn));
+  // none and scale-down use the natural size
+  assert.deepEqual(plain(imageFrame({rect, natural: {width: 100, height: 100}, fit: 'none'}).drawn), {x: 200, y: 200, w: 100, h: 100});
+  assert.deepEqual(plain(imageFrame({rect, natural: {width: 900, height: 900}, fit: 'scale-down'}).drawn), {x: 100, y: 100, w: 300, h: 300});
+  // border and padding shrink the content box
+  const padded = imageFrame({rect, inset: {left: 10, right: 10, top: 20, bottom: 20}, natural: {width: 280, height: 360}, fit: 'fill'});
+  assert.deepEqual(plain(padded.drawn), {x: 110, y: 70, w: 280, h: 360});
+});
+
+test('lineGeometry maps onto the visible picture; text cropped away gets no note', () => {
+  const f = page(); const {lineGeometry} = f.w.LakomicsContextImage;
+  // the element shows 300x400 of a 300x900 picture whose top is 250 px above the element
+  const frame = {W: 300, H: 400, ox: 0, oy: -250, DW: 300, DH: 900};
+  const inside = lineGeometry({original: 'a', korean: '가', box: {x0: 100, y0: 500, x1: 400, y1: 600}}, 300, 400, frame);
+  assert.deepEqual(plain(inside.box), {x: 30, y: 200, w: 90, h: 90}, 'y = -250 + 0.5 * 900');
+  assert.equal(lineGeometry({original: 'a', korean: '가', box: {x0: 0, y0: 0, x1: 200, y1: 100}}, 300, 400, frame), null, 'above the crop');
+  assert.equal(lineGeometry({original: 'a', korean: '가', box: {x0: 0, y0: 900, x1: 200, y1: 1000}}, 300, 400, frame), null, 'below the crop');
+  const edge = lineGeometry({original: 'a', korean: '가', box: {x0: 0, y0: 250, x1: 500, y1: 400}}, 300, 400, frame);
+  assert.equal(edge.box.y, 0, 'a box cut by the edge keeps its visible part'); assert.ok(edge.box.h > 0 && edge.box.h < 135);
+  // without a frame the old full-image mapping still holds
+  assert.deepEqual(plain(lineGeometry({original: 'a', korean: '가', box: {x0: 100, y0: 100, x1: 200, y1: 300}}, 200, 400).box), {x: 20, y: 40, w: 20, h: 80});
+});
+
+test('notes follow the visible part of a cropped X-style picture (object-fit: cover)', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: [
+    {original: 'ここ', korean: '여기', kind: 'dialogue', box: {x0: 100, y0: 500, x1: 500, y1: 560}},
+    {original: '上', korean: '위', kind: 'dialogue', box: {x0: 100, y0: 20, x1: 500, y1: 80}},
+  ]})});
+  Object.defineProperty(f.img, 'complete', {value: true}); Object.defineProperty(f.img, 'naturalWidth', {value: 300}); Object.defineProperty(f.img, 'naturalHeight', {value: 900});
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, right: 400, top: 50, bottom: 450, width: 300, height: 400})});
+  f.img.style.setProperty('object-fit', 'cover'); f.img.style.setProperty('object-position', '50% 50%');
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['100px', '50px', '300px', '400px']);
+  assert.equal(v.notes.length, 2);
+  // 500/1000 of the 900 px picture is 450 px down; the picture starts 250 px above the element -> 200 px; minus the 3 px margin
+  assert.equal(v.notes[0].style.top, '197px'); assert.equal(v.notes[0].style.left, '27px');
+  assert.equal(v.notes[1].style.display, 'none', 'text cropped off the top gets no note');
+  f.actions.destroy(); f.close();
+});
+
+test('Claude is asked for pixel boxes of the exact prepared size and the answer is converted to 0-1000', async () => {
+  // a 3136x1000 picture is cut to 1568x500 before the request; the prompt names that size
+  const reply = answer([
+    {original: 'a', korean: '가', kind: 'dialogue', box: {x0: 392, y0: 50, x1: 784, y1: 250}},
+    {original: 'b', korean: '나', kind: 'dialogue', box: {x0: -20, y0: 480, x1: 1700, y1: 900}},
+  ]);
+  const f = worker({pictures: {[IMG]: image({type: 'image/png', size: 5000})}, dims: {width: 3136, height: 1000}, reply});
+  const result = await f.handle({type: 'translation:image', url: IMG});
+  assert.match(f.calls[0].body.system, /1568 px wide and 500 px high/);
+  assert.deepEqual(plain(result.lines.map(line => line.box)), [{x0: 250, y0: 100, x1: 500, y1: 500}, {x0: 0, y0: 960, x1: 1000, y1: 1000}]);
+  // an unscaled small picture keeps its own size
+  const small = worker({pictures: {[IMG]: image({type: 'image/png', size: 300})}, dims: {width: 800, height: 600}, reply: answer([{original: 'a', korean: '가', box: {x0: 80, y0: 60, x1: 400, y1: 300}}])});
+  const lines = (await small.handle({type: 'translation:image', url: IMG})).lines;
+  assert.match(small.calls[0].body.system, /800 px wide and 600 px high/);
+  assert.deepEqual(plain(lines[0].box), {x0: 100, y0: 100, x1: 500, y1: 500});
+});
+
+test('Gemini boxes are [ymin,xmin,ymax,xmax] and are converted to x0,y0,x1,y1', async () => {
+  const reply = answer([
+    {original: 'a', korean: '가', kind: 'dialogue', box: [100, 200, 300, 600]},
+    {original: 'b', korean: '나', kind: 'dialogue', box: [10, 20, 30]},
+    {original: 'c', korean: '다', kind: 'dialogue', box: [900, 950, 1200, 1100]},
+  ]);
+  const f = worker({model: 'google/gemini-3.5-flash-lite', pictures: {[IMG]: image({type: 'image/jpeg', size: 20})}, reply});
+  const result = await f.handle({type: 'translation:image', url: IMG});
+  assert.deepEqual(plain(result.lines.map(line => line.box)), [{x0: 200, y0: 100, x1: 600, y1: 300}, null, {x0: 950, y0: 900, x1: 1000, y1: 1000}]);
+  assert.equal(result.lines.length, 3, 'an unusable box keeps its line');
+});
+
+test('parseLines without a convention still reads the old 0-1000 object', () => {
+  const ctx = vm.createContext({}); for (const script of core) vm.runInContext(script, ctx);
+  const image = ctx.LakomicsTranslationCore.image;
+  assert.deepEqual(plain(image.parseLines({lines: [{original: 'a', korean: '가', box: {x0: 100, y0: 200, x1: 300, y1: 400}}]})[0].box), {x0: 100, y0: 200, x1: 300, y1: 400});
+  assert.equal(image.convention('google/gemini-3.5-flash-lite'), 'gemini'); assert.equal(image.convention('anthropic:claude-haiku-5-5'), 'pixel');
+  assert.match(image.instruction([], {convention: 'pixel', width: 640, height: 900}), /640 px wide and 900 px high/);
 });

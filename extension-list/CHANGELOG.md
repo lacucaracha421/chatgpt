@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.43 — 2026-10-16
+
+- Translation notes follow the visible part of cropped or letterboxed images (X timeline
+  crops), and text cut off by the crop gets no note.
+- Text boxes are requested in each model's own convention: Claude gets the exact image
+  size and answers in pixels; Gemini answers [ymin, xmin, ymax, xmax] on 0–1000.
+
 ## 3.5.42 — 2026-10-16
 
 - Image text translation now lays solid translation notes over each text block on the

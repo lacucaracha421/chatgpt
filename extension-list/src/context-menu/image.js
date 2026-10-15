@@ -113,10 +113,55 @@
     return { corner: best[0], x: best[1], y: best[2], area: bestArea };
   }
   const JAPANESE = /[぀-ヿ㐀-鿿]/;
-  function lineGeometry(line, W, H) {
+  // Where the picture itself is drawn inside its <img> element. X crops tall pictures with
+  // object-fit: cover and letterboxes others, so the element's rectangle is not the picture's.
+  // `rect` is the element's viewport rectangle, `inset` its border + padding, `natural` the
+  // picture's pixel size. Returns the drawn picture ({x, y, w, h}, viewport pixels, may reach
+  // past the element when cropped) and `view`, the part of it that is actually visible.
+  const cssPx = value => { const n = parseFloat(value); return Number.isFinite(n) ? n : 0; };
+  function axisPosition(token, free, fallback) {
+    const word = String(token || fallback).trim();
+    if (/%$/.test(word)) return free * (cssPx(word) / 100);
+    if (/^-?[\d.]+(px)?$/.test(word)) return cssPx(word);
+    return free * ({ left: 0, top: 0, center: .5, right: 1, bottom: 1 }[word] ?? .5);
+  }
+  function imageFrame({ rect, inset = {}, natural = {}, fit = "fill", position = "50% 50%" }) {
+    const box = {
+      x: rect.left + cssPx(inset.left), y: rect.top + cssPx(inset.top),
+      w: rect.width - cssPx(inset.left) - cssPx(inset.right), h: rect.height - cssPx(inset.top) - cssPx(inset.bottom),
+    };
+    if (!(box.w > 0 && box.h > 0)) return { drawn: { x: rect.left, y: rect.top, w: rect.width, h: rect.height }, view: { x: rect.left, y: rect.top, w: rect.width, h: rect.height } };
+    let w = box.w, h = box.h;
+    const nw = natural.width, nh = natural.height, kind = String(fit || "fill").trim().split(/\s+/)[0];
+    if (nw > 0 && nh > 0) {
+      const contain = Math.min(box.w / nw, box.h / nh), cover = Math.max(box.w / nw, box.h / nh);
+      const scale = kind === "contain" ? contain : kind === "cover" ? cover : kind === "none" ? 1 : kind === "scale-down" ? Math.min(1, contain) : 0;
+      if (scale > 0) { w = nw * scale; h = nh * scale; }
+    }
+    const tokens = String(position || "").trim().split(/\s+/).filter(Boolean);
+    let px = tokens[0], py = tokens[1];
+    if (tokens.length === 1) { if (px === "top" || px === "bottom") { py = px; px = "center"; } else py = "center"; }
+    else if (px === "top" || px === "bottom" || py === "left" || py === "right") [px, py] = [py, px];
+    const drawn = { x: box.x + axisPosition(px, box.w - w, "50%"), y: box.y + axisPosition(py, box.h - h, "50%"), w, h };
+    const left = Math.max(drawn.x, box.x), top = Math.max(drawn.y, box.y);
+    const right = Math.min(drawn.x + w, box.x + box.w), bottom = Math.min(drawn.y + h, box.y + box.h);
+    const view = right > left && bottom > top ? { x: left, y: top, w: right - left, h: bottom - top } : { x: drawn.x, y: drawn.y, w: 0, h: 0 };
+    return { drawn, view };
+  }
+  // Maps a normalized (0-1000) box onto the visible part of the picture. `frame` is
+  // {W, H, ox, oy, DW, DH}: the visible size, and the drawn picture's offset and size relative
+  // to it. Returns null when nothing of the box is visible.
+  function lineGeometry(line, W, H, frame = { W, H, ox: 0, oy: 0, DW: W, DH: H }) {
     const b = line.box; if (!b) return null;
-    const box = { x: b.x0 / 1000 * W, y: b.y0 / 1000 * H, w: (b.x1 - b.x0) / 1000 * W, h: (b.y1 - b.y0) / 1000 * H };
-    return { box, vertical: box.h > box.w * 1.4 && JAPANESE.test(line.original || ""), chars: String(line.original || line.korean).replace(/[\s、。，．,.!！?？…ー〜~]/g, "").length };
+    const x0 = frame.ox + b.x0 / 1000 * frame.DW, x1 = frame.ox + b.x1 / 1000 * frame.DW;
+    const y0 = frame.oy + b.y0 / 1000 * frame.DH, y1 = frame.oy + b.y1 / 1000 * frame.DH;
+    const left = Math.max(0, x0), top = Math.max(0, y0), right = Math.min(frame.W, x1), bottom = Math.min(frame.H, y1);
+    const full = { w: x1 - x0, h: y1 - y0 };
+    // A box whose centre is cropped away is hidden; a partly cropped one keeps its visible part.
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    if (!(right > left && bottom > top) || cx < 0 || cx > frame.W || cy < 0 || cy > frame.H) return null;
+    const box = { x: left, y: top, w: right - left, h: bottom - top };
+    return { box, vertical: full.h > full.w * 1.4 && JAPANESE.test(line.original || ""), chars: String(line.original || line.korean).replace(/[\s、。，．,.!！?？…ー〜~]/g, "").length };
   }
 
   function create({ doc = document, win = window, send, surfaces, collector = {}, alive = () => true, watchSession = () => ({ watch() {}, stop() {} }) } = {}) {
@@ -146,22 +191,36 @@
     }
 
     // ---------------------------------------------------------------- notes over the picture
+    // The picture's visible part inside its <img> (object-fit crops and letterboxing count).
+    function frameOf(image, rect) {
+      let style = null; try { style = win.getComputedStyle(image); } catch {}
+      const inset = style ? {
+        left: parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right: parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight),
+        top: parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop), bottom: parseFloat(style.borderBottomWidth) + parseFloat(style.paddingBottom),
+      } : {};
+      for (const key of Object.keys(inset)) if (!Number.isFinite(inset[key])) inset[key] = 0;
+      return imageFrame({ rect, inset, natural: { width: image.naturalWidth, height: image.naturalHeight }, fit: style?.objectFit || "fill", position: style?.objectPosition || "50% 50%" });
+    }
     function placeNotes(session) {
       const overlay = session.overlay, image = session.context.image;
       if (!overlay || overlay.surface.closed) return;
       const rect = image?.isConnected ? image.getBoundingClientRect() : null, empty = !rect || rect.width <= 0 || rect.height <= 0;
-      overlay.surface.node.style.visibility = session.pickerOpen || empty ? "hidden" : "visible";
-      if (empty) return;
-      Object.assign(overlay.surface.node.style, { left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px" });
-      const key = Math.round(rect.width) + "x" + Math.round(rect.height);
-      if (overlay.key !== key) { overlay.key = key; layoutNotes(session, rect.width, rect.height); }
+      const frame = empty ? null : frameOf(image, rect), view = frame?.view, gone = empty || !(view.w > 0 && view.h > 0);
+      overlay.surface.node.style.visibility = session.pickerOpen || gone ? "hidden" : "visible";
+      if (gone) return;
+      Object.assign(overlay.surface.node.style, { left: view.x + "px", top: view.y + "px", width: view.w + "px", height: view.h + "px" });
+      const d = frame.drawn, key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
+      if (overlay.key !== key) { overlay.key = key; layoutNotes(session, { W: view.w, H: view.h, ox: d.x - view.x, oy: d.y - view.y, DW: d.w, DH: d.h }); }
     }
-    function layoutNotes(session, W, H) {
-      const overlay = session.overlay;
+    function layoutNotes(session, frame) {
+      const overlay = session.overlay, { W, H } = frame;
       overlay.box.querySelector(".card")?.remove(); overlay.card = null;
       const rects = [];
       for (const item of overlay.items) {
-        const geometry = lineGeometry(item.line, W, H);
+        const geometry = lineGeometry(item.line, W, H, frame);
+        // Text cropped out of the visible picture (X's timeline crop) gets no note.
+        item.node.style.display = geometry ? "" : "none";
+        if (!geometry) continue;
         if (item.kind === "sfx") {
           // Sound effects get a small tag just below their text, or above it at the bottom edge.
           const tag = item.node;
@@ -618,5 +677,5 @@
     }
     return { translate, close: dismiss, get open() { return Boolean(current?.popover || current?.overlay); }, destroy() { dismiss(0); cache.clear(); } };
   }
-  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, chooseCorner, toneAround, lineGeometry, MIN_FONT };
+  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, chooseCorner, toneAround, lineGeometry, imageFrame, MIN_FONT };
 })();

@@ -686,14 +686,14 @@
   function imageBody(prepared, model) {
     return {
       ...baseBody([
-        { role: "system", content: core.image.instruction(settings.userTerms) },
+        { role: "system", content: core.image.instruction(settings.userTerms, { convention: core.image.convention(model), width: prepared.width, height: prepared.height }) },
         { role: "user", content: [
           { type: "image_url", image_url: { url: `data:${prepared.mediaType};base64,${prepared.base64}` } },
           { type: "text", text: "Read and translate all text in this image." },
         ] },
       ], model),
       provider: { require_parameters: true, sort: "latency" },
-      response_format: { type: "json_schema", json_schema: { name: "image_text_translation", strict: true, schema: core.image.SCHEMA } },
+      response_format: { type: "json_schema", json_schema: { name: "image_text_translation", strict: true, schema: core.image.convention(model) === "gemini" ? core.image.SCHEMA_GEMINI : core.image.SCHEMA } },
     };
   }
   function imageUsage(message) {
@@ -718,7 +718,7 @@
     const result = await request(item => imageBody(prepared, item), epoch, IMAGE_TIMEOUT_MS, [model, model], budget, true, imageUsage(message));
     if (!result.ok) return result;
     const choice = result.data?.choices?.[0];
-    const lines = choice?.finish_reason === "length" ? null : core.image.parseLines(choice?.message?.content);
+    const lines = choice?.finish_reason === "length" ? null : core.image.parseLines(choice?.message?.content, { convention: core.image.convention(result.model || model), width: prepared.width, height: prepared.height });
     return lines ? { ok: true, lines, model: result.model } : { ok: false, code: "invalid_translation" };
   }
   // The page names its translation run so every batch lands in the same usage entry.
