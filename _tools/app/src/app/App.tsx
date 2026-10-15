@@ -394,7 +394,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "exchange" && view.kind !== "private_vault";
+  // Home takes file drops only on its 전송 tile (HomeTransfer); no drop-anywhere import to 미분류 (user 2026-10-16).
+  const dropEnabled = maintenance === null && view.kind !== "home" && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "exchange" && view.kind !== "private_vault";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
     const assetIds = activeNativeDragAssetIdsRef.current;
