@@ -125,12 +125,58 @@ it("groups owned characters by series, chooses the best tier, pages and filters,
     .mockResolvedValueOnce({ version: 1, revision: 1, cards: [serverCard({ characterId: "c2", characterName: "아리아", seriesName: "새 시리즈", tier: "lr" })], nextCursor: null });
   const original = vi.fn(), folder = vi.fn(); render(<CardAlbum api={api} onBack={vi.fn()} onOpenAsset={original} onCharacter={folder} />); await settle();
   fireEvent.click(screen.getByRole("button", { name: "루나 · UR" }));
+  expect(screen.getByRole("dialog", { name: "루나 UR 크게 보기" })).toBeInTheDocument(); fireEvent.click(screen.getByRole("button", { name: "닫기" })); await settle();
   const detail = screen.getByRole("complementary", { name: "카드 상세" }); expect(detail).toHaveTextContent("Lv.3"); expect(detail).toHaveTextContent("2026");
   fireEvent.click(within(detail).getByRole("button", { name: "원본 열기" })); expect(original).toHaveBeenCalledWith("a1");
   fireEvent.click(within(detail).getByRole("button", { name: "캐릭터 폴더" })); expect(folder).toHaveBeenCalledWith("c1");
   fireEvent.click(screen.getByRole("button", { name: "더 보기" })); await settle(); expect(api.album).toHaveBeenLastCalledWith("next"); expect(screen.getByRole("button", { name: "아리아 · LR" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByLabelText("카드 등급")).getByRole("button", { name: "N" })); expect(screen.getByRole("button", { name: "루나 · N" })).toBeInTheDocument(); expect(screen.queryByRole("button", { name: "아리아 · LR" })).not.toBeInTheDocument();
   const displayed = await displayCards(api, [serverCard({ tier: "n" }), serverCard({ tier: "lr" })]); expect(groupAlbum(displayed)[0][1].get("c1")?.[0].tier).toBe("lr");
+});
+
+const viewerAlbum = () => {
+  const { api } = apiFixture();
+  vi.mocked(api.album).mockResolvedValue({ version: 1, revision: 1, nextCursor: null, cards: [
+    serverCard({ tier: "n" }), serverCard({ tier: "ur", count: 3, level: 3 }),
+    serverCard({ characterId: "c2", characterName: "아리아", seriesName: "새 시리즈", tier: "n", artAssetId: "a2" }),
+    serverCard({ characterId: "c3", characterName: "하나", seriesName: "새 시리즈", tier: "r", artAssetId: "a3" }),
+  ] });
+  return api;
+};
+const viewerCard = () => screen.getByRole("dialog").querySelector("[data-viewer-card] [role=img]")!.getAttribute("aria-label")!;
+
+it("opens the card viewer from a tile or 크게 보기, walks the filtered list with the arrow keys, and Esc returns to the same scroll position", async () => {
+  const api = viewerAlbum(), asset = vi.fn(), folder = vi.fn();
+  render(<CardAlbum api={api} onBack={vi.fn()} onOpenAsset={asset} onCharacter={folder} />); await settle();
+  const list = document.querySelector<HTMLElement>(".card-album__list")!; list.scrollTop = 240;
+  fireEvent.click(within(screen.getByLabelText("카드 등급")).getByRole("button", { name: "N" }));
+  fireEvent.click(screen.getByRole("button", { name: "루나 · N" })); await settle();
+  const dialog = screen.getByRole("dialog", { name: "루나 N 크게 보기" });
+  expect(within(dialog).getByText("1 / 2")).toBeInTheDocument(); // only the N cards are in the filtered list
+  expect(viewerCard()).toContain("N 루나");
+  fireEvent.keyDown(dialog, { key: "ArrowRight" }); await settle();
+  expect(viewerCard()).toContain("N 아리아"); expect(within(dialog).getByRole("button", { name: "다음 카드" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "원본 열기" })); expect(asset).toHaveBeenCalledWith("a2");
+  fireEvent.click(within(dialog).getByRole("button", { name: "캐릭터 폴더" })); expect(folder).toHaveBeenCalledWith("c2");
+  fireEvent.keyDown(dialog, { key: "Escape" }); await settle(500);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.querySelector(".card-album__list")).toBe(list); expect(list.scrollTop).toBe(240);
+  // The detail panel followed the last viewed card, and 크게 보기 reopens it.
+  expect(screen.getByRole("complementary", { name: "카드 상세" })).toHaveTextContent("아리아");
+  fireEvent.click(screen.getByRole("button", { name: "크게 보기" })); await settle();
+  expect(viewerCard()).toContain("N 아리아");
+});
+
+it("walks all tiers in album order when unfiltered and respects the series filter", async () => {
+  render(<CardAlbum api={viewerAlbum()} onBack={vi.fn()} />); await settle();
+  fireEvent.click(screen.getByRole("button", { name: "루나 · UR" })); await settle();
+  const dialog = screen.getByRole("dialog"); expect(within(dialog).getByText("1 / 4")).toBeInTheDocument();
+  expect(viewerCard()).toContain("UR 루나");
+  fireEvent.keyDown(dialog, { key: "ArrowRight" }); await settle(); expect(viewerCard()).toContain("N 루나");
+  fireEvent.click(within(dialog).getByRole("button", { name: "닫기" })); await settle(500);
+  fireEvent.click(screen.getByRole("button", { name: "새 시리즈 · 2명" }));
+  fireEvent.click(screen.getByRole("button", { name: "하나 · R" })); await settle();
+  expect(within(screen.getByRole("dialog")).getByText(/\d \/ 2/)).toBeInTheDocument();
 });
 
 it("masks card art and cutouts in privacy and never requests an unreported cutout from the server", async () => {

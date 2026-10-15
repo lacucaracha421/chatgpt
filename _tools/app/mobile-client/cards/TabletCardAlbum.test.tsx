@@ -112,33 +112,69 @@ it('shows an error without dropping the cards and retries', async () => {
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('opens a character in a bottom sheet, switches tiers there, and closes with Back before leaving the album', async () => {
+const viewerCard = () => screen.getByRole('dialog').querySelector('[data-viewer-card] [role=img]')!.getAttribute('aria-label')!;
+const swipe = (from: number, to: number) => {
+  const stage = document.querySelector('.card-viewer__stage')!;
+  fireEvent.pointerDown(stage, {pointerType: 'touch', clientX: from, clientY: 100});
+  fireEvent.pointerUp(stage, {pointerType: 'touch', clientX: to, clientY: 100});
+};
+
+it('opens a card in the full-screen viewer, swipes through the filtered list, and closes with Back before leaving the album', async () => {
   const api = apiFixture([page([luna('n', 4), luna('ssr', 1), mika])]);
   const backRef: MutableRefObject<(() => boolean) | null> = {current: null}, onClose = vi.fn();
   render(<TabletCardAlbum api={api} backRef={backRef} onClose={onClose}/>); await settle(500);
+  const list = document.querySelector<HTMLElement>('.tablet-card-album__list')!; list.scrollTop = 180;
   expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', {name: '루나 · SSR'}));
-  const sheet = screen.getByRole('dialog', {name: '루나'});
-  expect(within(sheet).getByRole('img', {name: /SSR 루나/})).toBeTruthy();
-  expect(sheet.textContent).toContain('별자리');
-  expect(sheet.textContent).toContain('Lv.3');
-  fireEvent.click(within(sheet).getByRole('button', {name: 'N ×4'}));
-  expect(within(screen.getByRole('dialog')).getByRole('img', {name: /N 루나/})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SSR'})); await settle(500);
+  const viewer = screen.getByRole('dialog', {name: '루나 SSR 크게 보기'});
+  expect(viewerCard()).toContain('SSR 루나');
+  expect(viewer.textContent).toContain('별자리'); expect(viewer.textContent).toContain('Lv.3');
+  // Series run in Korean order (가을 before 별자리), so 미카 comes first and the SSR card is second.
+  expect(viewer.querySelector('.card-viewer__count')!.textContent).toBe('2 / 3');
   // No source folder or Asset route is wired, so no dead buttons.
-  expect(within(sheet).queryByRole('button', {name: '원본 열기'})).toBeNull();
+  expect(within(viewer).queryByRole('button', {name: '원본 열기'})).toBeNull();
+  swipe(300, 120); await settle(500);                       // swipe left: next card (the same character's N)
+  expect(viewerCard()).toContain('N 루나');
+  swipe(300, 120); await settle(500);                       // end of the list: stays
+  expect(viewerCard()).toContain('N 루나');
+  swipe(120, 300); await settle(500);                       // swipe right: previous
+  expect(viewerCard()).toContain('SSR 루나');
+  swipe(120, 300); await settle(500);
+  expect(viewerCard()).toContain('N 미카');
   expect(backRef.current!()).toBe(true);
   await settle(500);
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.querySelector('.tablet-card-album__list')).toBe(list); expect(list.scrollTop).toBe(180);
   expect(onClose).not.toHaveBeenCalled();
   expect(backRef.current!()).toBe(true);
   expect(onClose).toHaveBeenCalledOnce();
 });
 
-it('offers the source Asset and the character folder when the host wires them', async () => {
+it('walks only the cards of the active tier filter', async () => {
+  const api = apiFixture([page([luna('n'), luna('ssr'), mika])]);
+  render(<TabletCardAlbum api={api} onClose={vi.fn()}/>); await settle(500);
+  fireEvent.click(within(screen.getByRole('group', {name: '카드 등급'})).getByRole('button', {name: 'N'}));
+  fireEvent.click(screen.getByRole('button', {name: '루나 · N'})); await settle(500);
+  expect(screen.getByRole('dialog').querySelector('.card-viewer__count')!.textContent).toBe('2 / 2');
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: '이전 카드'})); await settle(500);
+  expect(viewerCard()).toContain('N 미카');
+});
+
+it('hardware Back closes only the viewer', async () => {
+  const api = apiFixture([page([luna('ssr')])]), onClose = vi.fn();
+  render(<TabletCardAlbum api={api} onClose={onClose}/>); await settle(500);
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SSR'})); await settle(500);
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  act(() => { window.dispatchEvent(new Event('lakomics-back')); }); await settle(500);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it('offers the source Asset and the character folder in the viewer when the host wires them', async () => {
   const api = apiFixture([page([luna('ssr')])]);
   const asset = vi.fn(), character = vi.fn();
   render(<TabletCardAlbum api={api} onClose={vi.fn()} onOpenAsset={asset} onCharacter={character}/>); await settle(500);
-  fireEvent.click(screen.getByRole('button', {name: '루나 · SSR'}));
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SSR'})); await settle(500);
   fireEvent.click(screen.getByRole('button', {name: '원본 열기'}));
   fireEvent.click(screen.getByRole('button', {name: '캐릭터 폴더'}));
   expect(asset).toHaveBeenCalledWith('a-ssr');

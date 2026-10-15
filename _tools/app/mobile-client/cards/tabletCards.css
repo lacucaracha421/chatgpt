@@ -54,16 +54,3 @@ button.tablet-daily-card__pack { appearance:none; border:0; background:transpare
 .tablet-card-album__tiers i { font-size:var(--type-meta); font-style:normal; color:var(--color-faint); opacity:.35; }
 .tablet-card-album__tiers [data-owned="true"] { opacity:1; color:var(--color-text); }
 .tablet-card-album__more { display:grid; place-items:center; padding:var(--space-4) 0; }
-
-/* The detail sheet: the card is big, and a finger drag tilts it. */
-.tablet-card-album__detail { display:flex; flex-direction:column; gap:var(--space-3, 12px); padding:var(--space-2) var(--mobile-gutter, 24px) var(--space-6); overflow-y:auto; }
-.tablet-card-album__detail p { margin:0; color:var(--color-muted); font-size:var(--type-meta); text-align:center; }
-.tablet-card-album__detail-card { width:min(300px, 70%); align-self:center; }
-.tablet-card-album__detail-card .trading-card, .tablet-card-album__detail-card .card { width:100%; }
-.tablet-card-album__detail-card .card { touch-action:none; }
-.tablet-card-album__ladder { display:flex; flex-wrap:wrap; justify-content:center; gap:var(--space-2); }
-.tablet-card-album__ladder .ui-filter-chip { min-height:var(--touch-target); }
-.tablet-card-album__detail dl { display:grid; grid-template-columns:1fr auto; gap:var(--space-2); margin:0; color:var(--color-muted); font-size:var(--type-meta); }
-.tablet-card-album__detail dd { margin:0; color:var(--color-text); }
-.tablet-card-album__actions { display:flex; gap:var(--space-2); justify-content:center; flex-wrap:wrap; }
-.tablet-card-album__actions .ui-button { min-height:var(--touch-target); }
