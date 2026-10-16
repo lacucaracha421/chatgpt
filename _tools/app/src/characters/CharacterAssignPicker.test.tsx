@@ -155,3 +155,65 @@ it("offers no 기타 rows unless the owner opts in", async () => {
   await screen.findByRole("group", { name: "방과후 스위츠부" });
   expect(screen.queryByRole("option", { name: /^기타/ })).not.toBeInTheDocument();
 });
+
+const pokemon: ClassificationEntry[] = [{ id: "pokemon", kind: "work", name: "포켓몬스터", parentId: null, iconKey: null, colorKey: null }];
+const pokemonTargets = ["muku", "matiere", "rudy", "shiyu", "chili", "moran", "moyamo", "nemo"]
+  .map(id => ({ ...fixtureTarget(id, id === "nemo" ? "네모" : id === "shiyu" ? "시유" : id), seriesClassificationId: "pokemon" }));
+const pokemonGroups = [
+  { id: "sm", seriesId: "pokemon", name: "썬/문", revision: 1, targetIds: ["muku", "matiere", "rudy"] },
+  { id: "sv", seriesId: "pokemon", name: "스칼렛/바이올렛", revision: 1, targetIds: ["shiyu", "chili", "moran", "moyamo", "nemo"] },
+];
+const renderPokemon = (props: Partial<React.ComponentProps<typeof CharacterAssignPicker>> = {}) => render(<CharacterAssignPicker assetIds={["a"]} targets={pokemonTargets} groups={pokemonGroups}
+  classifications={pokemon} counts={{ shiyu: 30, nemo: 7 }} privacyMode={false} onAssign={vi.fn()} onClose={vi.fn()} loadSuggestions={vi.fn().mockResolvedValue([])} {...props} />);
+
+it("folds a group of more than three characters and keeps smaller groups open, unfolding on click", async () => {
+  const user = userEvent.setup();
+  renderPokemon();
+  const small = await screen.findByRole("button", { name: /^썬\/문/ });
+  const large = screen.getByRole("button", { name: /^스칼렛\/바이올렛/ });
+  expect(small).toHaveAttribute("aria-expanded", "true");
+  expect(large).toHaveAttribute("aria-expanded", "false");
+  expect(large).toHaveTextContent("5명");
+  expect(screen.getByRole("option", { name: /^matiere/ })).toBeVisible();
+  expect(screen.queryByRole("option", { name: /^시유/ })).not.toBeInTheDocument();
+
+  await user.click(large);
+  expect(large).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("option", { name: /^시유/ })).toBeVisible();
+  await user.click(large);
+  expect(screen.queryByRole("option", { name: /^시유/ })).not.toBeInTheDocument();
+});
+
+it("skips folded rows with the arrow keys and keeps Enter on a header for folding", async () => {
+  const user = userEvent.setup();
+  const assign = vi.fn();
+  renderPokemon({ onAssign: assign });
+  const search = await screen.findByRole("searchbox", { name: "캐릭터 찾기" });
+  for (let step = 0; step < 6; step += 1) fireEvent.keyDown(search, { key: "ArrowDown" });
+  // The last reachable row is in the open group; the folded group's characters are never highlighted.
+  expect(screen.getAllByRole("option").find(row => row.hasAttribute("data-highlighted"))).toHaveAccessibleName(/^rudy/);
+
+  const large = screen.getByRole("button", { name: /^스칼렛\/바이올렛/ });
+  large.focus();
+  await user.keyboard("{Enter}");
+  expect(large).toHaveAttribute("aria-expanded", "true");
+  expect(assign).not.toHaveBeenCalled();
+});
+
+it("opens matching groups while searching and restores the folds when the search is cleared", async () => {
+  const user = userEvent.setup();
+  renderPokemon();
+  const search = await screen.findByRole("searchbox", { name: "캐릭터 찾기" });
+  await user.type(search, "네모");
+  expect(screen.getByRole("button", { name: /^스칼렛\/바이올렛/ })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("option", { name: /^네모/ })).toBeVisible();
+
+  await user.clear(search);
+  expect(screen.getByRole("button", { name: /^스칼렛\/바이올렛/ })).toHaveAttribute("aria-expanded", "false");
+});
+
+it("opens the group that holds the current character", async () => {
+  renderPokemon({ currentTargetId: "nemo" });
+  expect(await screen.findByRole("button", { name: /^스칼렛\/바이올렛/ })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("option", { name: /^네모 · 현재/ })).toBeVisible();
+});

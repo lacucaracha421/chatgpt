@@ -2,15 +2,17 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/20/solid";
-import { ChevronRightIcon, PlusIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useEffect, useId, useMemo, useState } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import type { ClassificationEntry } from "../library/types";
 import { matchesKoreanSearch } from "../shared/koreanSearch";
+import { displayCount } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
 import { characterAssignSuggestions, type CharacterAssignSuggestion, type CharacterTarget } from "./api";
 import { characterExtrasApi } from "./extrasApi";
 import type { CharacterGroup } from "./hubApi";
+import "../shared/fold.css";
 import "./CharacterAssignPicker.css";
 
 export const CHARACTER_ASSIGN_RECENT_KEY = "lakomics.characterAssign.recent.v1";
@@ -45,6 +47,9 @@ function newExtras(seriesId: string, groupId: string | null): CharacterTarget {
   return { id: `${NEW_EXTRAS}${seriesId}:${groupId ?? ""}`, seriesClassificationId: seriesId, linkedClassificationId: null, displayName: "기타", enabled: false, manualOnly: true, revision: 0, references: [], ready: false, fingerprint: "", role: "extras", extrasGroupId: groupId };
 }
 
+/** A group with more characters than this starts folded, so the series' groups stay scannable. */
+const GROUP_FOLD_OVER = 3;
+
 type PickerRow = {
   key: string;
   target: CharacterTarget;
@@ -63,6 +68,10 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmTargets, setConfirmTargets] = useState<CharacterTarget[] | null>(null);
+  // Folds the user toggled while the picker is open; a search opens every matching group, and folds toggled during it last until the query changes.
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const [searchFolded, setSearchFolded] = useState<string[]>([]);
+  const foldIdPrefix = useId();
   const targetById = useMemo(() => new Map(targets.map(target => [target.id, target])), [targets]);
   const seriesName = (target: CharacterTarget) => classifications.find(entry => entry.id === target.seriesClassificationId)?.name ?? "시리즈 없음";
   const activeScopeName = activeScopeId ? classifications.find(entry => entry.id === activeScopeId)?.name ?? "시리즈" : null;
@@ -103,10 +112,19 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
     return grouped.length || ungrouped.length ? [{ ...section, groups: grouped, ungrouped }] : [];
   });
   const scopedSeries = activeScopeId ? filteredSeries.filter(section => section.id === activeScopeId) : filteredSeries;
+  const searching = query.trim().length > 0;
+  const isGroupOpen = (group: SeriesGroup) => searching
+    ? !searchFolded.includes(group.id)
+    : groupOpen[group.id] ?? (group.characterCount <= GROUP_FOLD_OVER || group.rows.some(row => row.target.id === currentTargetId));
+  const toggleGroup = (group: SeriesGroup) => {
+    const open = isGroupOpen(group);
+    if (searching) setSearchFolded(current => open ? [...current, group.id] : current.filter(id => id !== group.id));
+    else setGroupOpen(current => ({ ...current, [group.id]: !open }));
+  };
   const scopeRows = [
     ...filteredRecommended,
     ...filteredRecent,
-    ...scopedSeries.flatMap(section => [...section.groups.flatMap(group => group.rows), ...section.ungrouped]),
+    ...scopedSeries.flatMap(section => [...section.groups.flatMap(group => isGroupOpen(group) ? group.rows : []), ...section.ungrouped]),
   ].map(row => row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row);
   const scopedNoMatch = Boolean(activeScopeId && query.trim() && scopeRows.length === 0);
   const otherSeriesRows = scopedNoMatch
@@ -192,17 +210,32 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
         <span>{activeScopeName}</span><XMarkIcon aria-hidden="true" />
       </button>}
       <input autoFocus type="search" role="searchbox" aria-label="캐릭터 찾기" placeholder="캐릭터 찾기" value={query}
-        onChange={event => { setQuery(event.target.value); setConfirmTargets(null); setMessage(null); }}
+        onChange={event => { setQuery(event.target.value); setSearchFolded([]); setConfirmTargets(null); setMessage(null); }}
         onKeyDown={event => { if (event.key === "Backspace" && !query && activeScopeId) { event.preventDefault(); clearScope(); } }} autoComplete="off" />
     </div>
     <div className="character-assign-picker__scroll" data-native-scrollbar="true">
       {!scopedNoMatch && filteredRecommended.length > 0 && <PickerSection label="추천">{filteredRecommended.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}</PickerSection>}
       {!scopedNoMatch && filteredRecent.length > 0 && <PickerSection label="최근">{filteredRecent.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}</PickerSection>}
       {!scopedNoMatch && scopedSeries.map(section => <PickerSection key={section.id} label={section.name}>
-        {section.groups.map(group => <div key={group.id} role="group" aria-label={group.name}>
-          <div className="character-assign-picker__group-caption">{group.name}</div>
-          {group.rows.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}
-        </div>)}
+        {section.groups.map(group => {
+          const open = isGroupOpen(group);
+          const foldId = `${foldIdPrefix}-group-${group.id}`;
+          return <div key={group.id} className="character-assign-picker__group" role="group" aria-label={group.name}>
+            <button type="button" className="character-assign-picker__group-header" aria-expanded={open} aria-controls={foldId}
+              onClick={() => toggleGroup(group)}
+              // Enter and Space toggle this header; the list's Enter-to-assign must not take them.
+              onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}>
+              <span className="character-assign-picker__group-name">{group.name}</span>
+              <span className="character-assign-picker__group-count">{displayCount(group.characterCount, "명")}</span>
+              <ChevronDownIcon className="character-assign-picker__group-chevron" aria-hidden="true" />
+            </button>
+            <div id={foldId} className="ui-fold character-assign-picker__group-fold" data-open={open} inert={!open} aria-hidden={!open}>
+              <div className="ui-fold__inner">
+                {group.rows.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}
+              </div>
+            </div>
+          </div>;
+        })}
         {section.ungrouped.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}
       </PickerSection>)}
       {scopedNoMatch && <>
@@ -241,6 +274,8 @@ function CharacterThumbnail({ target, privacyMode }: { target: CharacterTarget; 
   return <AssetImage className="character-assign-picker__thumbnail" src={thumbnailUrl(assetId)} alt="" draggable={false} />;
 }
 
+type SeriesGroup = ReturnType<typeof buildSeriesSections>[number]["groups"][number];
+
 function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[], classifications: ClassificationEntry[], counts: Record<string, number>, extras?: CharacterTarget[], scopeSeriesId?: string) {
   const nameById = new Map(classifications.map(entry => [entry.id, entry.name]));
   const groupByTarget = new Map<string, CharacterGroup>();
@@ -269,6 +304,7 @@ function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[
         id: group.id,
         name: group.name,
         count: group.targetIds.reduce((sum, targetId) => sum + (counts[targetId] ?? 0), 0),
+        characterCount: group.targetIds.filter(targetId => members.some(target => target.id === targetId && target.role !== "extras")).length,
         rows: [
           ...group.targetIds.flatMap(targetId => members.find(target => target.id === targetId) ?? []).sort(sortTargets)
             .map(target => ({ key: `all:${id}:${group.id}:${target.id}`, target, right: formatCount(counts[target.id] ?? 0), indented: true })),
