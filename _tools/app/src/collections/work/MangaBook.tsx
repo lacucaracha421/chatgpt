@@ -134,7 +134,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
     <span className="manga-book-shadow" aria-hidden="true" />
     {/* Rotation is an interaction with the physical book, separate from volume navigation. */}
     <div className="manga-book-object">
-    <div className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--ty": `${angle}deg` } as CSSProperties}
+    <div className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--manga-turn-angle": `${angle}deg` } as CSSProperties}
       onPointerDown={event => {
         if (blocked?.current) { drag.current = null; setDragging(false); return; }
         if (event.button !== 0 || drag.current) return;

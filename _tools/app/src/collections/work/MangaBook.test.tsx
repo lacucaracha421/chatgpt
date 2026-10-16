@@ -6,10 +6,27 @@ import { MangaStage, MangaBookcase, type MangaWorkData } from "./MangaBookcase";
 import { stripPosition } from "./coverStrip";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
+import { readFileSync } from "node:fs";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const props = { src: "/cover", title: "위치 WATCH", author: "작가 이름", volumeNumber: 2, volumeTitle: "2권", focus: null, privacy: false, frontReset: 0, onReady: vi.fn() };
 describe("turnable manga book", () => {
+  it("feeds the rendered rotation an angle without colliding with registered card properties", () => {
+    const css = readFileSync("src/collections/work/collectionWork.css", "utf8");
+    const cards = readFileSync("src/cards/cards.css", "utf8");
+    const property = /\.manga-bigbook \{[^}]*transform: rotateY\(var\((--[\w-]+)\)\)/.exec(css)![1];
+    const registration = [...cards.matchAll(/@property\s+(--[\w-]+)\s*\{([^}]+)\}/g)].find(match => match[1] === property);
+    // @property registrations apply document-wide, even under scoped card selectors.
+    if (registration) expect(registration[2]).toMatch(/syntax:\s*['"]<angle>['"]/);
+    render(<MangaBook {...props} />);
+    const book = screen.getByRole("group", { name: "책" });
+    fireEvent.pointerDown(book, { button: 0, pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(book, { pointerId: 1, clientX: 150 });
+    expect(book.style.getPropertyValue(property)).toBe("30deg");
+    fireEvent.pointerUp(book, { pointerId: 1 });
+    fireEvent.keyDown(book, { key: "ArrowRight" });
+    expect(book.style.getPropertyValue(property)).toBe("45deg");
+  });
   it("forwards PC volume metadata through the shared stage, with tablet fields optional", () => {
     const volume = { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: null, localReleaseDate: "2026-10-04", isbn13: "9780306406157", releaseStatus: null, contents: "Volume copy", price: 12000, publisher: "Publisher" };
     const manga: MangaWorkData = { volumes: [volume], activeVolumeId: "v2", editionIndex: 0, focuses: [], ownedNumbers: null, scope: "", revision: "", ownership: null, management: null };
