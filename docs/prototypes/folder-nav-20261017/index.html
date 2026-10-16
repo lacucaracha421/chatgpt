@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>폴더 탐색 시안</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!-- Loads the app's real font, tokens, shared surfaces, toolbars, controls, chrome and the sidebar's reveal motion.
+     folder-nav.css = the proposed CSS (recent folders, context tint). page.css = mockup frame and stand-in pictures.
+     folder-nav.js = mockup behaviour with stand-in data. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-toolbars.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-states.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-hover.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/classification/ClassificationSidebar.css">
+<link rel="stylesheet" href="folder-nav.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>폴더 탐색 시안</h1>
+  <p class="lead">“사이드바에 하위폴더들이 많으면 찾기 힘들잖아.” 검색 없이 폴더를 찾는 세 가지를 함께 넣는다. <b>하나만 펼치기</b>: 폴더를 펼치면 같은 단계의 다른 폴더가 접힌다. <b>최근 폴더</b>: 에셋 상단바의 빈 자리에 최근 폴더 다섯 개가 칩으로 놓인다. <b>현재 위치 따라가기</b>: 다른 곳에서 폴더를 열면 사이드바가 그 경로만 펼치고 그 줄을 화면 안으로 부드럽게 가져온다.</p>
+  <p class="lead">앱의 실제 토큰·사이드바·상단바 CSS를 그대로 읽는다. 새로 쓴 것은 최근 칩과 접힌 위치 표시뿐이다. 폴더와 그림은 임시 데이터다.</p>
+</header>
+
+<section class="variant" id="before">
+  <h2>지금 <small>여러 갈래가 열린 채로 쌓인다</small></h2>
+  <div class="pair">
+    <div><div id="pc-before"></div><p class="cap">지금의 사이드바. 펼친 폴더는 직접 접기 전까지 계속 열려 있다.</p></div>
+    <div style="flex:1;min-width:280px;max-width:640px">
+      <ul class="plain">
+        <li>캐릭터·게임 스크린샷·작가별·레퍼런스를 한 번씩 들렀을 뿐인데 12갈래가 열려 있다. 지금 연 <b>쥐는 손</b>은 맨 아래로 밀려 스크롤해야 보인다.</li>
+        <li>바꾼 뒤에는 <b>지금 보고 있는 경로 하나만</b> 열린다. 같은 상태에서 쥐는 손을 열면 <b>레퍼런스 › 인체 › 손</b>만 펼쳐진다.</li>
+        <li>자주 오가는 폴더는 사이드바를 뒤질 필요 없이 상단바의 최근 칩으로 바로 간다. 고정은 오래 두는 자리, 최근은 요즘 오간 자리다.</li>
+        <li>폴더 보기 메뉴(⋯)의 <b>현재 위치만 펼치기</b>는 이제 늘 그렇게 되므로 뺀다. <b>모든 폴더 접기</b>는 남긴다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="variant" id="live">
+  <h2>A. PC 에셋 화면 <small>1376 × 800 · 직접 눌러 볼 수 있음</small></h2>
+  <p class="note"><b>폴더의 ▸</b>를 누르면 같은 단계의 열린 폴더가 접힌다. <kbd>Ctrl</kbd>+클릭은 다른 폴더를 그대로 두고 하나 더 연다. <b>폴더 줄</b>을 누르면 그 폴더가 열리고 그 경로만 남는다. 이때 누른 줄은 포인터 아래에서 움직이지 않는다. 위쪽 갈래가 너무 커서 스크롤로 받아낼 수 없으면, 위쪽 접기는 포인터가 사이드바를 떠날 때까지 미룬다. <b>최근 칩</b>, <b>고정</b>, 본문의 <b>폴더 선반</b>에서 열면 사이드바가 그 경로만 펼치고 줄을 화면 안으로 부드럽게 가져온다. 새로 연 폴더는 3초 머물면 칩 맨 앞에 들어간다. 칩을 우클릭하면 최근에서 뺀다. 시계 버튼은 최근 폴더 메뉴다.</p>
+  <div class="scrollx"><div id="pc-live"></div></div>
+  <p class="readout" id="pc-live-readout">지금 연 폴더: <b>캐릭터 › 블루 아카이브 › 게헨나</b>. 사이드바에는 그 경로만 열려 있다.</p>
+</section>
+
+<section class="variant" id="narrow">
+  <h2>B. 좁은 창 <small>860 × 560 · 최근 폴더 메뉴를 연 상태</small></h2>
+  <p class="note">칩은 들어가는 만큼만 보이고, 오른쪽(오래된 쪽)부터 빠진다. 빠진 개수는 시계 버튼 모서리의 숫자로 보인다. 메뉴에는 최근 폴더 여덟 개가 경로와 함께 모두 있다. 칩이 하나도 안 들어가는 폭이면 시계 버튼만 남는다. 이름이 같은 폴더(<b>풍경</b> 둘)는 칩에 상위 폴더 이름을 옅게 붙여 구분한다. 마우스를 올렸을 때 뜨는 말풍선은 쓰지 않는다(DESIGN §9). 전체 경로는 메뉴에서 본다.</p>
+  <div class="scrollx"><div id="pc-narrow"></div></div>
+  <p class="readout" id="pc-narrow-readout"></p>
+</section>
+
+<section class="variant" id="tablet">
+  <h2>C. 태블릿 <small>세로 800 × 1280을 축소해 보임</small></h2>
+  <p class="note">태블릿에는 폴더 트리가 없다. 폴더 격자를 눌러 들어가는 방식이라 <b>하나만 펼치기</b>와 <b>따라가기</b>는 해당 없다. 최근 폴더는 PC와 같은 칩을 쓰되 터치 크기(높이 36, 누르는 영역 44)로 한 줄에 놓고 옆으로 넘긴다. 폴더 안의 상단바에는 경로·제목·버튼이 있어 자리가 없다. 그래서 칩 줄은 에셋 첫 화면의 <b>모든 이미지</b> 아래에 두고, 폴더 안에서는 상단바를 끌어내리거나 제목을 눌러 여는 내림 패널(지금 미분류/전체가 있는 곳)에 둔다.</p>
+  <div class="pair">
+    <div><div class="tablet-scale" id="tab-root"></div><p class="cap">에셋 첫 화면: 모든 이미지 → 최근 → 분류</p></div>
+    <div><div class="tablet-scale" id="tab-folder"></div><p class="cap">폴더 안(하우징): 상단바를 끌어내리면 최근 줄이 함께 내려온다</p></div>
+  </div>
+</section>
+
+<section class="variant" id="decide">
+  <h2>D. 정할 것과 제안</h2>
+  <div class="table-wrap">
+  <table class="decide">
+    <thead><tr><th>항목</th><th>제안</th><th>다른 선택지(권하지 않음)</th></tr></thead>
+    <tbody>
+      <tr><td>여러 개 펼치기</td><td><b><kbd>Ctrl</kbd>+클릭</b>(▸ 위에서)만 둔다. 키보드는 트리 표준대로 <kbd>*</kbd>가 같은 단계를 모두 연다. 설정 토글은 두지 않는다.</td><td class="alt">⋯ 메뉴에 “하나만 펼치기” 켜고 끄기 / 아예 없음</td></tr>
+      <tr><td>접는 범위</td><td>같은 단계의 형제와 그 아래 전부. 접었다 다시 열면 그 안은 접힌 채로 열린다.</td><td class="alt">형제 아래 상태 기억</td></tr>
+      <tr><td>지금 위치가 접혀 숨으면</td><td>보이는 가장 가까운 상위 폴더에 <b>옅은 상위 표시</b>(N4의 부모 틴트)를 준다. 상아색 선택은 하나뿐이다.</td><td class="alt">숨은 채 표시 없음</td></tr>
+      <tr><td>트리 안 클릭</td><td>열면서 그 경로만 남긴다. 누른 줄은 스크롤 보정으로 제자리에 둔다. 보정이 모자라면 위쪽 접기를 포인터가 사이드바를 떠날 때까지 미룬다.</td><td class="alt">트리 클릭은 접지 않고 바깥에서 열 때만 따라가기</td></tr>
+      <tr><td>고정 폴더</td><td>트리에서 특별 대우하지 않는다(고정 줄이 이미 한 번에 연다). 고정에서 열면 따라가기가 적용된다. <b>최근에는 넣지 않는다</b>: 다섯 자리를 고정과 겹치지 않게 쓴다.</td><td class="alt">고정 폴더 갈래는 늘 열어 둠 / 최근에도 넣음</td></tr>
+      <tr><td>“최근”의 기준</td><td>내가 연 폴더 중 <b>3초 이상 머물렀거나</b>, 거기서 이미지를 열었거나, 이미지를 <b>옮겨 넣은</b> 폴더. 하위로 내려가며 지나친 폴더와 자동 분류는 넣지 않는다. 시리즈의 그룹·캐릭터를 열면 그 그룹 줄로 센다. 앨범은 넣지 않는다.</td><td class="alt">클릭한 모든 폴더 / 가져오기가 들어간 폴더</td></tr>
+      <tr><td>순서</td><td>새 폴더는 맨 앞에 들어온다. 이미 있는 칩은 눌러도 <b>자리가 바뀌지 않는다</b>(누르는 순간 칩이 움직이지 않게). 꽉 차면 가장 오래 안 쓴 것이 빠진다. 목록은 8개, 상단바에는 최대 5개.</td><td class="alt">누를 때마다 맨 앞으로</td></tr>
+      <tr><td>좁은 창</td><td>들어가는 만큼만 보이고 오래된 쪽부터 빠진다. 빠진 개수는 시계 버튼 모서리 숫자로, 나머지는 시계 메뉴에.</td><td class="alt">두 줄로 넘김 / 가로 스크롤</td></tr>
+      <tr><td>고정과의 차이</td><td>고정: 사이드바, 테두리 칩, 핀 아이콘, 직접 관리. 최근: 상단바, 면도 테두리도 없는 조용한 버튼, 폴더 아이콘(폴더 색), 저절로 채워짐. 지금 연 폴더의 칩은 탭처럼 밝은 글자·굵게.</td><td class="alt">같은 모양</td></tr>
+      <tr><td>긴 이름·같은 이름</td><td>칩은 최대 11rem에서 말줄임. 이름이 겹치면 상위 이름을 옅게 붙인다. 전체 경로는 시계 메뉴와 화면 읽기 프로그램용 설명에만 있다(말풍선 금지 규칙).</td><td class="alt">마우스를 올리면 경로 말풍선</td></tr>
+      <tr><td>비공개·비밀</td><td>비공개 모드는 그림만 가리므로 칩은 그대로다(폴더 이름은 사이드바에도 보인다). <b>비밀</b> 영역의 폴더는 기록하지 않는다. 지운 폴더는 빠지고, 이름을 바꾸면 따라간다.</td><td class="alt">비공개 모드에서 칩 숨김</td></tr>
+      <tr><td>저장 위치</td><td>기기마다 따로, 라이브러리별로 저장한다(펼침 상태와 같은 자리). PC와 태블릿은 공유하지 않는다.</td><td class="alt">서버로 기기 간 공유</td></tr>
+      <tr><td>태블릿</td><td>같은 칩 부품을 에셋 첫 화면(모든 이미지 아래)과 폴더 안의 내림 패널에 둔다. 트리가 없으므로 펼치기 규칙은 해당 없다.</td><td class="alt">상단바에 넣기(세로 폭이 모자람)</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="variant">
+  <h2>E. 확인하지 못한 것</h2>
+  <ul class="plain">
+    <li>헤드리스 Edge 정지 화면으로만 확인했다. 실제 앱 창에서의 움직임(접히는 동안 줄이 포인터 아래 그대로인지)은 구현 뒤 실제 창에서 봐야 한다.</li>
+    <li>태블릿 폴더 안 내림 패널이 지금 에셋 폴더 화면에도 있는지는 코드에서 확실히 확인하지 못했다. 없다면 이 칩 줄 하나 때문에 패널을 새로 만들지, 첫 화면에만 둘지 정해야 한다.</li>
+    <li>“3초 머묾”은 체감으로 고른 값이다. 너무 길거나 짧으면 조정한다.</li>
+  </ul>
+</section>
+</div>
+<script src="folder-nav.js"></script>
+</body>
+</html>

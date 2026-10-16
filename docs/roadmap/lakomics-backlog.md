@@ -8,6 +8,7 @@ Reconciled 2026-10-13 against `main` at `2e751573`, using current source, Git hi
 
 Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped outside this list: TRANSFER-001 S1–S6, SIM-ORIGINAL-001, diet batches A–F, test cleanup and split, card trash, text-only calendar, NL search paused. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
 
+0. **`FOLDER-NAV-001`** — next: implement the approved folder navigation design (accordion tree, recent-folder chips, follow current location); PC first, tablet chips in the same round (see [section](#folder-nav-001)).
 0. **`CHAR-CLAUDE-001`** — slice 3: experiment on identifying series members in images without a character or recommendation; retiring the tablet 캐릭터 확인 screen and its review feed is low priority (see [section](#char-claude-001)).
 1. **`COLLECTOR-MENU-SCOPE-001`** — `PARTIAL`: 3.5.35 (`0f578b44`) delivered HTTP pages, frames, media and touch hold; inventory sites that still swallow the menu, investigate the PDF viewer, and retain the later save-X-post/link/page idea (see [section](#collector-menu-scope-001)).
 2. **`COLLECTOR-TABLET-001`** — remaining selection chip "번역" and touch-menu slice; the 3.5.35 link/selection hold is delivered (see [section](#collector-tablet-001--tablet-translation-chip-and-touch-menu)).
@@ -24,6 +25,16 @@ Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped ou
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
 - Nothing open (the user confirmed Collections motion with 항상 켜기 and the "<name> 아님" button on 2026-10-13).
+
+<a id="folder-nav-001"></a>
+## FOLDER-NAV-001 — Find folders in a deep sidebar without search (2026-10-17)
+
+Status: `OPEN` — design approved, not started. User: "사이드바에 하위폴더들이 많으면 찾기 힘들잖아" (no search). Mockup and implementation spec: `docs/prototypes/folder-nav-20261017/` (README is the spec; artifact https://claude.ai/artifact/GQA5AW43UeEJmy4ypUrjZ6). The user picked ideas 1, 2 and 4 and accepted every recommendation:
+- **Accordion (하나만 펼치기):** expanding a folder collapses its open siblings and their subtrees. Ctrl+click on the disclosure arrow keeps several open; keyboard `*` opens all siblings. No settings toggle. A hidden current folder leaves a faint ancestor mark on the nearest visible parent; pinned folders get no special tree handling; drop the "현재 위치만 펼치기" menu item, keep "모든 폴더 접기".
+- **Recent folders in the PC asset top bar:** after the title, a thin divider, a clock button and up to 5 quiet chips (folder-colour icon; the current folder's chip bold). A folder counts as recent after 3 s there, opening an image in it, or moving images into it; folders passed through while drilling down, automatic classification, pinned folders, Albums and the private vault are excluded. New entries go first; clicking an existing chip does not reorder it; keep 8, evict least recently used. Narrow windows drop the oldest chips and show the hidden count on the clock button, whose menu lists all recent folders with full paths, plus "최근 목록 비우기"; chip context menu "최근에서 빼기". Same-named folders show a faint parent prefix. No hover tooltips (DESIGN §9): full paths live in the menu and accessible names. Stored per device and library; chips stay in privacy mode.
+- **Follow the current location:** opening a folder from a chip, menu, pin, folder shelf, Find or Back expands only its path and scrolls the row into view with the collapse motion (320 ms), without scrolling when already visible. A click inside the tree keeps the clicked row under the pointer (scroll compensation; defer collapsing above until the pointer leaves the sidebar if needed).
+- **Tablet:** no tree, so only the chips: one horizontally scrolling row under "모든 이미지" on the asset home, and inside a folder in the pull-down panel under 미분류/전체.
+- Open checks from the design pass: the tablet pull-down panel's presence on every folder level was not verified in code; the motion was not seen live; the existing pin chips still use `title=` tooltips against DESIGN §9.
 
 <a id="char-claude-001"></a>
 ## CHAR-CLAUDE-001 — Series member identification and tablet review retirement (2026-10-12)

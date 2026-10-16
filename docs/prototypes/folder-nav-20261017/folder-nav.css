@@ -1,0 +1,67 @@
+/* Proposed component CSS for folder navigation (2026-10-17).
+   Recent folders -> assets/recentFolders.css (shared by PC and tablet; size tokens differ).
+   Tree context tint -> classification/ClassificationSidebar.css.
+   Everything else on the page lives in page.css (mockup frame only). */
+
+/* ---------- Recent folders in the asset top bar ---------- */
+.recent-folders {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--space-1);
+}
+/* A neutral 1px divider between the title and the places; the same divider the Collections bar uses between groups. */
+.recent-folders::before {
+  content: "";
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin-right: var(--space-1);
+  background: var(--color-border);
+}
+.recent-folders__more.ui-button.ui-button--quiet { position: relative; flex: none; width: var(--control-height-compact); padding: 0; }
+.recent-folders__more[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text); }
+.recent-folders__more .ui-badge--corner { position: absolute; top: -4px; left: calc(100% - 10px); }
+.recent-folders__list { display: flex; align-items: center; gap: var(--space-1); min-width: 0; overflow: hidden; }
+.recent-folders__chip.ui-button.ui-button--quiet { flex: none; max-width: 11rem; }
+.recent-folders__chip > svg { color: var(--folder-color, currentColor); }
+.recent-folders__chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.recent-folders__parent { color: var(--color-faint); font-weight: 400; }
+/* The open place reads like a selected tab: brighter text at weight 600, no face, no underline. */
+.recent-folders__chip[aria-current="page"] { color: var(--color-text); font-weight: 600; }
+.recent-folders__chip[aria-current="page"] .recent-folders__parent { font-weight: 400; }
+/* Enter: fade only (no rise in a bar). Leave: fade out, then the element is removed. Others slide (FLIP, 200 ms). */
+.recent-folders__chip.is-entering { animation: recent-chip-in var(--motion-small) var(--ease-standard) both; }
+.recent-folders__chip.is-leaving { opacity: 0; transition: opacity var(--motion-micro) var(--ease-standard); pointer-events: none; }
+@keyframes recent-chip-in { from { opacity: 0; } }
+
+/* The 최근 폴더 menu: the shared menu surface (corner brackets), rows with a faint path. */
+.recent-folders__menu { width: 320px; }
+.recent-folders__menu .ui-section-label { padding: var(--space-1) var(--space-2) var(--space-2); }
+.recent-folders__menu .ui-menu__item { min-width: 0; }
+.recent-folders__menu .ui-menu__item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.recent-folders__path { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: right; color: var(--color-faint); font-size: var(--type-meta); }
+/* The open place uses the app's selected menu row (ivory face, dark mark); path and icon follow its text colour. */
+.recent-folders__menu .ui-menu__item[data-selected="true"] { font-weight: 600; }
+.recent-folders__menu .ui-menu__item-check { width: var(--selection-mark-size); height: var(--selection-mark-size); }
+.recent-folders__menu .ui-menu__item svg { color: var(--folder-color, var(--color-muted)); }
+.recent-folders__menu .ui-menu__item[data-selected="true"] :is(svg, .recent-folders__path) { color: inherit; }
+.recent-folders__menu .ui-menu__item[data-selected="true"] .recent-folders__path { opacity: .7; font-weight: 400; }
+.recent-folders__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
+
+/* ---------- Folder tree: one path open ---------- */
+/* When the open folder's row is folded away, its nearest visible ancestor carries the parent-context tint
+   (DESIGN N4: only the most specific level is a slab; a parent that holds it is tinted). */
+.classification-sidebar__tree-row[data-holds-current="true"] > .classification-sidebar__tree-surface {
+  background: var(--color-selection-context);
+  color: var(--color-selection-context-text);
+  transition: background-color var(--motion-micro) var(--ease-standard);
+}
+.classification-sidebar__tree-row[data-holds-current="true"]:hover > .classification-sidebar__tree-surface { background: var(--color-selection-context-hover); }
+/* Scroll compensation is done by script while branches fold (the clicked row stays under the pointer). */
+.workspace-index__scroll { overflow-anchor: none; }
+/* Hidden chips and the zero count leave the layout (the button rule would otherwise override [hidden]). */
+.recent-folders [hidden] { display: none; }
+.recent-folders__menu .ui-menu__item[data-selected="true"] > .ui-menu__item-check { color: inherit; }
