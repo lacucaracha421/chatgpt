@@ -17,11 +17,17 @@ const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-r
 const sheet = 'cubic-bezier(.32,.72,0,1)';
 const standard = 'cubic-bezier(.2,0,0,1)';
 
-/** Own only the viewer's entrance/exit; decoded content changes remain instant. */
-export function useViewerMotion(id: string | null, onClose: () => void, origin?: TileRect, aspect = 1, source?: string, sourceId = id, masked = false) {
+/**
+ * Own only the viewer's entrance/exit; decoded content changes remain instant.
+ *
+ * `naturalWidth` is the original's pixel width when the viewer shows it at most at natural size
+ * (the PC viewer never upscales). The zoom preview and the exit scale then use that same size,
+ * so the first frame already has the final size. Omit it where the media is fitted to the stage.
+ */
+export function useViewerMotion(id: string | null, onClose: () => void, origin?: TileRect, aspect = 1, source?: string, sourceId = id, masked = false, naturalWidth?: number) {
   const root = useRef<HTMLElement | null>(null);
   const first = useRef<{id: string | null; rect?: TileRect; tile?: HTMLElement}>({id: null});
-  const current = useRef({id, onClose, origin, aspect, masked}); current.current = {id, onClose, origin, aspect, masked};
+  const current = useRef({id, onClose, origin, aspect, masked, naturalWidth}); current.current = {id, onClose, origin, aspect, masked, naturalWidth};
   const sources = useRef(new Map<string, string>());
   if (source && sourceId) sources.current.set(source, sourceId);
   const closing = useRef(false);
@@ -40,7 +46,7 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
     const animations: Animation[] = [];
     const from = first.current.rect;
     const bounds = media.getBoundingClientRect();
-    const fitW = Math.min(bounds.width, bounds.height * current.current.aspect), fitH = fitW / current.current.aspect;
+    const fitW = Math.min(bounds.width, bounds.height * current.current.aspect, current.current.naturalWidth || Infinity), fitH = fitW / current.current.aspect;
     const fit = {left: bounds.left + (bounds.width - fitW) / 2, top: bounds.top + (bounds.height - fitH) / 2, width: fitW, height: fitH};
     let ghost: HTMLImageElement | undefined;
     const thumb = first.current.tile?.querySelector('img');
@@ -104,7 +110,8 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
     const shownId = keepPreview ? first.current.id : (shown && sources.current.get(shown.getAttribute("src") ?? "")) ?? current.current.id;
     const to = visibleTileRect(shownId), r = media.getBoundingClientRect();
     const ratio = shown?.naturalWidth && shown.naturalHeight ? shown.naturalWidth / shown.naturalHeight : current.current.aspect;
-    const w = Math.min(r.width, r.height * ratio), h = w / ratio;
+    const naturalCap = shown?.naturalWidth || current.current.naturalWidth || Infinity;
+    const w = Math.min(r.width, r.height * ratio, naturalCap), h = w / ratio;
     const dx = to ? to.left + to.width / 2 - r.left - r.width / 2 : 0;
     const dy = to ? to.top + to.height / 2 - r.top - r.height / 2 : 0;
     const destination = to && w > 0 && h > 0 ? `translate(${dx}px,${dy}px) scale(${to.width / w})` : 'scale(.96)';

@@ -4,8 +4,8 @@ import {StableImage} from '../ui/StableImage';
 import {useViewerMotion} from './useViewerMotion';
 const rect = (left:number, top:number, width:number, height:number) => ({left,top,width,height,right:left+width,bottom:top+height,x:left,y:top,toJSON:()=>({})});
 let calls: {element:HTMLElement; frames:Keyframe[]; options:KeyframeAnimationOptions; animation:Animation}[];
-function Fixture({id='a',onClose=vi.fn()}:{id?:string;onClose?:()=>void}) {
-  const motion=useViewerMotion(id,onClose,undefined,2,`original:${id}`);
+function Fixture({id='a',onClose=vi.fn(),naturalWidth}:{id?:string;onClose?:()=>void;naturalWidth?:number}) {
+  const motion=useViewerMotion(id,onClose,undefined,2,`original:${id}`,id,false,naturalWidth);
   return <div ref={motion.bind} className="asset-viewer"><div data-viewer-backdrop/><div data-viewer-media><StableImage src={`original:${id}`} alt={id}/></div><button onClick={motion.close}>close</button></div>;
 }
 beforeEach(() => {
@@ -33,6 +33,12 @@ it('grows the tapped tile in 380 ms and keeps its preview until media is ready',
   expect(zoom.element.isConnected).toBe(true);
   await act(async()=>fireEvent.load(screen.getByRole('img',{name:'a'})));
   expect(zoom.element.isConnected).toBe(false);
+});
+it('sizes the zoom preview like the final image when the original is smaller than the stage', () => {
+  render(<Fixture naturalWidth={400}/>);
+  const preview=document.querySelector<HTMLElement>('[data-viewer-zoom-preview]')!;
+  expect([preview.style.width,preview.style.height]).toEqual(['400px','200px']);
+  expect(calls.find(call=>call.options.duration===380)!.frames[0].transform).toContain('scale(0.25)');
 });
 it('closes into the last painted tile while a replacement is still loading', () => {
   const onClose=vi.fn();

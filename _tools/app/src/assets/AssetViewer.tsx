@@ -124,7 +124,7 @@ export function AssetViewer({
   const masked = useAssetMasks();
   const {nsfwFilter}=usePrivacy();
   const privacyMode = masked(asset, requestedPrivacy);
-  const motion = useViewerMotion(activeId, onClose, originRect, asset?.width && asset?.height ? asset.width / asset.height : 1, !privacyMode && activeId ? (mediaSource === "vault" ? vaultAssetUrl(activeId) : assetUrl(activeId)) : undefined, activeId, privacyMode);
+  const motion = useViewerMotion(activeId, onClose, originRect, asset?.width && asset?.height ? asset.width / asset.height : 1, !privacyMode && activeId ? (mediaSource === "vault" ? vaultAssetUrl(activeId) : assetUrl(activeId)) : undefined, activeId, privacyMode, asset?.media.kind === "image" ? asset.width ?? undefined : undefined);
   const [stripGrown, setStripGrown] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const stripActive = useRef(false);
