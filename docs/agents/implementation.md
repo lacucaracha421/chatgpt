@@ -71,6 +71,18 @@ Replace BASE/HEAD with verified revisions and quote paths for the actual shell; 
 
 Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checkout, worktree creation, index changes, or test-generated writes in a strictly read-only review. Missing historical objects are a coverage limit, not permission to fetch or mutate.
 
+## Writing tests
+
+A test earns its place by catching a realistic regression in our own behaviour. The user rejects tests of the "don't travel to America because America might collapse" kind (2026-10-16); a cleanup removed them in `57358118`. Do not add:
+
+- **Impossible situations.** Hostile input on purely local paths, absurd sizes or counts the product never produces (`u64::MAX` cursors, trillion-won amounts, 20-digit ids), clocks jumping years, malformed responses from our own server that its validation already refuses (for example classification parent cycles), or the same corrupt-storage case repeated in every file. One representative fallback case is enough.
+- **Text pins.** Exact CSS values, durations, easing curves, class names, generated script text, or "this source file contains `<Component`" checks. They break on harmless edits and catch no bug. Test the behaviour instead, or nothing.
+- **Framework re-tests.** React rendering, serde/pydantic validation matrices, OpenAPI schema output, Python integer size, Rust `Drop` on panic, OS timers.
+- **Duplicate matrices.** The same rejection table copied across routes that share one parser; test the shared parser once and keep only route-specific cases.
+- **Defensive code for such tests.** Production branches whose only trigger is an impossible situation.
+
+Still write tests for real risks this project has hit: data loss and crash-safe journals, sync/authority conflicts, credentials, path traversal on files received from other devices, server auth and ownership, no-flash behaviour. A source-reading check is acceptable only when it encodes a standing user design rule that jsdom cannot observe (no Home entrance motion, no edge-stripe state marks, reduced motion present, tablet touch-target size), and it should assert just that rule. Ratchet baselines fail only when a count rises.
+
 ## Verification evidence
 
 `AGENTS.md` owns the verification policy. For each material claim, keep the command or manual check, its scope, the observed result, and the revision or inputs it covered; the task conversation is enough, no permanent ledger is required.
