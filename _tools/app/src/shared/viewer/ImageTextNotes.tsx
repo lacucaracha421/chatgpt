@@ -2,7 +2,6 @@ import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } fr
 import type { ImageTextLine } from "../../library/types";
 import { reducedMotion, EASE_STANDARD } from "../motion/curves";
 import { layoutImageTextNotes, lineGeometry, type ImageRect, type ImageZoom } from "./imageTextNoteLayout";
-import { DEFAULT_TONE, readNotePixels, readNoteThumbnail, toneAround, type NotePixels, type NoteTone } from "./imageTextNoteTone";
 import "./image-text.css";
 
 export type ImageTextNotesHandle = { tap: (clientX: number, clientY: number) => boolean; dismissCard: () => boolean };
@@ -11,24 +10,9 @@ const browserCopy = (text: string) => navigator.clipboard.writeText(text);
 export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
   lines: ImageTextLine[]; selected: number | null; open: boolean; onSelect: (index: number) => void;
   rect: ImageRect; zoom: ImageZoom; panning?: boolean; animatePan?: boolean; interactive?: boolean;
-  surfaceTap?: boolean; onCopy?: (text: string) => Promise<void>; image?: HTMLImageElement | null; thumbnailSrc?: string;
-}>(function ImageTextNotes({ lines, selected, open, onSelect, rect, zoom, panning = false, animatePan = false, interactive = true, surfaceTap = false, onCopy = browserCopy, image = null, thumbnailSrc }, ref) {
+  surfaceTap?: boolean; onCopy?: (text: string) => Promise<void>;
+}>(function ImageTextNotes({ lines, selected, open, onSelect, rect, zoom, panning = false, animatePan = false, interactive = true, surfaceTap = false, onCopy = browserCopy }, ref) {
   const root = useRef<HTMLDivElement>(null);
-  const [tones, setTones] = useState<NoteTone[]>([]);
-  useLayoutEffect(() => {
-    let active = true;
-    const apply = (pixels: NotePixels | null) => {
-      if (active) setTones(lines.map(line => {
-        const geometry = pixels && lineGeometry(line, pixels.width, pixels.height);
-        return geometry ? toneAround(pixels, geometry.box) : DEFAULT_TONE;
-      }));
-    };
-    if (thumbnailSrc) {
-      apply(null);
-      void readNoteThumbnail(image, thumbnailSrc).then(apply);
-    } else apply(readNotePixels(image));
-    return () => { active = false; };
-  }, [image, lines, thumbnailSrc]);
   const [layout, setLayout] = useState(() => ({ lines, scale: zoom.scale, notes: layoutImageTextNotes(lines, rect.width * zoom.scale, rect.height * zoom.scale, (word, font) => word.length * font) }));
   const [hovered, setHovered] = useState<number | null>(null);
   const [card, setCard] = useState<number | null>(null);
@@ -104,7 +88,7 @@ export const ImageTextNotes = forwardRef<ImageTextNotesHandle, {
       onPointerEnter={() => setHovered(item.index)} onPointerLeave={() => setHovered(null)} onFocus={() => setHovered(item.index)} onBlur={() => setHovered(null)}
       onPointerDown={event => { if (!surfaceTap) event.stopPropagation(); }}
       onClick={() => activate(item.index)}
-      style={{ background: tones[item.index] && tones[item.index] !== DEFAULT_TONE ? `rgb(${tones[item.index].bg.join(", ")})` : undefined, color: tones[item.index] && tones[item.index] !== DEFAULT_TONE ? `rgb(${tones[item.index].fg.join(", ")})` : undefined, left: item.x, top: item.y, width: item.w, height: item.h, padding: `${item.padY}px ${item.padX}px`, fontSize: item.f, overflowWrap: item.wrap ? "anywhere" : "normal", zIndex: zIndex(item.index, item.zIndex) }}>{lines[item.index]?.korean}</button>)}
+      style={{ left: item.x, top: item.y, width: item.w, height: item.h, padding: `${item.padY}px ${item.padX}px`, fontSize: item.f, overflowWrap: item.wrap ? "anywhere" : "normal", zIndex: zIndex(item.index, item.zIndex) }}>{lines[item.index]?.korean}</button>)}
     {open && interactive && note && line && <div ref={cardElement} className="image-text-note-card ui-anchored-panel" role="region" aria-label="대사 번역" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); dismissCard(); } event.stopPropagation(); }}
       style={{ left: Math.max(viewLeft, Math.min(note.x, viewRight - cardWidth)), top: Math.max(viewTop, Math.min(cardTop, viewBottom - visibleCardHeight)), width: cardWidth, maxHeight: cardMaxHeight, zIndex: lines.length + 4 }}>
       <span className="image-text-note-card__original">{line.original}</span><span>{line.korean}</span>

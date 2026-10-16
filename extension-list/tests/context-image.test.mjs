@@ -417,7 +417,9 @@ for (const touch of [false, true]) test(`translation notes sit over each text bl
   assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['100px', '50px', '200px', '200px']);
   // the first note starts at its OCR box (100,100 of 1000 is 20,20 px of a 200 px image) minus a 3 px margin
   assert.equal(v.notes[0].style.left, '17px'); assert.equal(v.notes[0].style.top, '17px');
-  assert.notEqual(v.notes[0].style.background, '', 'solid colour, no glass');
+  assert.equal(v.notes[0].style.background, '', 'note background comes from shared CSS');
+  assert.equal(v.notes[0].style.color, '');
+  assert.equal(v.notes[0].style.getPropertyValue('--edge'), '');
   assert.deepEqual([...v.pill.querySelectorAll('button')].map(button => button.textContent), ['원문', '모두 복사', '']);
   assert.equal(v.pill.dataset.placement, 'below');
   // Real layout changes follow resize, rather than document scroll events.
@@ -1157,14 +1159,16 @@ test('the button group takes the corner that covers the least note area', () => 
   assert.equal(chooseCorner([{x: 0, y: 0, w: 400, h: 100}, {x: 200, y: 500, w: 200, h: 100}], 400, 600, 200, 32).corner, 'bl');
 });
 
-test('note colours come from around the text box and fall back to a light note when the picture is unreadable', () => {
-  const f = page(); const {toneAround} = f.w.LakomicsContextImage;
-  const fill = (r, g, b, w = 100, h = 100) => ({width: w, height: h, data: Uint8ClampedArray.from({length: w * h * 4}, (_, i) => [r, g, b, 255][i % 4])});
-  const light = plain(toneAround(fill(240, 240, 235), {x: 40, y: 40, w: 20, h: 20}));
-  assert.ok(light.bg.every(v => v >= 235)); assert.ok(light.fg.every(v => v < 40));
-  const dark = plain(toneAround(fill(20, 20, 30), {x: 40, y: 40, w: 20, h: 20}));
-  assert.ok(dark.bg.every(v => v < 40)); assert.ok(dark.fg.every(v => v > 240));
-  assert.deepEqual(plain(toneAround(null, {x: 0, y: 0, w: 1, h: 1})), {bg: [251, 250, 247], fg: [31, 33, 35]});
+test('notes always use white, dark text and a faint edge in CSS', () => {
+  const f = page('<div class="image-notes"><button class="note">translation</button><button class="note stacked">stacked</button></div>');
+  const style = f.doc.createElement('style'); style.textContent = css; f.doc.head.append(style);
+  for (const note of f.doc.querySelectorAll('.note')) {
+    const computed = f.w.getComputedStyle(note);
+    assert.equal(computed.backgroundColor, 'rgb(255, 255, 255)');
+    assert.equal(computed.color, 'rgb(28, 29, 31)');
+    assert.match(computed.getPropertyValue('--edge'), /^rgb\(0 0 0\s*\/\s*7%\)$/);
+  }
+  f.close();
 });
 
 test('notes are solid, keep whole words, use at least 14 px and fade in without motion when reduced', () => {
@@ -1752,7 +1756,7 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.50');
+  assert.equal(manifest.version, '3.5.51');
 });
 
 

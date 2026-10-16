@@ -27,43 +27,8 @@
   }
 
   // ---- translation notes laid over the picture (pure helpers, unit-tested) ----
-  const MIN_FONT = 14, EDGE = 4, DEFAULT_TONE = { bg: [251, 250, 247], fg: [31, 33, 35] };
+  const MIN_FONT = 14, EDGE = 4;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-  const luminance = ([r, g, b]) => { const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }; return .2126 * f(r) + .7152 * f(g) + .0722 * f(b); };
-  const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (hi + .05) / (lo + .05); };
-  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-  // Solid note colours from the median of a ring just outside the text box. `pixels` is
-  // {data, width, height} (RGBA) and `box` {x, y, w, h} in the same pixel space.
-  function toneAround(pixels, box) {
-    if (!pixels?.data || !(pixels.width > 0)) return DEFAULT_TONE;
-    const { data, width, height } = pixels, edge = Math.max(width, height);
-    const m = Math.max(2, Math.round(edge * .005)), t = Math.max(3, Math.round(edge * .008));
-    const x0 = Math.max(0, Math.round(box.x - m - t)), y0 = Math.max(0, Math.round(box.y - m - t));
-    const x1 = Math.min(width, Math.round(box.x + box.w + m + t)), y1 = Math.min(height, Math.round(box.y + box.h + m + t));
-    const rs = [], gs = [], bs = [];
-    for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
-      if (x > box.x - m && x < box.x + box.w + m && y > box.y - m && y < box.y + box.h + m) continue;
-      const i = (y * width + x) * 4; rs.push(data[i]); gs.push(data[i + 1]); bs.push(data[i + 2]);
-    }
-    if (!rs.length) return DEFAULT_TONE;
-    const med = list => { list.sort((p, q) => p - q); return list[list.length >> 1]; };
-    let bg = [med(rs), med(gs), med(bs)], fg;
-    if (luminance(bg) > .36) { fg = [28, 29, 31]; for (let k = 0; contrast(bg, fg) < 7 && k < 20; k += 1) bg = mix(bg, [255, 255, 255], .15); }
-    else { fg = [251, 250, 247]; for (let k = 0; contrast(bg, fg) < 4.8 && k < 20; k += 1) bg = mix(bg, [0, 0, 0], .1); }
-    return { bg, fg };
-  }
-  // The picture drawn small so notes can match its colours; null when it cannot be read (cross-origin).
-  function readPixels(image, doc = document) {
-    try {
-      if (!image || image.tagName !== "IMG" || !image.complete || !image.naturalWidth || !image.naturalHeight) return null;
-      const scale = Math.min(1, 640 / Math.max(image.naturalWidth, image.naturalHeight));
-      const canvas = doc.createElement("canvas"); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const context = canvas.getContext("2d", { willReadFrequently: true }); if (!context) return null;
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
-      return { data, width, height };
-    } catch { return null; }
-  }
   // Fits one translation note over its OCR box. `measure(f, rect, padX, padY, wrap)` returns
   // {overflow, height}: how far the longest unbreakable word sticks out of the note's text
   // area, and the height of the wrapped text. Rules (user, 2026-10-16): start at the OCR box,
@@ -571,7 +536,6 @@
       }
       const overlay = { surface, box, items: [], key: "", held: false, suppress: false, original: false, card: null, pill: null, peekButton: null };
       session.overlay = overlay;
-      const pixels = readPixels(image, doc);
       lines.forEach(line => {
         if (!line.box) return;
         const sfx = line.kind === "sfx", node = doc.createElement("button"); node.type = "button";
@@ -583,12 +547,6 @@
           // ~ ! ? … is glued to the word before it (word joiner) so it never starts a line of its own.
           inner.textContent = line.korean.replace(/(\S)\s*([~〜!?！？…]+)/g, "$1\u2060$2");
           node.className = "note"; node.setAttribute("aria-label", `번역: ${line.korean}`); node.append(inner); item.inner = inner;
-          const b = line.box, tone = pixels
-            ? toneAround(pixels, { x: b.x0 / 1000 * pixels.width, y: b.y0 / 1000 * pixels.height, w: (b.x1 - b.x0) / 1000 * pixels.width, h: (b.y1 - b.y0) / 1000 * pixels.height })
-            : DEFAULT_TONE;
-          const light = luminance(tone.bg) > .36;
-          node.style.background = `rgb(${tone.bg.join(" ")})`; node.style.color = `rgb(${tone.fg.join(" ")})`;
-          node.style.setProperty("--edge", light ? "rgb(0 0 0 / 7%)" : "rgb(255 255 255 / 10%)");
         }
         if (reduced()) node.style.animation = "none";
         node.addEventListener("click", event => {
@@ -980,5 +938,5 @@
     }
     return { translate, close: dismiss, get open() { return Boolean(current?.popover || current?.overlay); }, destroy() { dismiss(0); cache.clear(); } };
   }
-  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, noteVariants, resolveOverlaps, chooseCorner, choosePillPlacement, toneAround, lineGeometry, imageFrame, MIN_FONT };
+  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, noteVariants, resolveOverlaps, chooseCorner, choosePillPlacement, lineGeometry, imageFrame, MIN_FONT };
 })();

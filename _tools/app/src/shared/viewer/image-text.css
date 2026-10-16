@@ -19,9 +19,9 @@
 /* Notes can sit outside the animated media; remove them before its exit begins. */
 [data-viewer-closing="true"] .image-text-notes,
 [data-viewer-closing="true"] .image-text-unpositioned { display: none; }
-.image-text-note { box-sizing: border-box; position: absolute; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-mark); background: var(--color-accent); color: var(--color-on-accent); font-family: var(--font-ui); font-weight: 600; line-height: 1.28; letter-spacing: 0; text-align: center; white-space: pre-line; word-break: keep-all; cursor: pointer; pointer-events: auto; box-shadow: var(--shadow-floating); }
+.image-text-note { box-sizing: border-box; position: absolute; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-mark); background: #ffffff; color: rgb(28 29 31); font-family: var(--font-ui); font-weight: 600; line-height: 1.28; letter-spacing: 0; text-align: center; white-space: pre-line; word-break: keep-all; cursor: pointer; pointer-events: auto; box-shadow: var(--shadow-floating); }
 .image-text-note[aria-pressed="true"], .image-text-note:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.image-text-note[data-stacked="true"] { box-shadow: 0 0 0 1px var(--color-on-accent), var(--shadow-floating); }
+.image-text-note[data-stacked="true"] { box-shadow: 0 0 0 1px rgb(0 0 0 / 7%), var(--shadow-floating); }
 .image-text-notes[data-open="false"] .image-text-note, .image-text-notes[data-surface-tap="true"] .image-text-note { pointer-events: none; }
 .image-text-note-card { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--space-2); width: min(260px, 100%); overflow: auto; padding: var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface-elevated); color: var(--color-text); box-shadow: var(--shadow-floating); font: 400 var(--type-body) / 1.5 var(--font-ui); word-break: keep-all; overflow-wrap: anywhere; pointer-events: auto; animation: image-text-card-in 140ms var(--ease-standard); }
 .image-text-note-card__original { color: var(--color-muted); }

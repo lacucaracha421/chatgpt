@@ -5,7 +5,7 @@ import { ImageTextNotes, type ImageTextNotesHandle } from "./ImageTextNotes";
 import { createRef } from "react";
 import { act } from "@testing-library/react";
 import type { ImageTextLine } from "../../library/types";
-import * as noteTone from "./imageTextNoteTone";
+import { readFileSync } from "node:fs";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const lines: ImageTextLine[] = [
@@ -14,25 +14,30 @@ const lines: ImageTextLine[] = [
   { original: "終", korean: "끝" },
 ];
 
-it("ignores a late thumbnail result after the displayed image changes", async () => {
-  let finishFirst!: (pixels: noteTone.NotePixels) => void;
-  let finishNext!: (pixels: noteTone.NotePixels) => void;
-  vi.spyOn(noteTone, "readNoteThumbnail")
-    .mockReturnValueOnce(new Promise(resolve => { finishFirst = resolve; }))
-    .mockReturnValueOnce(new Promise(resolve => { finishNext = resolve; }));
-  const props = { lines: [lines[0]], selected: null, open: true, onSelect: vi.fn(), rect: { left: 0, top: 0, width: 400, height: 600 }, zoom: { scale: 1, x: 0, y: 0 } };
-  const { rerender } = render(<ImageTextNotes {...props} image={document.createElement("img")} thumbnailSrc="http://lakomics.localhost/thumbnail/a"/>);
-  rerender(<ImageTextNotes {...props} image={document.createElement("img")} thumbnailSrc="http://lakomics.localhost/thumbnail/b"/>);
-  const pixels = (value: number): noteTone.NotePixels => {
-    const data = new Uint8ClampedArray(64 * 64 * 4);
-    for (let i = 0; i < data.length; i += 4) data.set([value, value, value, 255], i);
-    return { data, width: 64, height: 64 };
-  };
-  await act(async () => finishNext(pixels(20)));
-  const note = screen.getByRole("button", { name: "1번 대사" });
-  expect(note.style.background).toBe("rgb(20, 20, 20)");
-  await act(async () => finishFirst(pixels(255)));
-  expect(note.style.background).toBe("rgb(20, 20, 20)");
+it("uses fixed white notes without reading image pixels, including stacked notes", () => {
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/shared/viewer/image-text.css", "utf8");
+  document.head.append(style);
+  try {
+    const props = { lines, selected: null, open: true, onSelect: vi.fn(), rect: { left: 0, top: 0, width: 400, height: 600 }, zoom: { scale: 1, x: 0, y: 0 } };
+    const { container, rerender } = render(<ImageTextNotes {...props}/>);
+    const checkNotes = () => {
+      for (const note of container.querySelectorAll<HTMLElement>(".image-text-note")) {
+        expect(note.style.background).toBe("");
+        expect(note.style.color).toBe("");
+        expect(getComputedStyle(note).backgroundColor).toBe("rgb(255, 255, 255)");
+        expect(getComputedStyle(note).color).toBe("rgb(28, 29, 31)");
+      }
+    };
+    checkNotes();
+    const stacked = container.querySelector<HTMLElement>(".image-text-note")!;
+    stacked.dataset.stacked = "true";
+    expect(getComputedStyle(stacked).boxShadow).toContain("rgb(0 0 0 / 7%)");
+    rerender(<ImageTextNotes {...props} lines={lines.map(line => ({ ...line }))}/>);
+    checkNotes();
+    expect(getContext).not.toHaveBeenCalled();
+  } finally { style.remove(); }
 });
 
 it("uses a whole-row fold button and numbered Korean/original rows with muted unpositioned numbers", () => {

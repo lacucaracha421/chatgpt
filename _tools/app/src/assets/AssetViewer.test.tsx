@@ -556,50 +556,31 @@ const imageTextFixture: AssetImageText = { digest: "first", lines: [
   { original: "はい", korean: "응", box: { x0: 600, y0: 700, x1: 800, y1: 900 } },
 ] };
 
-it("samples a separate CORS thumbnail, applies per-note tones and retains them while zooming", async () => {
+it("keeps desktop notes white while zooming without reading a canvas", async () => {
   vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
   vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(600);
   vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(300);
-  const data = new Uint8ClampedArray(256 * 128 * 4);
-  for (let i = 0; i < data.length; i += 4) data.set(i < 256 * 64 * 4 ? [18, 20, 22, 255] : [255, 255, 255, 255], i);
-  const samples: HTMLImageElement[] = [];
-  vi.stubGlobal("Image", vi.fn(function () {
-    const image = document.createElement("img");
-    Object.defineProperty(image, "src", {
-      get: () => image.getAttribute("src") ?? "",
-      set: (src: string) => {
-        // Browsers select CORS mode when src is assigned, not when canvas is read.
-        expect(image.crossOrigin).toBe("anonymous");
-        image.setAttribute("src", src);
-        queueMicrotask(() => fireEvent.load(image));
-      },
-    });
-    samples.push(image);
-    return image;
-  }));
-  let drawn: HTMLImageElement | null = null;
-  const context = { drawImage: vi.fn((image: HTMLImageElement) => { drawn = image; }), getImageData: vi.fn(() => {
-    // jsdom has no origin-clean canvas enforcement; reproduce WebView2's boundary here.
-    if (drawn?.crossOrigin !== "anonymous") throw new DOMException("Canvas is tainted by a non-CORS media image", "SecurityError");
-    return { data, width: 256, height: 128 };
-  }) };
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/shared/viewer/image-text.css", "utf8");
+  document.head.append(style);
+  onTestFinished(() => style.remove());
   const gateway = { assetImageText: vi.fn().mockResolvedValue(imageTextFixture) } as unknown as LibraryGateway;
   render(textViewer(gateway));
   fireEvent.click(await screen.findByRole("button", { name: "번역" }));
-  const note = screen.getByRole("button", { name: "1번 대사" });
-  await waitFor(() => expect(note.style.background).toBe("rgb(18, 20, 22)"));
-  expect(note.style.color).toBe("rgb(251, 250, 247)");
-  expect(screen.getByRole("button", { name: "2번 대사" }).style.background).toBe("rgb(255, 255, 255)");
-  expect(screen.getByRole("button", { name: "2번 대사" }).style.color).toBe("rgb(28, 29, 31)");
-  const image = document.querySelector('[data-viewer-media] img.asset-viewer__media:not([data-stable-image-loading])');
-  expect(image).not.toHaveAttribute("crossorigin");
-  expect(samples).toHaveLength(1);
-  expect(samples[0].src).toBe("http://lakomics.localhost/thumbnail/a?note-tone=1");
-  expect(context.drawImage).toHaveBeenCalledWith(samples[0], 0, 0, 256, 128);
+  const checkNotes = () => {
+    for (const name of ["1번 대사", "2번 대사"]) {
+      const note = screen.getByRole("button", { name });
+      expect(note.style.background).toBe("");
+      expect(note.style.color).toBe("");
+      expect(getComputedStyle(note).backgroundColor).toBe("rgb(255, 255, 255)");
+      expect(getComputedStyle(note).color).toBe("rgb(28, 29, 31)");
+    }
+  };
+  checkNotes();
   fireEvent.wheel(document.querySelector(".asset-viewer__stage")!, { deltaY: -100, clientX: 300, clientY: 200 });
-  expect(note.style.background).toBe("rgb(18, 20, 22)");
-  expect(context.getImageData).toHaveBeenCalledOnce();
+  checkNotes();
+  expect(getContext).not.toHaveBeenCalled();
 });
 
 function textViewer(gateway: LibraryGateway, activeId: string | null = "a", extra = {}) {

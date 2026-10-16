@@ -57,32 +57,28 @@ async function unfold() {
   fireEvent.click(screen.getByRole('button', {name: '미디어 정보', exact: true}));
   await screen.findByRole('button', {name: /첫 번역/});
 }
-it('colours tablet notes from the displayed decoded image and keeps ivory on canvas failure', async () => {
+it('keeps tablet notes white across displayed images without reading a canvas', async () => {
   vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true);
   vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(800);
   vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(1000);
-  const data = new Uint8ClampedArray(205 * 256 * 4);
-  for (let i = 0; i < data.length; i += 4) data.set([255, 255, 255, 255], i);
-  const context = {drawImage: vi.fn((_image: CanvasImageSource, _x: number, _y: number, _width: number, _height: number) => {}), getImageData: vi.fn().mockReturnValue({data, width: 205, height: 256})};
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
   const view = render(<Viewer {...props} items={items} index={0}/>);
   await loaded();
   fireEvent.click(screen.getByRole('button', {name: '번역', exact: true}));
-  const note = screen.getByRole('button', {name: '1번 대사'});
-  expect(note.style.background).toBe('rgb(255, 255, 255)');
-  expect(note.style.color).toBe('rgb(28, 29, 31)');
-  expect(context.drawImage).toHaveBeenCalledWith(document.querySelector('.viewer-surface img:not([data-stable-image-loading])'), 0, 0, 205, 256);
-  // The preview and original are separate displayed bitmaps; each is sampled once.
-  const sampledImages = context.drawImage.mock.calls.map(call => call[0]);
-  expect(new Set(sampledImages).size).toBe(sampledImages.length);
-  expect(sampledImages.filter(image => image === document.querySelector('.viewer-surface img:not([data-stable-image-loading])'))).toHaveLength(1);
-  context.getImageData.mockImplementation(() => {throw new DOMException('tainted', 'SecurityError');});
+  const checkNote = () => {
+    const note = screen.getByRole('button', {name: '1번 대사'});
+    expect(note.style.background).toBe('');
+    expect(note.style.color).toBe('');
+    expect(getComputedStyle(note).backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(getComputedStyle(note).color).toBe('rgb(28, 29, 31)');
+  };
+  checkNote();
   view.rerender(<Viewer {...props} items={items} index={1}/>);
-  expect(note.style.background).toBe('rgb(255, 255, 255)');
+  checkNote();
   await loaded('b');
   await waitFor(() => expect(screen.getByRole('button', {name: '1번 대사'})).toHaveTextContent('둘째 번역'));
-  expect(screen.getByRole('button', {name: '1번 대사'}).style.background).toBe('');
-  expect(screen.getByRole('button', {name: '1번 대사'}).style.color).toBe('');
+  checkNote();
+  expect(getContext).not.toHaveBeenCalled();
 });
 function pointer(type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y: number, pointerId = 1) {
   fireEvent[type](document.querySelector('.viewer-surface')!, {pointerId, clientX: x, clientY: y, button: 0});
