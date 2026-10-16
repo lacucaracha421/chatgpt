@@ -1,0 +1,79 @@
+/* PROPOSED component CSS for the game/AV spine shelf (책장). In the app this becomes
+   _tools/app/src/collections/SpineShelf.css. It reuses the real spine print from CollectionCase.css
+   (.case-spine-art, .tpl, .spine-title) and the package plastic from CaseMaterials.css.
+   Geometry comes from real package sizes in millimetres times one scale (--spine-scale, px per mm). */
+
+.spine-shelf {
+  --spine-scale: 1.1;                 /* PC 보통; 작게 .9, 크게 1.35. Tablet 1.0 / 1.25 / 1.5 (set by the layout, not here). */
+  --spine-gap: 1px;                   /* cases touch; the 1px seam is a line, not spacing */
+  --spine-rim: calc(2.5px * var(--spine-scale));  /* the case's top/bottom plastic lip around the printed insert */
+  --spine-lift-room: var(--space-4);  /* above the tallest case: room for hover lift and the pulled-out cover */
+  --spine-plank: 6px;                 /* the manga 책장 plank, same paint */
+  --spine-row-gap: var(--space-6);    /* plank to the next row's tallest case */
+  position: relative;
+  outline: none;
+}
+
+/* One shelf row: the board holds the books; rows are absolutely placed by the windowing layout. */
+.spine-shelf__row { position: absolute; left: var(--space-6); right: var(--space-6); }
+.spine-shelf__board { position: absolute; left: 0; right: 0; bottom: calc(var(--spine-plank) + var(--spine-row-gap)); height: var(--board-height); }
+/* The plank: identical to .manga-bookcase-board::before/::after (collectionWork.css). Implementation moves both to one shared class. */
+.spine-shelf__board::after { content: ""; position: absolute; left: calc(var(--space-6) * -1); right: calc(var(--space-6) * -1); top: 100%; height: var(--spine-plank); background: linear-gradient(color-mix(in srgb, var(--color-text) 20%, transparent), color-mix(in srgb, var(--color-text) 7%, transparent)); mask-image: linear-gradient(90deg, transparent, black 3%, black 97%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 3%, black 97%, transparent); pointer-events: none; }
+.spine-shelf__board::before { content: ""; position: absolute; left: 2%; right: 2%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, black 55%, transparent), transparent 72%); pointer-events: none; }
+.spine-shelf__spines { position: relative; display: flex; align-items: flex-end; gap: var(--spine-gap); height: 100%; }
+
+/* One case standing spine-out. Real height and thickness: --h / --w in px (mm × scale), set inline per platform. */
+.spine { position: relative; flex: none; width: var(--w); height: var(--h); padding: 0; border: 0; background: none; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.spine__case { position: absolute; inset: 0; display: block; overflow: hidden; border-radius: 1px; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e;
+  transition: transform 90ms var(--ease-standard), opacity 360ms var(--ease-sheet); }
+.spine__case::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
+.spine__case > .ins { position: absolute; inset: var(--spine-rim) 0; overflow: hidden; display: block; --cd: var(--w); }
+.spine__case > .ins.bare { display: flex; align-items: center; justify-content: center; }
+/* Spine art (LaunchBox / AV jacket spine) is a flat image stretched to the insert, as on the 선반 case. */
+.spine__case > .ins > .case-spine-art > img { width: 100%; height: 100%; object-fit: fill; }
+.spine__case .case-mask { display: block; width: 100%; height: 100%; background: var(--color-surface); }
+
+/* Hover (PC) and keyboard focus: the case rises a little off the plank. No outline on hover, no stripe. */
+@media (hover: hover) { .spine-shelf:not([data-scrolling]) .spine:hover .spine__case { transform: translateY(-4px); } }
+.spine:active .spine__case { transform: translateY(-2px); filter: brightness(.92); }
+.spine:focus-visible { outline: none; }
+.spine:focus-visible .spine__case { transform: translateY(-4px); }
+/* Keyboard focus is the standard blue ring, drawn around the whole case (all four sides), never an edge stripe. */
+.spine:focus-visible::after { content: ""; position: absolute; inset: -3px; bottom: -3px; transform: translateY(-4px); border: var(--focus-width) solid var(--color-focus); border-radius: 2px; pointer-events: none; }
+
+/* Picked: the case is pulled out of the row and turned to its front cover. The empty slot stays (no reflow). */
+.spine[aria-pressed="true"] .spine__case { opacity: 0; }
+.spine-shelf__out { position: absolute; bottom: 0; z-index: 3; width: var(--cover-w); height: var(--h); padding: var(--spine-rim) var(--spine-rim) var(--spine-rim) 0; border: 0; border-radius: 2px 4px 4px 2px; cursor: pointer;
+  background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; box-shadow: var(--shadow-floating);
+  transform-origin: 50% 100%; transition: transform 360ms var(--ease-sheet), opacity 200ms var(--ease-standard); }
+.spine-shelf__out.is-out { transform: translateY(-6px); }
+.spine-shelf__out > .face { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 0 2px 2px 0; background: var(--color-surface); }
+.spine-shelf__out:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+/* The case gloss of .cs-front::after, kept quiet. */
+.spine-shelf__out > .face::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(104deg, rgba(255,255,255,0) 38%, rgba(255,255,255,.14) 47%, rgba(255,255,255,0) 58%) 50% 0 / 260% 100% no-repeat, linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,0) 5%); }
+
+/* First load only: rows rise 8px and scale .98 → 1 (accepted first-appearance B), staggered by row, not per spine. */
+.spine-shelf__row.is-entering { animation: spine-row-in 560ms var(--ease-spring, cubic-bezier(.22,1,.36,1)) both; animation-delay: calc(var(--i, 0) * 24ms); }
+@keyframes spine-row-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+/* A spine image that arrives after the row is shown fades in once over its plastic (never from nothing). */
+.spine__case > .ins > .case-spine-art > img.is-arriving { animation: spine-art-in 140ms var(--ease-standard) both; }
+@keyframes spine-art-in { from { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spine__case, .spine-shelf__out { transition: none; }
+  .spine-shelf__row.is-entering, .spine__case > .ins > .case-spine-art > img.is-arriving { animation: none; }
+}
+
+/* Flat cover grid (격자) for game/AV: the front cover image alone, its own aspect ratio, bottom-aligned in the
+   row like cases standing face-out. Replaces GameCase/PhysicalCover (the cached 3D SteelBook render). */
+.cover-grid { display: grid; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.cover-grid__card { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 0; background: none; color: var(--color-text); text-align: left; cursor: pointer; }
+.cover-grid__frame { display: flex; align-items: flex-end; aspect-ratio: 105 / 170; } /* the tallest common cover (Switch) sets the row's cover band */
+.cover-grid__cover { position: relative; display: block; width: 100%; aspect-ratio: var(--ratio); overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface);
+  outline: var(--border-width, 1px) solid var(--color-border); outline-offset: calc(var(--border-width, 1px) * -1); transition: outline-color 90ms var(--ease-standard); }
+.cover-grid__card:hover .cover-grid__cover { outline-color: var(--color-muted); }
+.cover-grid__card:focus-visible { outline: none; }
+.cover-grid__card:focus-visible .cover-grid__cover { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.cover-grid__card[aria-selected="true"] .cover-grid__cover { outline: var(--focus-width) solid var(--color-accent); outline-offset: calc(var(--focus-width) * -1); }
+.cover-grid__name { margin-top: var(--space-2); overflow: hidden; color: var(--color-text); font-size: var(--type-meta); font-weight: 600; line-height: var(--line-ui); text-overflow: ellipsis; white-space: nowrap; }
+.cover-grid__meta { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }

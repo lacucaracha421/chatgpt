@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캐릭터 분류 정리</title>
+<!-- Loads the app's real font, tokens and shared controls; only the document frames below are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+:root { --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 15px/1.55 var(--font-ui); }
+.doc { max-width: 1360px; margin: 0 auto; padding: 32px 24px 96px; display: flex; flex-direction: column; gap: 44px; }
+h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 12px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark, var(--color-faint)); flex: none; }
+h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+p { margin: 0 0 8px; }
+.lead, .note { color: var(--color-muted); max-width: 96ch; line-height: 1.7; }
+.lead b, .note b, li b, td b { color: var(--color-text); font-weight: 600; }
+.meta { font-size: 12px; color: var(--color-faint); }
+code, .path { font-family: var(--font-mono); font-size: 12px; color: var(--color-faint); }
+ul, ol { margin: 0; padding-left: 20px; }
+li { margin: 3px 0; color: var(--color-muted); }
+li::marker { color: var(--color-faint); }
+.box { border: 1px solid var(--color-border); background: var(--color-surface); padding: 16px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+.badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-muted); font-size: 12px; font-weight: 600; white-space: nowrap; vertical-align: 1px; }
+.badge.acc { background: var(--color-accent); color: var(--color-on-accent, #111); }
+
+/* At a glance */
+.glance { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border); border: 1px solid var(--color-border); }
+.glance div { background: var(--color-sidebar); padding: 14px 16px; display: grid; grid-template-columns: 28px 1fr; gap: 0 8px; }
+.glance i { font-style: normal; font: 600 18px/1.4 var(--font-ui); color: var(--color-faint); }
+.glance b { display: block; font-weight: 600; margin-bottom: 2px; }
+.glance span { font-size: 14px; color: var(--color-muted); }
+
+/* Confirmed decisions */
+.dec { display: grid; grid-template-columns: 44px 1fr; gap: 0 12px; padding: 14px 0; border-top: 1px solid var(--color-border); }
+.dec:last-child { border-bottom: 1px solid var(--color-border); }
+.dec .n { font: 600 22px/1.2 var(--font-ui); color: var(--color-faint); }
+.dec h3 { margin-bottom: 4px; }
+.dec p { color: var(--color-muted); font-size: 14px; margin: 0; max-width: 110ch; }
+
+/* Numbers */
+.facts { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--color-border); border: 1px solid var(--color-border); }
+.facts div { background: var(--color-sidebar); padding: 12px 16px; }
+.facts b { display: block; font: 600 24px/1.2 var(--font-numeric, var(--font-ui)); font-variant-numeric: tabular-nums; }
+.facts span { font-size: 12px; color: var(--color-muted); }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--color-border); }
+th { font-size: 12px; font-weight: 600; color: var(--color-faint); white-space: nowrap; }
+td { color: var(--color-muted); }
+td:first-child { color: var(--color-text); font-weight: 600; white-space: nowrap; }
+.yes { color: var(--color-text); }
+.no { color: var(--color-faint); }
+.vocab td:first-child { font-weight: 400; color: var(--color-muted); white-space: normal; }
+.vocab td:nth-child(2) { color: var(--color-text); font-weight: 600; }
+.places td:first-child { font-weight: 400; white-space: normal; }
+.places td:nth-child(2) { color: var(--color-muted); }
+.places td:nth-child(3) { color: var(--color-text); }
+.strike { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--color-faint) 70%, transparent); }
+
+/* Model diagrams */
+.model { border: 1px solid var(--color-border); background: var(--color-sidebar); padding: 16px; }
+.model h3 { display: flex; gap: 8px; align-items: baseline; }
+.layer { font-size: 12px; color: var(--color-faint); margin: 12px 0 6px; }
+.node { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--color-border); background: var(--color-surface); font-size: 13px; white-space: nowrap; border-radius: 2px; }
+.node.series { border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border)); }
+.node.char { background: var(--color-surface-elevated); }
+.node.extra { border-style: dashed; color: var(--color-muted); }
+.node.excl { color: var(--color-faint); border-style: dotted; }
+.node.group { background: transparent; border-color: var(--color-muted); }
+.node small { color: var(--color-faint); font-size: 12px; }
+.tree { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.tree .kids { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 20px; position: relative; }
+.tree .kids::before { content: ""; position: absolute; left: 8px; top: -2px; bottom: 14px; border-left: 1px solid var(--color-border); }
+.flag { color: var(--color-danger); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; color: var(--color-muted); margin-top: 12px; }
+.legend .node { height: 22px; font-size: 12px; }
+
+/* Flow */
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); counter-reset: step; }
+.step { border: 1px solid var(--color-border); border-right: none; padding: 14px; background: var(--color-surface); position: relative; }
+.step:last-child { border-right: 1px solid var(--color-border); }
+.step::before { counter-increment: step; content: counter(step); display: block; font: 600 22px/1 var(--font-ui); color: var(--color-faint); margin-bottom: 8px; }
+.step b { display: block; margin-bottom: 4px; }
+.step p { font-size: 13px; color: var(--color-muted); margin: 0; }
+.flow.four { grid-template-columns: repeat(4, 1fr); }
+
+/* Screen frames */
+.cap { font-size: 12px; color: var(--color-faint); margin: 0 0 6px; }
+.cap b { color: var(--color-muted); font-weight: 600; }
+.pc { background: var(--color-bg); border: 1px solid var(--color-border); display: grid; grid-template-columns: 180px 1fr; overflow: hidden; font-size: 13px; }
+.pc.solo { grid-template-columns: 1fr; }
+.pc .side { background: var(--color-sidebar); border-right: 1px solid var(--color-border); padding: 10px 0; }
+.pc .side div { height: 26px; display: flex; align-items: center; padding: 0 12px; color: var(--color-muted); white-space: nowrap; }
+.pc .side .d1 { padding-left: 24px; } .pc .side .d2 { padding-left: 36px; }
+.pc .side.sb2 div { gap: 6px; }
+.pc .side .c { margin-left: auto; color: var(--color-faint); font-size: 12px; }
+.pc .side .on { background: var(--color-surface-elevated); color: var(--color-text); font-weight: 600; }
+.main { display: flex; flex-direction: column; min-width: 0; }
+.bar { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+.bar .crumb { color: var(--color-muted); font-size: 12px; }
+.bar .crumb i { font-style: normal; color: var(--color-faint); margin: 0 4px; }
+.bar .t { font-size: 15px; font-weight: 600; }
+.bar .n { font-size: 12px; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.bar .sp { flex: 1; }
+.bar .btn { font-size: 12px; color: var(--color-muted); padding: 0 6px; }
+.bar .btn b { color: var(--color-text); }
+.shelf { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; padding: 12px 16px; }
+.card { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.card .img { aspect-ratio: 3 / 4; background: var(--g, #2a2c30); position: relative; overflow: hidden; }
+.card .img.mosaic { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: transparent; }
+.card .img.mosaic span { background: var(--g, #2a2c30); }
+.card .img.extra { outline: 1px dashed var(--color-muted); outline-offset: -1px; background: var(--color-surface); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px; }
+.card .img.extra span { background: var(--g); opacity: .75; }
+.card .img.folder { background: var(--color-surface); display: grid; place-items: center; color: var(--color-faint); font-size: 22px; }
+.card .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 4px; align-items: center; }
+.card .name em { font-style: normal; font-weight: 400; color: var(--color-faint); font-size: 12px; }
+.card .sub { font-size: 12px; color: var(--color-faint); }
+.hint { position: absolute; left: 4px; bottom: 4px; right: 4px; font-size: 11px; line-height: 1.3; padding: 3px 5px; background: rgba(0,0,0,.78); color: var(--color-text); }
+.gallery { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; padding: 0 16px 12px; }
+.gallery span { aspect-ratio: 1; background: var(--g); position: relative; }
+.gallery span.sel::after { content: ""; position: absolute; inset: 0; outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.seclabel { display: flex; align-items: center; gap: 8px; padding: 10px 16px 0; font-size: 12px; color: var(--color-faint); }
+.seclabel::before { content: ""; width: 5px; height: 5px; background: var(--color-faint); }
+.seclabel b { color: var(--color-muted); font-weight: 600; }
+.segs { display: inline-flex; height: 28px; padding: 2px; background: var(--color-surface); border-radius: 4px; font-size: 12px; margin-left: 8px; }
+.segs span { padding: 0 10px; display: grid; place-items: center; color: var(--color-muted); border-radius: 3px; }
+.segs span.on { background: var(--color-accent); color: var(--color-on-accent, #111); font-weight: 600; }
+
+/* Review */
+.review { display: grid; grid-template-columns: 1fr 260px; gap: 0; }
+.review .stage { padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.review .big { aspect-ratio: 4 / 5; background: var(--g); position: relative; }
+.review .box2 { position: absolute; left: 30%; top: 14%; width: 38%; height: 40%; outline: 1.5px solid var(--color-accent); }
+.review .refs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; align-content: start; }
+.review .refs span { aspect-ratio: 1; background: var(--g); }
+.review .refs p { grid-column: 1 / -1; margin: 0 0 4px; font-size: 12px; color: var(--color-faint); }
+.review .side2 { border-left: 1px solid var(--color-border); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.review .q { font-size: 18px; font-weight: 600; }
+.review .why { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions { display: flex; flex-direction: column; gap: 6px; }
+.actions span { height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; background: var(--color-surface); font-size: 13px; }
+.actions span.p { background: var(--color-accent); color: var(--color-on-accent, #111); font-weight: 600; }
+.actions span.g { background: transparent; color: var(--color-muted); }
+.strip { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; padding: 0 16px 14px; }
+.strip span { aspect-ratio: 1; background: var(--g); opacity: .6; }
+.strip span.cur { opacity: 1; outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* Settings */
+.settings { padding: 16px; font-size: 13px; }
+.settings h4 { margin: 0 0 4px; font-size: 15px; }
+.settings .row { display: grid; grid-template-columns: 1.3fr 1fr .9fr .9fr .6fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--color-border); color: var(--color-muted); align-items: center; }
+.settings .row.h { color: var(--color-faint); font-size: 12px; }
+.settings .row b { color: var(--color-text); font-weight: 600; }
+.settings .raw { color: var(--color-faint); font-size: 12px; }
+.settings .line { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--color-border); color: var(--color-muted); }
+.settings .line b { color: var(--color-text); font-weight: 600; }
+.qbtn { font-size: 12px; color: var(--color-text); padding: 0 8px; height: 26px; display: inline-flex; align-items: center; }
+
+/* Dialog */
+.dialog { position: relative; border: 1px solid var(--color-border); background: var(--color-surface-elevated); padding: 16px; font-size: 13px; }
+.dialog::before, .dialog::after { content: ""; position: absolute; width: 8px; height: 8px; }
+.dialog::before { left: 2px; top: 2px; border-left: 2px solid var(--color-accent); border-top: 2px solid var(--color-accent); }
+.dialog::after { right: 2px; bottom: 2px; border-right: 2px solid var(--color-accent); border-bottom: 2px solid var(--color-accent); }
+.dialog h4 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 12px; color: var(--color-muted); margin-bottom: 4px; }
+.field .in { height: 32px; background: var(--color-surface); display: flex; align-items: center; padding: 0 10px; border-radius: 4px; }
+.prefs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.prefs span { aspect-ratio: 1; background: var(--g); position: relative; }
+.prefs span.on::after { content: ""; position: absolute; right: 3px; top: 3px; width: 9px; height: 9px; background: var(--color-accent); }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.dialog .row span { height: 32px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 4px; }
+.dialog .row .p { background: var(--color-accent); color: var(--color-on-accent, #111); font-weight: 600; }
+.dialog .row .g { color: var(--color-muted); }
+
+/* Tablet (about 70 % of a 674 px portrait screen) */
+.tab { width: 470px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; font-size: 13px; }
+.tab .tb { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 6px; background: var(--color-sidebar); border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+.tab .tb .back { width: 32px; text-align: center; color: var(--color-muted); font-size: 16px; }
+.tab .tb .stack { display: flex; flex-direction: column; line-height: 1.2; }
+.tab .tb .stack small { font-size: 10px; color: var(--color-muted); }
+.tab .tb .stack b { font-size: 14px; }
+.tab .tb .sp { flex: 1; }
+.tab .tb .ic { width: 28px; height: 28px; display: inline-grid; place-items: center; color: var(--color-muted); }
+.tab .shelf { grid-template-columns: repeat(4, 1fr); padding: 10px 16px; gap: 8px; }
+.tab .gallery { grid-template-columns: repeat(5, 1fr); }
+.tab .tbtns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 16px 16px; }
+.tab .tbtns span { height: 36px; display: grid; place-items: center; border-radius: 4px; background: var(--color-surface); font-size: 13px; }
+.tab .tbtns span.p { background: var(--color-accent); color: var(--color-on-accent, #111); font-weight: 600; }
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.empty { padding: 24px 16px 8px; text-align: center; color: var(--color-faint); font-size: 12px; }
+.x { color: var(--color-danger); font-size: 12px; }
+.ok { color: var(--color-success); font-size: 12px; }
+
+/* Evidence bars */
+.ev { display: grid; grid-template-columns: 200px 1fr 120px; gap: 6px 12px; align-items: center; font-size: 13px; }
+.ev .track { height: 10px; background: var(--color-surface); position: relative; }
+.ev .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--color-muted); }
+.ev span:last-child { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .grid2, .grid3, .flow, .flow.four, .ba, .glance, .review, .review .stage { grid-template-columns: 1fr; }
+  .facts { grid-template-columns: repeat(3, 1fr); }
+  .step { border-right: 1px solid var(--color-border); border-bottom: none; }
+  .pc { grid-template-columns: 1fr; } .pc .side { display: none; }
+  .shelf { grid-template-columns: repeat(4, 1fr); }
+  .tab { width: 100%; }
+}
+</style>
+</head>
+<body>
+<main class="doc">
+
+<header>
+  <p class="meta">2026-10-11 · 최종안 (결정과 추가 답변 반영, 구현 전) · PC와 태블릿 공통</p>
+  <h1>캐릭터 분류 정리</h1>
+  <p class="lead" style="margin-top:8px">2026년 10월 11일에 정한 결정을 한 문서로 모았습니다. 숫자는 오늘 실제 라이브러리를 <b>읽기만</b> 해서 확인한 값입니다. 라이브러리에 쓴 것은 없습니다.</p>
+</header>
+
+<!-- At a glance -->
+<section>
+  <h2 class="sec">한눈에 보기 — 매일 쓸 때 달라지는 것</h2>
+  <div class="glance">
+    <div><i>1</i><p><b>리버스 이미지는 그냥 리버스에 넣으면 됩니다.</b><span>자동 인식은 이미지를 "가장 가까운 시리즈"의 캐릭터 전부와 비교합니다. 리버스에 바로 넣어도 리버스 캐릭터 모두와 비교되니 손해가 없습니다. 하위 폴더로 나눠 넣어도 인식에는 도움도 해도 없습니다.</span></p></div>
+    <div><i>2</i><p><b>리버스의 하위 폴더는 모두 "그룹"이 됩니다.</b><span>라플라스·가방팟·전쟁, 그리고 런던·파리 같은 버전 이름까지 그룹 카드로 나옵니다(버전 표지만 폴더로 남음). 그룹을 열면 멤버 캐릭터와 "기타"가 보입니다.</span></p></div>
+    <div><i>3</i><p><b>왼쪽 사이드바에 그룹이 다시 보입니다.</b><span>리버스를 펼치면 그룹이 한 줄씩, 그다음에 폴더가 나옵니다. 그룹 줄을 누르면 그룹 화면이 열립니다. 캐릭터와 기타는 사이드바에 따로 나오지 않습니다.</span></p></div>
+    <div><i>4</i><p><b>캐릭터가 아직 없는 사람은 "기타"에 모아 둡니다.</b><span>그룹마다 기타가 하나, 그룹 밖 사람을 위한 시리즈 기타가 하나 있습니다. 기타에는 사람이 넣은 것만 들어갑니다.</span></p></div>
+    <div><i>5</i><p><b>같은 사람이 5장 모이면 "캐릭터로" 제안이 뜹니다.</b><span>누르면 그 이미지들로 새 캐릭터가 생기고, 레퍼런스 5장이 정해지면 그때부터 새 이미지를 자동으로 알아봅니다.</span></p></div>
+    <div><i>6</i><p><b>확인할 것은 "확인" 한 곳에서 맞음/아님만 누르면 됩니다.</b><span>태거 검토 · 후보 확인 · 캐릭터 검토로 흩어져 있던 목록이 하나로 합쳐집니다. 의무가 아니고, 빨간 숫자도 없습니다.</span></p></div>
+    <div><i>7</i><p><b>인식 방식은 캐릭터마다 앱이 알아서 고릅니다.</b><span>처음엔 "기본 인식", 맞음이 충분히 쌓이고 틀린 비율이 낮은 캐릭터는 저절로 "학습 인식"으로 넘어갑니다. 고르는 메뉴는 없고, 궁금하면 설정 › 고급에서 봅니다.</span></p></div>
+    <div><i>8</i><p><b>화면에서 PixAI · canary · B36 · S36 같은 이름이 사라집니다.</b><span>대신 "자동 태그(확실/불확실)", "기본 인식 / 학습 인식"으로 통일합니다. 태블릿도 같은 말과 같은 순서로 보입니다(밴드물에서 봇치·걸밴크도 보임).</span></p></div>
+  </div>
+</section>
+
+<!-- Confirmed -->
+<section>
+  <h2 class="sec">확정한 것</h2>
+  <div class="dec"><div class="n">1</div><div>
+    <h3>리버스 하위 폴더는 모두 그룹으로 (버전 표지만 폴더)</h3>
+    <p>라플라스, 라야시키, 가방팟, 전쟁, 아르고스팟, 카카졸데, 런던, 파리, 중국, 재건, 뱀파이어, 라모나, 4.0 — <b>13개 그룹</b>. 런던·파리 등은 장소가 아니라 버전 이름입니다. <b>버전 표지</b>만 일반 폴더로 남습니다. 마커스(캐릭터 1명짜리 시리즈)는 리버스의 캐릭터 <b>마커스</b>가 되고 따로 그룹은 만들지 않습니다. 캐릭터가 없는 그룹(전쟁, 파리, 라모나, 4.0)은 <b>기타만 있는 그룹</b>으로 시작합니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">2</div><div>
+    <h3>옮긴 뒤 빈 팀 폴더는 없앰</h3>
+    <p>팀 폴더의 이미지는 리버스로 올리고, 비게 된 폴더는 지웁니다. 디스크의 실제 파일은 그대로입니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">3</div><div>
+    <h3>캐릭터는 이미지가 가장 많은 그룹으로</h3>
+    <p>예: 버틴 → 가방팟. 다른 그룹 폴더에 잘못 들어가 있던 이미지(예: 런던 폴더의 버틴 몇 장)는 그냥 버틴 소속으로 따라갑니다. 따로 옮길 것은 없습니다. 캐릭터가 없는 이미지는 <b>그 이미지가 있던 폴더 이름의 그룹</b> 기타로 갑니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">4</div><div>
+    <h3>기타 칸: 그룹마다 하나, 시리즈마다 하나</h3>
+    <p>기타는 "이름 없는 사람 묶음"입니다. 사람이 넣은 것만 담고, 자동 인식도 학습도 하지 않습니다. 그룹 이미지 = 멤버 캐릭터 이미지 + 그 그룹의 기타. 기타에 이미지가 있는 그룹은 캐릭터가 없어도 지워지지 않습니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">5</div><div>
+    <h3>기타는 한 묶음, 5장 모이면 승격 제안 · 레퍼런스 5장이면 바로 인식</h3>
+    <p>자동 태그가 기타 안에서 같은 이름을 5장 이상 읽으면 "렌 5장 · 캐릭터로" 같은 제안이 뜹니다. 승격 창에서 레퍼런스를 미리 골라 두고, 5장 이상이면 그 자리에서 자동 인식이 켜집니다. 과거 이미지를 저절로 다시 훑지는 않습니다(버튼 하나로 요청).</p>
+  </div></div>
+  <div class="dec"><div class="n">6</div><div>
+    <h3>시리즈 안 시리즈·중간 폴더를 한 규칙으로</h3>
+    <p>시리즈 화면에 안쪽 시리즈가 카드로 보이고, 일반 폴더는 태블릿에서도 PC처럼 일반 폴더로 열립니다. 부모 시리즈의 미분류에서는 안쪽 시리즈 이미지가 빠집니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">7</div><div>
+    <h3>확인 목록 하나</h3>
+    <p>태거 검토 · 후보 확인 · S36 시험 채점 확인 · (태블릿) 캐릭터 검토 → <b>확인</b>. 채점 진행, 정확도, 준비 상태 같은 숫자는 설정 › 고급의 진단으로 옮깁니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">8</div><div>
+    <h3>학습 인식은 캐릭터마다 저절로 — 고르는 메뉴 없음</h3>
+    <p>캐릭터 하나가 다음 셋을 모두 넘으면 학습 인식으로 넘어갑니다: <b>확인에서 학습 인식 후보 30건 이상 판단</b> · <b>맞음 예시 50장 이상</b> · <b>틀림이 허용치 이하</b>. 허용치 = <b>판단 수의 5%(소수점 버림), 단 최소 1건</b>. 예: 판단 30건 → 1건까지, 40건 → 2건, 60건 → 3건, 100건 → 5건. 틀림이 허용치를 넘으면 기본 인식으로 돌아가고, 판단이 더 쌓여 다시 허용치 안이 되면 다시 넘어갑니다. 리버스는 지금 기준을 넘은 캐릭터가 없어 기본 인식으로 돌아갑니다(확정). 이 규칙이면 오늘 넘어가는 캐릭터는 젠레스의 <b>수나</b>와 <b>남궁우</b> 2명입니다. 학습 인식이 잘못 넣은 이미지는 <b>아님</b>으로 고치면 빠지고, 다시 들어오지 않으며, 틀림으로 세어집니다. 맞음은 학습 예시가 됩니다.</p>
+  </div></div>
+  <div class="dec"><div class="n">9</div><div>
+    <h3>사이드바에 그룹 다시 보이기</h3>
+    <p>PC 사이드바에서 시리즈를 펼치면 <b>그룹 줄 → 폴더 줄</b> 순서로 나옵니다. 그룹 줄은 펼쳐지지 않는 한 줄이고, 누르면 그룹 화면이 열립니다. 캐릭터와 기타는 사이드바 줄이 아니라 그룹 화면 안에서만 보입니다. 그룹 안의 캐릭터나 기타를 보고 있을 때도 그 그룹 줄이 선택된 것으로 표시됩니다. 태블릿은 에셋 › 분류 목록과 시리즈 화면에서 같은 순서(그룹 → 폴더)를 씁니다. 9월 29일에 뺐던 PC 사이드바의 그룹 줄을 거의 그대로 되살립니다(그때 있던 "그룹 밖 캐릭터 줄"은 다시 넣지 않음).</p>
+  </div></div>
+  <div class="dec"><div class="n">10</div><div>
+    <h3>용어 묶음과 쉬운 모델 이름</h3>
+    <p>"<b>자동 태그</b>가 이름을 읽고, <b>인식</b>이 얼굴을 알아본다." 자동 태그 둘이 같은 이름을 읽으면 <b>확실</b>, 하나만 읽으면 <b>불확실</b>. 인식은 레퍼런스와 비교하는 <b>기본 인식</b>, 맞음 판단으로 배우는 <b>학습 인식</b>. 원래 이름(PixAI, canary, B36, S36)은 설정 › 고급에만. 전체 목록은 "모델 이름 바꾸기"와 "용어" 절.</p>
+  </div></div>
+</section>
+
+<!-- Remaining questions -->
+<section>
+  <h2 class="sec">남은 확인 한 가지</h2>
+  <div class="dec"><div class="n">A</div><div>
+    <h3>레굴루스는 어느 그룹?</h3>
+    <p>레굴루스는 가방팟 폴더와 라플라스 폴더에 각각 7장씩 있어 "가장 많은 그룹"이 둘입니다. 정리를 실행할 때 미리보기 화면에서 고르면 됩니다(추천 없음 — 사용자가 아는 쪽). 참고로 근거가 1장뿐인 배정이 6명 있습니다: 릴리아 → 가방팟, 투스페어리·알레프 → 라플라스, 플러터페이지 → 런던, 제시카 → 아르고스팟, 노티카 → 재건. 규칙대로 하되 같은 미리보기에서 바꿀 수 있게 합니다.</p>
+  </div></div>
+</section>
+
+<!-- Facts -->
+<section>
+  <h2 class="sec">지금 라이브러리 (읽기 전용 확인)</h2>
+  <div class="facts">
+    <div><b>38</b><span>등록 시리즈 · 그중 16개가 다른 시리즈 안</span></div>
+    <div><b>251</b><span>캐릭터 · 수동 17</span></div>
+    <div><b>27</b><span>그룹 · 멤버 110 (리버스는 0)</span></div>
+    <div><b>1,640</b><span>리버스에 바로 들어 있는 이미지</span></div>
+    <div><b>13</b><span>리버스에 새로 생길 그룹 · 기타만 있는 그룹 4</span></div>
+    <div><b>2</b><span>새 기준으로 오늘 학습 인식이 될 캐릭터 (수나, 남궁우)</span></div>
+  </div>
+</section>
+
+<!-- Why folders are not needed -->
+<section>
+  <h2 class="sec">왜 리버스에 바로 넣어도 되나요</h2>
+  <div class="grid2">
+    <div class="box">
+      <h3>자동 인식이 비교하는 범위</h3>
+      <ul style="font-size:14px">
+        <li>이미지가 들어간 폴더에서 위로 올라가며 <b>처음 만나는 등록 시리즈</b>를 찾습니다.</li>
+        <li>그 시리즈의 자동 인식 캐릭터 <b>전부</b>와 비교합니다.</li>
+        <li>리버스 › 가방팟에 넣든 리버스에 바로 넣든 처음 만나는 시리즈는 리버스 → 똑같이 리버스 캐릭터 전부와 비교.</li>
+        <li>반대로 라플라스처럼 하위를 <b>시리즈로 등록</b>하면 그 안 캐릭터 2명과만 비교됩니다 — 이게 지금 손해를 보던 부분입니다.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>하위 폴더가 하던 일 → 그룹이 대신</h3>
+      <ul style="font-size:14px">
+        <li>"이 팀 사람들끼리 모아 보기" → 그룹 카드(멤버 + 기타).</li>
+        <li>"아직 누군지 모르는 팀 사람" → 그룹의 기타.</li>
+        <li>"인식이 헷갈리지 않게 나눠 두기" → 필요 없음. 인식은 폴더가 아니라 레퍼런스로 구분합니다.</li>
+        <li>장소·버전 같은 정리용 폴더는 계속 쓸 수 있습니다(인식에는 영향 없음).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Current vs proposed -->
+<section>
+  <h2 class="sec">지금 구조와 바뀐 구조 — 리버스</h2>
+  <div class="grid2">
+    <div class="model">
+      <h3>지금</h3>
+      <div class="layer">폴더 (이미지가 놓인 곳)</div>
+      <div class="tree">
+        <span class="node series">리버스 <small>시리즈 · 1,640장</small></span>
+        <div class="kids">
+          <span class="node series">라플라스 <small>시리즈 · 170</small></span>
+          <span class="node series">라야시키 <small>시리즈 · 77</small></span>
+          <span class="node series">마커스 <small>시리즈 · 127</small></span>
+          <span class="node">가방팟 <small>161</small></span>
+          <span class="node">전쟁 <small>128</small></span>
+          <span class="node">아르고스팟 <small>117</small></span>
+          <span class="node">파리 <small>114</small></span>
+          <span class="node">카카졸데 <small>60</small></span>
+          <span class="node"><small>일반 폴더 7개 더</small></span>
+        </div>
+      </div>
+      <div class="layer">캐릭터 (폴더가 아니라 소속)</div>
+      <div class="tree"><div class="kids" style="padding-left:0">
+        <span class="node char">버틴 <small>211</small></span>
+        <span class="node char">이졸데 <small>135</small></span>
+        <span class="node char"><small>리버스 캐릭터 26명 더</small></span>
+        <span class="node char">히사베스 <small>라플라스 시리즈</small></span>
+        <span class="node char">로렌츠 <small>라플라스 시리즈</small></span>
+        <span class="node char">마커스 <small>마커스 시리즈</small></span>
+      </div></div>
+      <div class="layer">그룹</div>
+      <div class="tree"><div class="kids" style="padding-left:0"><span class="node excl">리버스에는 그룹 0개</span></div></div>
+      <ul class="note" style="margin-top:12px; font-size:13px">
+        <li><span class="flag">●</span> 라플라스·라야시키·마커스 폴더 이미지는 리버스 캐릭터와 비교되지 않음</li>
+        <li><span class="flag">●</span> 리버스 미분류에 안쪽 시리즈 이미지 253장이 섞임</li>
+        <li><span class="flag">●</span> 리버스 첫 화면에 안쪽 시리즈 카드가 없음</li>
+        <li><span class="flag">●</span> 팀 사람인데 캐릭터가 없는 이미지는 둘 곳이 폴더뿐</li>
+      </ul>
+    </div>
+    <div class="model">
+      <h3>바뀐 뒤</h3>
+      <div class="layer">폴더</div>
+      <div class="tree">
+        <span class="node series">리버스 <small>시리즈 · 하나뿐인 인식 범위</small></span>
+        <div class="kids"><span class="node">버전 표지 <small>폴더 · 9</small></span></div>
+      </div>
+      <div class="layer">그룹 13개 (멤버 · 기타)</div>
+      <div class="tree">
+        <span class="node group">가방팟 <small>8명 · 기타 42</small></span>
+        <div class="kids"><span class="node char">버틴</span><span class="node char">소네트</span><span class="node char"><small>+6명</small></span><span class="node extra">기타 <small>42</small></span></div>
+        <span class="node group">라플라스 <small>8명 · 기타 18</small></span>
+        <div class="kids"><span class="node char">히사베스</span><span class="node char">로렌츠</span><span class="node char"><small>+6명</small></span><span class="node extra">기타 <small>18</small></span></div>
+        <span class="node group">전쟁 <small>기타만</small></span>
+        <div class="kids"><span class="node extra">기타 <small>126</small></span></div>
+        <div class="kids" style="padding-left:0">
+          <span class="node group">라야시키</span><span class="node group">카카졸데</span><span class="node group">아르고스팟</span><span class="node group">중국</span><span class="node group">런던</span><span class="node group">재건</span><span class="node group">뱀파이어</span><span class="node group">파리 <small>기타만</small></span><span class="node group">라모나 <small>기타만</small></span><span class="node group">4.0 <small>기타만</small></span>
+        </div>
+      </div>
+      <div class="layer">그룹 밖</div>
+      <div class="tree"><div class="kids" style="padding-left:0"><span class="node char">마커스</span><span class="node char">레콜레타</span><span class="node char">소더비</span><span class="node extra">기타 <small>시리즈 · 마커스 폴더의 10장</small></span></div></div>
+      <ul class="note" style="margin-top:12px; font-size:13px">
+        <li>모든 리버스 이미지가 리버스 캐릭터 전부와 비교됨</li>
+        <li>그룹 이미지 = 멤버 이미지 + 그룹 기타</li>
+        <li>기타 숫자는 정리 직후, 비교를 돌리기 전 값(비교 뒤 줄어들 수 있음)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="node series">시리즈</span> 인식 범위</span>
+    <span><span class="node">폴더</span> 이미지가 놓인 곳</span>
+    <span><span class="node char">캐릭터</span> 소속</span>
+    <span><span class="node extra">기타</span> 이름 없는 묶음</span>
+    <span><span class="node group">그룹</span> 팀</span>
+  </div>
+</section>
+
+<!-- Rules -->
+<section>
+  <h2 class="sec">규칙 — 개념 여섯 개와 보기 하나</h2>
+  <table>
+    <thead><tr><th>개념</th><th>이미지를 가짐</th><th>자동 인식이 넣나</th><th>학습 재료</th><th>PC · 태블릿 (같은 모양)</th></tr></thead>
+    <tbody>
+      <tr><td>폴더</td><td class="yes">직접 (한 이미지 한 폴더)</td><td class="no">아님</td><td class="no">아님</td><td>폴더 카드. 시리즈 안에서는 그룹·캐릭터 카드 뒤에.</td></tr>
+      <tr><td>시리즈</td><td class="yes">직접 + 하위 폴더 전부</td><td>인식 범위: 안의 이미지는 이 시리즈 캐릭터 전부와 비교</td><td class="no">—</td><td>시리즈 화면. 안쪽 시리즈는 시리즈 카드로.</td></tr>
+      <tr><td>그룹 (팀)</td><td>멤버를 통해서만 (기타 포함)</td><td class="no">아님</td><td class="no">아님</td><td>그룹 카드(멤버 얼굴 모자이크), 열면 멤버 + 기타</td></tr>
+      <tr><td>캐릭터</td><td class="yes">소속 (맞음·등록·승격)</td><td>레퍼런스 5장 이상이면 예, 아니면 "수동"</td><td>레퍼런스. 학습 인식은 맞음 예시도</td><td>캐릭터 카드, 수동이면 "수동"</td></tr>
+      <tr><td>기타</td><td class="yes">소속 (그룹당 1, 시리즈당 1)</td><td class="no">아님</td><td class="no">아님</td><td>항상 마지막 카드 "기타", 승격 제안 표시</td></tr>
+      <tr><td>분류 제외 폴더</td><td class="yes">직접</td><td class="no">그 안 이미지는 비교 안 함</td><td class="no">레퍼런스 후보에서도 빠짐</td><td>폴더 카드 + "분류 제외" 배지. 메뉴는 PC 폴더 메뉴</td></tr>
+      <tr><td>미분류 (보기)</td><td colspan="4">이 시리즈 안에 있고, 이 시리즈의 캐릭터·기타 어디에도 없고, 분류 제외 폴더와 안쪽 시리즈 밖에 있는 이미지. PC·태블릿 같은 정의.</td></tr>
+    </tbody>
+  </table>
+  <ul class="note" style="margin-top:12px; font-size:13px">
+    <li>자동 인식이 어떤 이미지를 캐릭터에 넣으면, 그 이미지는 <b>기타에서 저절로 빠집니다</b>(기타 = 아직 캐릭터가 없는 사람).</li>
+    <li>"과거 미분류 이미지 갱신"은 미분류와 함께 <b>기타도</b> 봅니다. 그래서 기타에 넣어 둔 이미지도 나중에 캐릭터를 찾을 수 있습니다.</li>
+    <li>태블릿은 보기, "이 캐릭터에서 빼기", 확인만 합니다. 그룹·기타·승격 같은 정리는 PC에서 합니다(10월 10일 결정: 캐릭터 데이터는 PC가 관리).</li>
+  </ul>
+</section>
+
+<!-- Promotion -->
+<section>
+  <h2 class="sec">기타 → 캐릭터 승격</h2>
+  <div class="flow">
+    <div class="step"><b>기타 열기</b><p>그룹 또는 시리즈의 기타. 제안이 있으면 카드에 "렌 5장 · 캐릭터로".</p></div>
+    <div class="step"><b>같은 사람 고르기</b><p>제안을 누르면 자동 태그가 그 이름을 읽은 이미지가 미리 선택됨. 더하거나 빼기.</p></div>
+    <div class="step"><b>캐릭터로</b><p>이름(자동 태그가 읽은 이름) · 그룹(지금 그룹) · 대표 이미지 · 레퍼런스(다양한 순서로 미리 체크).</p></div>
+    <div class="step"><b>만들기 한 번</b><p>새 캐릭터가 생기고, 고른 이미지가 기타에서 새 캐릭터로 옮겨짐. 파일·폴더 그대로.</p></div>
+    <div class="step"><b>알아보기 시작</b><p>레퍼런스 5장 이상이면 새로 들어오는 이미지부터 자동 인식. 모자라면 수동으로 시작.</p></div>
+  </div>
+  <div class="grid2" style="margin-top:16px">
+    <div class="box">
+      <h3>뒤에서 일어나는 일</h3>
+      <ul style="font-size:13px">
+        <li>새 캐릭터에는 "맞음", 기타에는 "빼기"가 기록됩니다. "아님"이 아니므로 틀림 통계에 섞이지 않습니다.</li>
+        <li>레퍼런스는 한 사람만 나온 이미지를 먼저 고릅니다. 여러 사람이 나온 이미지는 그 사람 부분만 씁니다.</li>
+        <li>승격한 이미지는 그 캐릭터의 맞음 예시가 되어, 나중에 학습 인식 기준(예시 50장)에 들어갑니다.</li>
+        <li>한 번에 저장됩니다. 중간에 실패하면 아무것도 바뀌지 않습니다.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>하지 않는 일</h3>
+      <ul style="font-size:13px">
+        <li>과거 이미지를 저절로 다시 훑지 않습니다. 완료 안내에 "과거 미분류 이미지 갱신" 버튼 하나.</li>
+        <li>파일 이동·복사, 폴더 만들기 없음.</li>
+        <li>다른 캐릭터 소속은 그대로(한 이미지에 여러 캐릭터 가능).</li>
+        <li>태블릿에서는 승격하지 않습니다. 다음 동기화 때 같은 모양으로 보입니다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Sketches -->
+<section>
+  <h2 class="sec">화면 스케치</h2>
+
+  <div class="grid2" style="grid-template-columns: 300px 1fr; align-items:start">
+    <div>
+      <p class="cap"><b>PC 6</b> · 사이드바 — 시리즈 아래 그룹 줄, 그다음 폴더</p>
+      <div class="pc solo" style="font-size:13px">
+        <div class="side sb2" style="border-right:none; padding:8px 0">
+          <div>게임</div>
+          <div class="d1">⌄ 리버스 <span class="c">2,709</span></div>
+          <div class="d2 on">◫ 가방팟 <span class="c">433</span></div>
+          <div class="d2">◫ 라플라스 <span class="c">337</span></div>
+          <div class="d2">◫ 카카졸데 <span class="c">179</span></div>
+          <div class="d2">◫ 라야시키 <span class="c">167</span></div>
+          <div class="d2">◫ 아르고스팟 <span class="c">162</span></div>
+          <div class="d2">◫ 전쟁 <span class="c">126</span></div>
+          <div class="d2">◫ 파리 <span class="c">104</span></div>
+          <div class="d2">◫ 중국 <span class="c">83</span></div>
+          <div class="d2">◫ 런던 <span class="c">46</span></div>
+          <div class="d2">◫ 재건 <span class="c">37</span></div>
+          <div class="d2">◫ 뱀파이어 <span class="c">28</span></div>
+          <div class="d2">◫ 라모나 <span class="c">11</span></div>
+          <div class="d2">◫ 4.0 <span class="c">4</span></div>
+          <div class="d2">▢ 버전 표지 <span class="c">9</span></div>
+          <div class="d1">› 명조</div>
+          <div class="d1">› 젠레스</div>
+          <div>만화</div>
+        </div>
+      </div>
+      <p class="note" style="font-size:12px; margin-top:6px">◫ 그룹 아이콘(그룹 카드와 같은 아이콘) · ▢ 폴더. 가방팟 › 버틴을 보고 있는 상태라 가방팟 줄이 선택됨. 숫자는 오늘 데이터로 계산한 그룹 이미지 수(정리 직후 기준), 리버스는 정리 뒤 전체.</p>
+    </div>
+    <div>
+      <p class="cap"><b>사이드바 규칙</b></p>
+      <table>
+        <tbody>
+          <tr><td>어디에</td><td>시리즈를 펼치면 바로 아래. <b>그룹 줄이 먼저</b>, 그다음 폴더와 안쪽 시리즈. 그룹끼리 순서는 시리즈 화면의 카드 순서와 같음(사용자가 바꾼 순서 유지).</td></tr>
+          <tr><td>모양</td><td>그룹 아이콘 + 이름 + 이미지 수. 펼치는 화살표 없음(한 줄).</td></tr>
+          <tr><td>누르면</td><td>그룹 화면(멤버 카드 + 기타 카드 + 그룹 전체 이미지).</td></tr>
+          <tr><td>선택 표시</td><td>그룹 화면, 그 그룹의 캐릭터 화면, 그 그룹의 기타 화면을 볼 때 모두 이 그룹 줄이 선택됨.</td></tr>
+          <tr><td>기타</td><td>사이드바 줄 없음. 그룹 화면 안의 마지막 카드로만.</td></tr>
+          <tr><td>캐릭터</td><td>사이드바 줄 없음(9월 28일 결정 유지). 찾기와 시리즈·그룹 화면 카드로.</td></tr>
+          <tr><td>우클릭</td><td>그룹 열기 · 그룹 편집.</td></tr>
+          <tr><td>태블릿</td><td>에셋 › 분류 목록과 시리즈 화면에서 같은 순서: 그룹 → 폴더.</td></tr>
+          <tr><td>되살리는 코드</td><td>9월 29일 커밋 <code>60d4e3a6</code>에서 지운 <code>ClassificationSidebar.tsx</code>의 <code>character-group:</code> 가상 줄, 그룹 줄 선택 표시, "그룹 열기" 메뉴. 개수는 남아 있는 <code>character_sidebar_counts</code>(<code>character_hub.rs:66–72</code>)로. 이번엔 기타 이미지도 개수에 포함하고, 그룹 밖 캐릭터 줄은 다시 넣지 않음.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="cap" style="margin-top:28px"><b>PC 1</b> · 리버스 시리즈 화면 — 그룹 카드, 그룹 밖 캐릭터, 시리즈 기타, 폴더 순서</p>
+  <div class="pc">
+    <div class="side">
+      <div>게임</div><div class="d1 on">리버스</div><div class="d2">가방팟</div><div class="d2">라플라스</div><div class="d2">카카졸데</div><div class="d2">라야시키</div><div class="d2">아르고스팟</div><div class="d2">전쟁</div><div class="d2">파리</div><div class="d2">…</div><div class="d2">버전 표지</div><div class="d1">명조</div>
+    </div>
+    <div class="main">
+      <div class="bar"><span class="crumb">게임<i>›</i></span><span class="t">리버스</span><span class="n">그룹 13 · 캐릭터 31 · 2,709장</span><span class="sp"></span><span class="btn">확인 <b>12</b></span><span class="btn">캐릭터 만들기</span><span class="btn">⋯</span></div>
+      <div class="seclabel"><b>그룹</b> 13 · 1/2쪽</div>
+      <div class="shelf">
+        <div class="card"><div class="img mosaic"><span style="--g:#6b4a3e"></span><span style="--g:#4a5a6e"></span><span style="--g:#5e5a3e"></span><span style="--g:#3e4a5a"></span></div><div class="name">가방팟</div><div class="sub">8명 · 기타 42</div></div>
+        <div class="card"><div class="img mosaic"><span style="--g:#5a4a6e"></span><span style="--g:#6b5a3e"></span><span style="--g:#3e5a6b"></span><span style="--g:#55485c"></span></div><div class="name">라플라스</div><div class="sub">8명 · 기타 18</div></div>
+        <div class="card"><div class="img mosaic"><span style="--g:#6e4a5a"></span><span style="--g:#4a6e5a"></span><span style="--g:#5a5a6e"></span><span style="--g:#6e5a4a"></span></div><div class="name">카카졸데</div><div class="sub">2명 · 기타 19</div></div>
+        <div class="card"><div class="img mosaic"><span style="--g:#4a6b6b"></span><span style="--g:#6b4a6b"></span><span style="--g:#5b5b4a"></span><span style="--g:#4a4a5b"></span></div><div class="name">라야시키</div><div class="sub">2명 · 기타 25</div></div>
+        <div class="card"><div class="img mosaic"><span style="--g:#3e6b5a"></span><span style="--g:#5a3e6b"></span><span style="--g:#6b6b3e"></span><span style="--g:#3e3e6b"></span></div><div class="name">아르고스팟</div><div class="sub">2명 · 기타 83</div></div>
+        <div class="card"><div class="img extra"><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span style="--g:#55485c"></span><span style="--g:#47534a"></span><span style="--g:#504a44"></span><span style="--g:#3d4450"></span><span style="--g:#5a5048"></span><span style="--g:#4c4656"></span></div><div class="name">전쟁</div><div class="sub">기타 126</div></div>
+        <div class="card"><div class="img extra"><span style="--g:#504a44"></span><span style="--g:#3d4450"></span><span style="--g:#5a5048"></span><span style="--g:#4c4656"></span><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span></div><div class="name">파리</div><div class="sub">기타 104</div></div>
+      </div>
+      <div class="seclabel"><b>그룹 밖</b></div>
+      <div class="shelf">
+        <div class="card"><div class="img" style="--g:linear-gradient(160deg,#4e6b4a,#212e20)"></div><div class="name">마커스</div><div class="sub">115장</div></div>
+        <div class="card"><div class="img" style="--g:linear-gradient(160deg,#3e5a6b,#1e2a30)"></div><div class="name">레콜레타</div><div class="sub">16장</div></div>
+        <div class="card"><div class="img" style="--g:linear-gradient(160deg,#6b5a3e,#2e281e)"></div><div class="name">소더비</div><div class="sub">10장</div></div>
+        <div class="card"><div class="img extra"><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span style="--g:#55485c"></span><span style="--g:#47534a"></span><span style="--g:#504a44"></span></div><div class="name">기타</div><div class="sub">시리즈 · 10장</div></div>
+        <div class="card"><div class="img folder">▢</div><div class="name">버전 표지</div><div class="sub">폴더 · 9장</div></div>
+        <div></div><div></div>
+      </div>
+      <div class="seclabel"><b>미분류</b> <span class="segs"><span class="on">미분류</span><span>전체</span></span></div>
+      <div class="gallery" style="padding-top:8px"><span style="--g:#3b3f47"></span><span style="--g:#4a4552"></span><span style="--g:#3f4a44"></span><span style="--g:#52463e"></span><span style="--g:#3a4552"></span><span style="--g:#4d3f48"></span><span style="--g:#444a3c"></span><span style="--g:#3e4450"></span><span style="--g:#4b4440"></span><span style="--g:#3c4650"></span></div>
+    </div>
+  </div>
+  <ul class="note" style="font-size:13px; margin-top:8px">
+    <li>순서: 그룹 → 그룹 밖 캐릭터 → 시리즈 기타 → 폴더. 사이드바와 태블릿도 같은 순서.</li>
+    <li>그룹은 지금 시리즈 화면처럼 두 줄씩 쪽으로 나눔(13개 → 2쪽).</li>
+    <li>미분류 = 리버스에 바로 있던 캐릭터 없는 이미지(오늘 991장). 팀 폴더에서 올라온 캐릭터 없는 이미지는 미분류가 아니라 각 그룹의 기타로 갑니다.</li>
+  </ul>
+
+  <div class="grid2" style="margin-top:28px">
+    <div>
+      <p class="cap"><b>PC 2</b> · 가방팟 그룹 — 멤버 다음에 기타, 기타에 승격 제안</p>
+      <div class="pc solo">
+        <div class="main">
+          <div class="bar"><span class="crumb">리버스<i>›</i></span><span class="t">가방팟</span><span class="n">8명 · 기타 42</span><span class="sp"></span><span class="btn">확인 <b>3</b></span><span class="btn">그룹 편집</span></div>
+          <div class="shelf" style="grid-template-columns:repeat(5,1fr)">
+            <div class="card"><div class="img" style="--g:linear-gradient(160deg,#6b4a3e,#2e201a)"></div><div class="name">버틴</div><div class="sub">211장</div></div>
+            <div class="card"><div class="img" style="--g:linear-gradient(160deg,#4a5a6e,#1e2630)"></div><div class="name">소네트</div><div class="sub">119장</div></div>
+            <div class="card"><div class="img" style="--g:linear-gradient(160deg,#5e5a3e,#2a281a)"></div><div class="name">슈나이더</div><div class="sub">34장</div></div>
+            <div class="card"><div class="img" style="--g:linear-gradient(160deg,#3e4a5a,#1a2028)"></div><div class="name">안조</div><div class="sub">73장</div></div>
+            <div class="card"><div class="img extra"><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span style="--g:#55485c"></span><span style="--g:#47534a"></span><span style="--g:#504a44"></span><span style="--g:#3d4450"></span><span style="--g:#5a5048"></span><span style="--g:#4c4656"></span><span class="hint">렌 5장 · 캐릭터로</span></div><div class="name">기타</div><div class="sub">42장</div></div>
+          </div>
+          <div class="seclabel"><b>전체</b> 새로운 순</div>
+          <div class="gallery" style="padding-top:8px; grid-template-columns:repeat(8,1fr)"><span style="--g:#3b3f47"></span><span style="--g:#4a4552"></span><span style="--g:#3f4a44"></span><span style="--g:#52463e"></span><span style="--g:#3a4552"></span><span style="--g:#4d3f48"></span><span style="--g:#444a3c"></span><span style="--g:#3e4450"></span></div>
+        </div>
+      </div>
+      <p class="note" style="font-size:13px; margin-top:8px">"렌"은 예시 이름입니다. 기타 카드는 점선 모자이크로 "아직 이름 없음"을 보여 줍니다(색 줄 표시 없음).</p>
+    </div>
+    <div>
+      <p class="cap"><b>PC 3</b> · 기타에서 5장 선택 → 캐릭터로</p>
+      <div class="pc solo">
+        <div class="main">
+          <div class="bar"><span class="crumb">리버스<i>›</i>가방팟<i>›</i></span><span class="t">기타</span><span class="n">42장 · 5장 선택</span><span class="sp"></span><span class="btn"><b>캐릭터로</b></span></div>
+          <div class="gallery" style="padding-top:12px; grid-template-columns:repeat(8,1fr)">
+            <span class="sel" style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span class="sel" style="--g:#55485c"></span><span class="sel" style="--g:#504a44"></span><span style="--g:#47534a"></span><span style="--g:#3d4450"></span><span class="sel" style="--g:#5a5048"></span><span class="sel" style="--g:#584b44"></span>
+          </div>
+          <div style="padding:4px 16px 16px">
+            <div class="dialog">
+              <h4>캐릭터로</h4>
+              <div class="grid2" style="gap:12px">
+                <div class="field"><label>이름</label><div class="in">렌</div></div>
+                <div class="field"><label>그룹</label><div class="in">가방팟</div></div>
+              </div>
+              <div class="field"><label>레퍼런스 · 5장 (5장부터 자동 인식)</label>
+                <div class="prefs"><span class="on" style="--g:#5b5048"></span><span class="on" style="--g:#55485c"></span><span class="on" style="--g:#504a44"></span><span class="on" style="--g:#5a5048"></span><span class="on" style="--g:#584b44"></span><span style="--g:transparent"></span></div>
+              </div>
+              <p class="meta" style="margin:0">고른 5장이 기타에서 렌으로 옮겨집니다.</p>
+              <div class="row"><span class="g">취소</span><span class="p">만들기</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:28px">
+    <div>
+      <p class="cap"><b>PC 4</b> · 확인 — 한 목록, 맞음/아님만</p>
+      <div class="pc solo">
+        <div class="main">
+          <div class="bar"><span class="crumb">리버스<i>›</i></span><span class="t">확인</span><span class="n">12</span><span class="sp"></span><span class="btn">닫기</span></div>
+          <div class="review">
+            <div class="stage">
+              <div class="big" style="--g:linear-gradient(170deg,#55505e,#26232c)"><span class="box2"></span></div>
+              <div class="refs"><p>버틴의 레퍼런스</p><span style="--g:#6b4a3e"></span><span style="--g:#5e4a40"></span><span style="--g:#6a5040"></span><span style="--g:#5a463a"></span></div>
+            </div>
+            <div class="side2">
+              <div class="q">버틴?</div>
+              <div class="why"><span class="badge">인식 추천</span><span class="badge">자동 태그 확실</span></div>
+              <div class="actions"><span class="p">맞음</span><span>아님</span><span>맞음 · 위치 틀림</span><span class="g">건너뛰기</span></div>
+              <p class="meta" style="margin:0">아님 = 버틴에서 빼고 다시 넣지 않음</p>
+            </div>
+          </div>
+          <div class="strip"><span class="cur" style="--g:#55505e"></span><span style="--g:#4a4552"></span><span style="--g:#3f4a44"></span><span style="--g:#52463e"></span><span style="--g:#3a4552"></span><span style="--g:#4d3f48"></span><span style="--g:#444a3c"></span><span style="--g:#3e4450"></span><span style="--g:#4b4440"></span><span style="--g:#3c4650"></span><span style="--g:#4a3f50"></span><span style="--g:#404a42"></span></div>
+        </div>
+      </div>
+      <ul class="note" style="font-size:13px; margin-top:8px">
+        <li>왜 보이는지 배지 두 종류만: <b>인식 추천</b>(기본 또는 학습 인식이 이 캐릭터 같다고 봄), <b>태그 추천</b>(자동 태그 둘이 모두 이 이름을 읽음). 자동으로 넣었다가 의심스러운 것은 <b>다시 확인</b>.</li>
+        <li>자동 태그 배지는 <b>확실 / 불확실</b>로만. 점수 숫자는 설정 › 고급.</li>
+        <li>시리즈 머리 "확인 12"와 홈의 합계가 같은 목록을 엽니다.</li>
+      </ul>
+    </div>
+    <div>
+      <p class="cap"><b>PC 5</b> · 설정 › 고급 › 캐릭터 인식 상태 (원래 이름은 여기만)</p>
+      <div class="pc solo">
+        <div class="main">
+          <div class="bar"><span class="crumb">설정<i>›</i>고급<i>›</i></span><span class="t">캐릭터 인식 상태</span></div>
+          <div class="settings">
+            <div class="line"><span><b>자동 태그</b> <span class="raw">자동 태그 1 = PixAI · 자동 태그 2 = canary</span></span><span>새 이미지마다 자동</span></div>
+            <div class="line"><span><b>학습 인식 준비</b> <span class="raw">S36 채점</span></span><span>새 이미지마다 자동 <span class="qbtn">기존 이미지도 준비</span></span></div>
+            <h4 style="margin-top:14px">젠레스 <span class="raw">기본 인식 = B36 · 학습 인식 = S36</span></h4>
+            <div class="row h"><span>캐릭터</span><span>인식</span><span>확인 판단</span><span>맞음 예시</span><span>틀림 / 허용</span></div>
+            <div class="row"><b>수나</b><span>학습 인식</span><span>74 / 30</span><span>126 / 50</span><span>0 / 3</span></div>
+            <div class="row"><b>남궁우</b><span>학습 인식</span><span>44 / 30</span><span>97 / 50</span><span>2 / 2</span></div>
+            <div class="row"><b>시시아</b><span>기본 인식</span><span>36 / 30</span><span>42 / 50</span><span>3 / 1</span></div>
+            <div class="row"><b>아리아</b><span>기본 인식</span><span>46 / 30</span><span>111 / 50</span><span>5 / 2</span></div>
+            <div class="row"><b>엘렌</b><span>기본 인식</span><span>— / 30</span><span>— / 50</span><span>—</span></div>
+            <p class="meta" style="margin:10px 0 0">새 기준(허용 = 판단의 5%, 최소 1)으로 오늘 데이터를 계산한 값입니다(엘렌 줄은 모양 예시).</p>
+          </div>
+        </div>
+      </div>
+      <ul class="note" style="font-size:13px; margin-top:8px">
+        <li>켜고 끄는 스위치 없이 상태만 보여 줍니다. 캐릭터 하나를 "자동 인식 끄기"하는 것은 그 캐릭터 메뉴에 그대로.</li>
+        <li>틀림이 허용치를 넘으면 기본 인식. 판단이 더 쌓여 허용치 안으로 들어오면 다시 학습 인식.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:28px">
+    <div>
+      <p class="cap"><b>태블릿 1</b> · 리버스 (세로, 약 70% 축척) — PC와 같은 순서</p>
+      <div class="tab">
+        <div class="tb"><span class="back">‹</span><span class="stack"><small>게임</small><b>리버스</b></span><span class="sp"></span><span class="ic">✓</span><span class="ic">⌕</span><span class="ic">⋯</span></div>
+        <div class="seclabel"><b>그룹</b></div>
+        <div class="shelf">
+          <div class="card"><div class="img mosaic"><span style="--g:#5a4a6e"></span><span style="--g:#6b5a3e"></span><span style="--g:#3e5a6b"></span><span style="--g:#55485c"></span></div><div class="name">라플라스</div><div class="sub">8명 · 기타 18</div></div>
+          <div class="card"><div class="img mosaic"><span style="--g:#6b4a3e"></span><span style="--g:#4a5a6e"></span><span style="--g:#5e5a3e"></span><span style="--g:#3e4a5a"></span></div><div class="name">가방팟</div><div class="sub">8명 · 기타 42</div></div>
+          <div class="card"><div class="img extra"><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span style="--g:#55485c"></span><span style="--g:#47534a"></span><span style="--g:#504a44"></span></div><div class="name">전쟁</div><div class="sub">기타 126</div></div>
+          <div class="card"><div class="img mosaic"><span style="--g:#3e6b5a"></span><span style="--g:#5a3e6b"></span><span style="--g:#6b6b3e"></span><span style="--g:#3e3e6b"></span></div><div class="name">아르고스팟</div><div class="sub">2명 · 기타 83</div></div>
+        </div>
+        <div class="seclabel"><b>그룹 밖</b></div>
+        <div class="shelf">
+          <div class="card"><div class="img" style="--g:linear-gradient(160deg,#4e6b4a,#212e20)"></div><div class="name">마커스</div><div class="sub">115장</div></div>
+          <div class="card"><div class="img" style="--g:linear-gradient(160deg,#3e5a6b,#1e2a30)"></div><div class="name">레콜레타</div><div class="sub">16장</div></div>
+          <div class="card"><div class="img extra"><span style="--g:#4a4f58"></span><span style="--g:#5b5048"></span><span style="--g:#3f4a52"></span><span style="--g:#55485c"></span><span style="--g:#47534a"></span><span style="--g:#504a44"></span></div><div class="name">기타</div><div class="sub">시리즈 · 10장</div></div>
+          <div class="card"><div class="img folder">▢</div><div class="name">버전 표지</div><div class="sub">폴더</div></div>
+        </div>
+      </div>
+      <p class="note" style="font-size:13px; margin-top:8px">상단 ✓는 "확인"(맞음/아님). 승격 제안 문구는 태블릿에는 나오지 않습니다(승격은 PC 작업).</p>
+    </div>
+    <div>
+      <p class="cap"><b>태블릿 2</b> · 확인 — 같은 말, 큰 버튼</p>
+      <div class="tab">
+        <div class="tb"><span class="back">‹</span><span class="stack"><small>리버스</small><b>확인 12</b></span><span class="sp"></span></div>
+        <div style="padding:12px 16px; display:grid; grid-template-columns:1.4fr 1fr; gap:10px">
+          <div style="aspect-ratio:4/5; background:linear-gradient(170deg,#55505e,#26232c); position:relative"><span style="position:absolute; left:30%; top:14%; width:38%; height:40%; outline:1.5px solid var(--color-accent)"></span></div>
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <b style="font-size:18px">버틴?</b>
+            <span><span class="badge">인식 추천</span></span>
+            <span><span class="badge">자동 태그 확실</span></span>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-top:4px"><span style="aspect-ratio:1; background:#6b4a3e"></span><span style="aspect-ratio:1; background:#5e4a40"></span></div>
+          </div>
+        </div>
+        <div class="tbtns"><span class="p">맞음</span><span>아님</span><span>건너뛰기</span></div>
+      </div>
+      <p class="note" style="font-size:13px; margin-top:8px">지금 태블릿의 "S36 추천 / B36 추천" 배지는 "인식 추천"으로 바뀝니다.</p>
+    </div>
+  </div>
+
+  <div style="margin-top:28px">
+    <p class="cap"><b>태블릿 3</b> · 만화 › 밴드물 — 지금과 고친 뒤</p>
+    <div class="ba" style="max-width:960px">
+      <div class="tab" style="width:auto">
+        <div class="tb"><span class="back">‹</span><span class="stack"><small>만화</small><b>밴드물</b></span><span class="sp"></span></div>
+        <div class="empty">하위 카드 없음</div>
+        <div class="gallery" style="grid-template-columns:repeat(4,1fr)"><span style="--g:#454a52"></span></div>
+        <p class="x" style="padding:0 12px 12px; margin:0">지금: 캐릭터 화면 안의 폴더로 열려 봇치·걸밴크가 없음.</p>
+      </div>
+      <div class="tab" style="width:auto">
+        <div class="tb"><span class="back">‹</span><span class="stack"><small>만화</small><b>밴드물</b></span><span class="sp"></span></div>
+        <div class="shelf" style="grid-template-columns:repeat(4,1fr)">
+          <div class="card"><div class="img" style="--g:linear-gradient(160deg,#6e4a5a,#2e1e26)"></div><div class="name">봇치 <em>시리즈</em></div><div class="sub">35장</div></div>
+          <div class="card"><div class="img" style="--g:linear-gradient(160deg,#4a5a6e,#1e262e)"></div><div class="name">걸밴크 <em>시리즈</em></div><div class="sub">102장</div></div>
+        </div>
+        <div class="gallery" style="grid-template-columns:repeat(4,1fr)"><span style="--g:#454a52"></span></div>
+        <p class="ok" style="padding:0 12px 12px; margin:0">고친 뒤: PC처럼 일반 폴더로 열고, 안의 시리즈를 카드로.</p>
+      </div>
+    </div>
+    <p class="note" style="font-size:13px; margin-top:8px">원인: 태블릿이 받는 캐릭터 목록에서 밴드물은 "만화의 폴더", 봇치·걸밴크는 "부모 없는 시리즈"로 따로 와서 둘이 이어지지 않습니다. 태블릿이 이미 가진 폴더 목록으로 이으면 서버를 바꾸지 않고 고칠 수 있습니다.</p>
+  </div>
+</section>
+
+<!-- Model names -->
+<section>
+  <h2 class="sec">모델 이름 바꾸기</h2>
+  <div class="grid2">
+    <div class="box">
+      <h3>하나의 비유: 읽기와 알아보기</h3>
+      <ul style="font-size:14px">
+        <li><b>자동 태그</b> — 그림을 보고 태그와 이름을 <b>읽는</b> 기능. 둘이 따로 읽습니다(지금의 PixAI, canary).
+          <ul><li>둘 다 같은 이름을 읽음 → <b>확실</b></li><li>하나만 읽음 → <b>불확실</b></li></ul></li>
+        <li><b>인식</b> — 얼굴을 보고 어느 캐릭터인지 <b>알아보는</b> 기능.
+          <ul><li><b>기본 인식</b> — 레퍼런스와 비교 (지금의 B36)</li><li><b>학습 인식</b> — 맞음 판단으로 배움 (지금의 S36)</li></ul></li>
+        <li>이미 쉬운 이름인 것은 그대로: <b>그림체</b>(작가 그림체), <b>내용 검색</b>(말로 찾기).</li>
+        <li>원래 이름은 설정 › 고급의 진단에만 괄호로 남깁니다.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>바꾸는 규칙</h3>
+      <ul style="font-size:14px">
+        <li>"태거" → <b>자동 태그</b>. 두 개를 따로 부를 일은 일반 화면에 없음.</li>
+        <li>점수 숫자(0.91, 0.123) → 일반 화면에서 빼고 <b>확실/불확실</b> 배지만.</li>
+        <li>"S36 …", "B36 …" → <b>학습 인식 / 기본 인식</b>, 고르는 메뉴는 없앰(확정 8).</li>
+        <li>"채점" → 일반 화면에서 없앰. 고급에선 <b>학습 인식 준비</b>.</li>
+        <li>"판정" → <b>판단</b> (사람과 기계 모두 같은 말).</li>
+      </ul>
+    </div>
+  </div>
+  <table class="places" style="margin-top:16px">
+    <thead><tr><th>지금 보이는 곳 (파일:줄)</th><th>지금 문구</th><th>바뀐 문구</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/characters/suggestions/CharacterSuggestions.tsx:140</code></td><td>● 일치 / ○ 한 태거만</td><td>확실 N / 불확실</td></tr>
+      <tr><td><code>CharacterSuggestions.tsx:150–151</code></td><td>PixAI만 · canary만 · 한 태거만 · ● 일치 N · 한쪽 M</td><td>확실 N · 불확실 M</td></tr>
+      <tr><td><code>CharacterSuggestions.tsx:70, 96</code></td><td>태거 검토 후보로 넣었습니다 · 태거가 찾았지만…</td><td>확인에 넣었습니다 · 자동 태그가 읽었지만…</td></tr>
+      <tr><td><code>suggestions/SuggestionDialog.tsx:114, 135</code></td><td>후보는 태거 검토에서 … · 두 태거와 자동 분류가 모두 맞다고 한 그림은…</td><td>후보는 확인에서 … · 자동 태그가 확실하고 인식도 같다고 본 그림은…</td></tr>
+      <tr><td><code>SuggestionDialog.tsx:159, 195</code></td><td>PixAI 0.91 · canary 0.88</td><td>확실 / 불확실 배지 (숫자는 고급)</td></tr>
+      <tr><td><code>src/characters/CharacterAssignPicker.tsx:71</code></td><td>2/3장 일치</td><td>3장 중 2장</td></tr>
+      <tr><td><code>src/characters/TaggerReview.tsx:82, 366</code></td><td>태거 추천 · 검토로 돌림</td><td>태그 추천 · 다시 확인</td></tr>
+      <tr><td><code>TaggerReview.tsx:277, 293, 346, 390, 392, 402</code></td><td>태거 검토 · 태거 후보</td><td>확인 (합친 목록)</td></tr>
+      <tr><td><code>TaggerReview.tsx:426–428</code></td><td>PixAI 0.91 · Canary 0.88 · B36 0.123</td><td>자동 태그 확실 · 인식 추천 (숫자는 고급)</td></tr>
+      <tr><td><code>src/characters/CharacterTaggerTags.tsx:31, 38, 51, 56, 61, 79</code></td><td>태거 태그 · 태거 태그 연결 끊기</td><td>자동 태그 이름 · 자동 태그 이름 연결 끊기</td></tr>
+      <tr><td><code>src/characters/S36Publication.tsx:123</code></td><td>자동 분류: 기존 / S36</td><td>(없앰 — 저절로 전환)</td></tr>
+      <tr><td><code>S36Publication.tsx:43, 47, 59, 70</code></td><td>S36 채점을 켜지 못했습니다 · S36 채점이 꺼져 있어 …</td><td>학습 인식 준비가 꺼져 있습니다 (고급에만)</td></tr>
+      <tr><td><code>S36Publication.tsx:112, 115, 128, 132, 133</code></td><td>S36 자동 분류 해제 …</td><td>(고급) 학습 인식이 넣은 것 되돌리기</td></tr>
+      <tr><td><code>S36Publication.tsx:129, 166–169</code></td><td>S36 켜도 됨 · 보류 · 부적합 · 준비 중 · 확인 12/30 · 예시 40/50</td><td>(고급 표) 학습 인식 / 기본 인식 · 확인 판단 12/30 · 맞음 예시 40/50 · 틀림 / 허용</td></tr>
+      <tr><td><code>S36Publication.tsx:147–148</code>, <code>SeriesBrowser.tsx:642</code></td><td>S36 제외</td><td>자동 인식 끄기 (캐릭터 메뉴, 하나로)</td></tr>
+      <tr><td><code>src/characters/SeriesBrowser.tsx:515</code></td><td>S36 자동 분류 중</td><td>(고급) 학습 인식</td></tr>
+      <tr><td><code>SeriesBrowser.tsx:648, 863</code></td><td>S36 자동 분류 설정 · S36 자동 분류</td><td>(없앰)</td></tr>
+      <tr><td><code>SeriesBrowser.tsx:649</code></td><td>S36 시험 채점 확인</td><td>(없앰 — 확인으로 합침)</td></tr>
+      <tr><td><code>SeriesBrowser.tsx:661</code></td><td>후보 N 확인 · "S36 자동 분류가 판단을 기다리는 후보…"</td><td>확인 N</td></tr>
+      <tr><td><code>src/characters/ShadowReview.tsx:110, 249, 258, 260, 277</code></td><td>S36 확인</td><td>확인</td></tr>
+      <tr><td><code>ShadowReview.tsx:183, 280, 282, 318</code></td><td>기존 이미지 채점 · 채점 취소 · S36이 지지하지 않는…</td><td>(고급) 기존 이미지도 준비 · 그만두기</td></tr>
+      <tr><td><code>ShadowReview.tsx:300</code>, <code>src/characters/shadowReviewApi.ts:58</code></td><td>S36은 이 분류를 지지하지 않습니다 · S36 미지지</td><td>다시 확인</td></tr>
+      <tr><td><code>src/home/HomeView.tsx:283, 300</code></td><td>태거</td><td>확인</td></tr>
+      <tr><td><code>src/autotags/autoTagInbox.ts:33</code></td><td>태거 판정 N건 반영</td><td>자동 태그 판단 N건 반영</td></tr>
+      <tr><td><code>src/autotags/AutoTagInboxSettings.tsx:59–60</code></td><td>가져온 뒤 태거 판정 자동 반영</td><td>가져온 뒤 자동 태그 판단 반영</td></tr>
+      <tr><td><code>src/autotags/TaggerReviewSettings.tsx:31, 36, 43, 47</code>, <code>src/settings/SettingsView.tsx:537</code></td><td>태거 검토 · 태거 추천 · 검토로 돌린 자동 판정</td><td>(고급) 자동 태그 판단 적용 · 태그 추천 · 다시 확인으로 돌린 것</td></tr>
+      <tr><td><code>mobile-client/CharacterReview.tsx:27</code></td><td>S36 추천 · B36 추천 · 다시 확인</td><td>인식 추천 · 인식 추천 · 다시 확인</td></tr>
+      <tr><td><code>mobile-client/homeDashboard.ts:25</code></td><td>캐릭터 검토 · 자동 분류 후보 확인</td><td>확인</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:8px; font-size:13px">찾은 방법: PC(<code>src/</code>)와 태블릿(<code>mobile-client/</code>) 화면 문구에서 PixAI, canary, B36, S36, 태거, WD, Kaloscope, CCIP, SigLIP을 검색(테스트 제외). WD · Kaloscope · CCIP · SigLIP · Qwen은 화면 문구에 없었습니다(코드 주석·설정 키에만). DESIGN.md의 용어 예시 "S36 제외"도 함께 바꿉니다.</p>
+</section>
+
+<!-- Vocabulary -->
+<section>
+  <h2 class="sec">용어</h2>
+  <table class="vocab">
+    <thead><tr><th>지금</th><th>바뀐 말</th><th>뜻 (한 줄)</th></tr></thead>
+    <tbody>
+      <tr><td><span class="strike">● 일치 · 한쪽 · ○ 한 태거만</span></td><td>확실 · 불확실</td><td>자동 태그 둘이 모두 같은 이름을 읽으면 확실, 하나만 읽으면 불확실.</td></tr>
+      <tr><td><span class="strike">2/3장 일치</span></td><td>3장 중 2장</td><td>고른 이미지 중 자동 태그가 이 캐릭터로 읽은 수.</td></tr>
+      <tr><td><span class="strike">태거 검토 · 후보 확인 · 캐릭터 검토 · S36 확인</span></td><td>확인</td><td>맞음/아님을 눌러 주면 좋은 이미지 목록. 시리즈별 "확인 N", 홈은 합계.</td></tr>
+      <tr><td><span class="strike">태거 추천 · S36 추천 · B36 추천 · 새 후보</span></td><td>태그 추천 · 인식 추천</td><td>아직 판단이 없는 제안. 누가 제안했는지만 구분.</td></tr>
+      <tr><td><span class="strike">검토로 돌림 · S36 미지지 · 기존 자동 분류 점검</span></td><td>다시 확인</td><td>자동으로 넣었는데 자동 태그나 학습 인식이 반대해서 다시 보는 것.</td></tr>
+      <tr><td><span class="strike">맞음 · 영역 틀림</span></td><td>맞음 · 위치 틀림</td><td>캐릭터는 맞지만 표시된 사람 위치가 다름. 소속만 넣고 학습엔 안 씀.</td></tr>
+      <tr><td><span class="strike">자동 분류 기존 / S36</span></td><td>(없앰)</td><td>기본 인식 → 학습 인식은 저절로 넘어감.</td></tr>
+      <tr><td><span class="strike">S36 제외 · 자동 분석 꺼짐 · 자동 분류 다시 사용</span></td><td>자동 인식 끄기 / 켜기</td><td>캐릭터 하나에 스위치 하나. 끄면 사람이 넣은 것만 담음.</td></tr>
+      <tr><td><span class="strike">수동 관리</span></td><td>수동</td><td>레퍼런스가 5장 미만이거나 일부러 끈 캐릭터. 자동으로 넣지 않음.</td></tr>
+      <tr><td><span class="strike">캐릭터 분류에서 제외(배지) · 자동 분류 제외(태블릿 배지)</span></td><td>분류 제외 (메뉴: 캐릭터 분류에서 제외)</td><td>이 폴더와 하위 이미지는 비교·미분류·레퍼런스 후보에서 빠짐. 폴더 보기는 그대로.</td></tr>
+      <tr><td><span class="strike">자동 분류 제외 (시리즈 보기)</span></td><td>제외한 이미지</td><td>예전 방식으로 시리즈에서 하나씩 뺀 이미지. 있을 때만 보임.</td></tr>
+      <tr><td><span class="strike">기준 이미지</span></td><td>레퍼런스</td><td>인식이 비교에 쓰는, 사람이 고른 이미지(최대 25장, 5장부터 인식).</td></tr>
+      <tr><td><span class="strike">캐릭터 폴더</span></td><td>캐릭터</td><td>폴더가 아니라 소속. 카드 모양은 그대로.</td></tr>
+      <tr><td><span class="strike">채점 · 정확도 · 준비 중</span></td><td>(고급) 학습 인식 준비</td><td>학습 인식이 쓸 점수를 미리 계산하는 뒤쪽 작업.</td></tr>
+      <tr><td>(새 말)</td><td>기타 · 캐릭터로</td><td>기타 = 이름 없는 사람 묶음. 캐릭터로 = 기타에서 골라 새 캐릭터 만들기.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- Review value -->
+<section>
+  <h2 class="sec">확인(맞음/아님)이 실제로 하는 일</h2>
+  <div class="grid2">
+    <ul style="font-size:14px">
+      <li><b>맞음</b>: 그 캐릭터에 넣습니다. 그리고 그 캐릭터의 <b>학습 예시</b>가 됩니다(학습 인식 기준의 "맞음 예시 50장").</li>
+      <li><b>아님</b>: 빼고, 다시 자동으로 들어오지 않게 막습니다. 학습 인식이 넣은 것을 아님 하면 <b>틀림</b>으로 세어지고, 틀림이 허용치(판단의 5%, 최소 1건)를 넘으면 그 캐릭터는 기본 인식으로 돌아갑니다.</li>
+      <li><b>맞음 · 위치 틀림</b>: 넣기만 하고 학습에는 쓰지 않습니다.</li>
+      <li>기본 인식은 판단에서 배우지 않습니다. 기본 인식을 좋게 하는 길은 레퍼런스입니다.</li>
+    </ul>
+    <div>
+      <div class="ev">
+        <span>학습 인식 "자동" 후보 · 판단 302</span><span class="track"><span class="fill" style="width:96%"></span></span><span>맞음 290 · 96%</span>
+        <span>학습 인식 "추천" 후보 · 판단 82</span><span class="track"><span class="fill" style="width:72%"></span></span><span>맞음 59 · 72%</span>
+        <span>학습 인식이 넣은 것 다시 봄 71</span><span class="track"><span class="fill" style="width:97%"></span></span><span>맞음 69 · 97%</span>
+      </div>
+      <p class="note" style="font-size:13px; margin-top:10px">오늘 데이터 기준. 앞으로의 정확도를 보장하지는 않습니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Reverse migration -->
+<section>
+  <h2 class="sec">리버스 정리 순서 (한 번만, 실행할 때 승인)</h2>
+  <p class="note">규칙: 하위 폴더는 모두 같은 이름의 그룹(버전 표지만 폴더). 캐릭터는 이미지가 가장 많은 그룹으로. 캐릭터 없는 이미지는 있던 폴더 이름의 그룹 기타로. 아래 멤버는 이 규칙을 오늘 데이터에 적용한 결과입니다(괄호 = 그 폴더 안 이미지 수).</p>
+  <table>
+    <thead><tr><th>지금 하위</th><th>종류</th><th>이미지 · 캐릭터 없음</th><th>바뀐 뒤</th><th>멤버 (규칙 적용)</th></tr></thead>
+    <tbody>
+      <tr><td>가방팟</td><td>폴더</td><td>161 · 42</td><td>그룹 + 기타 42</td><td>버틴 (82), 소네트 (36), 슈나이더 (10), 안조 (9), 마틸다 부아닉 (7), 드루비스 (3), 릴리아 (1*), 레굴루스 (7, 동점)</td></tr>
+      <tr><td>라플라스</td><td>시리즈</td><td>170 · 18</td><td>그룹 + 기타 18</td><td>히사베스 (103), 로렌츠 (49), 보이저 (10), 메디슨 포켓 (8), 키페리나 (7), 37 (5), 투스페어리 (1*), 알레프 (1*)</td></tr>
+      <tr><td>라야시키</td><td>시리즈 (캐릭터 0)</td><td>77 · 25</td><td>그룹 + 기타 25</td><td>윈드송 (43), 빌라 (39)</td></tr>
+      <tr><td>카카졸데</td><td>폴더</td><td>60 · 19</td><td>그룹 + 기타 19</td><td>이졸데 (34), 카카니아 (23)</td></tr>
+      <tr><td>아르고스팟</td><td>폴더</td><td>117 · 83</td><td>그룹 + 기타 83</td><td>튜즈데이 (31), 제시카 (1*)</td></tr>
+      <tr><td>중국</td><td>폴더</td><td>60 · 51</td><td>그룹 + 기타 51</td><td>안안 리 (4), 양월 (3), 곡랑 (2)</td></tr>
+      <tr><td>런던</td><td>폴더</td><td>11 · 10</td><td>그룹 + 기타 10</td><td>플러터페이지 (1*)</td></tr>
+      <tr><td>재건</td><td>폴더</td><td>27 · 23</td><td>그룹 + 기타 23</td><td>노티카 (1*)</td></tr>
+      <tr><td>뱀파이어</td><td>폴더</td><td>4 · 0</td><td>그룹 (기타 없음)</td><td>제멜바이스 (4)</td></tr>
+      <tr><td>전쟁</td><td>폴더</td><td>128 · 126</td><td>기타만 있는 그룹</td><td>— (윈드송·안조 1장씩은 각자 그룹으로)</td></tr>
+      <tr><td>파리</td><td>폴더</td><td>114 · 104</td><td>기타만 있는 그룹</td><td>— (마틸다 부아닉 5장 등은 각자 그룹으로)</td></tr>
+      <tr><td>라모나</td><td>폴더</td><td>11 · 11</td><td>기타만 있는 그룹</td><td>—</td></tr>
+      <tr><td>4.0</td><td>폴더</td><td>4 · 4</td><td>기타만 있는 그룹</td><td>—</td></tr>
+      <tr><td>마커스</td><td>시리즈 (캐릭터 1)</td><td>127 · 10</td><td>리버스 캐릭터 마커스, 10장은 리버스 시리즈 기타</td><td>그룹 없음. 레콜레타·소더비도 팀 폴더에 이미지가 없어 그룹 밖</td></tr>
+      <tr><td>버전 표지</td><td>폴더</td><td>9 · 8</td><td>폴더 그대로</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:8px; font-size:13px">* 근거가 1장뿐인 배정. 레굴루스는 가방팟과 라플라스가 7장씩 동점이라 실행 미리보기에서 고릅니다. 멤버는 리버스 캐릭터 31명 중 28명이 그룹에 들어가고, 마커스·레콜레타·소더비가 그룹 밖에 남습니다.</p>
+  <div class="flow" style="margin-top:16px">
+    <div class="step"><b>미리보기와 백업</b><p>위 표를 미리보기로 보여 주고(레굴루스와 1장 배정은 여기서 바꿀 수 있음), 데이터베이스를 백업합니다.</p></div>
+    <div class="step"><b>캐릭터를 리버스로</b><p>히사베스·로렌츠·마커스를 "다른 시리즈로 이동"으로. 레퍼런스와 판단은 그대로. 라플라스·라야시키·마커스는 시리즈 등록 해제(새 기능).</p></div>
+    <div class="step"><b>그룹 13개</b><p>폴더 이름으로 그룹을 만들고 멤버를 넣습니다. 기타만 있는 그룹도 만듭니다.</p></div>
+    <div class="step"><b>이미지 올리고 폴더 지우기</b><p>버전 표지를 뺀 하위 폴더 이미지를 리버스로 올리고 빈 폴더를 지웁니다. 디스크 파일은 그대로. 예전 시리즈였던 곳의 이미지는 이때 리버스 캐릭터 전부와 처음 비교됩니다.</p></div>
+    <div class="step"><b>기타 채우기</b><p>비교가 끝난 뒤에도 캐릭터가 없는 이미지를 원래 폴더 이름의 그룹 기타로(마커스 폴더 것은 시리즈 기타로).</p></div>
+  </div>
+  <p class="note" style="margin-top:10px; font-size:13px">순서 이유: 비교를 먼저 하면 자동 인식이 찾을 수 있는 이미지는 캐릭터로 가고, 정말 모르는 사람만 기타에 남습니다. 예전 시리즈였던 곳의 이미지가 저절로 비교되지 않으면 "과거 미분류 이미지 갱신"으로 요청합니다(구현 때 확인). 원래 폴더 이름은 이미지마다 정리 전에 기록해 두고 기타 채우기에 씁니다.</p>
+</section>
+
+<!-- Work order -->
+<section>
+  <h2 class="sec">작업 순서</h2>
+  <div class="grid3">
+    <div class="box">
+      <h3>1 · 보기 맞추기와 말 바꾸기</h3>
+      <p class="meta">데이터 구조 변경 없음</p>
+      <ul style="font-size:13px">
+        <li>PC 사이드바 그룹 줄 되살리기(그룹 → 폴더 순서, 선택 표시, 우클릭 메뉴). 태블릿 분류 목록도 같은 순서.</li>
+        <li>태블릿 밴드물: 일반 폴더로 열고 안쪽 시리즈를 카드로.</li>
+        <li>PC·태블릿 시리즈 화면에 안쪽 시리즈 카드, 부모 미분류에서 안쪽 시리즈 빼기.</li>
+        <li>용어와 모델 이름 바꾸기(표 전체), DESIGN.md 용어 표도.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>2 · 기타 · 승격 · 시리즈 등록 해제</h3>
+      <p class="meta">데이터 구조 변경 1번</p>
+      <ul style="font-size:13px">
+        <li>그룹과 시리즈에 기타 칸. 기타는 수동 캐릭터처럼 저장(같은 이름 금지 규칙 때문에 안쪽 이름은 "가방팟 기타", 화면엔 "기타").</li>
+        <li>빈 그룹 자동 삭제 규칙 변경: 기타에 이미지가 있으면 캐릭터가 없어도 남김. 기타만 있는 그룹 만들기 허용.</li>
+        <li>"캐릭터로" 승격, 5장 승격 제안, 자동 인식이 넣으면 기타에서 빼기, 과거 갱신에 기타 포함.</li>
+        <li>"시리즈 등록 해제", 사이드바·카드 개수에 기타 포함.</li>
+        <li>태블릿에 기타 표시(옛 태블릿 앱에선 "가방팟 기타" 캐릭터로 보임).</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>3 · 리버스 정리</h3>
+      <p class="meta">라이브러리 쓰기 — 실행 때 승인</p>
+      <ul style="font-size:13px">
+        <li>위 "리버스 정리 순서" 다섯 단계를 한 번 실행하는 정리 도구(미리보기 → 실행).</li>
+        <li>백업 먼저. 레굴루스 그룹은 미리보기에서 선택.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>4 · 확인 하나로</h3>
+      <p class="meta">데이터 구조 변경 없음</p>
+      <ul style="font-size:13px">
+        <li>태그 추천 · 인식 추천 · 다시 확인을 한 목록으로(PC, 태블릿, 홈).</li>
+        <li>모든 시리즈에서 학습 인식 후보도 보이게 — 그래야 확인 판단이 쌓여 기준을 넘을 수 있습니다.</li>
+        <li>설정 › 고급 › 캐릭터 인식 상태 화면.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>5 · 학습 인식 저절로 켜기</h3>
+      <p class="meta">인식 동작 변경 — 가장 신중하게</p>
+      <ul style="font-size:13px">
+        <li>지금의 시리즈 단위 스위치를 캐릭터 단위로.</li>
+        <li>기준: 판단 30 · 맞음 예시 50 · 틀림 ≤ max(1, 판단의 5%). 넘으면 기본으로, 다시 들어오면 학습으로.</li>
+        <li>같은 이미지에서 두 방식이 다른 캐릭터를 고르지 않도록 규칙 점검(별도 검토).</li>
+        <li>방식 선택 메뉴 없앰. 리버스의 손으로 켠 설정은 지움.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>확인하지 못한 것</h3>
+      <ul style="font-size:13px">
+        <li>실제 앱 화면은 PC·태블릿 모두 열어 보지 않았습니다. 코드와 라이브러리 데이터(읽기만)로 판단했습니다.</li>
+        <li>서버가 태블릿에 보내는 목록 모양은 PC 코드로 추정했습니다.</li>
+        <li>사이드바 그룹 개수는 겹치는 이미지를 한 번만 센 추정값입니다(정리 뒤 다시 계산됨).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Appendix -->
+<section>
+  <h2 class="sec">부록 · 지금 서로 맞지 않는 곳 (코드 위치)</h2>
+  <ol style="font-size:13px">
+    <li><b>밴드물(태블릿)</b>: 시리즈 바로 아래 일반 폴더만 폴더 항목으로, 시리즈는 부모 없이 보냄 — <span class="path">src-tauri/src/cloud/characters.rs:275–308</span>; 태블릿은 부모로만 하위를 찾음 — <span class="path">mobile-client/characterModel.ts:47–50, CharacterBrowser.tsx:396–416</span>.</li>
+    <li><b>안쪽 시리즈 카드 없음</b>: 시리즈 화면 폴더 카드가 등록된 시리즈를 뺌 — <span class="path">library/character_folders.rs:86–92</span>.</li>
+    <li><b>부모 미분류에 안쪽 시리즈 이미지</b> — <span class="path">library/character_hub.rs:84–102</span> (리버스 253장).</li>
+    <li><b>안쪽 시리즈는 부모 캐릭터와 비교 안 됨</b>: 가장 가까운 시리즈 하나만 — <span class="path">library/character_scope.rs:111–131</span>.</li>
+    <li><b>그룹은 이미지를 못 가짐</b>, 빈 그룹 자동 삭제 — <span class="path">library/character_groups.rs:1, migrations/0072_empty_character_groups.sql</span>. 우회: 백합의 초카구야 공주!! 그룹 안 같은 이름 수동 캐릭터(5장).</li>
+    <li><b>캐릭터 "폴더"는 폴더가 아님</b>: 폴더와 연결된 캐릭터 0명; 태블릿은 같은 이름 폴더를 캐릭터로 추정 — <span class="path">mobile-client/libraryModel.ts:45–62</span>.</li>
+    <li><b>학습 인식 전환은 시리즈 단위, 준비 기준은 캐릭터 단위</b> — <span class="path">library/character_worker.rs:38–51, character_shadow_review.rs:849–877</span>. 학습 인식이 켜진 시리즈에선 기본 인식이 아무것도 넣지 않음 — <span class="path">library/character_incremental.rs:1419–1429</span>.</li>
+    <li><b>한 캐릭터는 그룹 하나</b> — <span class="path">migrations/0053_character_groups.sql</span> (<code>target_id</code>가 기본 키).</li>
+    <li><b>사이드바 그룹 줄</b>: 9월 29일 <code>60d4e3a6</code>에서 캐릭터 줄과 함께 빠짐(그룹은 펼쳐지지 않는 한 줄, 그룹 밖 캐릭터는 각자 한 줄이었음) — 그때 <span class="path">src/classification/ClassificationSidebar.tsx</span>. 개수 조회는 지금도 있음 — <span class="path">library/character_hub.rs:66–72</span>.</li>
+    <li><b>틀림 기준이 개수</b>: 2건 이상이면 보류, 4건 이상이면 부적합 — <span class="path">library/character_shadow_review.rs:867–877</span>. 비율 기준으로 바꿈(확정 8).</li>
+  </ol>
+</section>
+
+</main>
+</body>
+</html>

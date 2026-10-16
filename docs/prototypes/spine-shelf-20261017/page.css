@@ -1,0 +1,110 @@
+/* Mockup frame only (document, fake shell, stand-in artwork). Not part of the proposal. */
+html, body, #root { height: auto !important; overflow: visible !important; overflow-y: auto !important; user-select: text; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0f10; color: var(--color-text); font: 400 var(--type-body) / 1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, p { margin: 0; }
+.doc { word-break: keep-all; overflow-wrap: break-word; width: 1520px; max-width: 100%; padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 48px; }
+.doc > header h1 { font-size: 26px; font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 1100px; margin-top: 8px; line-height: 1.75; }
+.lead b, .note b, .doc li b { color: var(--color-text); font-weight: 600; }
+.variant { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; border-top: 1px solid #2a2b2d; }
+.variant > h2 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.variant > h2::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.variant > h2 small { color: var(--color-faint); font-size: 14px; font-weight: 400; }
+.note { max-width: 1100px; color: var(--color-muted); font-size: 14px; line-height: 1.75; }
+.doc ul.plain { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.85; max-width: 1100px; font-size: 14px; }
+.readout { color: var(--color-faint); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pair { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+.pair > div { display: flex; flex-direction: column; gap: 8px; }
+.cap { color: var(--color-faint); font-size: 13px; }
+
+/* Fake PC shell (rail + top bar + section bar), as in collections-toolbar-20261013. */
+.frame { position: relative; overflow: hidden; background: var(--color-bg); outline: 1px solid #2a2b2d; color: var(--color-text); font-size: var(--type-body); line-height: var(--line-ui); flex: none; }
+.frame--pc { width: 1440px; height: 820px; }
+svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: 16px; height: 16px; }
+.num { font-variant-numeric: tabular-nums; }
+.pc { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-3); background: var(--color-sidebar); border-right: 1px solid var(--color-border); color: var(--color-muted); }
+.rail span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-control); }
+.rail span.on { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+.rail .push { margin-top: auto; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--toolbar-height, 48px); padding: 0 0 0 var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.topbar .ttl { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 600; }
+.topbar .grow { flex: 1; }
+.winctl { display: flex; align-self: stretch; align-items: center; gap: 24px; padding: 0 16px 0 12px; color: var(--color-faint); font-size: 13px; }
+.ibtn { display: inline-grid; place-items: center; width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); cursor: pointer; }
+.ibtn:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.ibtn svg { width: 16px; height: 16px; }
+.quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; white-space: nowrap; cursor: pointer; }
+.quiet-menu svg { width: 16px; height: 16px; }
+.quiet-menu[aria-expanded="true"], .quiet-menu:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.count { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--color-border) transparent; }
+.ui-section-bar .ui-segmented { position: relative; }
+.cb-head { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; margin: 0 var(--space-6); border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
+.cb-head h3 { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--type-body); font-weight: 600; }
+.cb-head .tot { color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; font-variant-numeric: tabular-nums; }
+.f-chip { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-1) 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: var(--color-filter-selected); color: var(--color-text); font: 600 var(--type-meta) / 1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.f-chip svg { width: 14px; height: 14px; }
+.f-chip .x { display: inline-grid; place-items: center; width: 20px; height: 20px; color: var(--color-muted); }
+.shelf-label { position: absolute; left: var(--space-6); right: var(--space-6); display: flex; align-items: flex-end; padding-bottom: var(--space-2); }
+.ui-section-label__count { color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.ui-section-label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.ui-section-label__rule { flex: 1; height: 1px; background: var(--section-label-rule, linear-gradient(90deg, var(--color-border), transparent)); }
+
+/* Static menu (the app uses the Radix portal anchored to 보기). Opens 140ms fade + 4px rise. */
+.mock-menu { position: absolute; z-index: 20; display: block; transition: opacity 140ms var(--ease-standard), transform 140ms var(--ease-standard); }
+.mock-menu.is-closed { opacity: 0; transform: translateY(-4px); pointer-events: none; }
+.ui-view-options .ui-segmented { height: var(--control-height); }
+.sub { display: grid; gap: var(--space-1); }
+.sub > span { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; }
+.manage-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; }
+.manage-row svg { width: 16px; height: 16px; color: var(--color-muted); }
+
+/* Stand-in work screen after opening (the real one is CollectionWorkOverlay; swap in one step). */
+.work-mock { position: absolute; inset: 0; z-index: 5; display: none; grid-template-columns: minmax(0, 1fr) 360px; background: var(--color-bg); }
+.work-mock.is-open { display: grid; }
+.work-mock__stage { position: relative; display: grid; place-items: center; overflow: hidden; }
+.work-mock__stage .back { position: absolute; left: var(--space-4); top: var(--space-3); }
+.work-mock__cover { position: relative; width: calc(460px * var(--ratio)); height: 460px; padding: 4px 4px 4px 0; border-radius: 3px 6px 6px 3px; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; box-shadow: 0 24px 60px rgba(0,0,0,.55); }
+.work-mock__cover > span { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; }
+.work-mock__info { padding: var(--space-8) var(--space-6); border-left: 1px solid var(--color-border); background: var(--color-sidebar); display: grid; align-content: start; gap: var(--space-2); }
+.work-mock__info h2 { font-size: var(--type-title); font-weight: 600; line-height: 1.3; }
+.work-mock__info p { color: var(--color-muted); font-size: var(--type-meta); }
+
+/* State strip (section D). */
+.states { display: flex; flex-wrap: wrap; gap: var(--space-6); align-items: flex-end; padding: var(--space-6); background: var(--color-bg); outline: 1px solid #2a2b2d; }
+.states figure { margin: 0; display: grid; justify-items: center; gap: var(--space-3); }
+.states figcaption { color: var(--color-faint); font-size: 12px; text-align: center; max-width: 120px; line-height: 1.4; }
+.states .mini { position: relative; display: flex; align-items: flex-end; gap: 1px; height: calc(190px * var(--spine-scale) + 16px); }
+.states .mini::after { content: ""; position: absolute; left: -12px; right: -12px; top: 100%; height: 6px; background: linear-gradient(color-mix(in srgb, var(--color-text) 20%, transparent), color-mix(in srgb, var(--color-text) 7%, transparent)); }
+.states .force-hover .spine__case, .states .force-focus .spine__case { transform: translateY(-4px); }
+.states .force-press .spine__case { transform: translateY(-2px); filter: brightness(.92); }
+.states .force-focus::after { content: ""; position: absolute; inset: -3px; transform: translateY(-4px); border: var(--focus-width) solid var(--color-focus); border-radius: 2px; pointer-events: none; }
+.states .mini .spine-shelf__out { position: relative; transform: translateY(-6px); }
+
+/* ---------- Stand-in artwork (no real covers or spines in the repository) ---------- */
+/* Covers: a hue per work, the title set large like key art. */
+.mock-cover { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 9% 8%; color: #fff; overflow: hidden;
+  background: radial-gradient(circle at 64% 28%, hsl(var(--hue) 80% 72% / .55), transparent 38%), radial-gradient(ellipse 80% 50% at 30% 85%, hsl(calc(var(--hue) + 50) 70% 45% / .5), transparent 70%), linear-gradient(170deg, hsl(var(--hue) 45% 36%), hsl(calc(var(--hue) + 40) 40% 11%)); container-type: inline-size; }
+.mock-cover b { display: block; font-weight: 800; font-size: 11cqw; line-height: 1.1; letter-spacing: -.01em; text-shadow: 0 1px 6px rgba(0,0,0,.5); word-break: keep-all; }
+.mock-cover i { display: block; margin-top: 4%; font-style: normal; font-size: 6cqw; opacity: .75; }
+.mock-cover.is-av { background: radial-gradient(ellipse 60% 70% at 70% 40%, hsl(var(--hue) 40% 78% / .8), transparent 70%), linear-gradient(160deg, hsl(var(--hue) 30% 88%), hsl(calc(var(--hue) + 20) 35% 62%)); color: #1a1a1a; }
+.mock-cover.is-av b { text-shadow: none; font-size: 9cqw; }
+.mock-cover.is-av::before { content: attr(data-code); position: absolute; left: 8%; top: 6%; font: 700 6cqw/1 var(--font-ui); letter-spacing: .04em; color: hsl(var(--hue) 60% 30%); }
+
+/* LaunchBox-style spine art stand-ins: printed band, a mark, the logo-like title. */
+.lb { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; overflow: hidden; background: var(--lb-bg); color: var(--lb-ink); }
+.lb::before { content: ""; flex: none; width: 100%; aspect-ratio: 1 / 1.7; background: var(--lb-head); }
+.lb b { flex: 1; min-height: 0; max-height: 100%; padding: 14% 0; overflow: hidden; white-space: nowrap; text-overflow: clip; writing-mode: vertical-rl; text-orientation: sideways; font: 900 calc(var(--cd) * .6) / 1 var(--font-spine); letter-spacing: var(--lb-track, .02em); text-transform: var(--lb-case, none); }
+.lb i { flex: none; width: 56%; aspect-ratio: 1; margin-bottom: 14%; border-radius: var(--lb-mark-radius, 50%); background: var(--lb-mark); }
+/* AV jacket spine stand-ins: maker block, title, product code. */
+.avs { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; overflow: hidden; background: var(--av-bg); color: var(--av-ink); }
+.avs::before { content: ""; flex: none; width: 100%; aspect-ratio: 1 / 1.3; background: var(--av-maker); }
+.avs b { flex: 1; min-height: 0; padding: 10% 0; overflow: hidden; white-space: nowrap; writing-mode: vertical-rl; font: 700 calc(var(--cd) * .5) / 1 var(--font-spine); }
+.avs i { flex: none; padding-bottom: 12%; writing-mode: vertical-rl; text-orientation: sideways; font: 700 calc(var(--cd) * .42) / 1 var(--font-ui); font-style: normal; letter-spacing: .04em; color: var(--av-code); }
+/* PS4 template stand-in: another agent is adding the real .ps4 rules to CollectionCase.css (marks/ps4-head.svg). */
+.case-spine-art .ps4 .t-head { aspect-ratio: 96 / 256; background: url("../../../_tools/app/src/collections/case/marks/ps4-head.svg") center top / 100% auto no-repeat, #003399; }
+.case-spine-art .ps4 .t-band, .case-spine-art .ps4 .t-foot { background: #0b0b0c; }

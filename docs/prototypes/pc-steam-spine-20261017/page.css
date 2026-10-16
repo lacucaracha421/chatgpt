@@ -1,0 +1,60 @@
+/* Mockup frame only. The cases themselves use the app's real CaseMaterials/CollectionCase/LightCase CSS. */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--color-bg); color: var(--color-text); font: 400 var(--type-body) / 1.6 var(--font-ui); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+.doc { max-width: 1240px; margin: 0 auto; padding: var(--space-8) var(--space-4) 64px; display: grid; gap: var(--space-8); }
+.doc > * { min-width: 0; }
+header h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.lead { margin: var(--space-2) 0 0; color: var(--color-muted); max-width: 78ch; text-wrap: pretty; }
+.lead b { color: var(--color-text); font-weight: 600; }
+h2 { margin: 0 0 var(--space-1); font-size: var(--type-body); font-weight: 700; }
+h2 small { margin-left: var(--space-2); font-size: var(--type-meta); font-weight: 400; color: var(--color-faint); }
+.sub { margin: 0 0 var(--space-4); color: var(--color-muted); font-size: 13px; max-width: 86ch; }
+.keys { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-4); color: var(--color-faint); font-size: var(--type-meta); }
+.keys button { font: 500 13px / 1 var(--font-ui); color: var(--color-muted); background: var(--color-control); border: 1px solid var(--color-border); border-radius: 4px; padding: 7px 11px; cursor: pointer; }
+.keys button[aria-pressed="true"] { color: var(--color-text); background: var(--color-filter-selected, var(--color-control-hover)); font-weight: 600; }
+.keys button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.keys input[type="range"] { width: 200px; accent-color: var(--color-accent); }
+
+/* Shelf: the same cell geometry CollectionList gives LightCase. */
+.shelf { --case-height: 224px; --cell-width: 150px; position: relative; display: flex; flex-wrap: wrap; gap: 0 var(--space-4); padding: var(--space-6) var(--space-6) 0; overflow: hidden; }
+.shelf.tablet { --case-height: 150px; --cell-width: 108px; gap: 0 var(--space-4); }
+.cell { width: fit-content; height: calc(var(--case-height) + 80px); position: relative; }
+.cell .collection-light-case { width: min(var(--cell-width), calc(var(--lead) + var(--W))); perspective-origin: calc(var(--cell-width) * .35) 30%; }
+.cell .name { position: absolute; top: calc(var(--case-height) + 24px + var(--space-2)); left: 0; right: 0; font-size: var(--type-meta); line-height: 18px; color: var(--color-muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; word-break: keep-all; overflow-wrap: anywhere; }
+.cell .tag { display: block; color: var(--color-faint); }
+.cell .tag.new { color: var(--color-accent); }
+.shelf::before { content: ""; position: absolute; left: 0; right: 0; top: calc(var(--space-6) + var(--case-height) - 12px); height: 36px; background: linear-gradient(color-mix(in srgb, var(--color-text) 5%, transparent), transparent); pointer-events: none; }
+
+/* Large work-screen cases. */
+.stages { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-4); }
+.stage { position: relative; height: 640px; background: var(--color-bg); overflow: hidden; }
+.stage .collection-case { --ch: 520px; --cd: 34px; }
+.stage figcaption { position: absolute; left: var(--space-4); top: var(--space-3); font-size: var(--type-meta); color: var(--color-faint); z-index: 1; }
+
+/* Flat spines at true size (the face the 3D case turns toward you). */
+.flat { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-3); align-items: flex-end; }
+.flat figure { margin: 0; display: grid; justify-items: center; gap: var(--space-2); }
+.flat figcaption { font-size: 11px; line-height: 14px; color: var(--color-faint); text-align: center; max-width: 64px; }
+.fs { --case-rim: 3px; position: relative; width: var(--cd); height: var(--h); background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; flex: none; }
+.fs .ins { position: absolute; inset: var(--case-rim) 0; overflow: hidden; display: block; }
+.fs .ins.bare { display: flex; align-items: center; justify-content: center; }
+.fs .case-mask { display: block; width: 100%; height: 100%; background: var(--color-surface); }
+.fs::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
+.fs.big { --cd: 34px; --h: 520px; }
+.fs.mid { --cd: 18px; --h: 224px; }
+.fs.small { --cd: 12px; --h: 150px; }
+.flat-row + .flat-row { margin-top: var(--space-6); }
+.flat-row h3 { margin: 0 0 var(--space-3); font-size: var(--type-meta); font-weight: 500; color: var(--color-faint); }
+
+/* Stand-in front covers (no real artwork in the repository). */
+.mock-cover { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 9% 8%; color: #fff; font-family: var(--font-ui); overflow: hidden; }
+.mock-cover b { display: block; font-weight: 800; font-size: calc(var(--face-height, var(--ch)) * .07); line-height: 1.1; letter-spacing: -.01em; text-shadow: 0 1px 6px rgba(0,0,0,.5); word-break: keep-all; }
+.mock-cover i { display: block; margin-top: 4%; font-style: normal; font-size: calc(var(--face-height, var(--ch)) * .032); opacity: .7; }
+.c-ds2 { background: radial-gradient(ellipse 60% 40% at 50% 30%, rgba(214,150,70,.55), transparent 70%), radial-gradient(circle at 50% 34%, #2a1a10 0 18%, transparent 19%), linear-gradient(#3a2a1e, #0d0b0a 70%); }
+.c-soma { background: radial-gradient(circle at 62% 30%, rgba(160,220,230,.5), transparent 32%), linear-gradient(170deg, #0e3b4a, #061a24 60%, #02080c); }
+.c-va11 { background: radial-gradient(circle at 30% 30%, rgba(255,80,170,.55), transparent 40%), radial-gradient(circle at 75% 60%, rgba(90,120,255,.5), transparent 45%), linear-gradient(#24103a, #0b0616); }
+.c-mkw { background: radial-gradient(circle at 70% 25%, #ffe08a, transparent 30%), linear-gradient(180deg, #4fb4ff, #2a7de0 55%, #e8463a 56%, #b8231a); }
+.c-zelda { background: radial-gradient(circle at 50% 22%, rgba(255,240,200,.7), transparent 30%), linear-gradient(180deg, #7ec4d8, #3b8a7a 60%, #1f4a3c); }
+.c-astro { background: radial-gradient(circle at 50% 40%, #e8f2ff 0 14%, transparent 15%), linear-gradient(180deg, #1c3fae, #0b1b5a); }
+.c-hades { background: radial-gradient(circle at 50% 70%, rgba(255,90,40,.6), transparent 45%), linear-gradient(#2a0d10, #0a0405); }

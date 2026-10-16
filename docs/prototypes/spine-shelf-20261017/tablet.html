@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>책등 책장 태블릿</title>
+<!-- PC 시안과 같은 CSS(앱의 실제 토큰·컨트롤·케이스 인쇄 + 제안 spine-shelf.css). 태블릿 크기 토큰은 .frame--tab에서 mobile.css 값으로 덮는다.
+     틀은 1:1 크기(갤럭시 탭 세로 800×1280 CSS px)로 그린다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/CollectionBrowser.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CaseMaterials.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CollectionCase.css">
+<link rel="stylesheet" href="spine-shelf.css">
+<link rel="stylesheet" href="page.css">
+<style>
+/* Tablet tokens (mobile.css values) on the mock device. */
+.frame--tab { width: 800px; height: 1280px;
+  --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px;
+  --control-height: 44px; --control-height-compact: 36px; --control-height-sm: 36px; --badge-height: 24px;
+  --line-meta: 20px; --line-ui: 24px; --text-md: 17px; --text-sm: 15px; --text-xs: 13px; }
+.frame--land { width: 1280px; height: 800px; }
+.tab { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tab-top { display: flex; align-items: center; gap: var(--space-2); flex: none; height: 64px; padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab-top .ttl { font-size: var(--type-title); font-weight: 600; }
+.tab-top .grow { flex: 1; }
+.tab .ibtn { width: 44px; height: 44px; }
+.tab .ibtn svg { width: 24px; height: 24px; }
+.tab-nav { display: flex; justify-content: space-around; align-items: center; flex: none; height: 64px; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 13px; }
+.tab-nav span.on { color: var(--color-text); }
+.tab-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6); }
+.tab-bar .ui-segmented { position: relative; height: 44px; }
+.tab-bar .ui-segmented__cell { min-width: 88px; }
+.tab-bar .grow { flex: 1; }
+.tab-tool { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 44px; height: 44px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; cursor: pointer; }
+.tab-tool svg { width: 24px; height: 24px; }
+.tab-tool .n { color: var(--color-accent); font-size: 13px; font-weight: 600; }
+.tab-div { width: 1px; height: 20px; margin-inline: var(--space-1); background: var(--color-border); }
+.tab .cb-head { min-height: 56px; }
+.t-dim { position: absolute; inset: 0; z-index: 4; background: rgba(0,0,0,.5); }
+.t-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: grid; gap: var(--space-6); padding: var(--space-2) var(--space-6) var(--space-8); background: var(--color-surface-raised); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.t-sheet .grab { width: 40px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--color-border-strong); }
+.t-sheet h3 { font-size: var(--type-title); font-weight: 600; }
+.t-sheet .ui-segmented { position: relative; height: 44px; }
+.t-sheet .ui-view-options__content { padding: 0; }
+.tab .work-mock { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+.tab .work-mock__cover { width: calc(520px * var(--ratio)); height: 520px; }
+.tab .work-mock__info { border-left: 0; border-top: 1px solid var(--color-border); }
+.tab .back { min-height: 44px; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>게임 · AV 책장 — 태블릿</h1>
+  <p class="lead">PC와 같은 책장 부품을 그대로 쓴다. 다른 점은 <b>크기</b>(배율 1.0 / 1.25 / 1.5 px/mm), <b>탭 영역</b>, <b>세로 화면</b>뿐이다. 책등은 보통 크기에서 14~18px로 손가락(44px)보다 얇으므로, 줄 안 어디를 탭해도 <b>가장 가까운 케이스</b>를 꺼낸다(만화 책장의 태블릿 탭과 같은 규칙). 꺼낸 앞표지(크기에 따라 105~200px 폭)를 <b>한 번 더 탭</b>하면 작품 화면이 열린다. 판자 아래 빈 곳이나 줄 사이를 탭하면 제자리에 꽂는다. 세로 스와이프는 스크롤이고 탭으로 세지 않는다(8px 넘게 움직이면 취소).</p>
+</header>
+
+<section class="variant">
+  <h2>A. 세로 · 게임 책장 <small>보통 1.25 · 기기별 묶기 · 한 줄 약 47개</small></h2>
+  <p class="note">줄 안 아무 곳이나 탭해 보자(마우스 클릭으로 흉내). 가장 가까운 케이스가 앞표지로 돌아 나온다.</p>
+  <div class="frame frame--tab" id="t-a"></div>
+</section>
+
+<section class="variant">
+  <h2>B. 보기 시트 <small>배치: 책장 · 격자 / 책등 크기</small></h2>
+  <p class="note">태블릿의 보기는 바닥에서 올라오는 시트다(지금과 같다). 배치는 책장과 격자 둘. 책장일 때는 "한 줄에" 대신 책등 크기 세 단계가 나온다. 바꾸면 시트 뒤 목록이 바로 다시 꽂힌다(움직임 없이 한 번에).</p>
+  <div class="frame frame--tab" id="t-b"></div>
+</section>
+
+<section class="variant">
+  <h2>C. 세로 · AV 책장 / 격자</h2>
+  <div class="pair"><div><span class="cap">AV 책장 · 작품 하나 꺼냄</span><div class="frame frame--tab" id="t-c"></div></div></div>
+  <div class="pair"><div><span class="cap">게임 격자 · 한 줄 4개 · 앞표지만 평평하게</span><div class="frame frame--tab" id="t-d"></div></div></div>
+</section>
+
+<section class="variant">
+  <h2>D. 가로 <small>1280 × 800 · 한 줄 약 77개</small></h2>
+  <div class="frame frame--tab frame--land" id="t-e"></div>
+</section>
+</div>
+
+<script src="shelf.js"></script>
+<script>
+const { makeGames, makeAv, coverHTML, groupsFor, SpineShelf, renderGrid, PLASTIC, DIM, esc } = window.SpineShelfMock;
+const P = {
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  cal: 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5',
+  grid: 'M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  left: 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+function segmented(key, cells, active, extra = '') {
+  return `<div class="ui-segmented ${extra}" role="radiogroup" data-key="${key}"><span class="ui-segmented__thumb ui-segmented__thumb--initial"></span>${cells.map(([value, text]) =>
+    `<button type="button" class="ui-segmented__cell" role="radio" aria-checked="${value === active}" data-value="${value}" ${value === active ? 'data-segmented-active="true"' : ''}><span class="ui-segmented__content"><span class="ui-segmented__label">${text}</span></span></button>`).join('')}</div>`;
+}
+function placeThumbs(root) {
+  root.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-segmented-active]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!cell || !th) { if (th) th.style.display = 'none'; return; }
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+const label = title => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span><span class="ui-section-label__rule" aria-hidden="true"></span></div>`;
+const SIZES = { small: 1.0, normal: 1.25, large: 1.5 };
+const DATA = { game: makeGames(412), av: makeAv(236) };
+
+function mount(root, initial) {
+  const state = { type: 'game', layout: 'bookcase', size: 'normal', grouping: 'device', sheet: false, ...initial };
+  root.innerHTML = `<div class="tab">
+    <header class="tab-top"><span class="ttl">컬렉션</span><span class="grow"></span><button class="ibtn" aria-label="찾기">${ic('search')}</button><button class="ibtn" aria-label="더보기">${ic('dots')}</button></header>
+    <div class="scroll js-scroll">
+      <div class="tab-bar js-bar"></div>
+      <div class="cb-head"><h3>전체<span class="tot num js-total"></span></h3></div>
+      <div class="js-list" style="position:relative"></div>
+    </div>
+    <nav class="tab-nav"><span>홈</span><span>에셋</span><span class="on">컬렉션</span><span>만화</span><span>메모</span></nav>
+    <div class="js-sheet"></div>
+    <div class="work-mock js-work"></div></div>`;
+  const $ = s => root.querySelector(s);
+  const scroll = $('.js-scroll');
+  let shelf = null, listHost = $('.js-list');
+  function drawBar() {
+    $('.js-bar').innerHTML = `${segmented('type', [['game', '게임'], ['manga', '만화'], ['movie', '영화'], ['av', 'AV']], state.type)}<span class="grow"></span>
+      <button class="tab-tool" aria-label="쇼케이스">${ic('spark')}</button>
+      ${state.type === 'game' ? `<button class="tab-tool" aria-label="발매 캘린더">${ic('cal')}<span class="n num">3</span></button>` : ''}
+      <span class="tab-div"></span><button class="tab-tool js-view" aria-label="보기">${ic('grid')}</button><button class="tab-tool" aria-label="새 작품">${ic('plus')}</button>`;
+    $('.js-sheet').innerHTML = state.sheet ? `<div class="t-dim js-dim"></div><div class="t-sheet" role="dialog" aria-label="보기"><span class="grab"></span><h3>보기</h3>
+      <div class="ui-view-options__content">
+        <section class="ui-view-options__section">${label('배치')}${segmented('layout', [['bookcase', '책장'], ['grid', '격자']], state.layout, 'ui-segmented--full-width')}
+          ${state.layout === 'bookcase' ? `<div class="sub"><span>책등 크기</span>${segmented('size', [['small', '작게'], ['normal', '보통'], ['large', '크게']], state.size, 'ui-segmented--full-width')}</div>`
+            : `<div class="ui-per-row"><label class="ui-slider"><span>한 줄에</span><input type="range" min="3" max="8" value="4" aria-label="한 줄에"></label><output>4개</output></div>`}</section>
+        <section class="ui-view-options__section">${label('정렬')}
+          ${state.type === 'game' ? `<div class="sub"><span>묶기</span>${segmented('grouping', [['sort', '안 묶음'], ['device', '기기'], ['year', '발매 연도']], state.grouping, 'ui-segmented--full-width')}</div>` : ''}
+          <div class="sub"><span>기준</span>${segmented('sortkey', [['date', '발매일'], ['added', '추가일'], ['name', '제목']], 'date', 'ui-segmented--full-width')}</div></section>
+      </div></div>` : '';
+    requestAnimationFrame(() => placeThumbs(root));
+  }
+  function drawList(first = false) {
+    const items = DATA[state.type];
+    $('.js-total').textContent = items.length.toLocaleString();
+    if (state.layout === 'bookcase') {
+      if (!shelf) {
+        const host = document.createElement('div'); listHost.replaceWith(host); listHost = host;
+        shelf = new SpineShelf({ scroll, host, scale: SIZES[state.size], touch: true, onOpen: openWork });
+      }
+      shelf.scale = SIZES[state.size]; listHost.style.setProperty('--spine-scale', shelf.scale);
+      shelf.set({ items, groups: groupsFor(items, state.grouping), label: '작품 목록', first });
+    } else {
+      shelf = null;
+      const host = document.createElement('div'); listHost.replaceWith(host); listHost = host;
+      renderGrid(host, items, { columns: 4, privacy: false, onOpen: openWork });
+      host.onclick = e => { const card = e.target.closest('.cover-grid__card'); if (card) openWork(items.find(i => i.id === card.dataset.id)); };
+    }
+  }
+  function openWork(item) {
+    const [hmm, , cmm] = DIM[item.p];
+    const work = $('.js-work');
+    work.innerHTML = `<div class="work-mock__stage"><button class="ui-button ui-button--ghost back js-back" type="button">${ic('left', 's')}<span>컬렉션</span></button>
+      <span class="work-mock__cover" style="--ratio:${cmm / hmm};--plastic:${PLASTIC[item.p]}"><span>${coverHTML(item, false)}</span></span></div>
+      <aside class="work-mock__info"><h2>${esc(item.title)}</h2><p>${esc(item.credit)} · ${item.year}</p><p>지금의 태블릿 작품 화면이 그대로 열린다(대신 그림). 뒤로 가면 같은 케이스가 꺼낸 채로 남는다.</p></aside>`;
+    work.classList.add('is-open');
+    work.querySelector('.js-back').onclick = () => work.classList.remove('is-open');
+  }
+  root.addEventListener('click', e => {
+    if (e.target.closest('.js-view')) { state.sheet = true; drawBar(); return; }
+    if (e.target.closest('.js-dim')) { state.sheet = false; drawBar(); return; }
+    const cell = e.target.closest('.ui-segmented__cell'); if (!cell) return;
+    const key = cell.closest('.ui-segmented').dataset.key, value = cell.dataset.value;
+    if (key === 'type') { if (value !== 'game' && value !== 'av') return; state.type = value; drawBar(); drawList(true); return; }
+    if (key === 'layout') { state.layout = value; drawBar(); drawList(); return; }
+    if (key === 'size') { state.size = value; drawBar(); shelf?.setScale(SIZES[value]); return; }
+    if (key === 'grouping') { state.grouping = value; drawBar(); drawList(); return; }
+    cell.closest('.ui-segmented').querySelectorAll('.ui-segmented__cell').forEach(c => c.toggleAttribute('data-segmented-active', c === cell)); placeThumbs(root);
+  });
+  drawBar(); drawList(true);
+  return root;
+}
+mount(document.getElementById('t-a'), {});
+mount(document.getElementById('t-b'), { sheet: true });
+mount(document.getElementById('t-c'), { type: 'av' });
+mount(document.getElementById('t-d'), { layout: 'grid' });
+mount(document.getElementById('t-e'), {});
+// Show one pulled-out case in A, C and the landscape frame (a tap on the row band picks the nearest case).
+setTimeout(() => {
+  for (const [id, n] of [['t-a', 9], ['t-c', 20], ['t-e', 40]]) {
+    const spine = document.querySelectorAll(`#${id} .spine`)[n]; if (!spine) continue;
+    const box = spine.getBoundingClientRect();
+    spine.closest('.spine-shelf__row').dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: box.left + box.width / 2 + 6, clientY: box.top + 20 }));
+  }
+}, 300);
+</script>
+</body>
+</html>

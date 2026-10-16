@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>새 캐릭터 제안 목록</title>
+<!-- Loads the app's real font, tokens, shared base and controls; only the frames and the two layouts below are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* The app shell locks html/body height and scrolls inside panels; this page scrolls as a document. */
+html, body, #root { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+:root { --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); }
+button { font-family: inherit; }
+.doc { width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 12px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 100ch; line-height: 1.7; }
+.note b, .lead b { color: var(--color-text); font-weight: 600; }
+.cap { margin: 24px 0 8px; font-size: var(--type-meta); color: var(--color-faint); }
+.scroll-x { overflow-x: auto; }
+
+/* ===== App frame: sidebar index + main area ===== */
+.frame { display: grid; grid-template-columns: 208px minmax(0, 1fr); background: var(--color-bg); border: 1px solid var(--color-border); }
+.frame--wide { width: 1376px; }
+.frame--narrow { width: 896px; }
+.frame__index { background: var(--color-sidebar); padding: 0 var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--color-border); }
+.frame__top { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-2); height: var(--toolbar-height); padding: 0 var(--space-2); background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.frame__top svg { width: 16px; height: 16px; }
+.frame__index .ui-section-label { margin: var(--space-3) var(--space-1) var(--space-2); }
+.idx { width: 100%; display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text); text-align: left; font-size: var(--type-body); }
+.idx:hover { background: var(--color-surface-hover); }
+.idx span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.idx .n { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.idx[aria-current=page] { position: relative; color: var(--color-on-accent); background: var(--color-accent); border-radius: 0; box-shadow: var(--selection-echo); }
+.idx[aria-current=page] .n { color: inherit; }
+.idx[aria-current=page]::after { content: ""; width: var(--selection-mark-size); height: var(--selection-mark-size); margin-left: auto; flex: none; background: currentColor; }
+
+/* ===== Main area (container: layouts react to its width, not the window) ===== */
+.main { container-type: inline-size; container-name: main; min-width: 0; padding: var(--space-4) var(--space-4) var(--space-8); display: flex; flex-direction: column; gap: var(--space-4); }
+.bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); min-height: var(--control-height); }
+.bar h3 { margin: 0; display: flex; align-items: center; gap: var(--space-1); font-size: var(--type-body); font-weight: 600; }
+.bar h3 .num { font-variant-numeric: tabular-nums; }
+.bar .grow { flex: 1; min-width: 0; }
+.bar .ib { width: 28px; height: 28px; padding: 0; min-height: 28px; }
+.bar select { appearance: none; height: var(--control-height); padding: 0 28px 0 var(--space-3); border: 0; border-radius: var(--radius-control); color: var(--color-text); font: 400 var(--type-body) var(--font-ui); background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a3a5' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center; color-scheme: dark; }
+.ui-choice { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--type-body); color: var(--color-muted); }
+.ui-quiet-btn.ui-button.ui-button--quiet { font-size: var(--type-body); }
+.ui-button.ui-button--quiet .c { font-variant-numeric: tabular-nums; color: var(--color-text); }
+
+.group { display: flex; flex-direction: column; gap: var(--space-2); }
+.group + .group { margin-top: var(--space-2); }
+.group .ui-section-label { margin: 0; }
+
+/* Shared pieces of a suggestion */
+.nm b { display: block; font-size: var(--type-body); font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nm small { display: block; font-size: var(--type-meta); color: var(--color-faint); line-height: var(--line-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cnt { display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+.cnt b { font-size: var(--type-body); font-weight: 600; font-variant-numeric: tabular-nums; }
+.where { font-size: var(--type-meta); color: var(--color-muted); line-height: var(--line-meta); }
+.ph { background-color: var(--color-surface); }
+.acts { position: relative; display: flex; align-items: center; gap: var(--space-1); }
+.acts .ui-button--secondary { flex: none; white-space: nowrap; }
+.more.ui-button.ui-button--quiet svg { width: var(--icon-md); height: var(--icon-md); }
+.more.ui-button.ui-button--quiet { width: var(--control-height-compact); padding: 0; flex: none; }
+.more[aria-expanded=true] { background: var(--color-surface-hover); color: var(--color-text); }
+.acts .ui-menu { position: absolute; top: calc(100% + var(--space-1)); right: 0; min-width: 12rem; display: none; }
+.acts.open .ui-menu { display: grid; }
+.ui-menu__item { width: 100%; cursor: pointer; font-size: var(--type-body); }
+
+/* ===== Variant A: dense list row ===== */
+.rowsA { display: flex; flex-direction: column; }
+.rA { position: relative; display: grid; align-items: center; column-gap: var(--space-4); row-gap: var(--space-1); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border);
+  grid-template-columns: 256px 240px minmax(0, 1fr) auto; grid-template-areas: "thumbs name info acts"; }
+.rA:hover { background: var(--color-surface-hover); }
+.rA:last-child { border-bottom: 1px solid var(--color-border); }
+.rA .thumbs { grid-area: thumbs; display: flex; gap: var(--space-1); }
+.rA .thumbs .t, .rA .thumbs .more-t { width: 48px; height: 64px; flex: none; }
+.rA .more-t { display: grid; place-items: center; background: var(--color-surface-elevated); color: var(--color-muted); font-size: var(--type-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rA .more-t .n { display: none; }
+.rA .nm { grid-area: name; min-width: 0; }
+.rA .info { grid-area: info; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.rA .acts { grid-area: acts; }
+@container main (max-width: 900px) {
+  .rA { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "thumbs name acts" "thumbs info acts"; }
+  .rA .thumbs .t:nth-child(4) { display: none; }
+  .rA .more-t .w { display: none; }
+  .rA .more-t .n { display: inline; }
+  .rA .nm { display: flex; align-items: baseline; gap: var(--space-2); align-self: end; }
+  .rA .nm b { flex: none; max-width: 100%; }
+  .rA .nm small { min-width: 0; }
+  .rA .info { align-self: start; }
+  .rA .thumbs { grid-row: 1 / span 2; }
+  .rA .acts { grid-row: 1 / span 2; }
+}
+
+/* ===== Variant B: thumbnail-first cards ===== */
+.cardsB { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-4); }
+.cB { position: relative; display: flex; flex-direction: column; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-control); }
+.cB .media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; aspect-ratio: 9 / 4; overflow: hidden; border-radius: var(--radius-control) var(--radius-control) 0 0; }
+.cB .media .t { position: relative; min-width: 0; }
+.cB .media .ui-badge { position: absolute; right: var(--space-1); bottom: var(--space-1); }
+.cB .body { padding: var(--space-3) var(--space-4) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); flex: 1; }
+.cB .cnt { flex-wrap: wrap; row-gap: var(--space-1); }
+.cB .where { flex: 1; }
+.cB .acts .ui-button--secondary { flex: 1; }
+.cB .acts .ui-menu { z-index: var(--z-floating-menu); }
+.cB:hover { background: var(--color-surface-hover); }
+.cB .tag-line { margin-top: var(--space-1); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>새 캐릭터 제안 목록 · 두 가지 안</h1>
+    <p class="lead">확인 화면의 <b>새 캐릭터 제안</b>이 한눈에 읽히도록 줄 하나를 다시 짰습니다. 이름이 가장 크게 보이고, 숫자와 확실/불확실은 한 줄로 모으고, 폴더 정보는 한 문장으로 줄였습니다. 등록 버튼 하나만 눈에 보이고, 나머지는 ⋯ 메뉴에 둡니다. 두 안 모두 본문 폭 1,168 px(창 1440)과 688 px(창 960)에서 보여 드립니다. 썸네일은 색 막대기로 대신한 자리표시입니다.</p>
+    <p class="lead">이 페이지는 앱의 실제 폰트와 색, 버튼, 배지, 메뉴 CSS를 그대로 불러옵니다. ⋯ 버튼을 누르면 메뉴가 열리고 닫힙니다.</p>
+  </header>
+
+  <section id="va">
+    <h2 class="sec">A안 · 촘촘한 목록</h2>
+    <p class="note"><b>달라지는 점</b> 한 줄이 약 88 px로 줄고(지금은 약 130 px), 썸네일은 더 크게(48×64) 왼쪽에 놓입니다. 이름이 굵게 가장 먼저 읽히고 영문 태그는 작게 흐려집니다.</p>
+    <p class="note">줄마다 “캐릭터로 등록” 하나만 보이고, 다른 캐릭터와 같음 · 나중에 · 무시는 ⋯ 안에 있어서 글자가 잘리지 않습니다. 창이 좁아지면 썸네일이 3장으로 줄고 글이 두 줄로 쌓입니다.</p>
+    <div class="cap">창 1440 · 본문 1,168 px</div>
+    <div class="scroll-x"><div class="frame frame--wide" data-layout="a"></div></div>
+    <div class="cap">창 960 · 본문 688 px</div>
+    <div class="scroll-x"><div class="frame frame--narrow" data-layout="a"></div></div>
+  </section>
+
+  <section id="vb">
+    <h2 class="sec">B안 · 썸네일 카드</h2>
+    <p class="note"><b>달라지는 점</b> 사진이 먼저 보이는 카드입니다. 한 줄에 4장(좁으면 2장)씩 놓여, 누구인지 이미지로 알아보고 등록하는 흐름에 맞습니다.</p>
+    <p class="note">이름 · 장수와 확실/불확실 · 폴더 문장이 카드 안에서 위아래로 읽히고, 아래에 “캐릭터로 등록”과 ⋯가 있습니다. 한 번에 보이는 제안 수는 A안보다 적습니다.</p>
+    <div class="cap">창 1440 · 본문 1,168 px</div>
+    <div class="scroll-x"><div class="frame frame--wide" data-layout="b"></div></div>
+    <div class="cap">창 960 · 본문 688 px</div>
+    <div class="scroll-x"><div class="frame frame--narrow" data-layout="b"></div></div>
+  </section>
+</div>
+
+<script>
+const ICON = {
+  back: '<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/>',
+  more: '<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/>',
+  info: '<path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/>',
+  up: '<path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5"/>',
+  link: '<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/>',
+  clock: '<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>',
+  hide: '<path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/>',
+};
+const svg = (p, size = 16) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${p}</svg>`;
+
+// Sample rows. inside = images inside the series folder.
+const GROUPS = [
+  { series: '리버스', count: 4, rows: [
+    { name: '블로니', tag: 'blonney', n: 9, sure: 0, inside: 9 },
+    { name: '호넷', tag: 'hornet_(hollow_knight)', n: 8, sure: 8, inside: 2 },
+    { name: '소피아', tag: 'sophia_(reverse:1999)', n: 8, sure: 5, inside: 8 },
+    { name: '다이린', tag: 'dairin', n: 9, sure: 7, inside: 9 },
+  ]},
+  { series: '젠레스', count: 4, rows: [
+    { name: '11호', tag: 'soldier_11_(zenless_zone_zero)', n: 9, sure: 4, inside: 9 },
+    { name: '우키나미 유즈하', tag: 'ukinami_yuzuha', n: 9, sure: 9, inside: 9 },
+    { name: '코하루 리카', tag: 'koharu_rika', n: 5, sure: 2, inside: 5 },
+    { name: '벨 (수영복)', tag: 'belle_(swimsuit)', n: 8, sure: 1, inside: 8 },
+  ]},
+];
+
+// Stand-in pictures: gradients made only from the app's surface and accent tokens.
+function ph(seed) {
+  const a = (seed * 47) % 360, p1 = 8 + (seed * 13) % 22, p2 = 30 + (seed * 29) % 40, x = 20 + (seed * 37) % 60, y = 15 + (seed * 53) % 50;
+  return `background: radial-gradient(circle at ${x}% ${y}%, color-mix(in srgb, var(--color-accent) ${p1 + 10}%, transparent) 0 ${14 + seed % 9}%, transparent ${38 + seed % 14}%), linear-gradient(${a}deg, color-mix(in srgb, var(--color-accent) ${p1}%, var(--color-surface-elevated)), color-mix(in srgb, var(--color-border-strong) ${p2}%, var(--color-bg)));`;
+}
+const badges = r => {
+  const out = [];
+  if (r.sure > 0) out.push(`<span class="ui-badge">확실 ${r.sure}</span>`);
+  if (r.n - r.sure > 0) out.push(`<span class="ui-badge">불확실 ${r.n - r.sure}</span>`);
+  return out.join('');
+};
+const where = (series, r) => r.inside === r.n ? `${series} 폴더에 ${r.n}장` : `${series} 폴더에 ${r.inside}장, 다른 곳에 ${r.n - r.inside}장`;
+const menu = `<div class="ui-menu" role="menu">
+  <button type="button" class="ui-menu__item" role="menuitem"><span class="ui-menu__item-icon">${svg(ICON.link)}</span><span class="ui-menu__item-label">다른 캐릭터와 같음…</span></button>
+  <button type="button" class="ui-menu__item" role="menuitem"><span class="ui-menu__item-icon">${svg(ICON.clock)}</span><span class="ui-menu__item-label">나중에</span></button>
+  <button type="button" class="ui-menu__item" role="menuitem"><span class="ui-menu__item-icon">${svg(ICON.hide)}</span><span class="ui-menu__item-label">무시</span></button>
+</div>`;
+const actions = (open) => `<div class="acts${open ? ' open' : ''}"><button type="button" class="ui-button ui-button--secondary">캐릭터로 등록</button><button type="button" class="ui-button ui-button--quiet more" aria-label="더보기" aria-haspopup="menu" aria-expanded="${open ? 'true' : 'false'}">${svg(ICON.more, 20)}</button>${menu}</div>`;
+
+let seed = 3;
+function rowA(series, r, open) {
+  const thumbs = [0, 1, 2, 3].map(() => `<span class="t ph" style="${ph(seed++)}"></span>`).join('');
+  return `<div class="rA">
+    <div class="thumbs">${thumbs}<span class="more-t"><span class="w">+${r.n - 4}</span><span class="n">+${r.n - 3}</span></span></div>
+    <div class="nm"><b>${r.name}</b><small>${r.tag}</small></div>
+    <div class="info"><div class="cnt"><b>${r.n}장</b>${badges(r)}</div><div class="where">${where(series, r)}</div></div>
+    ${actions(open)}
+  </div>`;
+}
+function cardB(series, r, open) {
+  const thumbs = [0, 1, 2].map(i => `<span class="t ph" style="${ph(seed++)}">${i === 2 && r.n > 3 ? `<span class="ui-badge ui-badge--scrim">+${r.n - 3}</span>` : ''}</span>`).join('');
+  return `<div class="cB">
+    <div class="media">${thumbs}</div>
+    <div class="body">
+      <div class="nm"><b>${r.name}</b><small>${r.tag}</small></div>
+      <div class="cnt"><b>${r.n}장</b>${badges(r)}</div>
+      <div class="where">${where(series, r)}</div>
+      ${actions(open)}
+    </div>
+  </div>`;
+}
+
+const index = `<nav class="frame__index" aria-label="확인 시리즈">
+  <div class="ui-section-label"><span class="ui-section-label__title">제안</span><span class="ui-section-label__rule"></span></div>
+  <button type="button" class="idx" aria-current="page"><span>새 캐릭터 제안</span><span class="n">130</span></button>
+  <div class="ui-section-label"><span class="ui-section-label__title">시리즈</span><span class="ui-section-label__rule"></span></div>
+  <button type="button" class="idx"><span>전체</span><span class="n">587</span></button>
+  <button type="button" class="idx"><span>리버스</span><span class="n">264</span></button>
+  <button type="button" class="idx"><span>백합</span><span class="n">111</span></button>
+  <button type="button" class="idx"><span>젠레스</span><span class="n">92</span></button>
+  <button type="button" class="idx"><span>블루 아카이브</span><span class="n">70</span></button>
+</nav>`;
+
+const bar = `<div class="bar">
+  <h3>새 캐릭터 제안 <span class="num">130</span>명 <button type="button" class="ui-button ui-button--quiet ib" aria-label="도움말">${svg(ICON.info)}</button></h3>
+  <span class="grow"></span>
+  <select aria-label="최소 이미지 수"><option>1장 이상</option><option>3장 이상</option><option selected>5장 이상</option><option>10장 이상</option></select>
+  <label class="ui-choice"><input type="checkbox" class="ui-checkbox"><span>시리즈 폴더 안에 있는 것만</span></label>
+  <button type="button" class="ui-button ui-button--quiet">무시 목록 <span class="c">15</span></button>
+</div>`;
+
+function frame(el) {
+  const layout = el.dataset.layout;
+  let openDone = false;
+  const groups = GROUPS.map((g, gi) => {
+    const items = g.rows.map((r, ri) => {
+      const open = !openDone && gi === 0 && ri === 1; if (open) openDone = true;
+      return layout === 'a' ? rowA(g.series, r, open) : cardB(g.series, r, open);
+    }).join('');
+    return `<section class="group" aria-label="${g.series}">
+      <div class="ui-section-label"><span class="ui-section-label__title">${g.series}</span> <span class="ui-section-label__count">${g.count}명</span><span class="ui-section-label__rule"></span></div>
+      ${layout === 'a' ? `<div class="rowsA">${items}</div>` : `<div class="cardsB">${items}</div>`}
+    </section>`;
+  }).join('');
+  el.innerHTML = `<div class="frame__top">${svg(ICON.back)}<span>확인</span></div>${index}<div class="main">${bar}${groups}</div>`;
+}
+document.querySelectorAll('.frame').forEach(frame);
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.more');
+  const hit = btn ? btn.closest('.acts') : null;
+  document.querySelectorAll('.acts.open').forEach(a => { if (a !== hit) { a.classList.remove('open'); a.querySelector('.more').setAttribute('aria-expanded', 'false'); } });
+  if (hit) { const on = hit.classList.toggle('open'); btn.setAttribute('aria-expanded', String(on)); }
+});
+
+// ?only=a or ?only=b shows a single variant (used for screenshots).
+const only = new URLSearchParams(location.search).get('only');
+if (only) { document.querySelector('header').style.display = 'none'; ['a', 'b'].forEach(k => { if (k !== only) document.getElementById('v' + k).style.display = 'none'; }); }
+</script>
+</body>
+</html>

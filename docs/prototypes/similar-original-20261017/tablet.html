@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 유사 검토</title>
+<!-- 태블릿의 실제 mobile.css(토큰·컨트롤 포함)와 검토 화면 CSS를 읽는다. clues.css는 PC와 같은 공용 조각. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/mobile-client/mobile.css">
+<link rel="stylesheet" href="../../../_tools/app/mobile-client/characterReview.css">
+<link rel="stylesheet" href="../../../_tools/app/mobile-client/similarityReview.css">
+<link rel="stylesheet" href="clues.css">
+<script src="cases.js"></script>
+<style>
+  body { margin: 0; }
+  svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .art { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* ---------- CHANGED (mobile-client/similarityReview.css) ---------- */
+  .similarity-body { gap: var(--space-3); }
+  /* Pane tag becomes the shared scrim badge. */
+  .similarity-pane > .ui-badge--scrim { position: absolute; top: var(--space-2); left: var(--space-2); pointer-events: none; }
+  .similarity-pane { border: 0; border-radius: 0; background: var(--color-sidebar); }
+  .similarity-panes { gap: var(--space-2); }
+  @media (orientation: landscape) and (min-width: 700px) {
+    /* Same gap as the clue table's centre column, so each value sits under its own image. */
+    .similarity-panes { column-gap: calc(var(--type-meta) * 9); }
+  }
+  .similarity-body > .similarity-clues { flex: none; }
+  .similarity-actions { display: grid; gap: var(--space-2); padding: var(--space-3) var(--mobile-gutter) var(--space-3); border-top: 1px solid var(--color-border); }
+  .similarity-reason { margin: 0; text-align: center; font-size: var(--type-body); line-height: 1.4; color: var(--color-text); }
+  .similarity-reason[data-none] { color: var(--color-muted); }
+  .similarity-buttons { gap: var(--space-2); }
+  .similarity-buttons button { font-size: var(--type-body); }
+  .similarity-actions .hint { margin: 0; font-size: var(--type-meta); color: var(--color-faint); }
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <symbol id="back" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></symbol>
+  <symbol id="stack" viewBox="0 0 24 24"><path d="M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"/></symbol>
+</svg>
+<div class="similarity-overlay" role="dialog" aria-modal="true" aria-label="유사 이미지 검토">
+  <header class="review-bar">
+    <button type="button" class="ui-button ui-button--ghost ui-button--icon" aria-label="검토 닫기"><svg class="i"><use href="#back"/></svg></button>
+    <div class="review-title"><h1>유사 이미지 검토</h1><p class="numeric" id="count">3 / 38</p></div>
+    <button type="button" class="ui-button ui-button--ghost ui-button--icon" aria-label="한 화면에서 비교"><svg class="i"><use href="#stack"/></svg></button>
+  </header>
+  <div class="similarity-body" data-mode="side">
+    <div class="similarity-panes" id="panes"></div>
+    <div id="clues"></div>
+  </div>
+  <footer class="similarity-actions">
+    <p class="similarity-reason" id="reason"></p>
+    <div class="similarity-buttons" id="buttons"></div>
+    <p class="hint">선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.</p>
+  </footer>
+</div>
+<script>
+(() => {
+  const S = window.SIM;
+  const $ = (s) => document.querySelector(s);
+  function render(key, alt) {
+    const c = S.resolved(S.CASES[key] || S.CASES.a, alt);
+    const nm = S.names(c, 'tablet');
+    $('#panes').innerHTML = [0, 1].map((i) => `<div class="similarity-pane" aria-label="${nm[i]} 이미지">${S.art(c.sides[i].art, c.sides[i].w, c.sides[i].h)}<span class="ui-badge ui-badge--scrim" aria-hidden="true">${nm[i]}</span></div>`).join('');
+    const holder = $('#clues');
+    holder.outerHTML = S.clueTable(c, nm).replace('<table class="similarity-clues"', '<table id="clues" class="similarity-clues"');
+    const r = $('#reason');
+    r.textContent = S.reasonText(c, nm);
+    r.toggleAttribute('data-none', S.recSide(c) === null);
+    $('#buttons').innerHTML = S.buttons(c, 'tablet');
+    $('#count').textContent = { a: '1 / 38', b: '3 / 38', c: '4 / 38', d: '5 / 38', e: '6 / 38' }[c.key];
+  }
+  render(new URLSearchParams(location.search).get('case') || 'a', false);
+  addEventListener('message', (e) => { if (e.data && e.data.simCase) render(e.data.simCase, !!e.data.alt); });
+})();
+</script>
+</body>
+</html>

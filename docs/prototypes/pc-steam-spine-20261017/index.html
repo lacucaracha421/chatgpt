@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 책등 Steam</title>
+<!-- 앱의 실제 폰트·토큰과 케이스 CSS(CaseMaterials, CollectionCase, LightCase)를 읽는다.
+     steam-spine.css가 새 PC 템플릿(NEW), page.css는 시안 틀과 임시 앞표지. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CaseMaterials.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CollectionCase.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/LightCase.css">
+<link rel="stylesheet" href="steam-spine.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>PC 책등 · Steam 템플릿</h1>
+  <p class="lead">책등 이미지가 없는 PC 게임에 <b>Steam 책등</b>을 그린다. 스위치·PS5 템플릿과 같은 틀(위 머리 · 제목 띠 · 아래 개발사)에 Steam 클라이언트의 짙은 남청 회색을 입히고, 머리에는 <b>Steam 마크와 PC</b>를 PS5 머리(로고 + PS5)처럼 세로로 찍는다. 케이스 플라스틱은 실제 PC DVD 케이스처럼 <b>검정</b>으로 바꾸는 것을 함께 제안한다(아래 버튼으로 지금의 회색과 비교).</p>
+  <p class="lead">게임 케이스 책등 템플릿은 <b>이번 요청 범위</b>(10.17)다. 바뀌는 것은 PC 게임의 책등 그림과 케이스 색뿐이고, LaunchBox 책등 이미지가 있는 게임과 다른 기종은 그대로다. 앞표지 그림은 예시용 대체 그림.</p>
+</header>
+
+<section>
+  <h2>A. 선반 <small>PC 선반 크기 · 스위치 · 스위치 2 · PS5 옆에 새 PC 책등</small></h2>
+  <p class="sub">왼쪽 셋은 지금 있는 템플릿, 가운데 셋이 새 PC 책등(긴 한국어 제목 · 짧은 영어 제목 · 긴 영어 제목), 오른쪽 끝은 비공개 모드(책등과 앞면이 다른 기종과 똑같이 가려진다). 고른 케이스는 앞으로 나온다(클릭).</p>
+  <div class="keys" role="group" aria-label="PC 케이스 색">PC 케이스 색
+    <button type="button" data-plastic="new" aria-pressed="true">검정 (제안)</button>
+    <button type="button" data-plastic="now" aria-pressed="false">회색 (지금)</button>
+  </div>
+  <div class="shelf" id="shelf-pc"></div>
+</section>
+
+<section>
+  <h2>B. 지금 <small>같은 세 게임이 지금 보이는 모습 · 빈 책등에 제목만</small></h2>
+  <div class="shelf" id="shelf-now"></div>
+</section>
+
+<section>
+  <h2>C. 태블릿 선반 <small>케이스 높이 150 · 책등 폭 12 px</small></h2>
+  <p class="sub">책등 폭은 앞면 높이의 8%(최소 8 px)를 따른다. 가장 작은 태블릿 선반에서도 마크와 PC가 뭉개지지 않는지 확인.</p>
+  <div class="shelf tablet" id="shelf-tablet"></div>
+</section>
+
+<section>
+  <h2>D. 작품 화면의 큰 케이스 <small>높이 520 · 책등 폭 34 px</small></h2>
+  <div class="keys" role="group" aria-label="케이스 돌리기">돌리기
+    <button type="button" data-turn="0" aria-pressed="false">정면</button>
+    <button type="button" data-turn="28" aria-pressed="false">기본 28°</button>
+    <button type="button" data-turn="62" aria-pressed="true">책등 쪽 62°</button>
+    <input type="range" min="-10" max="90" value="62" aria-label="각도">
+  </div>
+  <div class="stages" id="stages"></div>
+</section>
+
+<section>
+  <h2>E. 책등 펼쳐 보기 <small>실제 크기 · 3D 없이 책등 면만</small></h2>
+  <div class="flat-row"><h3>작품 화면 (34 × 520)</h3><div class="flat" id="flat-big"></div></div>
+  <div class="flat-row"><h3>PC 선반 (18 × 224)</h3><div class="flat" id="flat-mid"></div></div>
+  <div class="flat-row"><h3>태블릿 선반 (12 × 150)</h3><div class="flat" id="flat-small"></div></div>
+</section>
+</div>
+
+<script>
+const PLASTIC = { sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)", pc: "rgba(16,18,22,.9)", now: "rgba(120,128,136,.38)" };
+const G = {
+  zelda: { title: "젤다의 전설 티어스 오브 더 킹덤", dev: "Nintendo EPD", p: "sw", ratio: .62, cover: "c-zelda" },
+  mkw: { title: "마리오 카트 월드", dev: "Nintendo", p: "sw2", nintendo: true, ratio: .62, cover: "c-mkw" },
+  astro: { title: "아스트로봇", dev: "Team Asobi", p: "ps5", ratio: .79, cover: "c-astro" },
+  ds2: { title: "다크 소울 2: 스칼라 오브 더 퍼스트 신", dev: "FromSoftware", p: "pc", ratio: .71, cover: "c-ds2" },
+  soma: { title: "SOMA", dev: "Frictional Games", p: "pc", ratio: .71, cover: "c-soma" },
+  va11: { title: "VA-11 Hall-A: Cyberpunk Bartender Action", dev: "SUKEBAN", p: "pc", ratio: .71, cover: "c-va11" },
+  hades: { title: "하데스", dev: "Supergiant Games", p: "pc", ratio: .71, cover: "c-hades", privacy: true },
+};
+const NAMES = { sw: "Switch", sw2: "Switch 2", ps5: "PS5", pc: "PC · 새 책등", now: "PC · 지금" };
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const plastic = (g, now) => now ? PLASTIC.now : PLASTIC[g.p];
+
+function spine(g, now) {
+  if (g.privacy) return `<span class="ins"><span class="case-mask"></span></span>`;
+  const title = `<span class="spine-title">${esc(g.title)}</span>`;
+  if (now) return `<span class="ins bare"><span class="case-spine-art">${title}</span></span>`;
+  return `<span class="ins full"><span class="case-spine-art"><span class="tpl ${g.p}" data-spine-template="${g.p}"${g.nintendo ? " data-nintendo" : ""}>` +
+    `<span class="t-head"></span><span class="t-band">${title}</span><span class="t-foot"><span class="t-pub">${esc(g.dev)}</span></span></span></span></span>`;
+}
+const cover = g => g.privacy ? `<span class="case-mask"></span>` : `<span class="mock-cover ${g.cover}"><b>${esc(g.title)}</b><i>${esc(g.dev)}</i></span>`;
+
+function lightCase(key, now) {
+  const g = G[key];
+  return `<div class="cell"><span class="collection-light-case" data-ready="true" data-revealed="true" data-pc="${g.p === "pc" && !now ? "" : "no"}" style="--case-ratio:${g.ratio};--plastic:${plastic(g, now)};--gloss:84%">
+    <span class="cs-box"><span class="cs-front"><span class="ins">${cover(g)}</span></span><span class="cs-spine">${spine(g, now)}</span><span class="cs-top"></span></span></span>
+    <span class="name"><span class="tag${g.p === "pc" && !now ? " new" : ""}">${g.privacy ? "PC · 비공개" : NAMES[now ? "now" : g.p]}</span>${g.privacy ? "" : esc(g.title)}</span></div>`;
+}
+
+function walls(tray) {
+  return ["top", "bottom", "outer"].map(w => `<span class="k-wall k-${tray}-wall k-wall-${w}"></span><span class="k-wall k-${tray}-wall k-wall-${w}-in"></span><span class="k-lip k-${tray}-lip k-lip-${w}"></span>`).join("");
+}
+function bigCase(key) {
+  const g = G[key];
+  return `<figure class="stage"><figcaption>${NAMES[g.p]} · ${esc(g.title)}</figcaption><div class="collection-case collection-case--large" style="--ratio:${g.ratio};--plastic:${plastic(g)}">
+    <span class="floor-shadow"></span><div class="collection-case-object"><div class="kase" data-pc="${g.p === "pc" ? "" : "no"}" style="--ry:62deg;--open:0;--gloss:100%">
+    <span class="k-back"><span class="ins"><span class="case-mask"></span></span></span><span class="k-floor"></span>${walls("base")}<span class="k-ridge"></span>
+    <span class="k-hinge"><span class="k-spine">${spine(g)}</span><span class="k-spine-in"></span><span class="k-lid"><span class="k-front"><span class="ins">${cover(g)}</span></span><span class="k-inner"></span>${walls("lid")}</span></span>
+    </div></div></div></figure>`;
+}
+function flat(key, size, now) {
+  const g = G[key];
+  return `<figure><span class="fs ${size}" data-pc="${g.p === "pc" && !now ? "" : "no"}" style="--plastic:${plastic(g, now)}">${spine(g, now)}</span><figcaption>${g.privacy ? "PC 비공개" : NAMES[now ? "now" : g.p]}</figcaption></figure>`;
+}
+
+const mix = ["zelda", "mkw", "astro", "ds2", "soma", "va11", "hades"];
+document.getElementById("shelf-pc").innerHTML = mix.map(k => lightCase(k)).join("");
+document.getElementById("shelf-now").innerHTML = ["ds2", "soma", "va11"].map(k => lightCase(k, true)).join("");
+document.getElementById("shelf-tablet").innerHTML = mix.map(k => lightCase(k)).join("");
+document.getElementById("stages").innerHTML = ["ds2", "va11", "astro"].map(bigCase).join("");
+for (const [id, size] of [["flat-big", "big"], ["flat-mid", "mid"], ["flat-small", "small"]])
+  document.getElementById(id).innerHTML = ["mkw", "zelda", "astro", "ds2", "soma", "va11"].map(k => flat(k, size)).join("") + flat("ds2", size, true) + flat("hades", size);
+
+// Lift a shelf case like the app's selection.
+document.querySelectorAll(".shelf").forEach(shelf => shelf.addEventListener("click", event => {
+  const box = event.target.closest(".collection-light-case"); if (!box) return;
+  const on = !box.hasAttribute("data-front");
+  shelf.querySelectorAll("[data-front]").forEach(n => { n.removeAttribute("data-front"); n.style.setProperty("--gloss", "84%"); });
+  if (on) { box.setAttribute("data-front", ""); box.style.setProperty("--gloss", "50%"); }
+}));
+// Compare the proposed black PC plastic with today's grey.
+document.querySelectorAll("[data-plastic]").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-plastic]").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
+  const value = button.dataset.plastic === "new" ? PLASTIC.pc : PLASTIC.now;
+  document.querySelectorAll('[data-pc=""]').forEach(n => (n.closest(".collection-case") ?? n).style.setProperty("--plastic", value));
+}));
+// Turn the large cases.
+const range = document.querySelector('input[type="range"]');
+function turn(deg) {
+  range.value = deg;
+  document.querySelectorAll("[data-turn]").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.turn) === Number(deg))));
+  document.querySelectorAll(".stage .kase").forEach(k => { k.style.setProperty("--ry", `${deg}deg`); k.style.setProperty("--gloss", `${50 + Number(deg)}%`); });
+}
+document.querySelectorAll("[data-turn]").forEach(b => b.addEventListener("click", () => turn(b.dataset.turn)));
+range.addEventListener("input", () => turn(range.value));
+</script>
+</body>
+</html>

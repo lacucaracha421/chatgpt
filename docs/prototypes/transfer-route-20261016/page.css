@@ -1,0 +1,99 @@
+/* Mockup frame only. The app's real fonts, tokens, base, controls, chrome and 전송 CSS load first;
+   the few new pieces (route word, 직접 받기 block) are marked NEW and are what the implementer adds. */
+html, body { height: auto !important; overflow: visible !important; overflow-y: auto !important; user-select: text; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: #0e0f10; color: var(--color-text); font: 400 var(--type-body) / 1.55 var(--font-ui); word-break: keep-all; }
+h1, h2, h3, p { margin: 0; }
+button { font-family: inherit; }
+.doc { width: 1360px; max-width: 100%; margin: 0 auto; padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 48px; }
+.doc > header h1 { font-size: 26px; font-weight: 600; letter-spacing: -.3px; }
+.lead { color: var(--color-muted); max-width: 1040px; margin-top: 8px; line-height: 1.75; font-size: 15px; }
+.lead b, .doc li b, td b { color: var(--color-text); font-weight: 600; }
+.part { display: flex; flex-direction: column; gap: 16px; }
+.part > h2 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.part > h2::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.part > h2 small { color: var(--color-faint); font-size: 14px; font-weight: 400; }
+.doc ul.plain { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.85; max-width: 1080px; font-size: 14px; }
+.doc code { font-family: var(--font-ui); font-size: 13px; color: var(--color-text); }
+.cap { color: var(--color-faint); font-size: 13px; }
+svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Doc-level state switcher (not app UI). */
+.keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--color-faint); }
+.keys button { height: 28px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: 4px; background: transparent; color: var(--color-muted); font-size: 13px; cursor: pointer; }
+.keys button[aria-pressed="true"] { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+
+/* ---------- PC window: rail + index + main (the real app uses its shell) ---------- */
+.frame { position: relative; overflow: hidden; background: var(--color-bg); outline: 1px solid #2a2b2d; color: var(--color-text); font-size: var(--type-body); flex: none; }
+.frame--pc { width: 1280px; height: 760px; display: flex; }
+.frame--pc .workspace-rail { height: 100%; }
+.frame--pc .workspace-rail__item svg { width: 18px; height: 18px; }
+.mock-index { width: 264px; flex: none; height: 100%; background: var(--color-sidebar); border-right: 1px solid var(--color-border); overflow: hidden; }
+.mock-index .exchange-index { height: 100%; }
+.mock-index .exchange-index-body { padding-top: var(--space-1); }
+.mock-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mock-titlebar { height: 44px; flex: none; display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar, var(--color-sidebar)); }
+.mock-titlebar h1 { font-size: var(--type-body); font-weight: 600; }
+.mock-titlebar .exchange-status { margin-left: auto; }
+.mock-titlebar .win { display: flex; gap: 18px; margin-left: 24px; color: var(--color-faint); font-size: 12px; letter-spacing: 2px; }
+.mock-main .exchange-workspace { flex: 1; min-height: 0; }
+.mock-main .exchange-body { justify-content: flex-end; }
+
+/* Image stand-ins (no library images in mockups). */
+.ph { display: block; width: 100%; height: 100%; background: linear-gradient(135deg, hsl(var(--h) 28% 34%), hsl(calc(var(--h) + 40) 22% 18%)); }
+.exchange-glyph .ph { width: 40px; height: 40px; }
+
+/* Real sizes for the small icons (the mockup's svg.i default is 20). */
+.exchange-who svg.i { width: 14px; height: 14px; }
+.exchange-strip-done svg.i { width: 10px; height: 10px; stroke-width: 3; }
+.hl .bar { flex: none; }
+
+/* ---------- NEW: route word in the who line ---------- */
+.exchange-route { color: var(--color-faint); }
+.exchange-route.is-new { animation: route-in 140ms var(--ease-standard) both; }
+@keyframes route-in { from { opacity: 0; } }
+
+/* ---------- NEW: 직접 받기 block at the top of the index foot ---------- */
+.exchange-direct { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border);
+  overflow: hidden; transition: opacity 200ms var(--ease-standard), grid-template-rows 200ms var(--ease-standard); }
+.exchange-direct__head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.exchange-direct__head .ui-button--icon { width: 24px; height: 24px; min-height: 24px; margin-right: calc(-1 * var(--space-1)); color: var(--color-faint); }
+.exchange-direct__head .ui-button--icon svg { width: 16px; height: 16px; }
+.exchange-direct__line { margin: 0; font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); transition: color 200ms var(--ease-standard); }
+.exchange-direct__line svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; }
+.exchange-direct__line.is-done { color: var(--color-success); }
+.exchange-direct__line.is-error { color: var(--color-danger); }
+.exchange-direct .ui-button { justify-self: start; margin-top: var(--space-1); }
+.exchange-direct .ui-button svg { width: 16px; height: 16px; }
+.exchange-direct.is-entering { animation: direct-in 200ms var(--ease-standard) both; }
+@keyframes direct-in { from { opacity: 0; transform: translateY(4px); } }
+.exchange-direct.is-leaving { opacity: 0; padding-bottom: 0; margin-bottom: 0; border-bottom-color: transparent; transition: opacity 140ms var(--ease-standard), max-height 200ms var(--ease-standard) 80ms, padding 200ms var(--ease-standard) 80ms, margin 200ms var(--ease-standard) 80ms; max-height: 0 !important; }
+.exchange-direct.is-tint { background: color-mix(in srgb, var(--color-success) 8%, transparent); transition: background-color 200ms var(--ease-standard); }
+@media (prefers-reduced-motion: reduce) { .exchange-direct, .exchange-direct.is-leaving { transition: none; animation: none; } .exchange-route.is-new { animation: none; } }
+
+/* ⓘ popover, shown in place (the app's AnchoredPanel is fixed-positioned). */
+.mock-pop { position: absolute !important; left: 332px; bottom: 96px; width: 300px !important; z-index: 5; }
+.mock-pop .ui-anchored-panel__body { padding: var(--space-3) var(--space-4); font-size: var(--type-meta); line-height: 1.7; color: var(--color-muted); }
+.mock-pop .ui-anchored-panel__body p { margin: 0; }
+
+/* ---------- Tablet frame (iframe with mobile.css) ---------- */
+.frame--tab { width: 800px; height: 860px; border: 0; display: block; }
+
+/* ---------- Home tile line comparison ---------- */
+.lines { display: grid; grid-template-columns: repeat(2, 360px); gap: 32px; }
+.lines > div { display: grid; gap: 8px; }
+.hl { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-2); background: var(--color-surface); font-size: var(--type-body); }
+.hl svg.i { width: 16px; height: 16px; color: var(--color-muted); }
+.hl > span:not(.bar) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hl small { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.hl small b { color: var(--color-faint); font-weight: 400; }
+.hl .bar { width: 48px; height: 3px; background: var(--color-border); }
+.hl .bar i { display: block; height: 100%; width: 62%; background: var(--color-accent); }
+
+table.inv { border-collapse: collapse; width: 100%; max-width: 1080px; font-size: 13px; }
+table.inv th, table.inv td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--color-border); line-height: 1.6; }
+table.inv th { color: var(--color-faint); font-weight: 600; white-space: nowrap; }
+table.inv td { color: var(--color-muted); }
+table.inv td:first-child { color: var(--color-text); white-space: nowrap; }

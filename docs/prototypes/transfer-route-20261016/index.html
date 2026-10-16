@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전송 경로 표시</title>
+<!-- 앱의 실제 폰트·토큰·베이스·컨트롤·chrome과 PC 전송 CSS(exchange.css)를 읽는다. page.css는 시안 틀과 새 조각 두 개만 담는다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/exchange/exchange.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <symbol id="check" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></symbol>
+  <symbol id="warn" viewBox="0 0 24 24"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></symbol>
+  <symbol id="folder" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></symbol>
+  <symbol id="clip" viewBox="0 0 24 24"><path d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></symbol>
+  <symbol id="pc" viewBox="0 0 24 24"><path d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/></symbol>
+  <symbol id="tablet" viewBox="0 0 24 24"><path d="M10.5 19.5h3m-6.75 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-15a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15a2.25 2.25 0 0 0 2.25 2.25Z"/></symbol>
+  <symbol id="updown" viewBox="0 0 24 24"><path d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"/></symbol>
+  <symbol id="home" viewBox="0 0 24 24"><path d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></symbol>
+  <symbol id="photo" viewBox="0 0 24 24"><path d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+</svg>
+
+<div class="doc">
+<header>
+  <h1>전송 · 직접 경로 표시</h1>
+  <p class="lead">TRANSFER-001의 화면 쪽(S6). 같은 Wi-Fi나 Tailscale로 바로 간 전송에 <b>작은 낱말 하나</b>(<code>직접</code> / <code>Tailscale</code>)만 붙이고, 서버로 간 것에는 아무것도 붙이지 않는다. PC는 방화벽이 직접 받기를 막고 있을 때만 왼쪽 아래에 <b>직접 받기</b> 한 칸과 <code>방화벽 열기</code>를 보이고, 허용되면 사라진다. 막혀 있어도 파일은 서버로 오니 경고가 아니라 안내다.</p>
+  <p class="lead">전송은 <b>이번 계획에 있는 영역</b>(TRANSFER-001, 10.15 승인)이다. 기존 전송 화면의 모양은 그대로 두고 새로 생기는 것은 두 조각뿐이다. 기기 이름·파일 이름·시각은 예시.</p>
+</header>
+
+<section class="part">
+  <h2>A. PC 전송 화면 <small>1280 × 760 · 왼쪽 아래 칸의 <code>방화벽 열기</code>를 눌러 보면 실제 순서대로 바뀐다</small></h2>
+  <div class="keys" role="group" aria-label="방화벽 상태 바꾸기">방화벽 상태
+    <button type="button" data-fw="blocked" aria-pressed="true">막힘</button>
+    <button type="button" data-fw="public" aria-pressed="false">공용 네트워크</button>
+    <button type="button" data-fw="failed" aria-pressed="false">열기 실패</button>
+    <button type="button" data-fw="none" aria-pressed="false">허용됨 · 확인 전 · Windows 아님 (아무것도 없음)</button>
+    <button type="button" data-help aria-pressed="false">ⓘ 열어 보기</button>
+  </div>
+  <div class="frame frame--pc" id="pc">
+    <nav class="workspace-rail" aria-label="영역">
+      <a class="workspace-rail__item"><svg class="i"><use href="#home"/></svg>홈</a>
+      <a class="workspace-rail__item"><svg class="i"><use href="#photo"/></svg>에셋</a>
+      <a class="workspace-rail__item" aria-current="page"><svg class="i"><use href="#updown"/></svg>전송</a>
+    </nav>
+    <aside class="mock-index">
+      <div class="exchange-index">
+        <div class="exchange-index-body">
+          <div class="ui-section-label workspace-section-label"><span class="ui-section-label__title">기기</span><span class="ui-section-label__rule"></span></div>
+          <div class="exchange-devices">
+            <button type="button" class="workspace-index-link exchange-device" aria-current="page"><svg class="i"><use href="#tablet"/></svg><span class="exchange-device-text">Galaxy Tab S9</span></button>
+          </div>
+          <div class="ui-section-label workspace-section-label"><span class="ui-section-label__title">보기</span><span class="ui-section-label__rule"></span></div>
+          <div class="exchange-filter"><button type="button" aria-pressed="true">전체</button><button type="button" aria-pressed="false">받은 파일</button></div>
+        </div>
+        <div class="exchange-index-foot">
+          <!-- NEW: 직접 받기. Only while the firewall blocks direct receive (or the network is public); gone once allowed. -->
+          <div class="exchange-direct" id="direct">
+            <div class="exchange-direct__head">
+              <p class="exchange-index-label">직접 받기</p>
+              <button type="button" class="ui-button ui-button--ghost ui-button--icon" aria-label="직접 받기 도움말" data-help-inline><svg class="i"><use href="#info"/></svg></button>
+            </div>
+            <p class="exchange-direct__line" id="directLine" role="status">지금은 서버를 거쳐 받음</p>
+            <button type="button" class="ui-button ui-button--secondary ui-button--sm" id="openFw"><svg class="i"><use href="#shield"/></svg><span id="openFwLabel">방화벽 열기</span></button>
+          </div>
+          <p class="exchange-index-label">받은 파일 저장 위치</p>
+          <p class="exchange-index-value exchange-folder">C:\Users\laku\Downloads\Lakomics</p>
+          <div class="exchange-index-links"><button type="button" class="ui-button ui-button--ghost ui-button--sm">폴더 열기</button></div>
+          <details class="exchange-token-details"><summary>이 PC 전용 토큰</summary></details>
+        </div>
+      </div>
+    </aside>
+    <div class="ui-anchored-panel mock-pop" id="pop" hidden>
+      <div class="ui-anchored-panel__body"><p id="popText"></p></div>
+    </div>
+    <main class="mock-main">
+      <div class="mock-titlebar"><h1>Galaxy Tab S9</h1><span class="exchange-status">이 PC · LAKU-DESKTOP</span><span class="win">— ▢ ✕</span></div>
+      <div class="exchange-workspace">
+        <div class="exchange-body">
+          <ol class="exchange-timeline">
+            <li class="exchange-day"><span class="numeric">10.15</span>어제</li>
+            <!-- From the tablet while the PC firewall blocked direct receive: server, so no route word. -->
+            <li class="exchange-block">
+              <p class="exchange-who">Galaxy Tab S9 · <time>22:40</time> · 파일 <span class="numeric">2</span>개</p>
+              <div class="exchange-bubble"><ul class="exchange-list">
+                <li class="exchange-row"><span class="exchange-glyph" aria-hidden="true">PDF</span><div class="exchange-row-main"><span class="exchange-name">세라핀 설정화 메모.pdf</span><span class="exchange-meta is-done">저장됨 · 2.4 MB</span></div><div class="exchange-row-actions"><button class="ui-button ui-button--secondary ui-button--sm">열기</button><button class="ui-button ui-button--ghost ui-button--sm">폴더에서 보기</button></div></li>
+                <li class="exchange-row"><span class="exchange-glyph is-image"><i class="ph" style="--h:210"></i></span><div class="exchange-row-main"><span class="exchange-name">Screenshot_20261015_224012.png</span><span class="exchange-meta is-done">저장됨 · 1.1 MB</span></div><div class="exchange-row-actions"><button class="ui-button ui-button--secondary ui-button--sm">열기</button><button class="ui-button ui-button--ghost ui-button--sm">폴더에서 보기</button></div></li>
+              </ul></div>
+            </li>
+            <li class="exchange-day"><span class="numeric">10.16</span>오늘</li>
+            <!-- PC → tablet over the same Wi-Fi: 직접. Outbound needs no firewall change. -->
+            <li class="exchange-block is-mine">
+              <p class="exchange-who">이 PC · <time>21:12</time> · <span class="exchange-route">직접</span> · 전달됨<svg class="i exchange-delivered"><use href="#check"/></svg></p>
+              <div class="exchange-bubble">
+                <div class="exchange-batch-head"><strong>사진 <span class="numeric">8</span>개</strong><span class="exchange-batch-meta">46.2 MB</span></div>
+                <div class="exchange-strip">
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:12"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span></span>
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:48"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span></span>
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:300"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span></span>
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:190"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span></span>
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:260"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span></span>
+                  <span class="exchange-strip-tile"><i class="ph" style="--h:90"></i><span class="exchange-strip-done"><svg class="i"><use href="#check"/></svg></span><span class="exchange-strip-more">+2</span></span>
+                </div>
+              </div>
+            </li>
+            <!-- Away from home, through Tailscale: the word names it. -->
+            <li class="exchange-block is-mine">
+              <p class="exchange-who">이 PC · <time>21:30</time> · <span class="exchange-route">Tailscale</span> · 전달됨<svg class="i exchange-delivered"><use href="#check"/></svg></p>
+              <div class="exchange-bubble"><ul class="exchange-list">
+                <li class="exchange-row"><span class="exchange-glyph is-zip" aria-hidden="true">ZIP</span><div class="exchange-row-main"><span class="exchange-name">레퍼런스 10월.zip</span><span class="exchange-meta is-done">318 MB · 전달됨</span></div></li>
+              </ul></div>
+            </li>
+            <!-- In progress, direct: the state word is 보내는 중 (not 업로드 중), and there is no server waiting step. -->
+            <li class="exchange-block is-mine">
+              <p class="exchange-who">이 PC · <time>21:45</time> · <span class="exchange-route is-new" id="liveRoute">직접</span></p>
+              <div class="exchange-bubble"><ul class="exchange-list">
+                <li class="exchange-row"><span class="exchange-glyph" aria-hidden="true">MP4</span><div class="exchange-row-main"><span class="exchange-name">녹화 2026-10-16 21-40.mp4</span><span class="exchange-meta">1.2 GB · 보내는 중 64%</span><div class="exchange-progress"><span style="width:64%"></span></div></div><div class="exchange-row-actions"><button class="ui-button ui-button--ghost ui-button--sm">취소</button></div></li>
+              </ul></div>
+            </li>
+            <!-- Tablet app closed: the send goes to the server and waits. No route word; the server's own wording stays. -->
+            <li class="exchange-block is-mine">
+              <p class="exchange-who">이 PC · <time>21:52</time></p>
+              <div class="exchange-bubble"><ul class="exchange-list">
+                <li class="exchange-row"><span class="exchange-glyph" aria-hidden="true">EPUB</span><div class="exchange-row-main"><span class="exchange-name">철의 왕관 3권.epub</span><span class="exchange-meta">8.9 MB · 대기 중 (받으면 삭제됨)</span></div><div class="exchange-row-actions"><button class="ui-button ui-button--ghost ui-button--sm">취소</button></div></li>
+              </ul></div>
+            </li>
+          </ol>
+        </div>
+        <footer class="exchange-composer">
+          <div class="exchange-composer-to"><b>Galaxy Tab S9(으)로 보내기</b><button class="ui-button ui-button--ghost ui-button--icon" aria-label="보내기 도움말"><svg class="i"><use href="#info"/></svg></button></div>
+          <button class="ui-button ui-button--secondary ui-button--md"><svg class="i"><use href="#folder"/></svg>폴더 보내기</button>
+          <button class="ui-button ui-button--primary ui-button--md"><svg class="i"><use href="#clip"/></svg>파일 보내기</button>
+        </footer>
+      </div>
+    </main>
+  </div>
+  <ul class="plain">
+    <li><b>경로 낱말은 누가·언제 줄에만.</b> <code>이 PC · 21:12 · 직접 · 전달됨 ✓</code>. 색은 그 줄보다 한 단계 옅은 <code>--color-faint</code>, 아이콘·배지·테두리 없음. 서버로 간 것은 지금과 똑같이 아무것도 없다. 묶음 안에서 경로가 갈리면(중간에 서버로 넘어간 경우) 낱말을 빼고 서버처럼 둔다.</li>
+    <li><b>직접 가는 중이면 상태 낱말이 <code>보내는 중 64%</code>.</b> 서버로 올리는 게 아니라서 <code>업로드 중</code>을 쓰지 않고, 받는 쪽에 바로 닿으니 <code>대기 중 (받으면 삭제됨)</code> 단계도 없다. 태블릿 앱이 꺼져 있으면 서버로 가서 지금 문구 그대로.</li>
+    <li><b>직접 받기 칸은 왼쪽 아래, 저장 위치 바로 위.</b> 받기에 관한 설정이 모여 있는 곳이라 여기에 둔다. 위쪽 띠나 타임라인 안 알림은 쓰지 않는다(급한 일이 아니라서). 칸이 사라질 때 아래의 저장 위치 줄은 제자리에 있다.</li>
+    <li><b>방화벽 열기를 누르면</b> 버튼은 바로 눌리지 않는 상태가 되고, Windows 관리자 확인 창이 뜬다. 0.6초가 넘게 걸리면 버튼 글이 <code>여는 중</code>(공용 지연 표시). 끝나면 줄이 <code>✓ 열림</code>으로 바뀌며 칸이 잠깐 초록빛을 띠고, 1.2초 뒤 칸이 접히며 사라진다. 확인 창에서 <b>아니요</b>를 고르면 아무 말 없이 원래대로.</li>
+    <li><b>공용 네트워크</b>면 규칙을 열어도 소용없으니 버튼 없이 줄만(<code>공용 네트워크라 서버를 거쳐 받음</code>), 이유는 ⓘ 안에. <b>실패</b>는 빨간 줄 하나와 <code>다시 시도</code>.</li>
+    <li><b>"같은 Wi-Fi의 태블릿과 직접 연결됨" 같은 상태 줄은 넣지 않는다.</b> 보낼 때마다 그때 길을 고르니 미리 띄운 상태는 금방 틀리고(태블릿은 앱이 열려 있을 때만 받는다), 확인하려면 계속 찔러 봐야 한다. 무엇이 어떻게 갔는지는 줄의 낱말이 알려 준다.</li>
+  </ul>
+</section>
+
+<section class="part">
+  <h2>B. 태블릿 전송 화면 <small>800 × 860 · 같은 규칙, 방화벽 칸 없음</small></h2>
+  <iframe class="frame frame--tab" src="tablet.html" title="태블릿 전송 화면"></iframe>
+  <ul class="plain">
+    <li>누가·언제 줄에 같은 낱말: <code>나 · 21:12 · 직접 · 전달됨 ✓</code>, <code>PC · 21:45 · 직접</code>. 서버는 아무것도 없다.</li>
+    <li>태블릿에는 PC 방화벽 이야기를 띄우지 않는다. 태블릿에서 보낸 것이 PC 방화벽에 막히면 자동으로 서버로 가고, 그 줄에는 낱말이 없을 뿐이다. 고치는 곳은 PC 한 곳.</li>
+    <li>머리의 <code>연결됨</code> 점은 지금처럼 서버 연결만 뜻한다. 직접 경로용 상태는 따로 두지 않는다.</li>
+  </ul>
+</section>
+
+<section class="part">
+  <h2>C. 홈 전송 칸의 최근 줄 <small>지금은 모든 줄에 <code>서버</code>가 붙는다</small></h2>
+  <div class="lines">
+    <div><p class="cap">지금 (10.15 홈 시안, 경로가 아직 없어 늘 서버)</p>
+      <div class="hl"><svg class="i"><use href="#check"/></svg><span>사진 8장</span><small>서버 · 21:12</small></div>
+      <div class="hl"><svg class="i"><use href="#check"/></svg><span>레퍼런스 10월.zip</span><small>서버 · 21:30</small></div>
+      <div class="hl"><span class="bar"><i></i></span><span>녹화 2026-10-16 21-40.mp4</span><small>서버 · 64%</small></div>
+    </div>
+    <div><p class="cap">제안: 줄마다 실제 경로, 서버는 낱말 없음</p>
+      <div class="hl"><svg class="i"><use href="#check"/></svg><span>사진 8장</span><small><b>직접</b> · 21:12</small></div>
+      <div class="hl"><svg class="i"><use href="#check"/></svg><span>레퍼런스 10월.zip</span><small><b>Tailscale</b> · 21:30</small></div>
+      <div class="hl"><span class="bar"><i></i></span><span>녹화 2026-10-16 21-40.mp4</span><small><b>직접</b> · 64%</small></div>
+      <div class="hl"><svg class="i"><use href="#clock"/></svg><span>철의 왕관 3권.epub</span><small>받기 대기</small></div>
+    </div>
+  </div>
+  <ul class="plain">
+    <li>홈 칸에는 방화벽 칸을 두지 않는다. 홈은 바로 쓰는 도구 자리이고 설정은 전송 상세 화면에만.</li>
+  </ul>
+</section>
+
+<section class="part">
+  <h2>D. 낱말 한눈에</h2>
+  <table class="inv">
+    <tr><th>줄의 경로</th><th>PC · 태블릿 누가·언제 줄</th><th>홈 최근 줄</th></tr>
+    <tr><td>같은 Wi-Fi (lan)</td><td><code>· 직접</code></td><td><code>직접 · 21:12</code></td></tr>
+    <tr><td>Tailscale (tailscale)</td><td><code>· Tailscale</code></td><td><code>Tailscale · 21:30</code></td></tr>
+    <tr><td>서버 (없음)</td><td>낱말 없음</td><td><code>21:52</code> 또는 <code>받기 대기</code></td></tr>
+    <tr><td>묶음 안에서 갈림</td><td>낱말 없음</td><td>낱말 없음</td></tr>
+  </table>
+</section>
+</div>
+
+<script>
+(() => {
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = (s) => document.querySelector(s);
+  const direct = $('#direct'), line = $('#directLine'), btn = $('#openFw'), label = $('#openFwLabel'), pop = $('#pop'), popText = $('#popText');
+  const HELP = {
+    blocked: '같은 Wi-Fi나 Tailscale의 태블릿이 이 PC로 바로 보내려면 Windows 방화벽에서 한 번 허용해야 합니다. 개인 네트워크에서만 열리고 관리자 확인 창이 뜹니다. 열지 않아도 파일은 서버를 거쳐 그대로 받습니다.',
+    public: '이 Wi-Fi가 Windows에서 공용 네트워크로 되어 있어 직접 받을 수 없습니다. 설정 › 네트워크 및 인터넷에서 개인 네트워크로 바꾸면 직접 받습니다. 바꾸지 않아도 서버를 거쳐 받습니다.',
+  };
+  let state = 'blocked', timers = [];
+  const clear = () => { timers.forEach(clearTimeout); timers = []; };
+  function render(next, { enter = false } = {}) {
+    clear(); state = next;
+    direct.classList.remove('is-leaving', 'is-tint', 'is-entering'); direct.style.maxHeight = '';
+    direct.hidden = next === 'none';
+    if (enter && !RM && next !== 'none') { void direct.offsetWidth; direct.classList.add('is-entering'); }
+    line.className = 'exchange-direct__line' + (next === 'failed' ? ' is-error' : '');
+    line.innerHTML = next === 'public' ? '공용 네트워크라 서버를 거쳐 받음'
+      : next === 'failed' ? '<svg class="i"><use href="#warn"/></svg>방화벽을 열지 못함' : '지금은 서버를 거쳐 받음';
+    btn.hidden = next === 'public'; btn.disabled = false;
+    label.textContent = next === 'failed' ? '다시 시도' : '방화벽 열기';
+    popText.textContent = HELP[next === 'public' ? 'public' : 'blocked'];
+    document.querySelectorAll('[data-fw]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.fw === next)));
+  }
+  function open() {
+    if (btn.disabled) return;
+    clear(); btn.disabled = true; pop.hidden = true;
+    // Shared delayed-busy helper: nothing for the first 600 ms, then 여는 중 (kept at least 400 ms).
+    timers.push(setTimeout(() => { label.textContent = '여는 중'; }, 600));
+    timers.push(setTimeout(() => {
+      line.className = 'exchange-direct__line is-done';
+      line.innerHTML = '<svg class="i"><use href="#check"/></svg>열림';
+      label.textContent = '방화벽 열기';
+      if (!RM) direct.classList.add('is-tint');
+      timers.push(setTimeout(() => {
+        if (RM) { direct.hidden = true; return; }
+        direct.style.maxHeight = direct.scrollHeight + 'px'; void direct.offsetWidth;
+        direct.classList.add('is-leaving');
+        timers.push(setTimeout(() => { direct.hidden = true; document.querySelectorAll('[data-fw]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.fw === 'none'))); }, 320));
+      }, 1200));
+    }, 1800));
+  }
+  btn.addEventListener('click', open);
+  document.querySelectorAll('[data-fw]').forEach((b) => b.addEventListener('click', () => render(b.dataset.fw, { enter: true })));
+  const togglePop = () => { pop.hidden = !pop.hidden || direct.hidden; $('[data-help]').setAttribute('aria-pressed', String(!pop.hidden)); };
+  $('[data-help]').addEventListener('click', togglePop);
+  $('[data-help-inline]').addEventListener('click', togglePop);
+  render('blocked');
+  const only = new URLSearchParams(location.search).get('state');
+  if (only) render(only);
+  if (new URLSearchParams(location.search).has('help')) togglePop();
+})();
+</script>
+</body>
+</html>

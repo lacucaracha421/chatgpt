@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>책등 책장 PC</title>
+<!-- 앱의 실제 폰트·토큰·공용 컨트롤·크롬·컬렉션 화면 CSS와 케이스 책등 인쇄(CaseMaterials, CollectionCase)를 읽는다.
+     spine-shelf.css = 새로 제안하는 책장·평면 격자 CSS, page.css = 시안 틀과 임시 그림, shelf.js = 시안 동작. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/CollectionBrowser.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CaseMaterials.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CollectionCase.css">
+<link rel="stylesheet" href="spine-shelf.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>게임 · AV 책장 (책등만)</h1>
+  <p class="lead">게임과 AV의 <b>3D 케이스 모델</b>(지금의 격자 SteelBook 렌더와 선반의 돌린 케이스)을 없애고, 보기를 <b>책장</b>과 <b>격자</b> 둘로 정리한다. 책장은 만화 책장처럼 판자 위에 <b>책등만 빽빽이</b> 꽂힌 모습이다. 이름표도, 마우스를 올렸을 때 뜨는 말풍선도 없다(DESIGN §9). 케이스는 실제 크기 비율을 따른다: PC·AV DVD 케이스가 가장 키가 크고, PS와 스위치는 조금 낮으며, 스위치는 가장 얇다. 격자는 앞표지 그림만 평평하게 놓는다.</p>
+  <p class="lead">이번 요청(10.17)의 범위다. 만화와 영화의 보기는 바뀌지 않는다. 표지와 책등 그림은 모두 <b>임시 그림</b>이다: LaunchBox 책등 대신 색 띠를 쓰고, PS4 머리는 다른 작업이 만드는 중이라 임시로 그렸다. 스위치·스위치 2·PS5·PC(Steam) 템플릿은 앱의 실제 CSS 그대로다.</p>
+</header>
+
+<section class="variant">
+  <h2>A. PC 게임 책장 <small>412개 · 기기별 묶기 · 보통 크기</small></h2>
+  <p class="note">마우스를 올리면 케이스가 4px 올라온다. <b>한 번 클릭</b>하면 케이스를 꺼내 앞표지가 보이게 돌린다(360ms, 만화 책장·선반과 같은 동작). 꺼낸 앞표지를 <b>다시 클릭</b>하거나 책등을 더블클릭하거나 <b>Enter</b>를 누르면 작품 화면이 열린다. 빈 곳을 클릭하거나 Esc를 누르면 제자리에 꽂는다. 키보드: ←/→ 한 권씩(줄을 넘어감), ↑/↓ 위아래 줄에서 가장 가까운 케이스, Home/End 줄의 처음/끝, Space 꺼내기/꽂기. 오른쪽 위 <b>보기</b>에서 책장과 격자를 바꾸고 책등 크기를 고른다.</p>
+  <div class="frame frame--pc" id="frame-a"></div>
+  <p class="readout" id="readout-a"></p>
+</section>
+
+<section class="variant">
+  <h2>B. PC AV 책장 <small>236개 · 묶기 없음</small></h2>
+  <p class="note">AV 책등은 재킷에서 잘라 둔 책등 그림(제작사 표식 · 제목 · 품번)을 쓴다. 책등 그림이 없는 작품은 검은 케이스에 제목만 세로로 찍힌다(지금 선반의 빈 책등과 같다). 모든 AV는 DVD 케이스 크기로 그린다. 블루레이 여부는 데이터에 없다.</p>
+  <div class="frame frame--pc" id="frame-b"></div>
+</section>
+
+<section class="variant">
+  <h2>C. 격자 (평면 앞표지) <small>보기 → 배치 → 격자</small></h2>
+  <p class="note">다른 보기로 격자를 남긴다(사용자 결정 10.17). 앞표지 그림만 평평하게, 각 케이스의 원래 비율대로, 줄 아래쪽에 맞춰 세운다. 아래에 제목과 개발사(AV는 품번)·연도·내 별점이 붙는다. 3D 케이스 렌더는 그리지 않는다. 클릭하면 고르고 더블클릭이나 Enter로 연다(지금 격자와 같다). 보기 메뉴는 열린 상태로 보인다.</p>
+  <div class="frame frame--pc" id="frame-c"></div>
+</section>
+
+<section class="variant">
+  <h2>D. 상태 <small>실제 크기 · 보통(1.1 px/mm)</small></h2>
+  <div class="states spine-shelf" id="states" style="--spine-scale:1.1"></div>
+  <ul class="plain">
+    <li><b>올림(hover)</b>: 4px 올라옴(90ms). 목록을 스크롤하는 동안에는 올라오지 않는다.</li>
+    <li><b>누름</b>: 2px만 올라오고 살짝 어두워진다.</li>
+    <li><b>키보드 초점</b>: 파란 초점 테두리가 케이스 전체를 둘러싼다(한쪽 가장자리 띠가 아니다). 케이스도 4px 올라온다.</li>
+    <li><b>꺼냄(고름)</b>: 책등 자리는 비워 두고, 앞표지가 같은 높이로 6px 떠서 그 위에 나온다. 옆 케이스는 움직이지 않는다(줄이 다시 배치되지 않는다).</li>
+    <li><b>읽는 중</b>: 책등 정보를 아직 받지 못한 케이스는 플라스틱 색만 보인다. 템플릿이나 그림이 그 위에 한 번에 들어온다(그림은 140ms 서서히).</li>
+    <li><b>비공개 모드</b>: 책등과 앞표지가 모두 회색 면으로 가려진다. 기기별 높이는 그대로다.</li>
+  </ul>
+</section>
+
+<section class="variant">
+  <h2>E. 책등 크기 <small>보기 → 책등 크기: 작게 · 보통 · 크게</small></h2>
+  <p class="note">책장에서는 "한 줄에 N개" 대신 크기 세 단계를 고른다. 비율은 실제 케이스 그대로이고 배율만 바뀐다. DVD 케이스 높이 171 / 209 / 257px, 두께 13 / 15 / 19px. 한 줄에 꽂히는 개수는 각 줄 오른쪽 위에 적었다(시안 틀 너비 기준).</p>
+  <div id="sizes" style="display:grid;gap:8px;background:var(--color-bg);outline:1px solid #2a2b2d;padding:8px 0"></div>
+</section>
+
+<section class="variant">
+  <h2>F. 결정과 수치</h2>
+  <ul class="plain">
+    <li><b>말풍선 없음.</b> 이름은 케이스에 인쇄된 책등(템플릿과 LaunchBox 그림)과 꺼냈을 때 보이는 앞표지로 알 수 있다. 화면 읽기 프로그램용 이름은 그대로 둔다. DESIGN §9가 마우스·초점 말풍선을 금지하므로 조용한 말풍선도 넣지 않는다.</li>
+    <li><b>수백 개.</b> 줄은 화면 너비에서 미리 계산하고, 화면 위아래 반 화면 안의 줄만 그린다(위 A의 숫자). 책등 그림은 그 줄이 가까워질 때만 요청하고, 기기와 책등 그림 정보는 지금처럼 한 번에 묶어서 읽는다.</li>
+    <li><b>정렬·필터·종류 바꾸기</b>: 새 줄의 첫 화면이 준비될 때까지 지금 책장을 그대로 두고 한 번에 바꾼다. 줄이 떠오르는 동작은 목록을 처음 열 때만 한다.</li>
+  </ul>
+</section>
+</div>
+
+<script src="shelf.js"></script>
+<script>
+const { makeGames, makeAv, spineInner, coverHTML, groupsFor, SpineShelf, renderGrid, PLASTIC, DIM, esc } = window.SpineShelfMock;
+const P = {
+  home: 'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  photo: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  doc: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  left: 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18',
+  down: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  x: 'M6 18 18 6M6 6l12 12',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  cal: 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5',
+  grid: 'M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  dl: 'M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3',
+  star: 'M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+function segmented(key, cells, active, extra = '') {
+  return `<div class="ui-segmented ${extra}" role="radiogroup" data-key="${key}"><span class="ui-segmented__thumb ui-segmented__thumb--initial"></span>${cells.map(([value, text]) =>
+    `<button type="button" class="ui-segmented__cell" role="radio" aria-checked="${value === active}" data-value="${value}" ${value === active ? 'data-segmented-active="true"' : ''}><span class="ui-segmented__content"><span class="ui-segmented__label">${text}</span></span></button>`).join('')}</div>`;
+}
+function placeThumbs(root) {
+  root.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-segmented-active]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!cell || !th) { if (th) th.style.display = 'none'; return; }
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+const label = (title, actions = '') => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span><span class="ui-section-label__rule" aria-hidden="true"></span>${actions}</div>`;
+const SIZES = { small: .9, normal: 1.1, large: 1.35 };
+const DATA = { game: makeGames(412), av: makeAv(236) };
+
+function viewMenu(state) {
+  const game = state.type === 'game';
+  return `<div class="ui-menu ui-view-options mock-menu ${state.menu ? '' : 'is-closed'}" style="top:52px;right:16px" role="dialog" aria-label="보기">
+    <div class="ui-view-options__content">
+      <section class="ui-view-options__section">${label('내 별점')}<div class="collection-rating-filter"><label class="ui-slider" style="display:flex"><input type="range" min="0" max="10" value="0" aria-label="내 별점" style="width:100%"></label></div></section>
+      <section class="ui-view-options__section">${label('배치')}
+        ${segmented('layout', [['bookcase', '책장'], ['grid', '격자']], state.layout, 'ui-segmented--full-width')}
+        ${state.layout === 'bookcase'
+          ? `<div class="sub"><span>책등 크기</span>${segmented('size', [['small', '작게'], ['normal', '보통'], ['large', '크게']], state.size, 'ui-segmented--full-width')}</div>`
+          : `<div class="ui-per-row"><label class="ui-slider"><span>한 줄에</span><input type="range" min="5" max="12" step="1" value="8" aria-label="한 줄에"></label><output>8개</output></div>`}
+      </section>
+      <section class="ui-view-options__section">${label('정렬')}
+        ${game ? `<div class="sub"><span>묶기</span>${segmented('grouping', [['sort', '안 묶음'], ['device', '기기'], ['year', '발매 연도']], state.grouping, 'ui-segmented--full-width')}</div>` : ''}
+        <div class="sub"><span>기준</span>${segmented('sortkey', [['date', '발매일'], ['added', '추가일'], ['name', '제목']], 'date', 'ui-segmented--full-width')}</div>
+        <div class="sub"><span>순서</span>${segmented('dir', [['desc', '최신순'], ['asc', '오래된순']], 'desc', 'ui-segmented--full-width')}</div></section>
+      ${game ? `<section class="ui-view-options__section">${label('관리')}<button class="manage-row" type="button">${ic('dl', 's')}<span>책등 받기</span></button></section>` : ''}
+    </div></div>`;
+}
+
+function mountFrame(root, initial) {
+  const state = { type: 'game', layout: 'bookcase', size: 'normal', grouping: 'device', menu: false, privacy: false, ...initial };
+  root.innerHTML = `<div class="pc">
+    <nav class="rail">${['home', 'photo', 'stack', 'book', 'doc'].map((n, i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}</span>`).join('')}<span class="push">${ic('search')}</span><span>${ic('dots')}</span></nav>
+    <div class="main">
+      <header class="topbar"><span class="ttl js-title"></span><span class="count num js-count"></span><span class="grow"></span>
+        <button class="ibtn" type="button" aria-label="제목 검색">${ic('search')}</button><button class="ibtn" type="button" aria-label="새 컬렉션">${ic('plus')}</button>
+        <span class="winctl"><span>—</span><span>☐</span><span>✕</span></span></header>
+      <div class="scroll js-scroll">
+        <div style="position:relative">
+          <div class="ui-section-bar js-bar"></div>
+          <div class="js-menu"></div>
+        </div>
+        <div class="cb-head"><h3>전체<span class="tot num js-total"></span></h3></div>
+        <div class="js-list" style="position:relative"></div>
+      </div>
+      <div class="work-mock js-work"></div>
+    </div></div>`;
+  const $ = s => root.querySelector(s);
+  const scroll = $('.js-scroll');
+  let shelf = null, listHost = $('.js-list');
+
+  function drawBar() {
+    const types = [['game', '게임'], ['manga', '만화'], ['movie', '영화'], ['av', 'AV']];
+    $('.js-bar').innerHTML = `${segmented('type', types, state.type)}
+      <div class="ui-section-bar__trailing">
+        <div class="collection-shortcuts">
+          <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('spark', 's')}<span class="collection-shortcuts__label">쇼케이스</span></button>
+          ${state.type === 'game' ? `<button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('cal', 's')}<span class="collection-shortcuts__label">발매 캘린더</span><span class="collection-shortcuts__count is-new num">3</span></button>` : ''}
+        </div>
+        <span class="collection-shortcuts__divider"></span>
+        <button class="quiet-menu js-view" type="button" aria-expanded="${state.menu}">${ic('grid', 's')}<span>보기</span></button>
+      </div>`;
+    $('.js-menu').innerHTML = viewMenu(state);
+    requestAnimationFrame(() => placeThumbs(root));
+  }
+  function drawList(first = false) {
+    const items = DATA[state.type];
+    $('.js-title').textContent = state.type === 'game' ? '게임' : 'AV';
+    $('.js-count').textContent = items.length.toLocaleString();
+    $('.js-total').textContent = items.length.toLocaleString();
+    if (state.layout === 'bookcase') {
+      if (!shelf) {
+        const host = document.createElement('div'); listHost.replaceWith(host); listHost = host;
+        shelf = new SpineShelf({ scroll, host, scale: SIZES[state.size], privacy: state.privacy, onOpen: openWork, onRendered: initial.onRendered });
+        host.style.setProperty('--spine-scale', SIZES[state.size]);
+      }
+      shelf.privacy = state.privacy;
+      shelf.scale = SIZES[state.size]; listHost.style.setProperty('--spine-scale', shelf.scale);
+      shelf.set({ items, groups: groupsFor(items, state.grouping), label: `${state.type === 'game' ? '게임' : 'AV'} 작품 목록`, first });
+    } else {
+      shelf = null;
+      const host = document.createElement('div'); listHost.replaceWith(host); listHost = host;
+      renderGrid(host, items, { columns: 8, privacy: state.privacy, onOpen: openWork });
+    }
+  }
+  function openWork(item) {
+    const [hmm, , cmm] = DIM[item.p];
+    const work = $('.js-work');
+    work.innerHTML = `<div class="work-mock__stage"><button class="ui-button ui-button--ghost ui-button--sm back js-back" type="button">${ic('left', 's')}<span>컬렉션으로</span></button>
+      <span class="work-mock__cover" style="--ratio:${cmm / hmm};--plastic:${PLASTIC[item.p]}"><span>${coverHTML(item, state.privacy)}</span></span></div>
+      <aside class="work-mock__info"><h2>${esc(item.title)}</h2><p>${esc(item.credit)} · ${item.year}</p><p style="margin-top:16px">지금의 작품 화면(CollectionWorkOverlay)이 그대로 열린다. 시안에서는 대신 그렸다. 돌아가면 같은 케이스가 꺼낸 채로, 초점도 그대로 남는다.</p></aside>`;
+    work.classList.add('is-open');
+    work.querySelector('.js-back').focus();
+    const back = () => { work.classList.remove('is-open'); if (shelf) shelf.focus(item.id, false); else listHost.querySelector(`[data-id="${item.id}"]`)?.focus(); };
+    work.querySelector('.js-back').onclick = back;
+    work.onkeydown = e => { if (e.key === 'Escape') back(); };
+  }
+  root.addEventListener('click', e => {
+    if (e.target.closest('.js-view')) { state.menu = !state.menu; drawBar(); return; }
+    const cell = e.target.closest('.ui-segmented__cell'); if (!cell) { if (state.menu && !e.target.closest('.mock-menu')) { state.menu = false; drawBar(); } return; }
+    const key = cell.closest('.ui-segmented').dataset.key, value = cell.dataset.value;
+    if (key === 'type') { if (value !== 'game' && value !== 'av') return; state.type = value; drawBar(); drawList(true); return; }
+    if (key === 'layout') { state.layout = value; drawBar(); drawList(); return; }
+    if (key === 'size') { state.size = value; drawBar(); shelf?.setScale(SIZES[value]); return; }
+    if (key === 'grouping') { state.grouping = value; drawBar(); drawList(); return; }
+    // Sort cells only move their thumb in the mockup.
+    cell.closest('.ui-segmented').querySelectorAll('.ui-segmented__cell').forEach(c => c.toggleAttribute('data-segmented-active', c === cell));
+    placeThumbs(root);
+  });
+  drawBar(); drawList(true);
+  return { state, redraw: () => { drawBar(); drawList(); } };
+}
+
+mountFrame(document.getElementById('frame-a'), { onRendered: r => { document.getElementById('readout-a').textContent = `시안 계측: 전체 ${r.totalRows}줄 중 ${r.rows}줄(책등 ${r.spines.toLocaleString()}개 / 작품 ${r.total.toLocaleString()}개)만 그려져 있다. 스크롤하면 바뀐다.`; } });
+mountFrame(document.getElementById('frame-b'), { type: 'av' });
+mountFrame(document.getElementById('frame-c'), { layout: 'grid', menu: true });
+
+// #pick opens the mockup with one case pulled out in A and B (for screenshots).
+if (location.hash === '#pick') setTimeout(() => { document.querySelectorAll('#frame-a .spine')[30]?.click(); document.querySelectorAll('#frame-b .spine')[12]?.click(); }, 300);
+
+// D. States at true size.
+(() => {
+  const games = DATA.game, av = DATA.av;
+  const find = (pred) => games.find(pred);
+  const fig = (caption, item, { cls = '', privacy = false, loading = false, picked = false } = {}) => {
+    const [hmm, tmm, cmm] = DIM[item.p], s = 1.1, w = Math.round(tmm * s), h = Math.round(hmm * s), cw = Math.round(cmm * s);
+    const spine = `<span class="spine ${cls}" style="--w:${w}px;--h:${h}px;--plastic:${PLASTIC[item.p]}"><span class="spine__case">${spineInner(item, privacy, { loading })}</span></span>`;
+    const out = picked ? `<span class="spine-shelf__out is-out" style="--cover-w:${cw}px;--h:${h}px;--plastic:${PLASTIC[item.p]}"><span class="face">${coverHTML(item, false)}</span></span>` : '';
+    return `<figure><div class="mini">${picked ? out : spine}</div><figcaption>${caption}</figcaption></figure>`;
+  };
+  document.getElementById('states').innerHTML = [
+    fig('쉼 · 스위치 템플릿', find(g => g.p === 'sw' && g.art === null)),
+    fig('쉼 · 스위치 2', find(g => g.p === 'sw2' && g.art === null)),
+    fig('쉼 · PS5', find(g => g.p === 'ps5' && g.art === null)),
+    fig('쉼 · PS4 (임시)', find(g => g.p === 'ps4' && g.art === null)),
+    fig('쉼 · PC Steam', find(g => g.p === 'pc' && g.art === null)),
+    fig('쉼 · LaunchBox 그림', find(g => g.art !== null && g.p === 'pc')),
+    fig('올림', find(g => g.art !== null && g.p === 'ps5'), { cls: 'force-hover' }),
+    fig('누름', find(g => g.art !== null && g.p === 'sw'), { cls: 'force-press' }),
+    fig('키보드 초점', find(g => g.p === 'pc' && g.art === null), { cls: 'force-focus' }),
+    fig('꺼내기 전', find(g => g.p === 'ps5')),
+    fig('꺼냄 (앞표지)', find(g => g.p === 'ps5'), { picked: true }),
+    fig('기타 기종 · 빈 책등', find(g => g.p === 'other')),
+    fig('읽는 중', find(g => g.p === 'pc'), { loading: true }),
+    fig('비공개', find(g => g.p === 'sw'), { privacy: true }),
+    fig('AV 책등 그림', av.find(a => a.art !== null)),
+    fig('AV 그림 없음', av.find(a => a.art === null)),
+  ].join('');
+})();
+
+// E. Three sizes, one shelf row each.
+(() => {
+  const host = document.getElementById('sizes');
+  for (const [key, scale] of Object.entries(SIZES)) {
+    const wrap = document.createElement('div'); wrap.style.cssText = 'position:relative;overflow:hidden';
+    const shelfHost = document.createElement('div'); wrap.appendChild(shelfHost); host.appendChild(wrap);
+    const items = DATA.game.slice(0, 100);
+    const shelf = new SpineShelf({ scroll: wrap, host: shelfHost, scale });
+    shelfHost.style.setProperty('--spine-scale', scale);
+    shelf.set({ items, groups: [{ label: '', items }], label: key });
+    // Keep only the first row.
+    const first = shelf.rows[0]; wrap.style.height = `${first.top + first.height}px`;
+    wrap.insertAdjacentHTML('afterbegin', `<span style="position:absolute;right:24px;top:4px;z-index:2;font-size:12px;color:var(--color-faint)">${key === 'small' ? '작게' : key === 'normal' ? '보통' : '크게'} · 한 줄 ${first.cells.length}개</span>`);
+  }
+})();
+</script>
+</body>
+</html>

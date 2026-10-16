@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 전송</title>
+<!-- 태블릿의 실제 mobile.css(토큰·컨트롤 포함)와 태블릿 전송 CSS를 읽는다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/mobile-client/mobile.css">
+<link rel="stylesheet" href="../../../_tools/app/mobile-client/exchange.css">
+<style>
+  body { margin: 0; }
+  svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .ph { display: block; width: 100%; height: 100%; background: linear-gradient(135deg, hsl(var(--h) 28% 34%), hsl(calc(var(--h) + 40) 22% 18%)); }
+  .exchange-who svg.i { width: 14px; height: 14px; }
+  .exchange-scroll { justify-content: flex-end; }
+  .exchange-bar .ui-button--icon svg { width: 24px; height: 24px; }
+  /* NEW: the route word, one step fainter than its line. */
+  .exchange-route { color: var(--color-faint); }
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <symbol id="check" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></symbol>
+  <symbol id="back" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></symbol>
+  <symbol id="pc" viewBox="0 0 24 24"><path d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/></symbol>
+  <symbol id="down" viewBox="0 0 24 24"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></symbol>
+  <symbol id="folder" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></symbol>
+  <symbol id="clip" viewBox="0 0 24 24"><path d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></symbol>
+</svg>
+<div class="exchange-overlay" role="dialog" aria-label="전송">
+  <header class="exchange-bar">
+    <button type="button" class="ui-button ui-button--ghost ui-button--icon" aria-label="뒤로"><svg class="i"><use href="#back"/></svg></button>
+    <div class="exchange-title">
+      <h1>전송</h1>
+      <button type="button" class="exchange-peer"><svg class="i"><use href="#pc"/></svg>LAKU-DESKTOP과 주고받은 파일<svg class="i"><use href="#down"/></svg></button>
+    </div>
+    <div class="exchange-filter" role="group" aria-label="보기"><button type="button" aria-pressed="true">전체</button><button type="button" aria-pressed="false">받은 파일</button></div>
+    <span class="exchange-status" role="status"><span class="exchange-dot" data-live="true"></span>연결됨</span>
+  </header>
+  <div class="exchange-scroll">
+    <ol class="exchange-timeline">
+      <li class="exchange-day"><span class="numeric">10.15</span>어제</li>
+      <!-- Sent while the PC firewall blocked direct receive: went by server, no word. -->
+      <li class="exchange-block" data-mine="true">
+        <p class="exchange-who">나 · <time class="numeric">22:40</time> · 전달됨<svg class="i exchange-delivered"><use href="#check"/></svg></p>
+        <div class="exchange-bubble">
+          <div class="exchange-row"><span class="exchange-glyph" aria-hidden="true">PDF</span><span class="exchange-row-text"><strong>세라핀 설정화 메모.pdf</strong><span class="exchange-state" data-tone="done"><span class="numeric">2.4 MB</span> · 전달됨</span></span></div>
+        </div>
+      </li>
+      <li class="exchange-day"><span class="numeric">10.16</span>오늘</li>
+      <li class="exchange-block">
+        <p class="exchange-who">LAKU-DESKTOP · <time class="numeric">21:12</time> · <span class="exchange-route">직접</span></p>
+        <div class="exchange-bubble">
+          <div class="exchange-batch-head"><strong>사진 <span class="numeric">8</span>개</strong><span class="exchange-batch-meta numeric">46.2 MB</span></div>
+          <div class="exchange-strip">
+            <span class="exchange-strip-tile"><i class="ph" style="--h:12"></i></span>
+            <span class="exchange-strip-tile"><i class="ph" style="--h:48"></i></span>
+            <span class="exchange-strip-tile"><i class="ph" style="--h:300"></i></span>
+            <span class="exchange-strip-tile"><i class="ph" style="--h:190"></i></span>
+            <span class="exchange-strip-tile"><i class="ph" style="--h:260"></i></span>
+            <span class="exchange-strip-tile"><i class="ph" style="--h:90"></i><span class="exchange-strip-more numeric">+2</span></span>
+          </div>
+        </div>
+      </li>
+      <li class="exchange-block">
+        <p class="exchange-who">LAKU-DESKTOP · <time class="numeric">21:30</time> · <span class="exchange-route">Tailscale</span></p>
+        <div class="exchange-bubble">
+          <div class="exchange-row"><span class="exchange-glyph" data-zip="true" aria-hidden="true">ZIP</span><span class="exchange-row-text"><strong>레퍼런스 10월.zip</strong><span class="exchange-state" data-tone="done"><span class="numeric">318 MB</span> · 저장됨</span></span></div>
+        </div>
+      </li>
+      <li class="exchange-block" data-mine="true">
+        <p class="exchange-who">나 · <time class="numeric">21:47</time> · <span class="exchange-route">직접</span></p>
+        <div class="exchange-bubble">
+          <div class="exchange-row"><span class="exchange-glyph" aria-hidden="true">MP4</span><span class="exchange-row-text"><strong>screen-20261016-214455.mp4</strong><span class="exchange-state"><span class="numeric">640 MB</span> · 보내는 중</span><span class="exchange-progress"><span style="width:38%"></span></span></span><span class="exchange-pct numeric">38%</span><span class="exchange-row-actions"><button class="ui-button ui-button--ghost ui-button--sm">취소</button></span></div>
+        </div>
+      </li>
+    </ol>
+  </div>
+  <footer class="exchange-composer">
+    <p class="exchange-composer-to"><b>LAKU-DESKTOP(으)로 보내기</b>파일당 최대 2GB · 받지 않으면 24시간 뒤 삭제</p>
+    <button class="ui-button ui-button--secondary ui-button--md exchange-composer-button"><svg class="i"><use href="#folder"/></svg>폴더</button>
+    <button class="ui-button ui-button--primary ui-button--md exchange-composer-button"><svg class="i"><use href="#clip"/></svg>파일 보내기</button>
+  </footer>
+</div>
+</body>
+</html>

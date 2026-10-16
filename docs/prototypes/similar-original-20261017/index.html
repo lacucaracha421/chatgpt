@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>유사 이미지 원본 단서</title>
+<!-- 앱의 실제 폰트·토큰·베이스·컨트롤·chrome과 PC 유사 검토 CSS를 읽는다. clues.css는 새 공용 조각, page.css는 시안 틀과 CHANGED 규칙. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/chrome.css">
+<link rel="stylesheet" href="../../../_tools/app/src/similarity/similarity-review.css">
+<link rel="stylesheet" href="../../../_tools/app/src/similarity/video/VideoSimilarity.css">
+<link rel="stylesheet" href="clues.css">
+<link rel="stylesheet" href="page.css">
+<script src="cases.js"></script>
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <symbol id="home" viewBox="0 0 24 24"><path d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></symbol>
+  <symbol id="photo" viewBox="0 0 24 24"><path d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></symbol>
+  <symbol id="stack" viewBox="0 0 24 24"><path d="M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"/></symbol>
+  <symbol id="more" viewBox="0 0 24 24"><path d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></symbol>
+</svg>
+
+<div class="doc">
+<header>
+  <h1>유사 이미지 · 원본 단서와 권장 버튼</h1>
+  <p class="lead">SIM-ORIGINAL-001의 화면 쪽. 작가 계정과 퍼온 계정이 분명히 갈리는 쌍은 자동으로 정리되어 여기 오지 않는다. 남은 쌍에서 고를 때 필요한 단서 네 가지(<b>계정 · 게시 · 해상도 · 크기</b>)를 두 이미지 아래 한 표로 마주 놓고, 단서마다 어느 쪽에 유리한지 가운데에 작은 꺾쇠로 표시한다. 권장을 정한 단서 한 줄은 바탕이 살짝 밝아지고, 이유는 버튼 옆 한 문장. <b>권장 버튼만 주 버튼(아이보리)</b>이고, 권장이 없으면 어느 버튼도 강조하지 않는다.</p>
+  <p class="lead">유사 검토는 <b>이번 계획에 있는 영역</b>(SIM-ORIGINAL-001, 10.17 승인)이다. 바뀌는 곳은 두 이미지 아래(기존 파일별 정보 목록과 위쪽 차이 줄을 이 표로 바꿈)와 아래 버튼 줄. 위쪽 이미지/영상 탭과 기존 보관함 검사 줄은 그대로다. 계정·날짜·크기는 예시.</p>
+</header>
+
+<section class="part" id="pc">
+  <h2>A. PC 유사 검토 <small>1280 × 800 · 경우를 바꿔 보면 표·문장·주 버튼이 한 번에 바뀐다</small></h2>
+  <div class="keys" role="group" aria-label="경우 바꾸기">경우
+    <button type="button" data-case="a" aria-pressed="true">(a) 작가 vs 알 수 없음 · 새로 들어온 쌍</button>
+    <button type="button" data-case="b" aria-pressed="false">(b) 퍼온 계정 둘</button>
+    <button type="button" data-case="c" aria-pressed="false">(c) 계정 정보 없음</button>
+    <button type="button" data-case="d" aria-pressed="false">(d) 같은 계정</button>
+    <button type="button" data-case="e" aria-pressed="false">(e) 권장 없음</button>
+    <span class="sep"></span>
+    <button type="button" data-alt aria-pressed="false" disabled>(d) 같은 계정이면 해상도로 (질문 2)</button>
+  </div>
+  <div class="frame frame--pc">
+    <nav class="workspace-rail" aria-label="영역">
+      <a class="workspace-rail__item"><svg class="i"><use href="#home"/></svg>홈</a>
+      <a class="workspace-rail__item"><svg class="i"><use href="#photo"/></svg>에셋</a>
+      <a class="workspace-rail__item" aria-current="page"><svg class="i"><use href="#more"/></svg>더보기</a>
+    </nav>
+    <main class="mock-main">
+      <div class="mock-titlebar"><h1>유사 검토</h1><span class="status" id="pcStatus">3 / 38</span><span class="win">— ▢ ✕</span></div>
+      <div class="similarity-review-workspace">
+        <nav class="similarity-review-workspace__tabs" aria-label="검토 미디어">
+          <button type="button" class="ui-button ui-button--secondary ui-button--md" aria-pressed="true">이미지</button>
+          <button type="button" class="ui-button ui-button--ghost ui-button--md" aria-pressed="false">영상</button>
+        </nav>
+        <section class="similarity-review" aria-label="유사 검토">
+          <section class="similarity-review__scan" aria-label="기존 보관함 유사 이미지 검사">
+            <div><strong>검사 완료 · 검토 38건 발견</strong><span>12,480개 대상 · 해시 미준비 0개</span></div>
+            <button type="button" class="ui-button ui-button--secondary ui-button--md">다시 검사</button>
+          </section>
+          <div class="similarity-review__comparison" id="pcCompare"></div>
+          <footer class="similarity-review__actions">
+            <p class="similarity-review__reason" id="pcReason"></p>
+            <p class="similarity-review__action-hint" id="pcHint"></p>
+            <div class="similarity-review__buttons" id="pcButtons"></div>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+  <ul class="plain">
+    <li><b>표는 두 이미지 바로 아래, 마주 보는 모양.</b> A 값은 가운데 쪽으로 오른쪽 정렬, B 값은 왼쪽 정렬, 단서 이름은 가운데. 그래서 각 값이 자기 이미지 바로 밑에 있다. 줄 사이는 1px 선 하나.</li>
+    <li><b>어느 쪽에 유리한지:</b> 가운데 이름 옆에 그쪽을 가리키는 작은 꺾쇠(‹ ›, 옅은 회색). 유리한 값은 굵게(600), 반대쪽 값은 한 단계 흐리게. 같거나 비교할 수 없으면(게시 시각이 한쪽에만 있음 등) 꺾쇠 없이 둘 다 보통 글씨.</li>
+    <li><b>권장을 정한 단서</b> 한 줄만 바탕이 <code>--color-surface</code>로 살짝 밝아지고 이름이 흰 글씨가 된다. 가장자리 띠·밑줄·색 글씨는 쓰지 않는다. 단서끼리 엇갈려도(a: 계정은 새 이미지, 게시는 기존 이미지) 둘 다 보이고, 어느 단서가 이겼는지는 이 줄과 문장으로 안다.</li>
+    <li><b>계정 칸:</b> X 핸들(<code>@shiro_neko_art</code>)과 네모 배지 하나 — <code>작가</code> / <code>퍼온 계정</code> / <code>알 수 없음</code>. 핸들이 없는 사이트(pixiv · arca · dc)는 사이트 이름을 흐리게 쓰고 배지는 <code>알 수 없음</code>. 배지는 모두 같은 보통 배지(색 없음).</li>
+    <li><b>버튼:</b> 순서는 언제나 같다(A 유지 · B 유지 · 둘 다 보관). 권장 쪽만 주 버튼으로 바뀌고 자리는 움직이지 않는다. 쌍이 바뀔 때 다음 쌍의 이미지가 준비되면 표·문장·버튼이 한 번에 바뀐다(빈 화면이나 깜빡임 없음).</li>
+    <li>기존 패널의 파일 이름, 형식/출처/가져온 날짜/분류 목록과 맨 위 <code>해상도 … · 새 이미지가 … 더 큼</code> 줄은 이 표로 대신한다. 형식은 크기 칸 끝에 작게 붙는다(<code>6.1 MB PNG</code>). 분류·앨범·좋아요는 남기는 쪽으로 옮겨지니 고르는 단서가 아니다.</li>
+  </ul>
+</section>
+
+<section class="part" id="tablet">
+  <h2>B. 태블릿 유사 이미지 검토 <small>세로 800 × 1280 · 가로 1280 × 800 · 같은 공용 표, 위 경우 바꾸기를 따른다</small></h2>
+  <div class="tabs">
+    <figure><iframe class="frame frame--tab-p" id="tabP" src="tablet.html?case=a" title="태블릿 세로"></iframe><figcaption class="cap">세로: A·B 이미지가 위아래, 표가 그 아래. 표의 머리줄 A · B가 이미지 왼쪽 위 표시와 짝.</figcaption></figure>
+    <figure><iframe class="frame frame--tab-l" id="tabL" src="tablet.html?case=a" title="태블릿 가로"></iframe><figcaption class="cap">가로: PC처럼 나란히, 두 이미지 사이 틈이 표의 가운데 칸과 같은 폭.</figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li>지금의 A/B 정보 상자 두 개(<code>MetaStrip</code>)와 버튼 안 <code>권장</code> 배지 대신 PC와 같은 표를 쓴다. 큰 쪽 값을 아이보리로 칠하던 규칙은 없어진다(아이보리는 선택·주 버튼 전용).</li>
+    <li>태블릿 줄 높이 48, 글자 17/13, 버튼 44 — 크기는 토큰이 바꾸고 표 모양은 PC와 같다. 이미지 위 <code>A</code>/<code>B</code> 표시는 공용 scrim 배지.</li>
+    <li>한 화면 비교(깜빡임 · 와이프)일 때도 표와 버튼 줄은 그대로 아래에 있다.</li>
+  </ul>
+</section>
+
+<section class="part" id="glance-part">
+  <h2>C. 다섯 경우 한눈에 <small>표 · 이유 문장 · 버튼 (PC 크기, 버튼은 축소)</small></h2>
+  <div class="glance" id="glance"></div>
+</section>
+
+<section class="part" id="copy">
+  <h2>D. 이유 문장</h2>
+  <table class="inv">
+    <tr><th>정한 단서</th><th>문장 (<code>{X}</code> = A · B · 기존 이미지 · 새 이미지)</th><th>예</th></tr>
+    <tr><td>계정 — 작가 쪽</td><td><code>작가 계정에 올라온 {X}를 권장합니다.</code></td><td>(a)</td></tr>
+    <tr><td>계정 — 알 수 없음 vs 퍼온 계정</td><td><code>퍼온 계정이 아닌 {X}를 권장합니다.</code></td><td>—</td></tr>
+    <tr><td>게시</td><td><code>먼저 올라온 {X}를 권장합니다.</code></td><td>(b), (d)</td></tr>
+    <tr><td>해상도</td><td><code>해상도가 더 큰 {X}를 권장합니다.</code> · 같은 계정 규칙(질문 2)일 때 <code>같은 계정이라 해상도가 더 큰 {X}를 권장합니다.</code></td><td>(c)</td></tr>
+    <tr><td>크기 (해상도 같음)</td><td><code>파일이 더 큰 {X}를 권장합니다.</code></td><td>—</td></tr>
+    <tr><td>없음</td><td><code>단서가 같거나 없어 권장하지 않습니다.</code> (흐린 글씨, 주 버튼 없음)</td><td>(e)</td></tr>
+  </table>
+</section>
+</div>
+
+<script>
+(() => {
+  const S = window.SIM;
+  let current = 'a', alt = false;
+  const $ = (s) => document.querySelector(s);
+  const HINT = {
+    historical: '유지하지 않은 이미지는 휴지통으로 이동합니다. 결정 전에는 원본을 변경하지 않습니다.',
+    incoming: '기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다.',
+  };
+  function renderPc() {
+    const c = S.resolved(S.CASES[current], alt);
+    const nm = S.names(c, 'pc');
+    const tag = nm;
+    $('#pcCompare').innerHTML =
+      `<div class="similarity-review__preview similarity-review__preview--a">${S.art(c.sides[0].art, c.sides[0].w, c.sides[0].h)}<span class="ui-badge ui-badge--scrim">${tag[0]}</span></div>` +
+      `<div class="similarity-review__preview similarity-review__preview--b">${S.art(c.sides[1].art, c.sides[1].w, c.sides[1].h)}<span class="ui-badge ui-badge--scrim">${tag[1]}</span></div>` +
+      S.clueTable(c, nm);
+    const reason = $('#pcReason');
+    reason.textContent = S.reasonText(c, nm);
+    reason.toggleAttribute('data-none', S.recSide(c) === null);
+    $('#pcHint').textContent = c.incoming ? HINT.incoming : HINT.historical;
+    $('#pcButtons').innerHTML = S.buttons(c, 'pc');
+    $('#pcStatus').textContent = { a: '1 / 4', b: '3 / 38', c: '4 / 38', d: '5 / 38', e: '6 / 38' }[current];
+  }
+  function renderTablets() {
+    for (const id of ['#tabP', '#tabL']) $(id).contentWindow?.postMessage({ simCase: current, alt }, '*');
+  }
+  function renderGlance() {
+    $('#glance').innerHTML = Object.values(S.CASES).map((raw) => {
+      const c = S.resolved(raw, false);
+      const nm = S.names(c, 'pc');
+      const none = S.recSide(c) === null;
+      return `<div><p class="cap">${c.title}</p>${S.clueTable(c, nm)}<div class="mini-foot"><p${none ? ' data-none' : ''}>${S.reasonText(c, nm)}</p><span class="btns">${S.buttons(c, 'pc')}</span></div></div>`;
+    }).join('') + (() => {
+      const c = S.resolved(S.CASES.d, true), nm = S.names(c, 'pc');
+      return `<div><p class="cap">(d′) 같은 계정이면 게시 시각을 건너뛰고 해상도로 정할 때 (질문 2 제안)</p>${S.clueTable(c, nm)}<div class="mini-foot"><p>${S.reasonText(c, nm)}</p><span class="btns">${S.buttons(c, 'pc')}</span></div></div>`;
+    })();
+  }
+  document.querySelectorAll('[data-case]').forEach((b) => b.addEventListener('click', () => {
+    current = b.dataset.case;
+    document.querySelectorAll('[data-case]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    const altBtn = $('[data-alt]');
+    altBtn.disabled = current !== 'd';
+    if (current !== 'd') { alt = false; altBtn.setAttribute('aria-pressed', 'false'); }
+    renderPc(); renderTablets();
+  }));
+  $('[data-alt]').addEventListener('click', (e) => {
+    alt = !alt; e.currentTarget.setAttribute('aria-pressed', String(alt));
+    renderPc(); renderTablets();
+  });
+  const q = new URLSearchParams(location.search).get('case');
+  if (q && S.CASES[q]) document.querySelector(`[data-case="${q}"]`).click(); else renderPc();
+  renderGlance();
+  for (const id of ['#tabP', '#tabL']) $(id).addEventListener('load', renderTablets);
+})();
+</script>
+</body>
+</html>
