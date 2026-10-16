@@ -82,6 +82,15 @@ describe("auto-saving personal record", () => {
     expect(screen.getByRole("menuitemradio",{name:"다 봄"})).toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio",{name:"하는 중"})).toBeNull();
   });
+  it("offers only the five 기기 values and names an older stored one by its bucket", async () => {
+    render(<WorkRecordEditor collection={{ ...work, platforms: "Xbox One · Wii · PC (Microsoft Windows)" }} record={{ ...record, ownedPlatform: "PC (Microsoft Windows)" }} onSave={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "소유 기기" });
+    expect(trigger).toHaveTextContent("PC");
+    expect(trigger).not.toHaveTextContent("Microsoft");
+    await userEvent.click(trigger);
+    expect(screen.getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["미입력", "Switch", "Switch 2", "PS4", "PS5", "PC"]);
+    expect(screen.getByRole("menuitemradio", { name: "PC" })).toHaveAttribute("aria-checked", "true");
+  });
   it("flushes a closing memo behind its earlier in-flight write", async () => {
     let finish!: (value:CollectionWorkRecord)=>void;
     const calls:CollectionRecordEdit[]=[];

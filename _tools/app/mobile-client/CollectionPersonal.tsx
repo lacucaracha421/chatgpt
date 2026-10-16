@@ -4,7 +4,7 @@ import {SparklesIcon as SparklesSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditValue} from './collectionEditOutbox';
-import {platformOptions, recordStates, statusLabel} from '../src/collections/work/WorkRecord';
+import {OWNED_PLATFORMS, ownedPlatformLabel, recordStates, statusLabel} from '../src/collections/work/WorkRecord';
 import type {CollectionDetail, CollectionSummary} from './collectionModel';
 import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
 import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
@@ -53,7 +53,7 @@ function RecordRows({item, edits, onSheet}: {item: CollectionDetail; edits: Pers
   const status = edits.visible(item.id, 'status', publishedStatus(item));
   const platform = edits.visible(item.id, 'ownedPlatform', publishedPlatform(item));
   const rows: [string, PersonalSheet, string, boolean][] = [['상태', 'status', statusLabel(item.type, status.value), status.pending]];
-  if (item.type === 'game') rows.push(['기기', 'platform', platform.value ?? '미입력', platform.pending]);
+  if (item.type === 'game') rows.push(['기기', 'platform', ownedPlatformLabel(platform.value) ?? '미입력', platform.pending]);
   return <>{rows.map(([label, sheet, text, pending]) => <button key={label} className={`collection-personal-row${pending ? ' is-pending' : ''}`} aria-label={`${label} ${text}${pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet(sheet)}>
     <span className="collection-personal-label">{label}</span><span className="collection-personal-value">{text}</span><PendingSlot shown={pending}/>
   </button>)}</>;
@@ -149,7 +149,7 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
     </BottomSheet>}
     {sheet === 'platform' && item.type === 'game' && <BottomSheet title="기기" onClose={() => onSheet(null)}>
       <div role="radiogroup" aria-label="기기">
-        {['', ...platformOptions(item.platforms, platform.value)].map(value => <button key={value} className="sheet-option" role="radio" aria-checked={(platform.value ?? '') === value} onClick={() => { edits.edit(item.id, 'ownedPlatform', value || null, publishedPlatform(item)); onSheet(null); }}>{value || '미입력'}<span className="radio-dot"/></button>)}
+        {['', ...OWNED_PLATFORMS].map(value => <button key={value} className="sheet-option" role="radio" aria-checked={(ownedPlatformLabel(platform.value) ?? '') === value} onClick={() => { edits.edit(item.id, 'ownedPlatform', value || null, publishedPlatform(item)); onSheet(null); }}>{value || '미입력'}<span className="radio-dot"/></button>)}
       </div>
     </BottomSheet>}
     {ownedEdition !== null && item.type === 'manga' && <OwnedSheet key={ownedEdition} item={item} edition={ownedEdition} edits={edits} onClose={() => onSheet(null)}/>}

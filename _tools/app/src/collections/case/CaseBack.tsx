@@ -10,7 +10,7 @@ export type CaseBackContent = {
   platformName?: string | null;
 };
 
-const platformNames = { sw2: "Nintendo Switch 2", sw: "Nintendo Switch", ps5: "PlayStation 5", pc: "PC", other: "", film: "FILM", av: "AV", book: "" };
+const platformNames = { sw2: "Nintendo Switch 2", sw: "Nintendo Switch", ps5: "PlayStation 5", ps4: "PlayStation 4", pc: "PC", other: "", film: "FILM", av: "AV", book: "" };
 
 /** Printed only when a work has no back artwork; all content comes from the work. */
 export function CaseBack({ data, content = {} }: { data: CaseData; content?: CaseBackContent }) {

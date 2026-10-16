@@ -7,6 +7,7 @@ import { Menu } from "../../shared/ui/Menu";
 import { TextInput } from "../../shared/ui/TextInput";
 import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { Toast } from "../../shared/ui/Toast";
+import { casePlatform, type CasePlatform } from "../case/CollectionCase";
 
 export const recordStates: Record<string, readonly [string, string][]> = {
   game: [["done", "다 함"], ["playing", "하는 중"], ["unplayed", "안 함"]],
@@ -20,9 +21,13 @@ export function statusLabel(type: string, status: string | null) {
 export function defaultRecord(collection: CollectionSummary): CollectionWorkRecord {
   return { status: null, ownedPlatform: null, myScore: collection.myScore, memo: collection.description };
 }
-/** The 기기 choices: the work's listed platforms, the one already recorded, then the common consoles. Shared with the tablet. */
-export function platformOptions(platforms: string | null | undefined, owned: string | null | undefined): string[] {
-  return [...new Set([...(platforms ?? "").split(/\s*[,·|]\s*/).filter(Boolean), ...(owned ? [owned] : []), "PC", "Switch", "Switch 2", "PS4", "PS5", "Xbox One", "Xbox Series X/S", "Steam Deck"])];
+/** The only 기기 choices (user, 2026-10-17), stored as these exact strings. Shared with the tablet. */
+export const OWNED_PLATFORMS = ["Switch", "Switch 2", "PS4", "PS5", "PC"] as const;
+const BUCKET_LABELS: Partial<Record<CasePlatform, (typeof OWNED_PLATFORMS)[number]>> = { sw: "Switch", sw2: "Switch 2", ps4: "PS4", ps5: "PS5", pc: "PC" };
+/** A recorded 기기 as the picker names it: an older stored value ("PC (Microsoft Windows)", "Wii") shows as its bucket. */
+export function ownedPlatformLabel(owned: string | null | undefined): string | null {
+  const value = owned?.trim();
+  return value ? BUCKET_LABELS[casePlatform(null, value)] ?? value : null;
 }
 export function RecordStars({ score, onChange, disabled = false }: { score: number | null; onChange?(score: number | null): void; disabled?: boolean }) {
   // Stars are the personal rating control; a half already stored remains visible.
@@ -103,12 +108,12 @@ export function WorkRecordEditor({ collection, record, onSave }: { collection: C
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { timer.current = null; save({ field: "memo", value: value || null }); }, 600);
   }
-  const platforms = platformOptions(collection.platforms, draft.ownedPlatform);
+  const ownedLabel = ownedPlatformLabel(draft.ownedPlatform);
   return <section className="work-record"><SectionLabel title="내 기록" /><dl>
     <div><dt>들인 날</dt><dd>{displayDate(collection.createdAt)}</dd></div>
     <div><dt>상태</dt><dd><Menu label="상태" triggerClassName="work-record-menu" disabled={busy} trigger={<>{statusLabel(collection.type, draft.status)}<ChevronDownIcon /></>} items={[["", "미입력"], ...(recordStates[collection.type] ?? [])].map(([id, label]) => ({ id, label, group: "status", selected: (draft.status ?? "") === id, onSelect: () => { setDraft(current => ({ ...current, status: id || null })); save({ field: "status", value: id || null }); } }))} /></dd></div>
     <div><dt>내 별점</dt><dd><RecordStars score={draft.myScore} disabled={busy} onChange={value => { setDraft(current => ({ ...current, myScore: value })); save({ field: "myScore", value }); }} /></dd></div>
-    {collection.type === "game" && <div><dt>기기</dt><dd><Menu label="소유 기기" disabled={busy} triggerClassName="work-record-menu" trigger={<>{draft.ownedPlatform ?? "미입력"}<ChevronDownIcon /></>} items={["", ...platforms].map(value => ({ id: value, label: value || "미입력", group: "platform", selected: (draft.ownedPlatform ?? "") === value, onSelect: () => { setDraft(current => ({ ...current, ownedPlatform: value || null })); save({ field: "ownedPlatform", value: value || null }); } }))} /></dd></div>}
+    {collection.type === "game" && <div><dt>기기</dt><dd><Menu label="소유 기기" disabled={busy} triggerClassName="work-record-menu" trigger={<>{ownedLabel ?? "미입력"}<ChevronDownIcon /></>} items={["", ...OWNED_PLATFORMS].map(value => ({ id: value, label: value || "미입력", group: "platform", selected: (ownedLabel ?? "") === value, onSelect: () => { setDraft(current => ({ ...current, ownedPlatform: value || null })); save({ field: "ownedPlatform", value: value || null }); } }))} /></dd></div>}
     <div><dt>메모</dt><dd><TextInput aria-label="메모" className="work-record-memo" placeholder="메모 남기기" value={draft.memo ?? ""} onChange={event => editMemo(event.target.value)} onBlur={() => { if (timer.current) { clearTimeout(timer.current); timer.current = null; save({ field: "memo", value: memoValue.current || null }); } }} /></dd></div>
   </dl>{feedback && <Toast tone={feedback.failed ? "error" : "status"} onDismiss={() => setFeedback(null)} actionLabel={feedback.failed ? "다시 시도" : undefined} onAction={feedback.failed ? () => { if (retry.current) save(retry.current); } : undefined}>{feedback.message}</Toast>}</section>;
 }

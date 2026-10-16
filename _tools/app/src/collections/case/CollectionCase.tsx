@@ -8,25 +8,31 @@ import { CaseBack, type CaseBackContent } from "./CaseBack";
 import { CASE_SOUND_ATTACK_MS, playCaseSound, preloadCaseSounds } from "./caseSounds";
 export { CaseInside } from "./CaseInside";
 
-export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film" | "book";
+export type CasePlatform = "sw2" | "sw" | "ps5" | "ps4" | "pc" | "other" | "av" | "film" | "book";
+/** NEC machines are not PCs; they stay unknown rather than getting the Steam spine. */
+const NOT_PC = /pc[\s-]?(engine|fx|8\d|9\d)|turbografx/i;
+/**
+ * Every game lands in one of the five owned-device buckets (user, 2026-10-17): Xbox, phones and computers print as PC,
+ * older Nintendo machines as Switch and older PlayStations as PS4. Only strings that fit none stay `other`.
+ */
 export function casePlatform(platforms: string | null, ownedPlatform?: string | null): CasePlatform {
   const platform = ownedPlatform?.trim() || platforms?.split("·")[0]?.trim() || "";
   if (/switch\s*2/i.test(platform)) return "sw2";
-  if (/switch/i.test(platform)) return "sw";
-  if (/ps5|playstation\s*5/i.test(platform)) return "ps5";
-  // Steam, MS-DOS, Windows, Mac and Linux games share the PC (Steam) spine; NEC machines and Windows Phone are not PCs.
-  const notPc = /windows\s*phone|pc[\s-]?(engine|fx|8\d|9\d)|turbografx/i.test(platform);
-  if (!notPc && /\b(pc|windows|linux|mac|macos|ms-dos)\b|steam/i.test(platform)) return "pc";
+  if (/ps\s*5|playstation\s*5|ps\s*vr\s*2|playstation\s*vr\s*2/i.test(platform)) return "ps5";
+  if (/\bps(\s*[1-4]|p|x|\s*vita|\s*vr)?\b|playstation|\bvita\b/i.test(platform)) return "ps4";
+  if (/switch|nintendo|\bwii|game\s*boy|gamecube|famicom|family computer|\b(n64|nes|snes|(new\s*)?3?dsi?)\b|virtual boy/i.test(platform)) return "sw";
+  if (NOT_PC.test(platform)) return "other";
+  if (/\b(pc|windows|linux|mac|macos|macintosh|ms-dos|ios|android|xbox)\b|steam|mobile/i.test(platform)) return "pc";
   return "other";
 }
 /** Platforms printed from a package spine template (`.tpl` in CollectionCase.css); the rest get a bare spine with the title. */
-const SPINE_TEMPLATES: CasePlatform[] = ["sw2", "sw", "ps5", "pc"];
+const SPINE_TEMPLATES: CasePlatform[] = ["sw2", "sw", "ps5", "ps4", "pc"];
 /** The case a work is drawn as: books, AV and films by type, games by their owned or first device. */
 export function workCasePlatform(type: string, platforms: string | null | undefined, ownedPlatform?: string | null): CasePlatform {
   return type === "manga" ? "book" : type === "av" ? "av" : type === "movie" ? "film" : casePlatform(platforms ?? null, ownedPlatform);
 }
 export const CASE_PLASTIC: Record<CasePlatform, string> = {
-  sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
+  sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)", ps4: "rgba(30,78,176,.62)",
   pc: "rgba(16,18,22,.9)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
 export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; /** A game spine names its developer (user, 2026-10-05); books, films and AV keep the publisher/maker. */ developer?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
@@ -219,8 +225,8 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
       }} onError={() => { if (wanted.current === url) setFailed(url); }} />)}
     {!hasPaintedSpine && (templatePainted.current || failed === data.spine) && (template ?
     <span className={`tpl ${data.platform}`} data-spine-template={data.platform}>
-      {/* Every Switch 2 spine ends in the Nintendo mark instead of the developer (user, 2026-10-17). */}
-      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot">{data.platform === "sw2" ? <span className="t-mark" data-spine-mark="nintendo" aria-hidden="true" /> : <span className="t-pub">{data.developer}</span>}</span>
+      {/* Every Switch and Switch 2 spine ends in the Nintendo mark instead of the developer (user, 2026-10-17). */}
+      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot">{data.platform === "sw2" || data.platform === "sw" ? <span className="t-mark" data-spine-mark="nintendo" aria-hidden="true" /> : <span className="t-pub">{data.developer}</span>}</span>
     </span> : title)}
   </>}</span>;
 }

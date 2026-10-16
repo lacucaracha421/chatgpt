@@ -193,7 +193,7 @@ describe("CollectionCase", () => {
     expect(screen.getByRole("img", { name: "게임 책등" })).toHaveAttribute("src", "/spine");
     expect(container.querySelector("[data-spine-template]")).toBeNull();
   });
-  it.each(["sw", "ps5", "pc"] as const)("draws the %s package blocks without invented logos", platform => {
+  it.each(["ps5", "ps4", "pc"] as const)("draws the %s package blocks without invented logos", platform => {
     const { container } = render(<Case value={{ ...data, platform, developer: "개발사" }} />);
     expect(container.querySelector(`[data-spine-template="${platform}"]`)).not.toBeNull();
     expect(container.querySelector(".k-spine")).toHaveTextContent("게임");
@@ -203,10 +203,10 @@ describe("CollectionCase", () => {
     expect(container.querySelector(".t-head img")).toBeNull();
     expect(container.querySelector("[data-spine-mark]")).toBeNull();
   });
-  it("ends every Switch 2 spine in the Nintendo mark instead of the developer", () => {
-    const { container } = render(<Case value={{ ...data, platform: "sw2", developer: "Nihon Falcom", publisher: "Nihon Falcom" }} />);
+  it.each(["sw2", "sw"] as const)("ends every %s spine in the Nintendo mark instead of the developer", platform => {
+    const { container } = render(<Case value={{ ...data, platform, developer: "Nihon Falcom", publisher: "Nihon Falcom" }} />);
     const spine = container.querySelector(".k-spine")!;
-    expect(spine.querySelector('[data-spine-template="sw2"] .t-foot [data-spine-mark="nintendo"]')).not.toBeNull();
+    expect(spine.querySelector(`[data-spine-template="${platform}"] .t-foot [data-spine-mark="nintendo"]`)).not.toBeNull();
     expect(spine).toHaveTextContent("게임");
     expect(spine).not.toHaveTextContent("Nihon Falcom");
     expect(spine.querySelector("img")).toBeNull();
@@ -219,18 +219,28 @@ describe("CollectionCase", () => {
     expect(container.querySelector('.k-spine [data-spine-template="pc"]')).toHaveTextContent("FromSoftware");
   });
   it("derives the template from actual platform data", () => {
-    for (const pc of ["PC (Microsoft Windows)", "Windows", "Mac", "macOS", "Linux", "Steam Deck", "SteamVR", "Steam", "MS-DOS"]) {
-      expect([pc, casePlatform(null, pc)]).toEqual([pc, "pc"]);
+    const buckets = {
+      pc: ["PC", "PC (Microsoft Windows)", "Windows", "Mac", "macOS", "Linux", "Steam Deck", "SteamVR", "Steam", "MS-DOS",
+        "Xbox One", "Xbox Series X|S", "Xbox 360", "Xbox", "iOS", "Android", "Windows Phone", "Legacy Mobile Device"],
+      sw: ["Switch", "Nintendo Switch", "Wii", "Wii U", "Nintendo Entertainment System", "Super Nintendo Entertainment System",
+        "Nintendo 64", "GameCube", "Nintendo GameCube", "Game Boy", "Game Boy Advance", "Nintendo DS", "Nintendo 3DS", "New Nintendo 3DS", "NES", "SNES"],
+      sw2: ["Switch 2", "Nintendo Switch 2"],
+      ps5: ["PS5", "PlayStation 5"],
+      ps4: ["PS4", "PlayStation 4", "PlayStation 3", "PS3", "PlayStation Vita", "PlayStation Portable", "PSP", "PlayStation 2", "PlayStation"],
+      other: ["PC Engine", "PC-FX", "NEC PC-8801", "NEC PC-9801", "TurboGrafx-16", "DOS", "Sega Saturn"],
+    };
+    for (const [bucket, names] of Object.entries(buckets)) {
+      for (const name of names) expect([name, casePlatform(null, name)]).toEqual([name, bucket]);
     }
-    for (const notPc of ["Windows Phone", "PC Engine", "PC-FX", "NEC PC-8801", "NEC PC-9801", "TurboGrafx-16", "DOS"]) {
-      expect([notPc, casePlatform(notPc)]).toEqual([notPc, "other"]);
-    }
+    // Without an owned 기기 the work's first listed platform decides, through the same buckets.
+    expect(casePlatform("PlayStation 3 · PC")).toBe("ps4");
+    expect(casePlatform("Wii · PlayStation 5")).toBe("sw");
     expect(casePlatform("Nintendo Switch 2 · PC")).toBe("sw2");
     expect(casePlatform("Nintendo Switch")).toBe("sw");
     expect(casePlatform("PC · PlayStation 5")).toBe("pc");
     expect(casePlatform("PC · Nintendo Switch 2")).toBe("pc");
     expect(casePlatform("PC · Nintendo Switch 2", "PS5")).toBe("ps5");
-    expect(casePlatform("Nintendo Switch 2", "Xbox One")).toBe("other");
+    expect(casePlatform("Nintendo Switch 2", "Xbox One")).toBe("pc");
     expect(casePlatform(null)).toBe("other");
   });
   it("rotates by keyboard, resets front, and folds open/closed", () => {

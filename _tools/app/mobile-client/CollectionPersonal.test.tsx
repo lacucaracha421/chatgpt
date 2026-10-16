@@ -315,8 +315,8 @@ describe('work record (상태 · 기기)',()=>{
     await openDetail();
     fireEvent.click(await within(personal()).findByRole('button',{name:'기기 PC, 바꾸기'}));
     const sheet=await screen.findByRole('dialog',{name:'기기'});
-    // The work's listed platforms first, then the common consoles, without duplicates.
-    expect(within(sheet).getAllByRole('radio').map(node=>node.textContent)).toEqual(['미입력','PC','PS5','Switch','Switch 2','PS4','Xbox One','Xbox Series X/S','Steam Deck']);
+    // Only the five owned-device values, whatever the work lists.
+    expect(within(sheet).getAllByRole('radio').map(node=>node.textContent)).toEqual(['미입력','Switch','Switch 2','PS4','PS5','PC']);
     fireEvent.click(within(sheet).getByRole('radio',{name:'Switch 2'}));
     await waitFor(()=>expect(commands()[0]).toMatchObject({field:'ownedPlatform',value:'Switch 2',expected:'PC'}));
     await waitFor(()=>expect(readCollectionEdits()).toEqual({}));

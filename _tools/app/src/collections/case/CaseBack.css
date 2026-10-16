@@ -3,6 +3,7 @@
 .collection-case .case-back--pc { --back-band: #1b2838; }
 .collection-case .case-back--sw { --back-band: #da1820; }
 .collection-case .case-back--ps5 { --back-band: #2a4fb0; }
+.collection-case .case-back--ps4 { --back-band: #039; }
 .collection-case .case-back--av { --back-band: #171719; }
 .collection-case .case-back-hero { position: relative; flex: none; height: 30%; background: #121a24 40% 50% / cover no-repeat; }
 .collection-case .case-back-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, #121a24); }
