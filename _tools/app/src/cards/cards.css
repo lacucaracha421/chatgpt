@@ -1157,7 +1157,10 @@
 }
 :where(.lkm-cards) .card[data-tier="ur"] .f-subjwrap, :where(.lkm-cards) .card[data-tier="lr"] .f-subjwrap {
 
- clip-path: inset(-40cqw 0 0 0 round 0 0 4.5cqw 4.5cqw); 
+ /* Stored cutouts can contain source lettering and panel lines. Only the
+    central crest may leave the frame; keep every other edge inside it.
+    Inset corner diagonals also keep ink inside the rounded card corners. */
+ clip-path: polygon(0 4.5cqw, 4.5cqw 0, 40% 0, 40% -12cqw, 60% -12cqw, 60% 0, calc(100% - 4.5cqw) 0, 100% 4.5cqw, 100% calc(100% - 4.5cqw), calc(100% - 4.5cqw) 100%, 4.5cqw 100%, 0 calc(100% - 4.5cqw));
 
 }
 :where(.lkm-cards) .card[data-tier="ur"][data-cut="1"] .f-subj, :where(.lkm-cards) .card[data-tier="lr"][data-cut="1"] .f-subj {
