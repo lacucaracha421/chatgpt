@@ -35,7 +35,9 @@ final class LanIdentity extends X509ExtendedKeyManager {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", "AndroidKeyStore");
             generator.initialize(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
                     .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
-                    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
+                    // Conscrypt signs the TLS 1.3 CertificateVerify over a digest it computed itself (NONEwithECDSA),
+                    // so the key must allow DIGEST_NONE as well as the hashed forms.
+                    .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                     .setCertificateSubject(subject).setCertificateSerialNumber(BigInteger.ONE)
                     .setCertificateNotBefore(new Date(0)).setCertificateNotAfter(end.getTime()).build());
             generator.generateKeyPair();
@@ -52,7 +54,8 @@ final class LanIdentity extends X509ExtendedKeyManager {
             throw new KeyStoreException("Unusable LAN identity");
         cert.verify(cert.getPublicKey());
         byte[] probe = new byte[32]; new SecureRandom().nextBytes(probe);
-        Signature signer = Signature.getInstance("SHA256withECDSA"); signer.initSign(key); signer.update(probe);
+        // Probe the raw form TLS uses; a key made before DIGEST_NONE was allowed fails here and is replaced.
+        Signature signer = Signature.getInstance("NONEwithECDSA"); signer.initSign(key); signer.update(probe);
         byte[] signature = signer.sign();
         signer.initVerify(cert.getPublicKey()); signer.update(probe);
         if (!signer.verify(signature)) throw new KeyStoreException("LAN certificate/key mismatch");
