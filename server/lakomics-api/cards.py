@@ -150,16 +150,26 @@ def _nodes(db):
 def eligible_characters(db):
     nodes = _nodes(db)
     series = {n["sourceId"]: n["name"] for n in nodes if n["kind"] == "series"}
+    eligible = [n for n in nodes if n["kind"] == "character" and n.get("role") != "extras"
+                and not n.get("excluded")]
+    if not eligible:
+        return {}
+    # One pass over every member, not one query per character. Skipped characters are
+    # filtered below: a node_id IN (...) list makes SQLite probe members once per id per
+    # asset (2.5 s on the production library against 0.25 s for the plain scan).
+    rows = db.execute(
+        "SELECT m.node_id,v.id,v.width,v.height FROM mobile_character_members m "
+        "JOIN visible_assets v ON v.id=m.asset_id WHERE m.filter='all' "
+        "AND v." + IMAGE_SQL + " AND NOT EXISTS (SELECT 1 FROM mobile_character_hidden_members h "
+        "WHERE h.node_id=m.node_id AND h.filter=m.filter AND h.asset_id=m.asset_id) "
+        "ORDER BY m.node_id,v.id")
+    images_by_node = {}
+    for row in rows:
+        images_by_node.setdefault(row["node_id"], []).append(
+            {"id": row["id"], "width": row["width"], "height": row["height"]})
     characters = {}
-    for node in nodes:
-        if node["kind"] != "character" or node.get("role") == "extras" or node.get("excluded"):
-            continue
-        images = db.execute(
-            "SELECT v.id,v.width,v.height FROM mobile_character_members m "
-            "JOIN visible_assets v ON v.id=m.asset_id WHERE m.node_id=? AND m.filter='all' "
-            "AND v." + IMAGE_SQL + " AND NOT EXISTS (SELECT 1 FROM mobile_character_hidden_members h "
-            "WHERE h.node_id=m.node_id AND h.filter=m.filter AND h.asset_id=m.asset_id) ORDER BY v.id",
-            [node["id"]]).fetchall()
+    for node in eligible:
+        images = images_by_node.get(node["id"])
         if images:
             characters[node["sourceId"]] = {"name": node["name"], "series": series.get(node["seriesId"], ""),
                                              "images": images}

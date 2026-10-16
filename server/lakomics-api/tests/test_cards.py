@@ -336,6 +336,68 @@ class CardRoutes(HomeFixture):
             self.assertIsNone(db.execute("SELECT opened_at FROM card_packs").fetchone()[0])
             self.assertEqual(db.execute("SELECT COUNT(*) FROM card_draws").fetchone()[0], 0)
 
+    def test_eligible_characters_preserves_metadata_image_order_and_exclusions(self):
+        with self.get_db() as db:
+            self.activate(db, "assets")
+            extra = [{**nodes()[1], "id": "character:c2", "sourceId": "c2",
+                      "seriesId": "missing", "name": "Second"}]
+            for source, fields in (("extras", {"role": "extras"}), ("excluded", {"excluded": True}),
+                                   ("folder", {"kind": "folder"}), ("empty", {})):
+                extra.append({**nodes()[1], "id": "character:" + source, "sourceId": source, **fields})
+                if source != "empty":
+                    db.execute("INSERT INTO mobile_character_members VALUES(?,'all',0,'art1')",
+                               ["character:" + source])
+            publish_nodes(db, nodes() + extra)
+            for asset, kind, committed in (("z-last", "gif", 1), ("a-first", "animated_gif", 1),
+                                            ("hidden", "image", 1), ("trash", "image", 1),
+                                            ("missing-state", "image", 1), ("video", "video", 1),
+                                            ("pending", "image", 0), ("other-filter", "image", 1)):
+                add_image(db, asset, kind=kind, committed=committed)
+            db.execute("INSERT INTO asset_authority_state SELECT 'library',id,'normal' FROM assets "
+                       "WHERE id!='missing-state'")
+            db.execute("UPDATE asset_authority_state SET lifecycle='trashed' WHERE asset_id='trash'")
+            for position, asset in enumerate(("z-last", "hidden", "trash", "missing-state", "video",
+                                               "pending", "a-first"), 1):
+                db.execute("INSERT INTO mobile_character_members VALUES('character:c1','all',?,?)",
+                           [position, asset])
+            db.execute("INSERT INTO mobile_character_members VALUES('character:c1','review',0,'other-filter')")
+            db.execute("INSERT INTO mobile_character_hidden_members VALUES('character:c1','all','hidden')")
+            # Hiding in another filter or another character must not hide c1's art1.
+            db.execute("INSERT INTO mobile_character_hidden_members VALUES('character:c1','review','art1')")
+            db.execute("INSERT INTO mobile_character_hidden_members VALUES('character:c2','all','art1')")
+            db.execute("INSERT INTO mobile_character_members VALUES('character:c2','all',0,'z-last')")
+            db.execute("INSERT INTO mobile_character_members VALUES('character:c2','all',1,'art1')")
+            db.execute("UPDATE assets SET width=321,height=654 WHERE id='a-first'")
+            cards.asset_visibility.install(db)
+            actual = cards.eligible_characters(db)
+        self.assertEqual(list(actual), ["c1", "c2"])
+        self.assertEqual({key: {**value, "images": [dict(row) for row in value["images"]]}
+                          for key, value in actual.items()}, {
+            "c1": {"name": "Character", "series": "Series", "images": [
+                {"id": "a-first", "width": 321, "height": 654},
+                {"id": "art1", "width": 800, "height": 1200},
+                {"id": "z-last", "width": 800, "height": 1200}]},
+            "c2": {"name": "Second", "series": "", "images": [
+                {"id": "z-last", "width": 800, "height": 1200}]}})
+
+    def test_eligible_characters_uses_one_image_query_for_many_characters(self):
+        with self.get_db() as db:
+            characters = [{**nodes()[1], "id": f"character:c{i}", "sourceId": f"c{i}"}
+                          for i in range(302)]
+            publish_nodes(db, [nodes()[0]] + characters)
+            for node in characters:
+                if node["sourceId"] != "c1":
+                    db.execute("INSERT INTO mobile_character_members VALUES(?,'all',0,'art1')", [node["id"]])
+            cards.asset_visibility.install(db)
+            queries = []
+            db.set_trace_callback(queries.append)
+            try:
+                actual = cards.eligible_characters(db)
+            finally:
+                db.set_trace_callback(None)
+        self.assertEqual(len(actual), 302)
+        self.assertEqual(len(queries), 2)  # Published nodes, then all eligible images.
+
     def test_extras_excluded_folders_and_no_image_characters_skipped(self):
         extra = []
         with self.get_db() as db:
