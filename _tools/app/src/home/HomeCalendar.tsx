@@ -12,7 +12,6 @@ import type { CalendarDay, ReleaseCalendarModel } from "./homeCalendarModel";
 import "./homeCalendar.css";
 
 const WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"];
-const MAX_STACK = 3;
 
 type Props = {
   model: ReleaseCalendarModel<HomeReleaseCard>;
@@ -24,18 +23,6 @@ type Props = {
   /** A client's own controls beside the section's links (the tablet's week arrows). */
   extraActions?: ReactNode;
 };
-
-/** Cover stack of one cell: the first cover in front, up to two more behind it. */
-function Stack({ entries }: { entries: HomeReleaseCard[] }) {
-  const first = entries[0]!;
-  return <span className="home-cal__stack" data-stack={Math.min(entries.length, MAX_STACK)}>
-    {entries.slice(0, MAX_STACK).map((entry, index) => <span className="home-cal__cover" key={entry.key}>
-      {entry.cover}
-      {index === 0 && first.fresh && <Badge variant="accent" className="home-cal__new">NEW</Badge>}
-    </span>)}
-    {entries.length > 1 && <Badge variant="scrim" className="home-cal__more">+{entries.length - 1}</Badge>}
-  </span>;
-}
 
 function Caption({ entry }: { entry: HomeReleaseCard }) {
   return <>
@@ -61,12 +48,12 @@ function Cell({ day, at, onOpenNote }: { day: CalendarDay<HomeReleaseCard>; at: 
     </div>
     {first && (entries.length === 1
       ? <button type="button" className="home-cal__item" onClick={first.onOpen}>
-          <Stack entries={entries} />
+          {first.fresh && <span className="home-cal__marks"><Badge variant="accent">NEW</Badge></span>}
           <Caption entry={first} />
         </button>
       : <Menu label={`${displayDate(day.date, at)} 발매 ${entries.length}개`} triggerClassName="home-cal__item" align="start"
           items={entries.map(entry => ({ id: entry.key, label: [releaseDisplayTitle(entry.name), entry.detail, entry.fresh ? "NEW" : ""].filter(Boolean).join(" · "), onSelect: entry.onOpen }))}
-          trigger={<><Stack entries={entries} /><Caption entry={first} /></>} />)}
+          trigger={<><span className="home-cal__marks">{first.fresh && <Badge variant="accent">NEW</Badge>}<Badge>+{entries.length - 1}</Badge></span><Caption entry={first} /></>} />)}
     <div className="home-cal__payments">
       {day.payments.slice(0, 2).map(payment => <Button key={payment.key} variant="quiet" className="home-cal__payment" disabled={!onOpenNote} title={payment.label} onClick={() => onOpenNote?.(payment.noteId)}>
         <span className="home-cal__payment-label">{payment.label}</span>

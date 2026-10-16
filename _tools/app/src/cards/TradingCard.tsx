@@ -87,7 +87,6 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
         </div><BackFace />
       </div></div>
       <span className="rim" aria-hidden="true"><i /></span>
-      {!faceDown && card.isNew && <span className="new-tag">NEW</span>}
       {!faceDown && card.tier === "lr" && reduced && <span className="lr-banner">LR · 별빛 한정</span>}
     </div>
   </div>;

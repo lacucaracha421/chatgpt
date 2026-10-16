@@ -85,6 +85,7 @@ final class NetworkPolicy {
   // (`/cutouts/prepare`, `/cutouts/{id}/complete`, `/cutout-candidates`) stay unreachable.
   String cardPack="[db]-[0-9]{8}";
   get=get || p.equals("/v1/cards/state") || p.equals("/v1/cards/album") || p.matches("/v1/cards/packs/"+cardPack);
+  post=post || p.matches("/v1/cards/album/[A-Za-z0-9_-]{1,128}/(n|r|sr|ssr|ur|lr)/(trash|restore)");
   post=post || p.matches("/v1/cards/packs/"+cardPack+"/(open|keep)") || p.matches("/v1/cards/cutouts/[A-Za-z0-9_-]{1,128}/ticket");
   get=get || p.equals("/v1/collections") || (p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}") && !p.equals("/v1/collections/personal-edits"));
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/suggestions") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");

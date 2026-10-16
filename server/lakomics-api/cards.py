@@ -88,6 +88,8 @@ def startup_db(db):
             db.execute("ALTER TABLE card_packs ADD COLUMN " + column + " TEXT")
     if "kept" not in _columns(db, "card_draws"):
         db.execute("ALTER TABLE card_draws ADD COLUMN kept INTEGER NOT NULL DEFAULT 0")
+    if "trashed_at" not in _columns(db, "card_album"):
+        db.execute("ALTER TABLE card_album ADD COLUMN trashed_at TEXT")
     if legacy:
         db.execute("UPDATE card_packs SET kept_at=opened_at WHERE opened_at IS NOT NULL")
         db.execute("UPDATE card_draws SET kept=1 WHERE pack_id IN (SELECT id FROM card_packs WHERE opened_at IS NOT NULL)")
@@ -403,8 +405,10 @@ def keep_pack(db, pack_id, operation_id, slots, now):
         if row["tier"] in ("ur", "lr"):
             serial = db.execute("SELECT next FROM card_serials WHERE tier=?", [row["tier"]]).fetchone()[0]
             db.execute("UPDATE card_serials SET next=next+1 WHERE tier=?", [row["tier"]])
-        db.execute("INSERT INTO card_album VALUES(?,?,?,?,?,?,?) ON CONFLICT(character_id,tier) "
-                   "DO UPDATE SET count=excluded.count,level=excluded.level,last_drawn_at=excluded.last_drawn_at",
+        # Keeping a trashed duplicate restores its collection and continues the original count/art.
+        db.execute("INSERT INTO card_album(character_id,tier,count,level,art_asset_id,first_drawn_at,last_drawn_at) "
+                   "VALUES(?,?,?,?,?,?,?) ON CONFLICT(character_id,tier) "
+                   "DO UPDATE SET count=excluded.count,level=excluded.level,last_drawn_at=excluded.last_drawn_at,trashed_at=NULL",
                    [*key, count, level, art_id, _iso(now), _iso(now)])
         card = {"slot": row["slot"], **_card(db, key[0], key[1], art_id, count, level, serial, old is None, nodes)}
         # Snapshot display data: later duplicates/publications must not change a retry.
@@ -507,7 +511,7 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
             today = accrue(db, _now())
-            summary = db.execute("SELECT COUNT(*),COALESCE(SUM(count),0) FROM card_album").fetchone()
+            summary = db.execute("SELECT COUNT(*),COALESCE(SUM(count),0) FROM card_album WHERE trashed_at IS NULL").fetchone()
             packs = [dict(r) for r in db.execute("SELECT id,kind,day FROM card_packs WHERE opened_at IS NULL ORDER BY day,id")]
             pending_keep = [{"packId": r["id"], "openedAt": r["opened_at"], "expiresAt": _iso(_expires_at(r["opened_at"]))}
                             for r in db.execute("SELECT id,opened_at FROM card_packs WHERE opened_at IS NOT NULL "
@@ -569,14 +573,15 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
 
     @app.get(PREFIX + "/album")
     def album(authorization: str | None = Header(default=None),
-              after: str | None = Query(default=None, max_length=512), limit: int = Query(default=50, ge=1, le=200)):
+              after: str | None = Query(default=None, max_length=512), limit: int = Query(default=50, ge=1, le=200),
+              trashed: bool = False):
         require_client(authorization)
         position = _position(after)
         with get_db() as db:
             db.execute("BEGIN")
             asset_visibility.install(db)
-            rows = db.execute("SELECT * FROM card_album WHERE (character_id,tier)>(?,?) "
-                              "ORDER BY character_id,tier LIMIT ?", [*position, limit + 1]).fetchall()
+            rows = db.execute("SELECT * FROM card_album WHERE (trashed_at IS NOT NULL)=? AND (character_id,tier)>(?,?) "
+                              "ORDER BY character_id,tier LIMIT ?", [int(trashed), *position, limit + 1]).fetchall()
             nodes = _nodes(db)
             cards = []
             for row in rows[:limit]:
@@ -584,10 +589,38 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
                                     [row["character_id"], row["tier"]]).fetchone()[0]
                 cards.append({"slot": None, **_card(db, row["character_id"], row["tier"], row["art_asset_id"],
                                                    row["count"], row["level"], serial, False, nodes),
-                              "firstDrawnAt": row["first_drawn_at"]})
+                              "firstDrawnAt": row["first_drawn_at"], "trashedAt": row["trashed_at"]})
             last = rows[limit - 1] if len(rows) > limit else None
             return {"version": 1, "revision": status_signal(db), "cards": cards,
                     "nextCursor": _cursor(last["character_id"], last["tier"]) if last else None}
+
+    def set_trashed(character_id, tier, trashed):
+        _asset_id(character_id)
+        if tier not in TIERS:
+            fail(422, "invalidCardTier", "Invalid card tier.")
+        with get_db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT trashed_at FROM card_album WHERE character_id=? AND tier=?",
+                             [character_id, tier]).fetchone()
+            if row is None:
+                fail(404, "cardNotFound", "Card not found.")
+            if bool(row[0]) != trashed:
+                db.execute("UPDATE card_album SET trashed_at=? WHERE character_id=? AND tier=?",
+                           [_iso(_now()) if trashed else None, character_id, tier])
+                _bump(db)
+            revision = status_signal(db)
+            db.commit()
+        return {"revision": revision, "trashed": trashed}
+
+    @app.post(PREFIX + "/album/{character_id}/{tier}/trash")
+    def trash_card(character_id: str, tier: str, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        return set_trashed(character_id, tier, True)
+
+    @app.post(PREFIX + "/album/{character_id}/{tier}/restore")
+    def restore_card(character_id: str, tier: str, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        return set_trashed(character_id, tier, False)
 
     def prepare(body):
         key = f"card-cutouts/{body.assetId}/{body.sha256}." + ("webp" if body.contentType == "image/webp" else "png")
@@ -653,7 +686,7 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
             # Unopened packs first, then packs awaiting a keep, then the album: the order of need.
             wanted = [asset_id for asset_id, tier in _upcoming_art(db, _now()) if tier in TIERS[3:]]
             wanted += [r[0] for r in db.execute("SELECT DISTINCT art_asset_id FROM card_album "
-                                                "WHERE tier IN ('ssr','ur','lr') ORDER BY art_asset_id")]
+                                                "WHERE trashed_at IS NULL AND tier IN ('ssr','ur','lr') ORDER BY art_asset_id")]
             wanted = list(dict.fromkeys(wanted))
             usable = {r[0] for r in db.execute(
                 "SELECT v.id FROM visible_assets v WHERE v." + IMAGE_SQL + " AND v.id IN (SELECT value FROM json_each(?)) "

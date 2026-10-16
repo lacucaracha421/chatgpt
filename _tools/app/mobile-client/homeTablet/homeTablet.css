@@ -7,12 +7,9 @@
 .home-tablet-week { touch-action:pan-y; }
 .home-tablet-week__nav { display:inline-flex; align-items:center; }
 .home-tablet-week__nav .ui-icon-button { min-width:44px; min-height:44px; }
-.home-attention-mobile .home-cal__day { height:auto; min-height:176px; }
-.home-attention-mobile .home-cal__payments { min-height:0; }
 .home-attention-mobile .home-cal__payment.ui-button, .home-attention-mobile .home-cal__payment.ui-menu__trigger { min-height:44px; }
 .home-attention-mobile .home-cal .home-cal__item { min-height:44px; }
 .home-attention-mobile .ui-section-label__actions .home-link { min-height:44px; min-width:44px; }
-.home-cal__cover > .collection-art, .home-cal__cover > .home-home-image, .home-cal__cover > .home-cover-placeholder { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 
 /* 빠른 메모 and 링크 보관 side by side. */
 .home-attention-mobile textarea.ui-text-input.home-qmemo__text { min-height:216px; font-size:var(--type-body); }

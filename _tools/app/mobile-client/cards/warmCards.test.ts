@@ -3,7 +3,7 @@ import {WARM_CONCURRENCY, WARM_MAX_IDS, warmArt, warmTargets} from './warmCards'
 import type {TabletCardsApi} from './cardsClient';
 
 const fakeApi = (): TabletCardsApi => ({
-  state: vi.fn(), open: vi.fn(), keep: vi.fn(), pack: vi.fn(), album: vi.fn(),
+  state: vi.fn(), open: vi.fn(), keep: vi.fn(), pack: vi.fn(), album: vi.fn(), setTrashed: vi.fn(),
   art: vi.fn(async id => `https://art.test/${id}.webp`), cutout: vi.fn(async id => `https://cut.test/${id}.png`),
 });
 // Idle runs on the next tick, so tests control the order with fake timers.

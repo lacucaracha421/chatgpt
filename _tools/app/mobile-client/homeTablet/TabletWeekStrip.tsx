@@ -11,7 +11,7 @@ const WEEK_MOTION_MS = 160;
 
 /**
  * The shared two-week release model shown one week at a time: this week, then next week by arrow or swipe.
- * Rendering is the PC calendar's own, so covers, NEW, D-day and payments stay identical.
+ * Rendering is the PC calendar's own, so titles, NEW, D-day and payments stay identical.
  */
 export function TabletWeekStrip({model, at, onOpenCalendar, onOpenNote}: {model: ReleaseCalendarModel<HomeReleaseCard>; at: Date; onOpenCalendar(): void; onOpenNote(noteId: string): void}) {
   const [week, setWeek] = useState(0);
@@ -20,7 +20,7 @@ export function TabletWeekStrip({model, at, onOpenCalendar, onOpenNote}: {model:
   const grid = useRef<HTMLDivElement>(null);
   const shownWeek = useRef(0);
   const move = (step: number) => setWeek(current => Math.max(0, Math.min(weeks - 1, current + step)));
-  // The other week slides in from its own side; the covers stay mounted, so no image reloads.
+  // The other week slides in from its own side using the shared text-only cells.
   useLayoutEffect(() => {
     const from = shownWeek.current;
     shownWeek.current = week;

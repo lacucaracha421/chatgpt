@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { displayDate } from "../shared/displayDate";
@@ -31,6 +31,7 @@ export interface CardViewerProps {
   onClose: () => void;
   onOpenAsset?: (assetId: string) => void;
   onCharacter?: (characterId: string) => void;
+  albumAction?: (card: CardData) => ReactNode;
   /** Tests replace the image preparation; the default decodes the art. */
   preload?: (card: CardData) => Promise<unknown>;
 }
@@ -40,7 +41,7 @@ export interface CardViewerProps {
  * foil and pop-out, stepping through the album list. The current card stays on screen until the
  * next one has its art decoded, then the two cross-fade (reduced motion: instant swap).
  */
-export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, onCharacter, preload = preloadCard }: CardViewerProps) {
+export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, onCharacter, albumAction, preload = preloadCard }: CardViewerProps) {
   const reduced = useCardReducedMotion();
   const target = cards[index] ?? cards[0];
   const [shown, setShown] = useState<CardData>(target);
@@ -139,9 +140,10 @@ export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, 
           <div><dt>처음 뽑음</dt><dd>{displayDate(shown.firstDrawnAt) || "—"}</dd></div>
           {shown.serial && <div><dt>일련번호</dt><dd>{shown.serial}</dd></div>}
         </dl>
-        {(canAsset || canCharacter) && <div className="card-viewer__actions">
+        {(canAsset || canCharacter || albumAction) && <div className="card-viewer__actions">
           {canAsset && <Button onClick={() => onOpenAsset!(shown.artAssetId!)}>원본 열기</Button>}
           {canCharacter && <Button variant="quiet" onClick={() => onCharacter!(shown.characterId!)}>캐릭터 폴더</Button>}
+          {albumAction?.(shown)}
         </div>}
       </footer>
     </div>

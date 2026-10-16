@@ -14,6 +14,7 @@ function apiFixture(pages: AlbumPage[]) {
   let call = 0;
   const api: TabletCardsApi = {
     state: vi.fn(), open: vi.fn(), keep: vi.fn(), pack: vi.fn(),
+    setTrashed: vi.fn(async () => ({})),
     album: vi.fn(async () => pages[Math.min(call++, pages.length - 1)]),
     art: vi.fn(async id => `https://art.test/${id}.jpg`), cutout: vi.fn(async id => `https://cut.test/${id}.png`),
   };
@@ -43,7 +44,7 @@ it('groups the album by series, then character, best tier first, and filters by 
 it('shows one tile per character with the best tier and the owned tiers, and keeps touch targets in the chip rows', async () => {
   const api = apiFixture([page([luna('n'), luna('ssr', 3), mika])]);
   render(<TabletCardAlbum api={api} onClose={vi.fn()}/>); await settle(500);
-  expect(api.album).toHaveBeenCalledWith(null, expect.anything());
+  expect(api.album).toHaveBeenCalledWith(null, expect.anything(), false);
   const tile = screen.getByRole('button', {name: '루나 · SSR'});
   expect(tile.textContent).toContain('×3');
   expect(within(tile).getByLabelText('보유 등급').querySelectorAll('[data-owned="true"]')).toHaveLength(2);
@@ -187,4 +188,30 @@ it('goes back from the top bar', async () => {
   render(<TabletCardAlbum api={apiFixture([page([])])} onClose={onClose}/>); await settle(500);
   fireEvent.click(screen.getByRole('button', {name: '홈으로'}));
   expect(onClose).toHaveBeenCalledOnce();
+});
+
+it('confirms trash with Android Back cancelling first, restores cards and shows no NEW', async () => {
+  const api = apiFixture([page([])]);
+  let trashed = false;
+  vi.mocked(api.album).mockImplementation(async (_after, _signal, trash = false) => page(trash === trashed ? [serverCard({isNew: true})] : []));
+  vi.mocked(api.setTrashed).mockImplementation(async (_character, _tier, value) => { trashed = value; });
+  render(<TabletCardAlbum api={api} onClose={vi.fn()}/>); await settle(2500);
+  expect(screen.queryByText('NEW')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SR'})); await settle(2500);
+  expect(screen.queryByText('NEW')).toBeNull();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: '카드 삭제'}));
+  expect(api.setTrashed).not.toHaveBeenCalled();
+  act(() => { window.dispatchEvent(new Event('lakomics-back')); }); await settle();
+  expect(screen.queryByRole('dialog', {name: '카드를 휴지통으로 옮길까요?'})).toBeNull();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: '카드 삭제'}));
+  fireEvent.click(screen.getByRole('button', {name: '휴지통으로 이동'})); await settle(2500);
+  expect(api.setTrashed).toHaveBeenCalledWith('c1', 'sr', true);
+  expect(screen.queryByRole('button', {name: '루나 · SR'})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '휴지통'})); await settle(2500);
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SR'})); await settle(2500);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: '복원'})); await settle(2500);
+  expect(api.setTrashed).toHaveBeenCalledWith('c1', 'sr', false);
+  expect(screen.getByText('카드 휴지통이 비어 있습니다')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: '보유 카드'})); await settle(2500);
+  expect(screen.getByRole('button', {name: '루나 · SR'}).textContent).toContain('×2');
 });

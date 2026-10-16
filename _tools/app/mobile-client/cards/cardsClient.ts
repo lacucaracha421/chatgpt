@@ -3,7 +3,7 @@ import {mediaTicket} from '../media';
 import {mapBounded} from '../model';
 import type {Asset} from '../types';
 import {preloadImages} from '../../src/shared/motion/viewportImages';
-import {hasCutoutLayer, type CardData, type PackCover} from '../../src/cards/types';
+import {hasCutoutLayer, type CardData, type CardTier, type PackCover} from '../../src/cards/types';
 // Types only: the PC module also holds Tauri calls the tablet must never load.
 import type {AlbumPage, CardState, OpenResult, ServerCard} from '../../src/cards/api';
 
@@ -24,7 +24,8 @@ export interface TabletCardsApi {
   keep(packId: string, operationId: string, slots: number[]): Promise<OpenResult>;
   /** An opened pack with its kept flags, to finish a keep started earlier or elsewhere. */
   pack(packId: string): Promise<OpenResult>;
-  album(after: string | null, signal?: AbortSignal): Promise<AlbumPage>;
+  album(after: string | null, signal?: AbortSignal, trashed?: boolean): Promise<AlbumPage>;
+  setTrashed(characterId: string, tier: CardTier, trashed: boolean): Promise<unknown>;
   /** The card art as an `https` URL; rejects when it cannot be had. */
   art(assetId: string): Promise<string>;
   /** The server's cutout layer for an Asset (a short-lived download ticket); `""` when there is none. */
@@ -41,7 +42,8 @@ export const tabletCardsApi: TabletCardsApi = {
   open: (packId, operationId) => api<OpenResult>(`${packPath(packId)}/open`, undefined, {operationId}, 'POST'),
   keep: (packId, operationId, slots) => api<OpenResult>(`${packPath(packId)}/keep`, undefined, {operationId, slots}, 'POST'),
   pack: packId => api<OpenResult>(packPath(packId)),
-  album: (after, signal) => api<AlbumPage>(`/v1/cards/album?${new URLSearchParams({...(after ? {after} : {}), limit: String(ALBUM_PAGE_SIZE)})}`, signal),
+  album: (after, signal, trashed = false) => api<AlbumPage>(`/v1/cards/album?${new URLSearchParams({...(after ? {after} : {}), limit: String(ALBUM_PAGE_SIZE), ...(trashed ? {trashed: 'true'} : {})})}`, signal),
+  setTrashed: (characterId, tier, trashed) => api(`/v1/cards/album/${encodeURIComponent(characterId)}/${tier}/${trashed ? 'trash' : 'restore'}`, undefined, undefined, 'POST'),
   async art(assetId) {
     // The thumbnail is cached on the device; an Asset without one falls back to the original.
     try { return (await mediaTicket(artAsset(assetId), 'thumbnail')).url; }

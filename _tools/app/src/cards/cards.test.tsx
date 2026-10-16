@@ -36,6 +36,7 @@ describe("card tiers", () => {
     expect(container.querySelector(`[data-tier="${tier}"]`)).toHaveClass(`card--${tier}`);
     expect(tierClass(tier).includes("fa")).toBe(["ssr", "ur", "lr"].includes(tier));
     expect(screen.getByRole("img")).toHaveAccessibleName(new RegExp(tier.toUpperCase()));
+    expect(screen.queryByText("NEW")).toBeNull();
   });
   it("prints the same back with opt-in tease", () => {
     const { container, rerender } = render(<CardBack teaseTier="lr" />);
@@ -128,6 +129,7 @@ it("runs reduced opening, leaves best after 모두 공개, and reaches results a
   expect(screen.getByRole("status")).toHaveTextContent("마지막 한 장");
   fireEvent.click(last); await act(async () => { await vi.advanceTimersByTimeAsync(400); });
   expect(screen.getByRole("status")).toHaveTextContent("공개 완료"); expect(screen.queryByRole("button", { name: "별빛 한정 연출 건너뛰기" })).not.toBeInTheDocument();
+  expect(screen.queryByText("NEW")).toBeNull();
   expect(document.querySelector(".pack-opening__slot .lr-banner")).not.toBeNull(); expect(document.querySelector(".card-reveal-fx")).toBeNull();
 });
 

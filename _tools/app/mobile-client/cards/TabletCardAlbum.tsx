@@ -1,3 +1,5 @@
+import { CardAlbumScope } from "../../src/cards/CardAlbumScope";
+import { CardAlbumAction } from "../../src/cards/CardAlbumAction";
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {FilterChip} from '../../src/shared/ui/FilterChip';
 import {CardViewer} from '../../src/cards/CardViewer';
@@ -13,7 +15,7 @@ import {displayCards, tabletCardsApi, type TabletCardsApi} from './cardsClient';
 import {useAndroidBack} from './useAndroidBack';
 import './tabletCards.css';
 
-interface Snapshot { cards: CardData[]; next: string | null; revision: number; pages: number }
+interface Snapshot { cards: CardData[]; next: string | null; revision: number; pages: number; trashed: boolean }
 interface AlbumProps {
   /** Android Back: closes the card viewer first, then the album. */
   backRef?: MutableRefObject<(() => boolean) | null>;
@@ -38,6 +40,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
   const [pending, setPending] = useState(false), [error, setError] = useState(false);
   const [tier, setTier] = useState<CardTier | 'all'>('all'), [series, setSeries] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null), [viewerId, setViewerId] = useState<string | null>(null);
+  const [trashed, setTrashed] = useState(false);
   const readRef = useRef<(more?: boolean) => void>(() => undefined);
   const moreRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -45,7 +48,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
     let live = true, running = false, refreshQueued = false, rebasing = false;
     const read = async (more = false) => {
       if (running) { if (!more) refreshQueued = true; return; }
-      const old = dataRef.current;
+      const old = dataRef.current?.trashed === trashed ? dataRef.current : null;
       if (more && !old?.next) return;
       running = true; setPending(true); setError(false);
       try {
@@ -55,7 +58,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
         const pages = more ? 1 : old?.pages ?? 1;
         let loaded = 0;
         for (; loaded < pages; loaded++) {
-          const page = await api.album(next, controller.signal);
+          const page = await api.album(next, controller.signal, trashed);
           if (revision !== -1 && page.revision !== revision) {
             // Never combine pages from different album revisions.
             if (rebasing) { refreshQueued = false; throw new Error('Album changed while paging'); }
@@ -66,7 +69,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
           if (!next) { loaded++; break; }
         }
         if (live) {
-          const snapshot = {cards: [...new Map(cards.map(card => [card.id, card])).values()], next, revision, pages: (more ? old!.pages : 0) + loaded};
+          const snapshot = {cards: [...new Map(cards.map(card => [card.id, card])).values()], next, revision, trashed, pages: (more ? old!.pages : 0) + loaded};
           dataRef.current = snapshot; setData(snapshot);
           rebasing = false;
         }
@@ -82,7 +85,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
     readRef.current = more => { void read(more); };
     void read();
     return () => { live = false; controller.abort(); readRef.current = () => undefined; };
-  }, [api]);
+  }, [api, trashed]);
   useSyncSignal('cards', () => readRef.current());
   // The next page loads when the end of the list scrolls near; the 더 보기 button stays as the fallback.
   const hasNext = !!data?.next;
@@ -101,14 +104,26 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
   const viewerOpen = viewerIndex >= 0;
   const openViewer = useCallback((card: CardData) => { setSelected(card.characterId ?? null); setViewerId(card.id); }, []);
   const closeViewer = useCallback(() => setViewerId(null), []);
-  useAndroidBack(closeViewer, viewerOpen);
+  const confirmBack = useRef<(() => boolean) | null>(null);
+  const dismissViewer = useCallback(() => { if (!confirmBack.current?.()) closeViewer(); }, [closeViewer]);
+  useAndroidBack(dismissViewer, viewerOpen);
   useEffect(() => {
     if (!backRef) return;
-    backRef.current = () => { if (viewerOpen) closeViewer(); else onClose(); return true; };
+    backRef.current = () => { if (viewerOpen) dismissViewer(); else onClose(); return true; };
     return () => { backRef.current = null; };
-  }, [backRef, viewerOpen, closeViewer, onClose]);
+  }, [backRef, viewerOpen, dismissViewer, onClose]);
+  const stale = !!data && data.trashed !== trashed;
+  const changed = (id: string) => {
+    closeViewer();
+    const old = dataRef.current;
+    if (old) { const next = { ...old, cards: old.cards.filter(card => card.id !== id) }; dataRef.current = next; setData(next); }
+    readRef.current();
+  };
+  const albumAction = (card: CardData) => <CardAlbumAction key={card.id} card={card} backRef={confirmBack} trashed={trashed} setTrashed={api.setTrashed} onChanged={changed} />;
+  const changeScope = (value: boolean) => { closeViewer(); setSeries(null); setTrashed(value); };
   return <div className="tablet-cards tablet-card-album" data-viewer-open={viewerOpen}>
     <TopBar title="카드 앨범" back={{label: '홈으로', onClick: onClose}} loading={pending && '카드 앨범 불러오는 중'}/>
+    <CardAlbumScope className="tablet-card-album__filters" trashed={trashed} onChange={changeScope}/>
     <div className="tablet-card-album__filters" role="group" aria-label="카드 등급">
       <FilterChip aria-pressed={tier === 'all'} onClick={() => setTier('all')}>전체</FilterChip>
       {cardTiers.map(value => <FilterChip key={value} aria-pressed={tier === value} onClick={() => setTier(value)}>{value.toUpperCase()}</FilterChip>)}
@@ -118,7 +133,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
       {groups.map(([name, characters]) => <FilterChip key={name} aria-pressed={series === name} onClick={() => setSeries(name)}>{`${name} · ${characters.size}명`}</FilterChip>)}
     </div>}
     {error && <p role="alert" className="tablet-card-album__error">카드 앨범을 불러오지 못했습니다. <Button variant="ghost" size="sm" onClick={() => readRef.current()}>다시 시도</Button></p>}
-    <main className="tablet-card-album__list">
+    <main className="tablet-card-album__list" inert={stale}>
       {!data && pending && <Skeleton className="tablet-card-album__skeleton" label="카드 앨범"/>}
       {visibleGroups.map(([name, characters]) => <section key={name} aria-label={name}>
         <h2 className="tablet-card-album__series-title">{name}<small>{`${characters.size}명`}</small></h2>
@@ -132,10 +147,10 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
           </button>;
         })}</div>
       </section>)}
-      {data && !visibleGroups.length && <EmptyState inline title={data.cards.length ? '이 등급의 카드가 없습니다' : '아직 모은 카드가 없습니다'}/>}
+      {data && !visibleGroups.length && <EmptyState inline title={data.cards.length ? '이 등급의 카드가 없습니다' : data.trashed ? '카드 휴지통이 비어 있습니다' : '아직 모은 카드가 없습니다'}/>}
       {data?.next && <div ref={moreRef} className="tablet-card-album__more"><Button disabled={pending} onClick={() => readRef.current(true)}>더 보기</Button></div>}
     </main>
-    {viewerOpen && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} onOpenAsset={onOpenAsset} onCharacter={onCharacter}
+    {viewerOpen && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter}
       onIndexChange={next => { const card = viewerCards[next]; if (card) openViewer(card); }}/>}
   </div>;
 }

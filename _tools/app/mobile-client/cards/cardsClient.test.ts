@@ -14,7 +14,7 @@ const serverCard = (changes: Partial<ServerCard> = {}): ServerCard => ({
   cutout: null, count: 1, level: 1, serial: null, isNew: true, ...changes,
 });
 const fakeApi = (changes: Partial<TabletCardsApi> = {}): TabletCardsApi => ({
-  state: vi.fn(), open: vi.fn(), keep: vi.fn(), pack: vi.fn(), album: vi.fn(),
+  state: vi.fn(), open: vi.fn(), keep: vi.fn(), pack: vi.fn(), album: vi.fn(), setTrashed: vi.fn(),
   art: vi.fn(async id => `https://art.test/${id}.webp`), cutout: vi.fn(async id => `https://cut.test/${id}.png`), ...changes,
 });
 
@@ -48,6 +48,16 @@ describe('routes', () => {
     const signal = new AbortController().signal;
     await tabletCardsApi.album('abc_-', signal);
     expect(mocks.api).toHaveBeenLastCalledWith(`/v1/cards/album?after=abc_-&limit=${ALBUM_PAGE_SIZE}`, signal);
+  });
+
+  it('lists trash separately and posts trash or restore for the selected character and tier', async () => {
+    mocks.api.mockResolvedValue({cards: []});
+    await tabletCardsApi.album(null, undefined, true);
+    expect(mocks.api).toHaveBeenLastCalledWith(`/v1/cards/album?limit=${ALBUM_PAGE_SIZE}&trashed=true`, undefined);
+    await tabletCardsApi.setTrashed('c1', 'sr', true);
+    expect(mocks.api).toHaveBeenLastCalledWith('/v1/cards/album/c1/sr/trash', undefined, undefined, 'POST');
+    await tabletCardsApi.setTrashed('c1', 'sr', false);
+    expect(mocks.api).toHaveBeenLastCalledWith('/v1/cards/album/c1/sr/restore', undefined, undefined, 'POST');
   });
 
   it('asks for a cutout ticket with POST and accepts only an https URL', async () => {

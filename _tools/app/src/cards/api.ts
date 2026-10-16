@@ -36,7 +36,8 @@ export interface CardsApi {
   keep(packId: string, operationId: string, slots: number[]): Promise<OpenResult>;
   /** An opened pack with its kept flags, to finish a keep started earlier or elsewhere. */
   pack(packId: string): Promise<OpenResult>;
-  album(after: string | null): Promise<AlbumPage>;
+  album(after: string | null, trashed?: boolean): Promise<AlbumPage>;
+  setTrashed(characterId: string, tier: CardTier, trashed: boolean): Promise<unknown>;
   /** `localOnly` never reaches the network: art that is not in the library rejects. */
   art(assetId: string, cutout?: boolean, localOnly?: boolean): Promise<string>;
   subscribe(changed: () => void): () => void;
@@ -46,7 +47,8 @@ export const cardsApi: CardsApi = {
   open: (packId, operationId) => invoke("card_open_pack", { packId, operationId }),
   keep: (packId, operationId, slots) => invoke("card_keep_pack", { packId, operationId, slots }),
   pack: packId => invoke("card_pack", { packId }),
-  album: after => invoke("card_album", { after, limit: 50 }),
+  album: (after, trashed = false) => invoke("card_album", { after, limit: 50, trashed }),
+  setTrashed: (characterId, tier, trashed) => invoke("card_set_trashed", { characterId, tier, trashed }),
   art: (assetId, cutout = false, localOnly = false) => invoke<string>("card_art_url", { assetId, cutout, localOnly }).then(nativeMediaUrl),
   subscribe: changed => {
     if (!isTauri()) return () => undefined;

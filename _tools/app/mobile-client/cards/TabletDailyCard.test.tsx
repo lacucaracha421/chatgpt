@@ -25,6 +25,7 @@ function apiFixture(snapshot = state()) {
     state: vi.fn(async () => snapshot), open: vi.fn(async () => result()),
     keep: vi.fn(async (packId: string, _operation: string, slots: number[]) => decided(slots, packId)),
     pack: vi.fn(async (packId: string) => ({...result(true), packId})),
+    setTrashed: vi.fn(async () => ({})),
     album: vi.fn(async () => ({version: 1, revision: 1, cards: [serverCard()], nextCursor: null})),
     art: vi.fn(async id => `https://art.test/${id}.jpg`), cutout: vi.fn(async id => `https://cut.test/${id}.png`),
   };
@@ -130,6 +131,7 @@ it('shows the stored result of the newest pack without any open request and repl
   fireEvent.click(screen.getByRole('button', {name: '결과 보기'})); await settle();
   expect(document.querySelector('.pack-opening')?.getAttribute('data-phase')).toBe('results');
   expect(api.open).not.toHaveBeenCalled();
+  expect(screen.queryByText('NEW')).toBeNull();
 });
 
 it('recovers a pack opened on another device and shows it as already opened', async () => {

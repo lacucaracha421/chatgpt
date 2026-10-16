@@ -22,6 +22,7 @@ function apiFixture(snapshot = state()) {
     state: vi.fn(async () => snapshot), open: vi.fn(async () => result()),
     keep: vi.fn(async (packId: string, _operation: string, slots: number[]) => decided(slots, packId)),
     pack: vi.fn(async (packId: string) => ({ ...result(true), packId })),
+    setTrashed: vi.fn(async () => ({})),
     album: vi.fn(async () => ({ version: 1, revision: 1, cards: [serverCard()], nextCursor: null })),
     art: vi.fn(async (id, cutout) => `https://art.test/${id}${cutout ? ".png" : ".jpg"}`),
     subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; },
@@ -58,6 +59,7 @@ it("shows the stored result of the newest pack without any open request", async 
   expect(api.open).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "결과 보기" })); await settle();
   expect(document.querySelector(".pack-opening")).toHaveAttribute("data-phase", "results"); expect(api.open).not.toHaveBeenCalled();
+  expect(screen.queryByText("NEW")).toBeNull();
 });
 
 it("recovers a pack opened on another device and replays it without the reveal", async () => {
@@ -130,7 +132,7 @@ it("groups owned characters by series, chooses the best tier, pages and filters,
   const detail = screen.getByRole("complementary", { name: "카드 상세" }); expect(detail).toHaveTextContent("Lv.3"); expect(detail).toHaveTextContent("10.15");
   fireEvent.click(within(detail).getByRole("button", { name: "원본 열기" })); expect(original).toHaveBeenCalledWith("a1");
   fireEvent.click(within(detail).getByRole("button", { name: "캐릭터 폴더" })); expect(folder).toHaveBeenCalledWith("c1");
-  fireEvent.click(screen.getByRole("button", { name: "더 보기" })); await settle(); expect(api.album).toHaveBeenLastCalledWith("next"); expect(screen.getByRole("button", { name: "아리아 · LR" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "더 보기" })); await settle(); expect(api.album).toHaveBeenLastCalledWith("next", false); expect(screen.getByRole("button", { name: "아리아 · LR" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByLabelText("카드 등급")).getByRole("button", { name: "N" })); expect(screen.getByRole("button", { name: "루나 · N" })).toBeInTheDocument(); expect(screen.queryByRole("button", { name: "아리아 · LR" })).not.toBeInTheDocument();
   const displayed = await displayCards(api, [serverCard({ tier: "n" }), serverCard({ tier: "lr" })]); expect(groupAlbum(displayed)[0][1].get("c1")?.[0].tier).toBe("lr");
 });
@@ -346,4 +348,54 @@ it("carries slot and kept flag from the server onto display cards", async () => 
   const { api } = apiFixture();
   const [card] = await displayCards(api, [serverCard({ slot: 3, kept: true })], "d-20261015");
   expect([card.slot, card.kept, card.id]).toEqual([3, true, "d-20261015:3"]);
+});
+
+it("confirms moving the whole card to trash, restores it and never shows NEW", async () => {
+  const {api} = apiFixture();
+  let trashed = false;
+  vi.mocked(api.album).mockImplementation(async (_after, trash = false) => ({version: 1, revision: trashed ? 2 : 3, cards: trash === trashed ? [serverCard({count: 3})] : [], nextCursor: null}));
+  vi.mocked(api.setTrashed).mockImplementation(async (_character, _tier, value) => { trashed = value; });
+  render(<CardAlbum api={api} onBack={vi.fn()}/>); await settle(2500);
+  expect(screen.queryByText("NEW")).toBeNull();
+  fireEvent.click(screen.getByRole("button", {name: "루나 · SR"})); await settle(2500);
+  expect(screen.queryByText("NEW")).toBeNull();
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {name: "카드 삭제"}));
+  expect(api.setTrashed).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", {name: "취소"}));
+  expect(api.setTrashed).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {name: "카드 삭제"}));
+  fireEvent.click(screen.getByRole("button", {name: "휴지통으로 이동"})); await settle(2500);
+  expect(api.setTrashed).toHaveBeenCalledWith("c1", "sr", true);
+  expect(screen.queryByRole("button", {name: "루나 · SR"})).toBeNull();
+  fireEvent.click(screen.getByRole("button", {name: "휴지통"})); await settle(2500);
+  fireEvent.click(screen.getByRole("button", {name: "루나 · SR"})); await settle(2500);
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {name: "복원"})); await settle(2500);
+  expect(api.setTrashed).toHaveBeenCalledWith("c1", "sr", false);
+  expect(screen.getByText("카드 휴지통이 비어 있습니다")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", {name: "보유 카드"})); await settle(2500);
+  expect(screen.getByRole("button", {name: "루나 · SR"})).toHaveTextContent("×3");
+});
+
+it("keeps the old album inert until the trash page arrives", async () => {
+  const {api} = apiFixture();
+  render(<CardAlbum api={api} onBack={vi.fn()}/>); await settle(2500);
+  let finish!: (value: Awaited<ReturnType<CardsApi['album']>>) => void;
+  vi.mocked(api.album).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole("button", {name: "휴지통"})); await settle();
+  expect(screen.getByRole("button", {name: "루나 · SR"}).closest('[inert]')).toBeTruthy();
+  await act(async () => finish({version: 1, revision: 1, cards: [], nextCursor: null}));
+  expect(screen.getByText("카드 휴지통이 비어 있습니다")).toBeTruthy();
+});
+
+it("keeps a card and its confirmation on a failed trash request, then retries", async () => {
+  const {api} = apiFixture();
+  vi.mocked(api.setTrashed).mockRejectedValueOnce(new Error("offline"));
+  render(<CardAlbum api={api} onBack={vi.fn()}/>); await settle(2500);
+  fireEvent.click(screen.getByRole("button", {name: "루나 · SR"})); await settle(2500);
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {name: "카드 삭제"}));
+  fireEvent.click(screen.getByRole("button", {name: "휴지통으로 이동"})); await settle();
+  expect(screen.getByRole("alert")).toHaveTextContent("카드를 옮기지 못했습니다");
+  expect(api.setTrashed).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", {name: "휴지통으로 이동"})); await settle();
+  expect(api.setTrashed).toHaveBeenCalledTimes(2);
 });

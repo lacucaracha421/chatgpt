@@ -54,14 +54,14 @@ it("opens the release of a cell with one release", async () => {
   expect(one.onOpen).toHaveBeenCalledOnce();
 });
 
-it("stacks several releases of one day under +n and lets each be opened", async () => {
+it("groups several text releases of one day under +n and lets each be opened", async () => {
   const rows = [card("a", "첫째", "2026-09-27"), card("b", "둘째", "2026-09-27", { fresh: true }), card("c", "셋째", "2026-09-27"), card("d", "넷째", "2026-09-27")];
   show(rows);
   const trigger = within(cell("2026-09-27")).getByRole("button", { name: "9.27 발매 4개" });
   expect(within(trigger).getByText("+3")).toBeTruthy();
-  // NEW comes first and shows on the front cover.
+  // NEW comes first in the text summary.
   expect(within(trigger).getByText("NEW")).toBeTruthy();
-  expect(trigger.querySelectorAll(".home-cal__cover")).toHaveLength(3);
+  expect(trigger.querySelector("img")).toBeNull();
   await userEvent.click(trigger);
   await userEvent.click(await screen.findByRole("menuitem", { name: /셋째/ }));
   expect(rows[2]!.onOpen).toHaveBeenCalledOnce();
@@ -86,7 +86,7 @@ it("keeps NEW releases from before this week reachable from the header", async (
   expect(screen.queryByRole("button", { name: /이후/ })).toBeNull();
 });
 
-it("puts payment lines below release covers and opens the same ledger note, including overflow", async () => {
+it("puts payment lines below release titles and opens the same ledger note, including overflow", async () => {
   const payments: CalendarPayment[] = Array.from({ length: 4 }, (_, index) => ({ key: String(index), date: TODAY, noteId: `ledger-${index}`, label: index === 0 ? "넷플릭스 13,500원" : `구독 ${index} 무료 끝남` }));
   const onOpenNote = vi.fn();
   render(<HomeCalendar model={releaseCalendarModel([card("game", "오늘 게임", TODAY)], TODAY, 2, { payments })} at={AT} onOpenCalendar={vi.fn()} onOpenNote={onOpenNote} />);
@@ -110,4 +110,13 @@ it("shows a quiet non-clickable saved count with a photo mark next to the date",
   expect(count.parentElement).toBe(cell(TODAY).querySelector(".home-cal__date")!.parentElement);
   expect(cell("2026-09-22").querySelector(".home-cal__payments")?.childElementCount).toBe(0);
   expect(cell("2026-09-22").querySelector(".home-cal__saved")).toBeNull();
+});
+
+it("shows release titles and kinds without mounting supplied cover images", () => {
+  show([card("anime", "사이버펑크: 엣지러너 2", "2026-09-30", {detail: "애니", cover: <img src="poster.jpg" alt="표지"/>})]);
+  const day = within(cell("2026-09-30"));
+  expect(day.getByText("사이버펑크: 엣지러너 2")).toBeTruthy();
+  expect(day.getByText("애니")).toBeTruthy();
+  expect(day.getByText("D-4")).toBeTruthy();
+  expect(day.queryByRole("img")).toBeNull();
 });

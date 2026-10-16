@@ -1387,17 +1387,6 @@
 
 
 
-:where(.lkm-cards) .new-tag {
-
- position: absolute; left: 50%; top: 0; z-index: 4; transform: translate(-50%, -55%); padding: 3px 7px; border-radius: 999px; pointer-events: none;
-  font: 800 10px/1 var(--f-ui); letter-spacing: .06em; color: #1a1205; background: #ffd84a; box-shadow: 0 0 0 2px #0b0c10; animation: lkm-tagIn .3s var(--ease) both; 
-
-}
-@keyframes lkm-tagIn {
-
- from { opacity: 0; transform: translate(-50%, -20%); } 
-
-}
 :where(.lkm-cards) .lr-banner {
 
  position: absolute; left: 50%; bottom: 0; z-index: 4; transform: translate(-50%, 60%); padding: 4px 10px; border-radius: 3px; white-space: nowrap; pointer-events: none;

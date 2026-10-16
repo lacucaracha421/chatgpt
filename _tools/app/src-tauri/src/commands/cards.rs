@@ -84,12 +84,34 @@ pub async fn card_pack(pack_id: String, state: State<'_, AppState>) -> Result<Va
 pub async fn card_album(
     after: Option<String>,
     limit: Option<u16>,
+    trashed: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Value, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         let (client, token) = client(&library)?;
-        client.card_album(after.as_deref(), limit.unwrap_or(50), &token.expose())
+        client.card_album(
+            after.as_deref(),
+            limit.unwrap_or(50),
+            trashed.unwrap_or(false),
+            &token.expose(),
+        )
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+#[tauri::command]
+pub async fn card_set_trashed(
+    character_id: String,
+    tier: String,
+    trashed: bool,
+    state: State<'_, AppState>,
+) -> Result<Value, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (client, token) = client(&library)?;
+        client.card_set_trashed(&character_id, &tier, trashed, &token.expose())
     })
     .await
     .map_err(|_| background_task_error())?

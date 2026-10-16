@@ -160,6 +160,54 @@ class CardRoutes(HomeFixture):
         self.ok(self.state(self.publisher))
         self.ok(self.open(headers=self.publisher))
 
+    def test_card_trash_restore_preserves_history_art_serial_and_counts(self):
+        self.predraw(["ur"] * 5)
+        self.fixed_open()
+        original = self.ok(self.album())["cards"][0]
+        before_pack = self.ok(self.pack())
+        before_state = self.ok(self.state())
+        path = PREFIX + "/album/c1/ur/"
+        for action in ("trash", "restore"):
+            self.assertEqual(self.client.post(path + action).status_code, 401)
+            self.assertEqual(self.client.post(path + action, headers={"Authorization": "Bearer wrong"}).status_code, 401)
+        trash = self.ok(self.client.post(path + "trash", headers=self.auth))
+        self.assertGreater(trash["revision"], before_state["revision"])
+        self.assertEqual(self.ok(self.album())["cards"], [])
+        self.assertEqual(self.ok(self.state())["albumSummary"], {"cards": 0, "total": 0})
+        deleted = self.ok(self.album(trashed=True))["cards"][0]
+        self.assertTrue(deleted["trashedAt"])
+        self.assertEqual({k: v for k, v in deleted.items() if k != "trashedAt"},
+                         {k: v for k, v in original.items() if k != "trashedAt"})
+        # Repeating a successful command is safe and does not change the revision.
+        self.assertEqual(self.ok(self.client.post(path + "trash", headers=self.auth)), trash)
+        self.assertEqual(self.ok(self.pack()), before_pack)
+        with self.get_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM assets WHERE id='art1'").fetchone()[0], 1)
+        self.ok(self.client.post(path + "restore", headers=self.auth))
+        self.assertEqual(self.ok(self.album())["cards"], [original])
+        self.assertEqual(self.ok(self.album(trashed=True))["cards"], [])
+        self.assertEqual(self.ok(self.state())["albumSummary"], before_state["albumSummary"])
+        self.assertEqual(self.client.post(PREFIX + "/album/missing/sr/trash", headers=self.auth).status_code, 404)
+
+    def test_keeping_a_trashed_duplicate_restores_its_existing_collection(self):
+        self.predraw(["sr"] * 5)
+        self.fixed_open()
+        original = self.ok(self.album())["cards"][0]
+        self.ok(self.client.post(PREFIX + "/album/c1/sr/trash", headers=self.auth))
+        self.force_pack()
+        with mock.patch.object(cards, "roll_pack", return_value=["sr"] * 5):
+            self.ok(self.open("b-20261015"))
+        # Opening alone leaves the card in trash; only keeping restores it.
+        self.assertEqual(self.ok(self.album())["cards"], [])
+        self.ok(self.keep("b-20261015", slots=[0]))
+        restored = self.ok(self.album())["cards"][0]
+        self.assertEqual(restored["count"], original["count"] + 1)
+        self.assertEqual(restored["firstDrawnAt"], original["firstDrawnAt"])
+        self.assertEqual(restored["artAssetId"], original["artAssetId"])
+        self.assertIsNone(restored["trashedAt"])
+        self.assertEqual(self.ok(self.album(trashed=True))["cards"], [])
+        self.assertEqual(self.ok(self.state())["albumSummary"], {"cards": 1, "total": 6})
+
     def test_initial_state_and_etag(self):
         reply = self.state()
         state = self.ok(reply)
@@ -949,6 +997,23 @@ class CardRoutes(HomeFixture):
         self.ok(self.complete())
         entry = self.ok(self.state())["prefetch"][0]
         self.assertEqual((entry["assetIds"], entry["cutoutAssetIds"]), (["art1"], ["art1"]))  # an N card, same answer as an LR
+
+    def test_upgrade_card_album_keeps_existing_cards_and_adds_trash_once(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.executescript("""
+CREATE TABLE card_album(character_id TEXT NOT NULL,tier TEXT NOT NULL,count INTEGER NOT NULL,
+ level INTEGER NOT NULL,art_asset_id TEXT NOT NULL,first_drawn_at TEXT NOT NULL,last_drawn_at TEXT NOT NULL,
+ PRIMARY KEY(character_id,tier));
+INSERT INTO card_album VALUES('c1','sr',3,3,'art1','first','last');
+""")
+        cards.startup_db(db)
+        self.assertEqual(tuple(db.execute("SELECT count,art_asset_id,trashed_at FROM card_album").fetchone()),
+                         (3, "art1", None))
+        db.execute("UPDATE card_album SET trashed_at='trashed'")
+        cards.startup_db(db)
+        self.assertEqual(db.execute("SELECT trashed_at FROM card_album").fetchone()[0], "trashed")
+        db.close()
 
     def test_upgrade_marks_cards_opened_before_the_keep_step_as_kept(self):
         db = sqlite3.connect(":memory:")

@@ -302,6 +302,7 @@ pub fn run() {
             commands::cards::card_keep_pack,
             commands::cards::card_pack,
             commands::cards::card_album,
+            commands::cards::card_set_trashed,
             commands::cards::card_art_url,
             commands::home_media::get_home_media,
             commands::home::set_av_favorite,

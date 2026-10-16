@@ -1,14 +1,14 @@
 /* PC release calendar: two weeks from Monday, one cell per day (layout A, 2026-10-15). */
-.home-cal { --cal-cover:72px; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); column-gap:var(--space-2); }
+.home-cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); column-gap:var(--space-2); }
 .home-cal__weekday { padding:0 var(--space-2) var(--space-1); color:var(--color-faint); font-size:var(--type-meta); }
 .home-cal__weekday[data-weekend] { color:color-mix(in srgb,var(--color-faint) 70%,var(--color-bg)); }
-.home-cal__day { min-width:0; height:calc(212px + 3 * var(--control-height-compact)); box-sizing:border-box; display:flex; flex-direction:column; gap:var(--space-2); padding:var(--space-2); border-top:1px solid var(--color-border); }
+.home-cal__day { min-width:0; min-height:128px; box-sizing:border-box; display:flex; flex-direction:column; gap:var(--space-2); padding:var(--space-2); border-top:1px solid var(--color-border); }
 .home-cal__head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-1); min-height:var(--badge-height); }
 .home-cal__date { color:var(--color-muted); font-size:var(--type-meta); }
 .home-cal__saved { margin-left:auto; min-width:0; display:inline-flex; align-items:center; gap:2px; padding:0 var(--space-1); border-radius:var(--radius-sm); background:var(--color-surface); overflow:hidden; white-space:nowrap; color:var(--color-faint); font-size:var(--type-meta); animation:home-cal-appear 200ms var(--ease-standard) both; }
 .home-cal__saved > svg { width:12px; height:12px; flex-shrink:0; }
 .home-cal__head > .ui-dday { flex-shrink:0; }
-.home-cal__payments { min-height:calc(3 * var(--control-height-compact)); margin-top:auto; min-width:0; }
+.home-cal__payments { margin-top:auto; min-width:0; }
 .home-cal__payments:has(> *) { animation:home-cal-appear 200ms var(--ease-standard) both; }
 .home-cal__payment.ui-button, .home-cal__payment.ui-menu__trigger { width:100%; justify-content:flex-start; min-width:0; }
 /* Names and labels show up to two lines (user 2026-10-15). */
@@ -23,17 +23,5 @@
 .home-cal .home-cal__item:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--space-1); }
 .home-cal__item b { max-width:100%; font-size:var(--type-meta); line-height:var(--line-meta); font-weight:600; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 .home-cal__item small { max-width:100%; color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
-/* The first cover stands in front; the others sit behind it, each a step to the right and darker. */
-.home-cal__stack { position:relative; display:block; width:var(--cal-cover); isolation:isolate; }
-.home-cal__cover { position:relative; display:block; width:var(--cal-cover); aspect-ratio:2/3; overflow:hidden; background:var(--color-surface); }
-.home-cal__cover > img, .home-cal__cover > .privacy-mask { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-.home-cal__cover + .home-cal__cover { position:absolute; top:0; left:14px; z-index:-1; filter:brightness(.62); }
-.home-cal__cover + .home-cal__cover + .home-cal__cover { left:28px; z-index:-2; filter:brightness(.42); }
-.home-cal__new { position:absolute; left:var(--space-1); top:var(--space-1); }
-.home-cal__more { position:absolute; right:var(--space-1); bottom:var(--space-1); z-index:1; }
-.home-cal .home-cal__stack[data-stack="2"] { width:calc(var(--cal-cover) + 14px); }
-.home-cal .home-cal__stack[data-stack="3"] { width:calc(var(--cal-cover) + 28px); }
-.home-cal .home-cal__stack[data-stack="2"] .home-cal__more { right:calc(var(--space-1) + 14px); }
-.home-cal .home-cal__stack[data-stack="3"] .home-cal__more { right:calc(var(--space-1) + 28px); }
-@container home (max-width:1000px) { .home-cal { --cal-cover:56px; } .home-cal__day { height:calc(188px + 3 * var(--control-height-compact)); } }
-@container home (max-width:700px) { .home-cal { --cal-cover:44px; } .home-cal__cover + .home-cal__cover { left:10px; } .home-cal__cover + .home-cal__cover + .home-cal__cover { left:20px; } }
+
+.home-cal__marks { display:flex; flex-wrap:wrap; gap:var(--space-1); }

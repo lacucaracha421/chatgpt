@@ -290,11 +290,29 @@ impl CloudClient {
         &self,
         after: Option<&str>,
         limit: u16,
+        trashed: bool,
         token: &str,
     ) -> Result<Value, LibraryError> {
-        validate_cards(
-            self.card_get(&album_path(after, limit)?, token, ALBUM_LIMIT)?,
-            false,
+        let path = album_path(after, limit)? + if trashed { "&trashed=true" } else { "" };
+        validate_cards(self.card_get(&path, token, ALBUM_LIMIT)?, false)
+    }
+    pub(crate) fn card_set_trashed(
+        &self,
+        character: &str,
+        tier: &str,
+        trashed: bool,
+        token: &str,
+    ) -> Result<Value, LibraryError> {
+        if !valid_id(character) || !matches!(tier, "n" | "r" | "sr" | "ssr" | "ur" | "lr") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let action = if trashed { "trash" } else { "restore" };
+        self.card_post(
+            &format!("/v1/cards/album/{character}/{tier}/{action}"),
+            json!({}),
+            token,
+            STATE_LIMIT,
+            true,
         )
     }
     pub(crate) fn card_ticket(
@@ -409,7 +427,7 @@ mod tests {
                 .unwrap()["alreadyOpened"],
             true
         );
-        assert!(client.card_album(None, 50, "client-secret").is_ok());
+        assert!(client.card_album(None, 50, false, "client-secret").is_ok());
         assert!(client.card_state("client-secret").is_err());
         let operation = uuid::Uuid::new_v4().to_string();
         assert_eq!(
@@ -440,5 +458,36 @@ mod tests {
             false
         )
         .is_err());
+    }
+    #[test]
+    fn card_trash_transport_lists_and_mutates_the_selected_card() {
+        let (client, requests) = CloudClient::home_test_client(vec![
+            json!({"version":1,"cards":[],"nextCursor":null}),
+            json!({"revision":2,"trashed":true}),
+            json!({"revision":3,"trashed":false}),
+        ]);
+        assert!(client.card_album(None, 50, true, "client-secret").is_ok());
+        assert_eq!(
+            client
+                .card_set_trashed("c1", "sr", true, "client-secret")
+                .unwrap()["trashed"],
+            true
+        );
+        assert_eq!(
+            client
+                .card_set_trashed("c1", "sr", false, "client-secret")
+                .unwrap()["trashed"],
+            false
+        );
+        let bytes = requests.lock().unwrap();
+        let request = |i: usize| String::from_utf8_lossy(&bytes[i]).into_owned();
+        assert!(request(0).contains("GET /v1/cards/album?limit=50&trashed=true "));
+        assert!(request(1).contains("POST /v1/cards/album/c1/sr/trash "));
+        assert!(request(2).contains("POST /v1/cards/album/c1/sr/restore "));
+        for i in 0..3 {
+            assert!(request(i)
+                .to_lowercase()
+                .contains("authorization: bearer client-secret"));
+        }
     }
 }
