@@ -5,6 +5,10 @@ public final class NetworkPolicyTest {
  static void pass(Attempt a)throws Exception{a.run();checks++;}
  static void reject(Attempt a)throws Exception{try{a.run();}catch(Exception e){checks++;return;}throw new AssertionError("Unsafe input accepted");}
  public static void main(String[] args)throws Exception{
+ String lan="/v1/exchange/devices/0f8fad5b-d9cb-469f-a165-70867728950e/lan";
+ pass(()->NetworkPolicy.api(lan,"PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH","HEAD"})reject(()->NetworkPolicy.api(lan,method));
+ for(String path:new String[]{lan+"/",lan+"/extra",lan.replace("/lan","/LAN"),lan.replace("0f8fad5b","0F8FAD5B"),lan.replace("/lan","%2flan"),lan.replace("/lan","/../lan"),"/v1/exchange/devices/x/lan"})reject(()->NetworkPolicy.api(path,"PUT"));
  for(String path:new String[]{"/v1/collections/authority/status","/v1/collections/authority/baseline?libraryId=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&epoch=2","/v1/collections/authority/changes?after=10","/v1/collections/authority/trash?libraryId=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&epoch=2"}){
   pass(()->NetworkPolicy.api(path,"GET"));
   for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));

@@ -62,7 +62,7 @@ final class ExchangeService {
         String zip;
         int skipped;
         long size = -1, bytes;
-        boolean incoming, persistable, freshId, autoRetryPending;
+        boolean incoming, persistable, freshId, autoRetryPending, direct;
         volatile boolean cancelled;
         int attempts;
     }
@@ -101,6 +101,14 @@ final class ExchangeService {
     private ScheduledFuture<?> poll, refreshRetry, ackRetry;
     /** Advances on every reset so work started for a replaced connection records nothing. */
     private int epoch;
+    private LanReceiver lanReceiver;
+    private LanIdentity lanIdentity;
+    private JSONArray lanPeers = new JSONArray();
+    private String lanScope = "", reportedLan = "";
+    private long lanUnsupportedUntil;
+    private boolean recoveryReady;
+    private final Set<String> directReceiving = new HashSet<>();
+    private final Object publication = new Object();
 
     private static ScheduledExecutorService executor(String name) {
         return StartupPerf.scheduled(name,task -> { Thread t = new Thread(task, name); t.setDaemon(true); return t; });
@@ -117,7 +125,10 @@ final class ExchangeService {
         restoreSends();
         sweepZips();
         // Before any new receive: the downloads worker runs one task at a time.
-        try { downloads.execute(this::recoverPublications); } catch (RejectedExecutionException ignored) {}
+        try { downloads.execute(() -> {
+            try { recoverPublications(); sweepLan(); }
+            finally { synchronized (this) { recoveryReady = true; } startLan(); }
+        }); } catch (RejectedExecutionException ignored) {}
     }
 
     static boolean receiveSupported() { return Build.VERSION.SDK_INT >= 29; }
@@ -215,6 +226,8 @@ final class ExchangeService {
     /** A connection change: forget everything learned from the previous server or token. */
     void reset() {
         synchronized (this) {
+            closeLan(); lanPeers = new JSONArray(); lanScope = ""; reportedLan = ""; lanUnsupportedUntil = 0;
+            preferences.edit().remove("lan-peers").remove("lan-scope").commit();
             epoch++;
             stopRefreshRetry();
             stopAckRetry();
@@ -241,12 +254,13 @@ final class ExchangeService {
         synchronized (this) {
             resumed = Math.max(0, resumed + (value ? 1 : -1));
             foreground = resumed > 0;
-            if (!foreground) { stopPoll(); stopRefreshRetry(); stopAckRetry(); return; }
+            if (!foreground) { closeLan(); stopPoll(); stopRefreshRetry(); stopAckRetry(); return; }
             if (visible) startPoll();
             scheduleRefreshRetry();
             retry = new ArrayList<>(deferred);
             deferred.clear();
         }
+        startLan();
         // Acknowledgements owed from before a pause or a restart.
         requestAcks();
         for (String id : retry) resume(id);
@@ -371,14 +385,18 @@ final class ExchangeService {
         }
         try {
             register(connection);
+            reportLan(connection);
             boolean withDevices;
             synchronized (this) { withDevices = refreshDevices || devices.length() == 0; refreshDevices = false; }
             JSONArray nextDevices = withDevices ? read(connection, "/v1/exchange/devices").getJSONArray("devices") : null;
+            synchronized (this) {
+                if (started != epoch) return;
+                if (nextDevices != null) { devices = nextDevices; cacheLanPeers(connection, nextDevices); }
+            }
             JSONArray inbox = readInbox(connection);
             JSONArray nextOutbox = read(connection, "/v1/exchange/outbox").getJSONArray("items");
             synchronized (this) {
                 if (started != epoch) return;
-                if (nextDevices != null) devices = nextDevices;
                 outbox = nextOutbox;
                 code = "";
                 // Local send rows the server now reports are retired in favour of its state.
@@ -414,6 +432,7 @@ final class ExchangeService {
         int fresh = 0;
         String fromName = "", fromKind = "";
         List<Row> receive = new ArrayList<>();
+        List<String> decline = new ArrayList<>();
         boolean ackDue = false;
         synchronized (this) {
             if (started != epoch) return;
@@ -422,6 +441,7 @@ final class ExchangeService {
                 JSONObject item = items.getJSONObject(i);
                 String id = item.getString("transferId");
                 if (!ExchangeTransfer.uuid(id)) continue;
+                if (lanFile(id, ".cancel").exists()) { decline.add(id); continue; }
                 present.add(id);
                 Row row = incoming.get(id);
                 if (row == null) {
@@ -439,13 +459,19 @@ final class ExchangeService {
                     incoming.put(id, row);
                 }
                 // Saved before: never save twice, only repeat the lost ack.
-                if (ledger.saved(id)) { ledger.withSha(id, row.sha); ackDue = true; continue; }
+                // A direct receipt is acked locally; the server's still-offered copy is acknowledged too.
+                if (ledger.saved(id)) { ackDue |= ledger.owe(journal, id, row.sha); continue; }
+                if (row.direct) {
+                    if (directReceiving.contains(id)) continue;
+                    // A failed/abandoned direct attempt can fall back to the server with the same id.
+                    row.direct = false; row.state = "waiting";
+                }
                 if (announced.add(id)) { fresh++; fromName = row.peer; fromKind = kindOf(row.peerId); }
                 if ("waiting".equals(row.state) && receiveSupported() && foreground) receive.add(row);
             }
             for (Iterator<Row> it = incoming.values().iterator(); it.hasNext(); ) {
                 Row row = it.next();
-                if (present.contains(row.id)) continue;
+                if (present.contains(row.id) || row.direct) continue;
                 if ("waiting".equals(row.state) || "saved".equals(row.state)) it.remove();
                 else if ("failed".equals(row.state)) { row.state = "expired"; row.code = "transferGone"; }
             }
@@ -454,6 +480,9 @@ final class ExchangeService {
             if (ackDue) scheduleAckRetry();
         }
         for (Row row : receive) enqueueReceive(row);
+        for (String id : decline) try { net.execute(() -> {
+            try { cancel(id); } catch (Exception failure) { android.util.Log.w("LakomicsExchange", "Server decline failed", failure); }
+        }); } catch (RejectedExecutionException ignored) {}
         if (fresh > 0) {
             try { emit(ARRIVED, new JSONObject().put("count", fresh).put("fromName", fromName).put("fromKind", fromKind)); }
             catch (JSONException ignored) {}
@@ -479,7 +508,7 @@ final class ExchangeService {
     // --- receive ------------------------------------------------------------------------
 
     private void enqueueReceive(Row row) {
-        synchronized (this) { if (!queued.add(row.id)) return; }
+        synchronized (this) { if (row.direct || directReceiving.contains(row.id) || !queued.add(row.id)) return; }
         try { downloads.execute(() -> { try { receive(row); } finally { synchronized (this) { queued.remove(row.id); } } }); }
         catch (RejectedExecutionException e) { synchronized (this) { queued.remove(row.id); } }
     }
@@ -524,19 +553,7 @@ final class ExchangeService {
                     if (attempt > 0 || !(expired.status == 400 || expired.status == 403)) throw expired;
                 }
             }
-            // Declined, withdrawn or reset while downloading: nothing reaches Downloads.
-            synchronized (this) {
-                if (row.cancelled || started != epoch) { part.delete(); return; }
-                row.state = "saving"; row.code = "";
-            }
-            changed();
-            if (!receiveSupported()) throw new UserError("unsupported");
-            // Whatever happens meanwhile, a published copy is always recorded (journal first,
-            // receipt before the ack), so a later sighting acks instead of saving a second copy.
-            ledger.publish(journal, destination, row.id, part, ExchangeTransfer.fileName(row.name), row.hint,
-                    row.size, row.sha, row.peer, System.currentTimeMillis());
-            rememberReceived(row);
-            saved(row, part, started);
+            if (!land(row, part, started)) return;
         } catch (Exception e) {
             if (row.cancelled) { part.delete(); return; }
             String reason = failureCode(e);
@@ -551,6 +568,30 @@ final class ExchangeService {
         }
     }
 
+    /** Shared by server and direct receive: the only path from verified bytes to Downloads. */
+    private boolean land(Row row, File part, int started) throws Exception {
+        synchronized (publication) {
+            synchronized (this) {
+                // Declined, withdrawn or reset while receiving: nothing reaches Downloads.
+                if (row.cancelled || started != epoch) { part.delete(); return false; }
+                if (!receiveSupported()) throw new UserError("unsupported");
+                row.state = "saving"; row.code = "";
+            }
+            changed();
+            // Do not hold the service monitor while copying a large file. Pause can close
+            // the listener immediately; an already-started publication keeps its journal.
+            if (!ledger.saved(row.id)) {
+                ExchangeTransfer.Ledger.Entry pending = ledger.get(row.id);
+                if (pending != null) ledger.recover(journal, destination, pending);
+                if (!ledger.saved(row.id)) ledger.publish(journal, destination, row.id, part, ExchangeTransfer.fileName(row.name), row.hint,
+                        row.size, row.sha, row.peer, System.currentTimeMillis(), row.direct);
+            }
+            rememberReceived(row);
+            saved(row, part, started);
+            return true;
+        }
+    }
+
     /** The receipt is durable: the row leaves the inbox list and its acknowledgement is owed. */
     private void saved(Row row, File part, int started) {
         boolean current;
@@ -558,6 +599,7 @@ final class ExchangeService {
         part.delete();
         changed();
         if (current) requestAcks();
+        if (current && row.direct) requestRefresh(false);
     }
 
     /**
@@ -929,7 +971,7 @@ final class ExchangeService {
         synchronized (this) { row = incoming.containsKey(id) ? incoming.get(id) : outgoing.get(id); }
         if (row == null || row.cancelled) return;
         row.autoRetryPending = false;
-        if (row.incoming) enqueueReceive(row); else enqueueUpload(row);
+        if (row.incoming) { if (!row.direct) enqueueReceive(row); } else enqueueUpload(row);
     }
 
     /** 재시도 on a failed row: a fresh round of automatic retries. */
@@ -940,7 +982,7 @@ final class ExchangeService {
         if ("sourceUnavailable".equals(row.code)) throw new UserError("원본 파일을 읽을 수 없습니다. 파일을 다시 선택해 주세요.");
         if (!retryable(row)) throw new UserError("압축 파일이 이미 정리되었습니다. 폴더를 다시 보내 주세요.");
         row.attempts = 0; row.cancelled = false; row.autoRetryPending = false;
-        if (row.incoming) { row.state = "waiting"; enqueueReceive(row); }
+        if (row.incoming) { row.state = "waiting"; if (!row.direct) enqueueReceive(row); }
         else { row.state = "preparing"; enqueueUpload(row); }
         changed();
     }
@@ -950,6 +992,16 @@ final class ExchangeService {
         Row row;
         synchronized (this) { row = incoming.containsKey(id) ? incoming.get(id) : outgoing.get(id); }
         if (!ExchangeTransfer.uuid(id)) throw new UserError("취소할 항목을 찾을 수 없습니다.");
+        if (row != null && row.direct) {
+            synchronized (this) {
+                writeLanFile(lanFile(id, ".cancel"), new byte[0]);
+                row.cancelled = true; incoming.remove(id);
+                if (!directReceiving.contains(id)) lanFile(id, ".part").delete();
+            }
+            changed();
+            return;
+        }
+        if (lanFile(id, ".json").exists()) synchronized (this) { writeLanFile(lanFile(id, ".cancel"), new byte[0]); }
         if (row != null) row.cancelled = true;
         JSONObject connection = connection();
         if (connection != null) {
@@ -971,6 +1023,231 @@ final class ExchangeService {
     // --- persistence ---------------------------------------------------------------------
 
     private boolean saveLedger() { return ledger.save(journal); }
+
+    // --- direct LAN receive ---------------------------------------------------------------
+
+    /** Called on the network worker; foreground transitions also close the listening sockets. */
+    private void startLan() {
+        try { net.execute(() -> {
+            try {
+                JSONObject connection = connection();
+                // The listener only exists after recovery; announce it through the normal pass (register, report, peers).
+                // Keystore key generation can take a moment on first use; keep it outside the service lock.
+                if (connection != null && ensureLan(connection, LanIdentity.load(deviceId()))) requestRefresh(true);
+            }
+            catch (Exception failure) { android.util.Log.w("LakomicsExchange", "LAN receive unavailable", failure); }
+        }); } catch (RejectedExecutionException ignored) {}
+    }
+
+    private synchronized void closeLan() {
+        if (lanReceiver != null) { lanReceiver.close(); lanReceiver = null; }
+        reportedLan = "";
+    }
+
+    private String lanScope(JSONObject connection) throws Exception {
+        return ThumbnailCache.key(connection.getString("endpoint") + "\n" + connection.getString("token") + "\n" + deviceId());
+    }
+
+    /** True when this call opened the listener. */
+    private synchronized boolean ensureLan(JSONObject connection, LanIdentity identity) throws Exception {
+        if (!foreground || !recoveryReady || !receiveSupported()) return false;
+        String scope = lanScope(connection);
+        if (!scope.equals(lanScope)) {
+            closeLan(); lanScope = scope; lanPeers = new JSONArray();
+            if (scope.equals(preferences.getString("lan-scope", ""))) {
+                try { lanPeers = new JSONArray(preferences.getString("lan-peers", "[]")); }
+                catch (JSONException damaged) { lanPeers = new JSONArray(); }
+            }
+        }
+        if (lanReceiver != null) return false;
+        lanIdentity = identity;
+        lanReceiver = new LanReceiver(lanIdentity, new LanReceiver.Sink() {
+            public String peer(String fingerprint) { return lanPeer(fingerprint); }
+            public Map<String, Object> info() {
+                synchronized (ExchangeService.this) {
+                    return LanProtocol.object("protocol", 1, "deviceId", deviceId(), "name", deviceName(), "kind", "android",
+                            "receiving", foreground && lanReceiver != null && receiveSupported(), "maxFileBytes", ExchangeTransfer.MAX_FILE_BYTES);
+                }
+            }
+            public Map<String, Object> prepare(LanProtocol.Prepare request) throws Exception { return prepareDirect(request); }
+            public Map<String, Object> upload(String peer, LanProtocol.Request request, InputStream in) throws Exception { return receiveDirect(peer, request, in); }
+            public void cancel(String peer, String id) throws Exception { cancelDirect(peer, id); }
+        });
+        return true;
+    }
+
+    private synchronized String lanPeer(String fingerprint) {
+        if (!foreground || lanReceiver == null) return null;
+        for (int i = 0; i < lanPeers.length(); i++) {
+            JSONObject peer = lanPeers.optJSONObject(i);
+            if (peer == null || peer.optBoolean("self") || peer.optBoolean("revoked") || !peer.isNull("revokedAt")) continue;
+            String id = peer.optString("deviceId", "");
+            JSONObject lan = peer.optJSONObject("lan");
+            if (ExchangeTransfer.uuid(id) && !id.equals(deviceId()) && lan != null
+                    && fingerprint.matches("[0-9a-f]{64}") && fingerprint.equals(lan.optString("certSha256"))) return id;
+        }
+        return null;
+    }
+
+    private synchronized void cacheLanPeers(JSONObject connection, JSONArray peers) throws Exception {
+        // Replacing the whole list drops revoked devices and replaced pins immediately.
+        lanPeers = new JSONArray(peers.toString()); lanScope = lanScope(connection);
+        preferences.edit().putString("lan-scope", lanScope).putString("lan-peers", lanPeers.toString()).commit();
+    }
+
+    private void reportLan(JSONObject connection) {
+        try {
+            ensureLan(connection, LanIdentity.load(deviceId()));
+            String scope = lanScope(connection);
+            JSONObject body;
+            synchronized (this) {
+                if (!foreground || lanReceiver == null || !scope.equals(lanScope) || System.currentTimeMillis() < lanUnsupportedUntil) return;
+                body = new JSONObject().put("certSha256", lanIdentity.fingerprint).put("port", LanProtocol.PORT).put("addresses", lanAddresses());
+                if (body.toString().equals(reportedLan)) return;
+            }
+            call(connection, "/v1/exchange/devices/" + deviceId() + "/lan", "PUT", body);
+            synchronized (this) { if (scope.equals(lanScope)) reportedLan = body.toString(); }
+        } catch (CloudClient.HttpFailure failure) {
+            if (failure.status == 404) synchronized (this) { lanUnsupportedUntil = System.currentTimeMillis() + 3_600_000; }
+            else android.util.Log.w("LakomicsExchange", "LAN announcement failed", failure);
+        } catch (Exception failure) { android.util.Log.w("LakomicsExchange", "LAN receive unavailable", failure); }
+    }
+
+    private static JSONArray lanAddresses() throws Exception {
+        LinkedHashSet<String> ips = new LinkedHashSet<>();
+        // UDP connect chooses the primary local route; no datagram is sent.
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            socket.connect(java.net.InetAddress.getByAddress(new byte[]{8, 8, 8, 8}), 53);
+            String ip = socket.getLocalAddress().getHostAddress();
+            if ("lan".equals(LanProtocol.addressKind(ip))) ips.add(ip);
+        } catch (IOException | RuntimeException ignored) {}
+        try {
+            Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                java.net.NetworkInterface network = interfaces.nextElement();
+                if (!network.isUp() || network.isLoopback()) continue;
+                Enumeration<java.net.InetAddress> addresses = network.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    String ip = addresses.nextElement().getHostAddress();
+                    if ("tailscale".equals(LanProtocol.addressKind(ip))) ips.add(ip);
+                }
+            }
+        } catch (java.net.SocketException ignored) {}
+        JSONArray result = new JSONArray();
+        for (String ip : ips) { if (result.length() == 4) break; result.put(new JSONObject().put("kind", LanProtocol.addressKind(ip)).put("ip", ip)); }
+        return result;
+    }
+
+    /** Start-up only: direct parts, metadata and cancel marks nobody touched for two days belong to dead transfers. */
+    private void sweepLan() {
+        File[] files = new File(context.getCacheDir(), "exchange-lan").listFiles();
+        if (files != null) for (File file : files) if (file.lastModified() < System.currentTimeMillis() - 48L * 3600_000) file.delete();
+    }
+
+    private File lanFile(String id, String suffix) { return new File(new File(context.getCacheDir(), "exchange-lan"), id + suffix); }
+
+    private void requireDirect(String id) throws Exception {
+        if (lanFile(id, ".cancel").exists()) throw new LanProtocol.Failure(410, "cancelled");
+        if (!foreground || lanReceiver == null || !receiveSupported()) throw new LanProtocol.Failure(503, "notReceiving");
+    }
+
+    private LanProtocol.Prepare directMetadata(String id, String peer) throws Exception {
+        File metadata = lanFile(id, ".json");
+        if (!metadata.isFile()) throw LanProtocol.invalid();
+        try (InputStream in = new FileInputStream(metadata)) { return new LanProtocol.Prepare(LanProtocol.json(in, metadata.length()), peer); }
+    }
+
+    private void writeLanFile(File file, byte[] bytes) throws IOException {
+        File dir = file.getParentFile();
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("No LAN cache");
+        File temp = new File(dir, file.getName() + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(temp)) { out.write(bytes); out.getFD().sync(); }
+        if (!temp.renameTo(file)) { temp.delete(); throw new IOException("LAN cache not saved"); }
+    }
+
+    private synchronized Map<String, Object> prepareDirect(LanProtocol.Prepare request) throws Exception {
+        requireDirect(request.id);
+        if (ledger.saved(request.id)) { checkReceiptPeer(request.id, request.from); return LanProtocol.object("state", "saved"); }
+        if (queued.contains(request.id)) throw new LanProtocol.Failure(409, "busy");
+        Row row = incoming.get(request.id);
+        if (row != null && row.cancelled) throw new LanProtocol.Failure(410, "cancelled");
+        if (row != null && !row.direct) throw new LanProtocol.Failure(409, "busy");
+        File metadata = lanFile(request.id, ".json");
+        if (metadata.exists()) {
+            if (!request.same(directMetadata(request.id, request.from))) throw LanProtocol.invalid();
+        } else writeLanFile(metadata, Json.write(request.body).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (row == null) {
+            row = new Row(); row.id = request.id; row.batchId = request.batch; row.peerId = request.from;
+            row.peer = nameOf(request.from); row.name = request.name; row.size = request.size; row.sha = request.sha;
+            row.hint = request.hint; row.incoming = true; row.direct = true; row.state = "waiting"; row.created = iso(System.currentTimeMillis());
+            incoming.put(row.id, row);
+        }
+        File part = lanFile(request.id, ".part");
+        if (part.length() > request.size && !part.delete()) throw new IOException("Cannot reset LAN part");
+        row.bytes = part.length(); changed();
+        return LanProtocol.object("state", "upload", "offset", row.bytes);
+    }
+
+    private void checkReceiptPeer(String id, String peer) throws LanProtocol.Failure {
+        JSONArray meta = receivedMeta().optJSONArray(id);
+        if (meta != null && !peer.equals(meta.optString(1, ""))) throw new LanProtocol.Failure(403, "deviceMismatch");
+    }
+
+    /** Stream the remaining bytes, then use the same durable publication as a server download. */
+    private Map<String, Object> receiveDirect(String peer, LanProtocol.Request request, InputStream in) throws Exception {
+        Row row;
+        int started;
+        File part = lanFile(request.transferId, ".part");
+        synchronized (this) {
+            requireDirect(request.transferId);
+            if (ledger.saved(request.transferId)) { checkReceiptPeer(request.transferId, peer); return LanProtocol.object("state", "saved"); }
+            LanProtocol.Prepare metadata = directMetadata(request.transferId, peer);
+            row = incoming.get(request.transferId);
+            if (row != null && row.cancelled) throw new LanProtocol.Failure(410, "cancelled");
+            if (queued.contains(request.transferId) || directReceiving.contains(request.transferId)) throw new LanProtocol.Failure(409, "busy");
+            if (row == null || !row.direct || !peer.equals(row.peerId)) throw LanProtocol.invalid();
+            LanProtocol.offset(request.offset, part.length(), metadata.size, request.length);
+            long cacheFree = part.getParentFile().getUsableSpace(), sharedFree = Environment.getExternalStorageDirectory().getUsableSpace();
+            if (cacheFree > 0 && cacheFree < request.length + 64L * 1024 * 1024 || sharedFree > 0 && sharedFree < row.size + 16L * 1024 * 1024)
+                throw new IOException("No space for direct receive");
+            directReceiving.add(row.id); started = epoch; row.state = "downloading"; row.code = "";
+        }
+        changed();
+        try {
+            try (FileOutputStream out = new FileOutputStream(part, request.offset > 0)) {
+                byte[] buffer = new byte[65536]; long left = request.length;
+                while (left > 0) {
+                    if (row.cancelled) throw new ExchangeTransfer.Cancelled();
+                    int n = in.read(buffer, 0, (int) Math.min(left, buffer.length));
+                    if (n < 0) throw new EOFException("Incomplete LAN upload");
+                    out.write(buffer, 0, n); left -= n; row.bytes = row.size - left; changed();
+                }
+                out.getFD().sync();
+            }
+            ExchangeTransfer.verify(part, row.size, row.sha);
+            if (!land(row, part, started)) throw new ExchangeTransfer.Cancelled();
+            lanFile(row.id, ".json").delete();
+            return LanProtocol.object("state", "saved");
+        } catch (Exception failure) {
+            synchronized (this) {
+                if (row.cancelled) part.delete();
+                row.state = row.cancelled ? "cancelled" : "failed"; row.code = failureCode(failure);
+            }
+            changed(); throw failure;
+        } finally { synchronized (this) { directReceiving.remove(row.id); } }
+    }
+
+    private synchronized void cancelDirect(String peer, String id) throws Exception {
+        requireDirect(id);
+        if (ledger.saved(id)) { checkReceiptPeer(id, peer); return; }
+        directMetadata(id, peer);
+        Row row = incoming.get(id);
+        if (row != null && !row.direct) throw new LanProtocol.Failure(409, "busy");
+        writeLanFile(lanFile(id, ".cancel"), new byte[0]);
+        if (row != null) { row.cancelled = true; incoming.remove(id); }
+        if (!directReceiving.contains(id)) lanFile(id, ".part").delete();
+        changed();
+    }
 
     /** Unfinished sends survive a restart with their transfer id, so a retry stays idempotent. */
     private void saveSends() {

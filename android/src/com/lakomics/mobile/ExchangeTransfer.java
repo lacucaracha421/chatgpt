@@ -377,6 +377,15 @@ final class ExchangeTransfer {
             Entry e = entries.get(id);
             if (e != null && !e.acked) entries.put(id, new Entry(e.id, e.savedAt, e.uri, e.name, e.size, e.from, true, e.sha256, e.publishing));
         }
+        /** A server offer of a saved direct receipt still needs its server acknowledgement. */
+        synchronized boolean owe(Journal journal, String id, String sha256) {
+            Entry e = entries.get(id);
+            if (e == null || e.publishing) return false;
+            withSha(id, sha256);
+            e = entries.get(id);
+            if (!e.acked) return true;
+            return commit(journal,new Entry(e.id, e.savedAt, e.uri, e.name, e.size, e.from, false, e.sha256, false));
+        }
         /** Fill in the digest of an entry written by an earlier version, so its ack can be retried alone. */
         synchronized void withSha(String id, String sha256) {
             Entry e = entries.get(id);
@@ -435,8 +444,13 @@ final class ExchangeTransfer {
          */
         Entry publish(Journal journal, Destination to, String id, File part, String name, String hint,
                       long size, String sha256, String from, long now) throws IOException {
+            return publish(journal, to, id, part, name, hint, size, sha256, from, now, false);
+        }
+
+        Entry publish(Journal journal, Destination to, String id, File part, String name, String hint,
+                      long size, String sha256, String from, long now, boolean acked) throws IOException {
             String uri = to.create(name, hint);
-            Entry pending = new Entry(id, now, uri, name, size, from, false, sha256, true);
+            Entry pending = new Entry(id, now, uri, name, size, from, acked, sha256, true);
             if (!commit(journal, pending)) {
                 to.delete(uri);
                 throw new IOException("Receipt not saved");
@@ -453,7 +467,7 @@ final class ExchangeTransfer {
         }
 
         private Entry finish(Journal journal, Entry pending, String name) throws IOException {
-            Entry saved = new Entry(pending.id, pending.savedAt, pending.uri, name, pending.size, pending.from, false, pending.sha256, false);
+            Entry saved = new Entry(pending.id, pending.savedAt, pending.uri, name, pending.size, pending.from, pending.acked, pending.sha256, false);
             if (!commit(journal, saved)) throw new IOException("Receipt not saved");
             return saved;
         }

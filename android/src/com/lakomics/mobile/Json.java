@@ -213,6 +213,7 @@ final class Json {
         int digits = at;
         while (at < text.length() && text.charAt(at) >= '0' && text.charAt(at) <= '9') at++;
         if (at == digits) throw new IllegalArgumentException("Malformed JSON number");
+        if (at - digits > 1 && text.charAt(digits) == '0') throw new IllegalArgumentException("Malformed JSON number");
         boolean integral = true;
         if (at < text.length() && text.charAt(at) == '.') {
             integral = false;

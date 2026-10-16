@@ -153,7 +153,7 @@ final class NetworkPolicy {
   String exchangeId="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   get=get || p.equals("/v1/exchange/devices") || p.equals("/v1/exchange/inbox") || p.equals("/v1/exchange/outbox");
   post=post || p.equals("/v1/exchange/transfers") || p.matches("/v1/exchange/transfers/"+exchangeId+"/(complete|ticket|ack)");
-  boolean exchangePut=p.matches("/v1/exchange/devices/"+exchangeId);
+  boolean exchangePut=p.matches("/v1/exchange/devices/"+exchangeId+"(/lan)?");
   boolean delete=p.matches("/v1/exchange/transfers/"+exchangeId);
   boolean put=pinPut || bookmarkPut || albumPut || classificationPut || collectionPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post) && !(method.equals("DELETE") && delete))throw new IllegalArgumentException("Unsupported read operation");

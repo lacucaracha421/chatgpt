@@ -3,19 +3,38 @@
 Run npm run mobile:build in _tools/app first. No dependencies or keys are created.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
+import uuid
+
+
+@contextmanager
+def check_directory(build):
+    # Python 3.14's Windows tempfile ACL can exclude the managed sandbox identity.
+    # Use normal inherited workspace permissions, without changing any ACL.
+    work = build.resolve() / ('check-' + uuid.uuid4().hex)
+    work.mkdir()
+    try:
+        yield work
+    finally:
+        if work.parent != build.resolve() or not work.name.startswith('check-'):
+            raise RuntimeError('Unexpected check directory')
+        shutil.rmtree(work)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-root', default=os.environ.get('ANDROID_SDK_ROOT'))
     parser.add_argument('--java-home', default=os.environ.get('JAVA_HOME'))
+    parser.add_argument('--check-only', action='store_true',
+                        help='Compile native sources and run offline exchange/policy checks; no APK or signing.')
     args = parser.parse_args()
     if not args.sdk_root or not args.java_home:
         parser.error('Set SDK/JDK paths through arguments or ANDROID_SDK_ROOT/JAVA_HOME.')
@@ -25,7 +44,7 @@ def main():
     sdk, java = Path(args.sdk_root), Path(args.java_home)
     bt, android = sdk / 'build-tools/35.0.0', sdk / 'platforms/android-35/android.jar'
     key = build / 'debug.keystore'
-    if not key.is_file() or not (assets / 'index.html').is_file():
+    if not args.check_only and (not key.is_file() or not (assets / 'index.html').is_file()):
         parser.error('Existing installation keystore and built mobile assets are required.')
     manifest = ET.parse(root / 'AndroidManifest.xml').getroot()
     attr = '{http://schemas.android.com/apk/res/android}'
@@ -44,7 +63,7 @@ def main():
     def run(*argv):
         subprocess.run([str(v) for v in argv], check=True, env=env)
 
-    with tempfile.TemporaryDirectory(prefix='release-', dir=build) as tmp:
+    with (check_directory(build) if args.check_only else tempfile.TemporaryDirectory(prefix='release-', dir=build)) as tmp:
         work = Path(tmp)
         classes, dex, tests = (work / n for n in ('classes', 'dex', 'tests'))
         for folder in (classes, dex, tests):
@@ -54,23 +73,31 @@ def main():
             '-d', classes, *sorted((root / 'src').rglob('*.java')))
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
                   'MediaTransfer', 'MediaStreamRange', 'MediaStreamProxy', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto',
-                  'ExchangeTransfer', 'ExchangeZip', 'NotesModel', 'ExchangeRefreshState', 'CancellableDispatch', 'CollectionArtworkRequests']
+                  'ExchangeTransfer', 'ExchangeZip', 'LanProtocol', 'NotesModel', 'ExchangeRefreshState', 'CancellableDispatch', 'CollectionArtworkRequests']
+        if args.check_only:
+            checks = ['NetworkPolicy', 'LanProtocol', 'ExchangeTransfer', 'ExchangeZip', 'ExchangeRefreshState']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.
-        sources += [root / 'src/com/lakomics/mobile/AlbumCollections.java',
-                    root / 'src/com/lakomics/mobile/AlbumReplica.java',
-                    root / 'src/com/lakomics/mobile/Json.java',
-                    root / 'src/com/lakomics/mobile/NotesPin.java',
-                    root / 'src/com/lakomics/mobile/ConditionalRead.java',
-                    root / 'tests/AlbumCollectionsTest.java']
+        sources.append(root / 'src/com/lakomics/mobile/Json.java')
+        if args.check_only:
+            pass
+        else:
+            sources += [root / 'src/com/lakomics/mobile/AlbumCollections.java',
+                        root / 'src/com/lakomics/mobile/AlbumReplica.java',
+                        root / 'src/com/lakomics/mobile/NotesPin.java',
+                        root / 'src/com/lakomics/mobile/ConditionalRead.java',
+                        root / 'tests/AlbumCollectionsTest.java']
         run(javac, '-encoding', 'UTF-8', '-d', tests, *sources)
-        for name in checks + ['AlbumCollections']:
+        for name in checks + ([] if args.check_only else ['AlbumCollections']):
             # NotesModel runs the Notes v2 fixtures shared with the PC (merge vectors,
             # payload examples incl. undecodable ones, and the v2 AES-GCM envelope).
             run(java_cmd, f'-Dvault.fixtures={root / "tests/fixtures/private-vault"}',
                 f'-Dnotes.fixtures={root.parent / "tests/fixtures/notes-v2"}',
                 '-cp', tests, f'com.lakomics.mobile.{name}Test')
+        if args.check_only:
+            print('Native compilation and offline exchange/policy checks passed; no APK created or signed.')
+            return
         run(javac, '-encoding', 'UTF-8', '-cp', tests, '-d', tests,
             root / 'tests/PreparedDispatchTest.java', root / 'tests/BridgeRequestTest.java')
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.PreparedDispatchTest')

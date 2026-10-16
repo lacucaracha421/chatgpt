@@ -148,6 +148,17 @@ public final class ExchangeTransferTest {
         legacy.withSha(a, sha);
         check(legacy.unacked().size() == 1);
 
+        // A direct receipt is settled locally until the same id is offered by the server.
+        FakeJournal directJournal = new FakeJournal();
+        current = new ExchangeTransfer.Ledger();
+        current.put(new ExchangeTransfer.Ledger.Entry(a, t, "content://d/1", "a.txt", 3, "PC", true, sha, false));
+        check(current.unacked().isEmpty());
+        check(current.owe(directJournal, a, sha));
+        check(ExchangeTransfer.Ledger.decode(directJournal.durable).unacked().size() == 1);
+        current.acked(a); current.save(directJournal);
+        directJournal.failAt = directJournal.writes + 1;
+        check(!current.owe(directJournal, a, sha) && current.get(a).acked);
+
         publication();
         System.out.println("ExchangeTransfer: " + checks + " checks passed");
     }
@@ -235,6 +246,21 @@ public final class ExchangeTransferTest {
             saved = restarted.recover(journal, downloads, restarted.publishing().get(0));
             check(saved != null && restarted.saved(id) && downloads.created == 1 && downloads.visible() == 1);
             check(ExchangeTransfer.Ledger.decode(journal.durable).unacked().size() == 1);
+
+            // Direct publication and recovery retain acked=true in the durable receipt.
+            FakeJournal direct = new FakeJournal();
+            FakeDownloads directDownloads = new FakeDownloads();
+            ExchangeTransfer.Ledger directLedger = new ExchangeTransfer.Ledger();
+            direct.crashAt = 2;
+            try { directLedger.publish(direct, directDownloads, id, part, "a.txt", null, content.length, sha, "PC", 1, true); throw new AssertionError("no crash"); }
+            catch (Crash expected) { checks++; }
+            directLedger = ExchangeTransfer.Ledger.decode(direct.durable);
+            check(directLedger.get(id).publishing && directLedger.get(id).acked);
+            direct.crashAt = -1;
+            directLedger.recover(direct, directDownloads, directLedger.get(id));
+            directLedger = ExchangeTransfer.Ledger.decode(direct.durable);
+            check(directLedger.saved(id) && directLedger.unacked().isEmpty() && directDownloads.created == 1);
+            check(directLedger.owe(direct, id, sha) && directLedger.unacked().size() == 1);
 
             // Crash after the bytes but before the entry was revealed: complete bytes are revealed.
             journal = new FakeJournal(); downloads = new FakeDownloads(); ledger = new ExchangeTransfer.Ledger();
