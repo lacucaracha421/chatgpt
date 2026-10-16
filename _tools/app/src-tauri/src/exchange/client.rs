@@ -4,6 +4,7 @@
 //! turned into transport errors, so the server's `{"detail":{"code":..}}` reaches the UI
 //! as a specific message. Bytes never pass through the API: uploads and downloads go
 //! straight to presigned R2 URLs, which are never logged.
+use super::lan::{LanInfo, LanReport};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -83,7 +84,28 @@ mod hold_tests {
         let mut client = ExchangeClient::new("http://127.0.0.1:9", "fixture-token", "device").unwrap();
         client.gate = std::sync::Arc::new(crate::library::sync_hold::Gate::new(true));
         assert!(matches!(client.register("PC"), Err(ApiError::Held)));
-        assert!(matches!(client.create(&CreateRequest { transfer_id: "transfer", batch_id: "batch", to_device: "tablet", file_name: "file", size_bytes: 1, sha256: "hash" }), Err(ApiError::Held)));
+        assert!(matches!(
+            client.set_lan(
+                "device",
+                &LanReport {
+                    cert_sha256: "a".repeat(64),
+                    port: 53318,
+                    addresses: vec![],
+                }
+            ),
+            Err(ApiError::Held)
+        ));
+        assert!(matches!(
+            client.create(&CreateRequest {
+                transfer_id: "transfer",
+                batch_id: "batch",
+                to_device: "tablet",
+                file_name: "file",
+                size_bytes: 1,
+                sha256: "hash"
+            }),
+            Err(ApiError::Held)
+        ));
         assert!(matches!(client.complete("transfer"), Err(ApiError::Held)));
         assert!(matches!(client.ticket("transfer"), Err(ApiError::Held)));
         assert!(matches!(client.ack("transfer", "hash"), Err(ApiError::Held)));
@@ -102,6 +124,8 @@ pub(crate) struct Device {
     pub last_seen_at: Option<String>,
     #[serde(rename = "self", default)]
     pub is_self: bool,
+    #[serde(default)]
+    pub lan: Option<LanInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -456,6 +480,23 @@ impl ExchangeClient {
         json(response)
     }
 
+    pub(crate) fn set_lan(&self, device_id: &str, report: &LanReport) -> Result<Device> {
+        if device_id != self.device_id {
+            return Err(ApiError::Invalid);
+        }
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
+        let body = serde_json::to_vec(report).map_err(|_| ApiError::Invalid)?;
+        let response = self
+            .agent
+            .put(self.url(&format!("/v1/exchange/devices/{device_id}/lan"))?)
+            .header("Authorization", &self.authorization)
+            .header("X-Lakomics-Device", &self.device_id)
+            .content_type("application/json")
+            .send(body.as_slice())
+            .map_err(network)?;
+        json(response)
+    }
+
     pub(crate) fn devices(&self) -> Result<Vec<Device>> {
         Ok(json::<Devices>(self.get("/v1/exchange/devices")?.call().map_err(network)?)?.devices)
     }
@@ -739,6 +780,65 @@ fn download_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_without_lan_still_parses() {
+        let device: Device =
+            serde_json::from_str(r#"{"deviceId":"old","name":"PC","kind":"pc"}"#).unwrap();
+        assert!(device.lan.is_none());
+    }
+
+    #[test]
+    fn set_lan_uses_device_auth_headers_and_report_contract() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let report = LanReport {
+            cert_sha256: "a".repeat(64),
+            port: 53318,
+            addresses: vec![],
+        };
+        let expected = serde_json::to_value(&report).unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut request = server
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.method(), &tiny_http::Method::Put);
+            assert_eq!(request.url(), "/v1/exchange/devices/device/lan");
+            for (name, value) in [
+                ("Authorization", "Bearer token"),
+                ("X-Lakomics-Device", "device"),
+            ] {
+                assert_eq!(
+                    request
+                        .headers()
+                        .iter()
+                        .find(|h| h.field.equiv(name))
+                        .unwrap()
+                        .value
+                        .as_str(),
+                    value
+                );
+            }
+            let body: serde_json::Value = serde_json::from_reader(request.as_reader()).unwrap();
+            assert_eq!(body, expected);
+            request
+                .respond(tiny_http::Response::from_string(
+                    r#"{"deviceId":"device","name":"PC","kind":"pc"}"#,
+                ))
+                .unwrap();
+        });
+        let client = ExchangeClient::new(&base, "token", "device").unwrap();
+        assert!(matches!(
+            client.set_lan("other", &report),
+            Err(ApiError::Invalid)
+        ));
+        assert_eq!(
+            client.set_lan("device", &report).unwrap().device_id,
+            "device"
+        );
+        handle.join().unwrap();
+    }
 
     #[test]
     fn server_error_codes_are_read_from_the_detail_object() {

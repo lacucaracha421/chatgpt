@@ -49,6 +49,11 @@ ring = "0.17.14"
 # rustls, so this adds no new transitive crate; `derive` is off because only the plain
 # `Zeroize` impl is used.
 zeroize = { version = "1.9.0", default-features = false }
+# Direct LAN transfer (TRANSFER-001): mutual TLS on blocking std threads. rustls and
+# httparse are already in the graph through ureq/reqwest; ring keeps aws-lc-rs out.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+httparse = "1"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
 
 tempfile = "3.27.0"
 

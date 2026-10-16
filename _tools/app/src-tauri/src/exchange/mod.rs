@@ -20,6 +20,7 @@
 //! `exchange://changed`.
 mod client;
 mod files;
+mod lan;
 mod thumbnail;
 mod zip;
 
@@ -100,6 +101,8 @@ struct Received {
     /// destination, and the row is neither shown nor acknowledged until this clears.
     #[serde(default)]
     publishing: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    via: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -134,9 +137,18 @@ struct Stored {
     received: Vec<Received>,
     #[serde(default)]
     sends: Vec<StoredSend>,
+    #[serde(default)]
+    peers: Vec<lan::LanPeer>,
 }
 
 impl Stored {
+    fn refresh_peers(&mut self, devices: &[Device]) -> bool {
+        let peers = lan::peers(devices, &self.device_id);
+        let changed = self.peers != peers;
+        self.peers = peers;
+        changed
+    }
+
     fn load(path: &Path) -> Self {
         let mut stored = match fs::read(path) {
             Ok(bytes) => serde_json::from_slice::<Stored>(&bytes).unwrap_or_else(|_| {
@@ -242,6 +254,8 @@ struct SendJob {
 }
 
 struct Incoming {
+    direct: bool,
+    direct_active: bool,
     item: InboxItem,
     done: u64,
     /// A failure that waits for the user's 재시도 instead of retrying on its own.
@@ -300,6 +314,8 @@ struct State {
     endpoint: Option<(PathBuf, Option<String>, Instant)>,
     /// Where downloads are assembled before verification (app data, never Downloads).
     parts: Option<PathBuf>,
+    lan_parts: Option<PathBuf>,
+    lan_cancelled: HashSet<String>,
     zips: Option<PathBuf>,
     /// Cached JPEG thumbnails of sent and received images (app data), for the timeline.
     thumbs: Option<PathBuf>,
@@ -337,6 +353,8 @@ fn runtime() -> &'static Runtime {
             token: TokenState::Unknown,
             endpoint: None,
             parts: None,
+            lan_parts: None,
+            lan_cancelled: HashSet::new(),
             zips: None,
             thumbs: None,
             notes: std::collections::HashMap::new(),
@@ -519,16 +537,29 @@ fn job_row(job: &SendJob) -> OutgoingRow {
 /// The UI snapshot. Built under the lock without filesystem calls; `exists` is filled
 /// in afterwards by [`current_snapshot`].
 fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
-    let mut outgoing: Vec<OutgoingRow> = state.jobs.iter().rev().map(job_row).collect();
+    let completed = |id: &str| {
+        state
+            .outbox
+            .iter()
+            .any(|row| row.transfer_id == id && matches!(row.state.as_str(), "ready" | "delivered"))
+    };
+    let mut outgoing: Vec<OutgoingRow> = state
+        .jobs
+        .iter()
+        .rev()
+        .filter(|job| !completed(&job.stored.transfer_id))
+        .map(job_row)
+        .collect();
     outgoing.extend(
         state
             .outbox
             .iter()
             .filter(|row| {
-                !state
-                    .jobs
-                    .iter()
-                    .any(|job| job.stored.transfer_id == row.transfer_id)
+                completed(&row.transfer_id)
+                    || !state
+                        .jobs
+                        .iter()
+                        .any(|job| job.stored.transfer_id == row.transfer_id)
             })
             .map(|row| outbox_row(row, state.notes.get(&row.transfer_id))),
     );
@@ -621,21 +652,103 @@ fn save_dir(app: &AppHandle) -> Option<PathBuf> {
 fn emit() {
     let Some(app) = app() else { return };
     let payload = current_snapshot(app);
-    crate::activities::finish_missing("transfer_send", &payload.outgoing.iter().map(|row| format!("transfer-send:{}", row.transfer_id)).collect::<Vec<_>>());
-    crate::activities::finish_missing("transfer_receive", &payload.incoming.iter().map(|row| format!("transfer-receive:{}", row.transfer_id)).collect::<Vec<_>>());
+    reconcile_send_activities(&payload.outgoing);
+    crate::activities::finish_missing(
+        "transfer_send",
+        &payload
+            .outgoing
+            .iter()
+            .map(|row| format!("transfer-send:{}", row.transfer_id))
+            .collect::<Vec<_>>(),
+    );
+    crate::activities::finish_missing(
+        "transfer_receive",
+        &payload
+            .incoming
+            .iter()
+            .map(|row| format!("transfer-receive:{}", row.transfer_id))
+            .collect::<Vec<_>>(),
+    );
     for row in &payload.outgoing {
         let key = format!("transfer-send:{}", row.transfer_id);
-        let state = match row.state { "queued" | "waiting" => "queued", "failed" | "interrupted" | "expired" => "failed", "delivered" | "cancelled" => "done", _ => "running" };
-        if state == "done" { crate::activities::finish(&key, None); continue; }
-        crate::activities::report(&key, "transfer_send", "태블릿으로 보내기", state, row.done, Some(row.size_bytes), Some(row.file_name.clone()), None, None, if state == "failed" { Some(row.message.clone().unwrap_or_else(|| "전송 실패".into())) } else { None });
+        let state = match row.state {
+            "queued" | "waiting" => "queued",
+            "failed" | "interrupted" | "expired" => "failed",
+            "delivered" | "cancelled" => "done",
+            _ => "running",
+        };
+        if state == "done" {
+            crate::activities::finish(&key, None);
+            continue;
+        }
+        crate::activities::report(
+            &key,
+            "transfer_send",
+            "태블릿으로 보내기",
+            state,
+            row.done,
+            Some(row.size_bytes),
+            Some(row.file_name.clone()),
+            None,
+            None,
+            if state == "failed" {
+                Some(row.message.clone().unwrap_or_else(|| "전송 실패".into()))
+            } else {
+                None
+            },
+        );
     }
     for row in &payload.incoming {
-        crate::activities::report(&format!("transfer-receive:{}", row.transfer_id), "transfer_receive", "태블릿에서 받기", if row.state == "failed" { "failed" } else { "running" }, row.done, Some(row.size_bytes), Some(row.file_name.clone()), None, None, row.message.clone());
+        crate::activities::report(
+            &format!("transfer-receive:{}", row.transfer_id),
+            "transfer_receive",
+            "태블릿에서 받기",
+            if row.state == "failed" {
+                "failed"
+            } else {
+                "running"
+            },
+            row.done,
+            Some(row.size_bytes),
+            Some(row.file_name.clone()),
+            None,
+            None,
+            row.message.clone(),
+        );
     }
-    for row in &payload.received { crate::activities::finish(&format!("transfer-receive:{}", row.transfer_id), None); }
+    for row in &payload.received {
+        crate::activities::finish(&format!("transfer-receive:{}", row.transfer_id), None);
+    }
     let unseen = payload.unseen;
     let _ = app.emit(EVENT, payload);
     crate::workload::set_received_indicator(app, unseen);
+}
+
+/// Failed activity rows are terminal history: `activities::finish` only finishes
+/// running rows. Retire an obsolete failure once this same transfer is healthy.
+fn reconcile_send_activities(outgoing: &[OutgoingRow]) {
+    let activities = crate::activities::activity_snapshot();
+    for activity in activities.jobs {
+        if activity.kind == "transfer_send"
+            && activity.state == "failed"
+            && outgoing.iter().any(|row| {
+                activity.key == format!("transfer-send:{}", row.transfer_id)
+                    && matches!(
+                        row.state,
+                        "queued"
+                            | "zipping"
+                            | "hashing"
+                            | "uploading"
+                            | "waiting"
+                            | "delivered"
+                            | "cancelled"
+                    )
+            })
+        {
+            crate::activities::dismiss_activity(activity.id);
+            crate::activities::clear_dismissed(&activity.key);
+        }
+    }
 }
 
 /// Progress emits are throttled; state changes always emit.
@@ -727,7 +840,9 @@ fn token() -> Result<String, Availability> {
 
 fn context(app: &AppHandle) -> Result<Context, Availability> {
     let base = endpoint(app)?;
-    let library = app.state::<crate::commands::AppState>().current_library()
+    let library = app
+        .state::<crate::commands::AppState>()
+        .current_library()
         .ok_or_else(|| Availability::unavailable("라이브러리를 열어 주세요."))?;
     context_with(&library, &base, token, || lock().stored.device_id.clone())
 }
@@ -738,8 +853,16 @@ fn context_with(
     read_token: impl FnOnce() -> Result<String, Availability>,
     device_id: impl FnOnce() -> String,
 ) -> Result<Context, Availability> {
-    let gate = library.sync_gate(base).map_err(|_| Availability::unavailable("받기만 — 파일 교환 보류"))?;
-    if gate.held() { return Err(Availability { state: "held", message: Some("받기만 — 파일 교환 보류".into()), needs_token: false }); }
+    let gate = library
+        .sync_gate(base)
+        .map_err(|_| Availability::unavailable("받기만 — 파일 교환 보류"))?;
+    if gate.held() {
+        return Err(Availability {
+            state: "held",
+            message: Some("받기만 — 파일 교환 보류".into()),
+            needs_token: false,
+        });
+    }
     let token = read_token()?;
     let device_id = device_id();
     let mut client = ExchangeClient::new(&base, &token, &device_id)
@@ -853,11 +976,79 @@ fn device_name() -> String {
 
 struct Receiver {
     registered: Option<String>,
+    lan: LanState,
     status: Option<(String, Option<i64>)>,
     handled: Option<Option<i64>>,
     last_full: Option<Instant>,
     /// The server's advertised long-poll wait (`Lakomics-Status-Wait`), capped.
     wait: Option<u64>,
+}
+
+static LAN_IDENTITY: OnceLock<lan::identity::Identity> = OnceLock::new();
+
+/// Process-local reporting state; private key material never enters Stored.
+#[derive(Default)]
+struct LanState {
+    reported: Option<lan::LanReport>,
+    retry_after: Option<Instant>,
+}
+
+impl LanState {
+    fn reset_report(&mut self) {
+        self.reported = None;
+        self.retry_after = None;
+    }
+
+    fn due(&self, report: &lan::LanReport, now: Instant) -> bool {
+        self.reported.as_ref() != Some(report) && self.retry_after.is_none_or(|at| now >= at)
+    }
+
+    fn report(
+        &mut self,
+        report: lan::LanReport,
+        now: Instant,
+        send: impl FnOnce(&lan::LanReport) -> Result<Device, ApiError>,
+    ) {
+        if !self.due(&report, now) {
+            return;
+        }
+        match send(&report) {
+            Ok(_) => {
+                self.reported = Some(report);
+                self.retry_after = None;
+            }
+            Err(error) if error.status() == Some(404) => {
+                self.retry_after = Some(now + Duration::from_secs(3600));
+            }
+            Err(error) => eprintln!("file exchange LAN report failed: {error:?}"),
+        }
+    }
+
+    fn refresh(&mut self, client: &ExchangeClient) {
+        let device_id = lock().stored.device_id.clone();
+        let Some(identity) = LAN_IDENTITY.get() else {
+            return;
+        };
+        let report = lan::LanReport {
+            cert_sha256: identity.fingerprint.clone(),
+            port: lan::PORT,
+            addresses: lan::addresses::discover(),
+        };
+        self.report(report, Instant::now(), |report| {
+            client.set_lan(&device_id, report)
+        });
+    }
+}
+
+/// Replace the cache immediately after every successful devices read, even if a
+/// later outbox/inbox read fails. Missing devices must not retain trust.
+fn refresh_devices(devices: Vec<Device>) {
+    let mut state = lock();
+    let changed = state.stored.refresh_peers(&devices);
+    state.devices = devices;
+    if changed {
+        persist(&state);
+    }
 }
 
 /// The longest status hold the receiver asks for (the server's own maximum is 50 s).
@@ -938,10 +1129,12 @@ impl Receiver {
             let me = context.client.register(&device_name())?;
             lock().self_name = Some(me.name);
             self.registered = Some(context.key.clone());
+            self.lan.reset_report();
             self.status = None;
             held = None;
             forced = true;
         }
+        self.lan.refresh(&context.client);
         let (revision, advertised) = match held {
             Some(held) => {
                 self.status = held.cache;
@@ -957,7 +1150,7 @@ impl Receiver {
         if !forced && self.handled == Some(revision) && !fallback_due {
             return Ok(());
         }
-        let devices = context.client.devices()?;
+        refresh_devices(context.client.devices()?);
         let outbox = context.client.outbox()?;
         let client::Inbox {
             items: inbox,
@@ -966,12 +1159,11 @@ impl Receiver {
         let offered: HashSet<String> = inbox.iter().map(|item| item.transfer_id.clone()).collect();
         let parts = {
             let mut state = lock();
-            state.devices = devices;
-            state.outbox = outbox;
+            reconcile_outbox(&mut state, outbox)?;
             // Rows the server no longer offers (withdrawn, expired) leave the list.
             state
                 .incoming
-                .retain(|row| offered.contains(&row.item.transfer_id));
+                .retain(|row| row.direct || offered.contains(&row.item.transfer_id));
             state.declined.retain(|id| offered.contains(id));
             state.parts.clone()
         };
@@ -981,13 +1173,7 @@ impl Receiver {
                 files::sweep_parts(&parts, Some(&offered), Duration::ZERO);
             }
             // So do their unfinished publications (a finished one is kept as received).
-            let publishing: Vec<Received> = lock()
-                .stored
-                .received
-                .iter()
-                .filter(|row| row.publishing && !offered.contains(&row.transfer_id))
-                .cloned()
-                .collect();
+            let publishing = server_abandoned(&lock().stored, &offered);
             if !publishing.is_empty() {
                 let (finished, forgotten) = abandoned(&publishing);
                 let settled = {
@@ -1091,6 +1277,7 @@ fn prepare_receiver_pass(
 fn receiver_loop(app: AppHandle) {
     let mut receiver = Receiver {
         registered: None,
+        lan: LanState::default(),
         status: None,
         handled: None,
         last_full: None,
@@ -1172,6 +1359,8 @@ fn set_incoming(item: &InboxItem, failed: Option<String>) -> Arc<AtomicBool> {
         None => {
             let cancel = Arc::new(AtomicBool::new(false));
             state.incoming.push(Incoming {
+                direct: false,
+                direct_active: false,
                 item: item.clone(),
                 done: 0,
                 failed,
@@ -1197,7 +1386,8 @@ fn acknowledge(context: &Context, transfer_id: &str, sha256: &str) -> Result<(),
         Err(error) if matches!(error.code(), Some("transferUnknown" | "transferGone")) => {}
         // Retried on the next pass; the ledger keeps the file from being saved twice.
         Err(error)
-            if matches!(error, ApiError::Held) || error.transient()
+            if matches!(error, ApiError::Held)
+                || error.transient()
                 || error.status() == Some(401)
                 || error.code() == Some("exchangeDeviceUnknown") =>
         {
@@ -1216,6 +1406,27 @@ fn acknowledge(context: &Context, transfer_id: &str, sha256: &str) -> Result<(),
     }
     persist(&state);
     Ok(())
+}
+
+/// A direct receipt has no server ack yet, even though its local ledger is acked.
+fn acknowledge_saved(
+    row: &Received,
+    ack: impl FnOnce() -> Result<(), ApiError>,
+) -> Result<(), ApiError> {
+    if row.acked && row.via.is_none() {
+        Ok(())
+    } else {
+        ack()
+    }
+}
+
+fn server_abandoned(stored: &Stored, offered: &HashSet<String>) -> Vec<Received> {
+    stored
+        .received
+        .iter()
+        .filter(|row| row.publishing && row.via.is_none() && !offered.contains(&row.transfer_id))
+        .cloned()
+        .collect()
 }
 
 /// What a journaled destination holds.
@@ -1254,6 +1465,7 @@ fn journal_destination(
     path: Option<&Path>,
     item: &InboxItem,
     target: &Path,
+    via: Option<&str>,
 ) -> io::Result<()> {
     commit(path, stored, |stored| {
         stored
@@ -1277,6 +1489,7 @@ fn journal_destination(
                 acked: false,
                 seen: false,
                 publishing: true,
+                via: via.map(str::to_owned),
             },
         );
     })
@@ -1292,6 +1505,9 @@ fn record_receipt(stored: &mut Stored, path: Option<&Path>, transfer_id: &str) -
             .find(|row| row.transfer_id == transfer_id)
         {
             row.publishing = false;
+            if row.via.is_some() {
+                row.acked = true;
+            }
             row.received_at = now_rfc3339();
         }
         stored.prune(chrono::Utc::now());
@@ -1373,29 +1589,71 @@ fn settle_abandoned(
     })
 }
 
+/// Both transports verify and publish through the same durable journal and receipt.
+fn land(
+    item: &InboxItem,
+    part: &Path,
+    dir: &Path,
+    resume_at: Option<PathBuf>,
+    cancel: &AtomicBool,
+    via: Option<&str>,
+) -> Result<PathBuf, ApiError> {
+    match files::verify_part(part, item.size_bytes, &item.sha256).map_err(ApiError::Local)? {
+        files::Verify::Ok => {}
+        _ => {
+            let _ = fs::remove_file(part);
+            return Err(ApiError::Corrupt);
+        }
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err(ApiError::Cancelled);
+    }
+    let target = publish(
+        part,
+        dir,
+        &files::sanitize_leaf(&item.file_name, cfg!(windows)),
+        resume_at,
+        |target| {
+            let mut state = lock();
+            let State { path, stored, .. } = &mut *state;
+            journal_destination(stored, path.as_deref(), item, target, via)
+        },
+    )
+    .map_err(ApiError::Local)?;
+    let mut state = lock();
+    let State { path, stored, .. } = &mut *state;
+    record_receipt(stored, path.as_deref(), &item.transfer_id).map_err(ApiError::Local)?;
+    Ok(target)
+}
+
 /// Save one inbox item. Transient failures return `Err` (the pass backs off); anything
 /// else is shown on the row and waits for the user.
 fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), ApiError> {
     drop(context.client.gate.permit().map_err(|_| ApiError::Held)?);
     let (ledger, skip, parts) = {
         let state = lock();
+        if state
+            .incoming
+            .iter()
+            .any(|row| row.direct_active && row.item.transfer_id == item.transfer_id)
+        {
+            return Ok(());
+        }
         let ledger = state.stored.ledger(&item.transfer_id).cloned();
         let skip = state.declined.contains(&item.transfer_id)
-            || state
-                .incoming
-                .iter()
-                .any(|row| row.item.transfer_id == item.transfer_id && row.failed.is_some());
+            || state.incoming.iter().any(|row| {
+                row.item.transfer_id == item.transfer_id
+                    && (row.direct_active || (!row.direct && row.failed.is_some()))
+            });
         (ledger, skip, state.parts.clone())
     };
     let mut resume_at = None;
     if let Some(row) = ledger {
         if !row.publishing {
             // Saved before: never save twice, only repeat the lost ack.
-            return if row.acked {
-                Ok(())
-            } else {
+            return acknowledge_saved(&row, || {
                 acknowledge(context, &item.transfer_id, &row.sha256)
-            };
+            });
         }
         // A publication an earlier attempt left unfinished: finish that same destination,
         // or continue it there once the part is verified again.
@@ -1432,7 +1690,40 @@ fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), A
         emit();
         return Ok(());
     };
-    let cancel = set_incoming(item, None);
+    let cancel = {
+        let mut state = lock();
+        if state
+            .incoming
+            .iter()
+            .any(|row| row.direct_active && row.item.transfer_id == item.transfer_id)
+        {
+            return Ok(());
+        }
+        if let Some(row) = state
+            .incoming
+            .iter_mut()
+            .find(|row| row.item.transfer_id == item.transfer_id)
+        {
+            if row.direct {
+                row.direct = false;
+                row.item = item.clone();
+                row.done = 0;
+                row.cancel = Arc::new(AtomicBool::new(false));
+            }
+            row.cancel.clone()
+        } else {
+            let cancel = Arc::new(AtomicBool::new(false));
+            state.incoming.push(Incoming {
+                direct: false,
+                direct_active: false,
+                item: item.clone(),
+                done: 0,
+                failed: None,
+                cancel: cancel.clone(),
+            });
+            cancel
+        }
+    };
     emit();
     let part = files::part_path(&parts, &id);
     let saved = (|| -> Result<PathBuf, ApiError> {
@@ -1458,43 +1749,12 @@ fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), A
         } else if !part.exists() {
             File::create(&part).map_err(ApiError::Local)?;
         }
-        match files::verify_part(&part, item.size_bytes, &item.sha256).map_err(ApiError::Local)? {
-            files::Verify::Ok => {}
-            _ => {
-                let _ = fs::remove_file(&part);
-                return Err(ApiError::Corrupt);
-            }
-        }
-        // Declined while verifying: never let it reach Downloads.
-        if cancel.load(Ordering::Acquire) {
-            return Err(ApiError::Cancelled);
-        }
-        publish(
-            &part,
-            &dir,
-            &files::sanitize_leaf(&item.file_name, cfg!(windows)),
-            resume_at,
-            |target| {
-                let mut state = lock();
-                let State { path, stored, .. } = &mut *state;
-                journal_destination(stored, path.as_deref(), item, target)
-            },
-        )
-        .map_err(ApiError::Local)
+        land(item, &part, &dir, resume_at, &cancel, None)
     })();
     match saved {
         Ok(_) => {
-            let recorded = {
-                let mut state = lock();
-                state
-                    .incoming
-                    .retain(|row| row.item.transfer_id != item.transfer_id);
-                let State { path, stored, .. } = &mut *state;
-                record_receipt(stored, path.as_deref(), &item.transfer_id)
-            };
+            remove_incoming(&item.transfer_id);
             emit();
-            // Not durable: no ack. The journal finishes this file on a later pass.
-            recorded.map_err(ApiError::Local)?;
             acknowledge(context, &item.transfer_id, &item.sha256)
         }
         Err(_) if cancel.load(Ordering::Acquire) => {
@@ -1783,11 +2043,16 @@ fn run_send(context: &Context, transfer_id: &str) -> Result<(), ApiError> {
             with_job(&current, |job| job.stored.to_name = Some(name));
         }
         match (created.transfer.state.as_str(), created.upload) {
-            ("ready" | "delivered", _) => return finish(&current),
+            ("ready" | "delivered", _) => return finish(created.transfer),
             ("uploading", Some(upload)) => {
-                client::upload(&context.client.gate, &upload, tracked(&cancel, &current)?, stored.size_bytes)?;
-                context.client.complete(&current)?;
-                return finish(&current);
+                client::upload(
+                    &context.client.gate,
+                    &upload,
+                    tracked(&cancel, &current)?,
+                    stored.size_bytes,
+                )?;
+                let completed = context.client.complete(&current)?;
+                return finish(completed);
             }
             // Expired, failed or withdrawn under this id: send again under a new one.
             _ if attempt == 0 => current = renew_id(&current),
@@ -1827,30 +2092,91 @@ fn discard_zip(send: &StoredSend, zips: Option<&Path>) {
     }
 }
 
-fn finish(transfer_id: &str) -> Result<(), ApiError> {
-    {
-        let mut state = lock();
-        if let Some(job) = state
-            .jobs
+/// Never regress a known completion when an outbox request started before it.
+fn merge_outbox(previous: &[Transfer], mut fetched: Vec<Transfer>) -> Vec<Transfer> {
+    for row in &mut fetched {
+        if let Some(known) = previous
             .iter()
-            .find(|job| job.stored.transfer_id == transfer_id)
+            .find(|known| known.transfer_id == row.transfer_id)
         {
-            discard_zip(&job.stored, state.zips.as_deref());
-            if job.stored.folder.is_none() {
-                thumbnail::cache_later(state.thumbs.clone(), transfer_id, job.stored.path.clone());
-            }
-            if let Some(note) = job.stored.note.clone() {
-                state.notes.insert(transfer_id.to_owned(), note);
+            if (row.state == "uploading" && matches!(known.state.as_str(), "ready" | "delivered"))
+                || (row.state == "ready" && known.state == "delivered")
+            {
+                *row = known.clone();
             }
         }
-        state
-            .jobs
-            .retain(|job| job.stored.transfer_id != transfer_id);
-        state
-            .stored
-            .sends
-            .retain(|send| send.transfer_id != transfer_id);
-        persist(&state);
+    }
+    // A request that predates create may not contain the completed transfer at all.
+    for known in previous {
+        if matches!(known.state.as_str(), "ready" | "delivered")
+            && !fetched
+                .iter()
+                .any(|row| row.transfer_id == known.transfer_id)
+            && known
+                .created_at
+                .as_deref()
+                .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+                .is_some_and(|at| at >= chrono::Utc::now() - chrono::Duration::days(HISTORY_DAYS))
+        {
+            fetched.push(known.clone());
+        }
+    }
+    fetched
+}
+
+fn reconcile_outbox(state: &mut State, fetched: Vec<Transfer>) -> Result<(), ApiError> {
+    state.outbox = merge_outbox(&state.outbox, fetched);
+    let finished: Vec<String> = state
+        .jobs
+        .iter()
+        .filter(|job| {
+            matches!(job.phase, Phase::Queued | Phase::Failed)
+                && state.outbox.iter().any(|row| {
+                    row.transfer_id == job.stored.transfer_id
+                        && matches!(row.state.as_str(), "ready" | "delivered")
+                })
+        })
+        .map(|job| job.stored.transfer_id.clone())
+        .collect();
+    for id in finished {
+        retire_send(state, &id)?;
+    }
+    Ok(())
+}
+
+fn retire_send(state: &mut State, transfer_id: &str) -> Result<(), ApiError> {
+    commit(state.path.as_deref(), &mut state.stored, |stored| {
+        stored.sends.retain(|send| send.transfer_id != transfer_id);
+    })
+    .map_err(ApiError::Local)?;
+    if let Some(job) = state
+        .jobs
+        .iter()
+        .find(|job| job.stored.transfer_id == transfer_id)
+    {
+        discard_zip(&job.stored, state.zips.as_deref());
+        if job.stored.folder.is_none() {
+            thumbnail::cache_later(state.thumbs.clone(), transfer_id, job.stored.path.clone());
+        }
+        if let Some(note) = job.stored.note.clone() {
+            state.notes.insert(transfer_id.to_owned(), note);
+        }
+    }
+    state
+        .jobs
+        .retain(|job| job.stored.transfer_id != transfer_id);
+    Ok(())
+}
+
+fn finish(completed: Transfer) -> Result<(), ApiError> {
+    {
+        let mut state = lock();
+        let transfer_id = completed.transfer_id.clone();
+        let mut outbox = state.outbox.clone();
+        outbox.retain(|row| row.transfer_id != transfer_id);
+        outbox.push(completed);
+        state.outbox = merge_outbox(&state.outbox, outbox);
+        retire_send(&mut state, &transfer_id)?;
     }
     wake_receiver();
     emit();
@@ -1995,6 +2321,14 @@ pub(crate) fn start(app: AppHandle) {
         // Orphans from transfers that expired while the app was closed.
         files::sweep_parts(parts, None, STALE_PART);
     }
+    let lan_parts = app
+        .path()
+        .app_local_data_dir()
+        .ok()
+        .map(|dir| dir.join("exchange-lan-parts"));
+    if let Some(parts) = &lan_parts {
+        files::sweep_parts(parts, None, STALE_PART);
+    }
     let zips = app
         .path()
         .app_local_data_dir()
@@ -2009,8 +2343,28 @@ pub(crate) fn start(app: AppHandle) {
         if let Some(path) = &path {
             state.stored = Stored::load(path);
         }
+        let stale: Vec<_> = state
+            .stored
+            .received
+            .iter()
+            .filter(|row| {
+                row.publishing
+                    && row.via.is_some()
+                    && chrono::DateTime::parse_from_rfc3339(&row.received_at).is_ok_and(|at| {
+                        chrono::Utc::now().signed_duration_since(at).num_hours() >= 48
+                    })
+            })
+            .cloned()
+            .collect();
+        let (finished, forgotten) = abandoned(&stale);
+        if let Err(error) =
+            settle_abandoned(&mut state.stored, path.as_deref(), &finished, &forgotten)
+        {
+            eprintln!("file exchange LAN recovery failed: {error}");
+        }
         state.path = path;
         state.parts = parts;
+        state.lan_parts = lan_parts;
         state.zips = zips;
         state.thumbs = app
             .path()
@@ -2039,6 +2393,27 @@ pub(crate) fn start(app: AppHandle) {
         persist(&state);
     }
     let _ = runtime().app.set(app.clone());
+    let device_id = lock().stored.device_id.clone();
+    match app
+        .path()
+        .app_config_dir()
+        .map_err(io::Error::other)
+        .and_then(|dir| lan::identity::load(&dir, &device_id, &lan::identity::OsKeyStore))
+    {
+        Ok(identity) => {
+            if let Err(error) =
+                lan::server::start(&identity, Arc::new(lan::sink::DirectSink::new(app.clone())))
+            {
+                eprintln!(
+                    "file exchange LAN listener unavailable; direct receive disabled: {error}"
+                );
+            }
+            let _ = LAN_IDENTITY.set(identity);
+        }
+        Err(error) => {
+            eprintln!("file exchange LAN identity unavailable; direct path disabled: {error}")
+        }
+    }
     emit();
     let receiver = app.clone();
     let _ = std::thread::Builder::new()
@@ -2190,11 +2565,16 @@ pub(crate) async fn exchange_cancel(transfer_id: String) {
             // An active download stops at its next chunk and deletes its part.
             let row = &state.incoming[index];
             row.cancel.store(true, Ordering::Release);
-            if row.failed.is_some() {
+            let direct = row.direct;
+            if row.failed.is_some() || direct {
                 state.incoming.remove(index);
             }
-            state.declined.insert(transfer_id.clone());
-            queue_cancel(&mut state, transfer_id.clone());
+            if direct {
+                state.lan_cancelled.insert(transfer_id.clone());
+            } else {
+                state.declined.insert(transfer_id.clone());
+                queue_cancel(&mut state, transfer_id.clone());
+            }
         } else if state.outbox.iter().any(|row| {
             row.transfer_id == transfer_id && matches!(row.state.as_str(), "uploading" | "ready")
         }) {
@@ -2348,6 +2728,107 @@ pub(crate) async fn exchange_set_token(token: Option<String>) -> Result<(), Stri
 mod tests {
     use super::*;
 
+    fn lan_device(id: &str, is_self: bool, has_lan: bool) -> Device {
+        serde_json::from_value(serde_json::json!({
+            "deviceId": id, "name": id, "kind": "pc", "self": is_self,
+            "lan": if has_lan { serde_json::json!({
+                "certSha256": "a".repeat(64), "port": 53318,
+                "addresses": [{"kind":"lan", "ip":"192.168.1.2"}],
+                "updatedAt": "2026-10-16T00:00:00Z"
+            }) } else { serde_json::Value::Null }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn lan_peer_cache_excludes_self_and_absent_lan_and_replaces_revoked_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        let mut stored = Stored {
+            device_id: uuid::Uuid::new_v4().to_string(),
+            ..Stored::default()
+        };
+        let devices = vec![
+            lan_device(&stored.device_id, false, true),
+            lan_device("self-flag", true, true),
+            lan_device("legacy", false, false),
+            lan_device("live", false, true),
+            lan_device("revoked-next-refresh", false, true),
+        ];
+        assert!(stored.refresh_peers(&devices));
+        assert_eq!(
+            stored
+                .peers
+                .iter()
+                .map(|peer| peer.device_id.as_str())
+                .collect::<Vec<_>>(),
+            ["live", "revoked-next-refresh"]
+        );
+        stored.save(&path).unwrap();
+        assert_eq!(Stored::load(&path).peers, stored.peers);
+        let mut live = lan_device("live", false, true);
+        live.name = "new name".into();
+        live.lan.as_mut().unwrap().report.port = 53319;
+        assert!(stored.refresh_peers(&[live.clone()]));
+        assert_eq!(stored.peers.len(), 1);
+        assert_eq!(stored.peers[0].name, "new name");
+        assert_eq!(stored.peers[0].report.port, 53319);
+        assert!(!stored.refresh_peers(&[live]));
+        assert!(stored.refresh_peers(&[]));
+        assert!(stored.peers.is_empty());
+    }
+
+    #[test]
+    fn old_exchange_config_without_peers_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        let id = uuid::Uuid::new_v4().to_string();
+        fs::write(
+            &path,
+            serde_json::json!({"deviceId":id,"received":[],"sends":[]}).to_string(),
+        )
+        .unwrap();
+        let stored = Stored::load(&path);
+        assert_eq!(stored.device_id, id);
+        assert!(stored.peers.is_empty());
+        assert!(!path.with_extension("json.corrupt").exists());
+    }
+
+    #[test]
+    fn lan_reports_retry_failures_back_off_404_and_only_remember_success() {
+        let mut lan = LanState::default();
+        let report = lan_device("me", true, true).lan.unwrap().report;
+        let now = Instant::now();
+        lan.report(report.clone(), now, |_| Err(ApiError::Network));
+        assert!(lan.due(&report, now));
+        lan.report(report.clone(), now, |_| {
+            Err(ApiError::Status {
+                status: 404,
+                code: None,
+                state: None,
+            })
+        });
+        assert!(!lan.due(&report, now + Duration::from_secs(3599)));
+        lan.report(report.clone(), now + Duration::from_secs(3599), |_| {
+            panic!("hourly backoff")
+        });
+        let later = now + Duration::from_secs(3600);
+        assert!(lan.due(&report, later));
+        lan.report(report.clone(), later, |_| Ok(lan_device("me", true, true)));
+        assert!(!lan.due(&report, later));
+        let mut changed = report.clone();
+        changed.port += 1;
+        assert!(lan.due(&changed, later));
+        changed = report.clone();
+        changed.cert_sha256 = "b".repeat(64);
+        assert!(lan.due(&changed, later));
+        changed = report.clone();
+        changed.addresses.clear();
+        assert!(lan.due(&changed, later));
+        lan.reset_report();
+        assert!(lan.due(&report, later));
+    }
+
     #[test]
     fn lightweight_mode_slows_the_receiver_to_about_a_minute() {
         assert_eq!(pass_interval(false, false), Duration::from_secs(5));
@@ -2411,12 +2892,18 @@ mod tests {
                     key: token.to_owned(),
                 })
             },
-            |context| (false, Some(Held {
-                result: Ok((Some(1), Some(50))),
-                cache: Some(("old-etag".into(), Some(1))),
-                key: context.key.clone(),
-            })),
-        ).unwrap();
+            |context| {
+                (
+                    false,
+                    Some(Held {
+                        result: Ok((Some(1), Some(50))),
+                        cache: Some(("old-etag".into(), Some(1))),
+                        key: context.key.clone(),
+                    }),
+                )
+            },
+        )
+        .unwrap();
         assert_eq!(context.key, "new-token");
         assert!(forced);
         assert!(held.is_none());
@@ -2438,6 +2925,7 @@ mod tests {
             acked,
             seen: false,
             publishing: false,
+            via: None,
         }
     }
 
@@ -2465,6 +2953,7 @@ mod tests {
                 received("new", 1, true),
             ],
             sends: Vec::new(),
+            peers: Vec::new(),
         };
         stored.prune(chrono::Utc::now());
         let ids: Vec<_> = stored
@@ -2486,6 +2975,182 @@ mod tests {
             fs::read(path.with_extension("json.corrupt")).unwrap(),
             b"{not json"
         );
+    }
+
+    #[test]
+    fn exchange_delivered_send_removes_the_terminal_interrupted_activity() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let key = format!("transfer-send:{id}");
+        crate::activities::report(
+            &key,
+            "transfer_send",
+            "test",
+            "failed",
+            0,
+            Some(128644),
+            None,
+            None,
+            None,
+            Some("업로드가 끝나지 않음".into()),
+        );
+        // The old finish call cannot clear a terminal failed activity.
+        crate::activities::finish(&key, None);
+        assert!(crate::activities::activity_snapshot()
+            .jobs
+            .iter()
+            .any(|row| row.key == key && row.state == "failed"));
+        let transfer = Transfer {
+            transfer_id: id,
+            batch_id: None,
+            to_device: None,
+            to_name: None,
+            file_name: "a".into(),
+            size_bytes: 128644,
+            state: "delivered".into(),
+            created_at: Some(now_rfc3339()),
+            failure: None,
+        };
+        reconcile_send_activities(&[outbox_row(&transfer, None)]);
+        assert!(!crate::activities::activity_snapshot()
+            .jobs
+            .iter()
+            .any(|row| row.key == key));
+    }
+
+    #[test]
+    fn completed_outbox_reconciles_only_the_matching_local_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        let send = |id: &str| StoredSend {
+            transfer_id: id.into(),
+            batch_id: "batch".into(),
+            to_device: "tablet".into(),
+            to_name: None,
+            path: dir.path().join("missing-source"),
+            file_name: "a".into(),
+            size_bytes: 128644,
+            modified: None,
+            sha256: Some("0".repeat(64)),
+            created_at: now_rfc3339(),
+            folder: None,
+            note: None,
+        };
+        let job = |id: &str| SendJob {
+            stored: send(id),
+            phase: Phase::Failed,
+            done: 0,
+            message: Some("앱이 종료되어 중단됨".into()),
+            retryable: true,
+            retry_at: Instant::now(),
+            attempts: 0,
+            timeouts: 0,
+            cancel: Arc::new(AtomicBool::new(false)),
+        };
+        let transfer = |status: &str| Transfer {
+            transfer_id: "sent".into(),
+            batch_id: Some("batch".into()),
+            to_device: Some("tablet".into()),
+            to_name: None,
+            file_name: "a".into(),
+            size_bytes: 128644,
+            state: status.into(),
+            created_at: Some(now_rfc3339()),
+            failure: None,
+        };
+        for status in ["ready", "delivered"] {
+            let mut state = State {
+                path: Some(path.clone()),
+                stored: Stored {
+                    device_id: uuid::Uuid::new_v4().to_string(),
+                    received: vec![],
+                    sends: vec![send("sent"), send("other")],
+                    peers: Vec::new(),
+                },
+                availability: Availability::unavailable("test"),
+                self_name: None,
+                devices: vec![],
+                outbox: vec![],
+                jobs: vec![job("sent"), job("other")],
+                incoming: vec![],
+                declined: HashSet::new(),
+                cancels: vec![],
+                refresh: false,
+                token: TokenState::Unknown,
+                endpoint: None,
+                parts: None,
+                lan_parts: None,
+                lan_cancelled: HashSet::new(),
+                zips: None,
+                thumbs: None,
+                notes: Default::default(),
+                last_progress: Instant::now(),
+            };
+            state.stored.save(&path).unwrap();
+            // Even before journal cleanup, an authoritative completion wins in the UI.
+            state.outbox = vec![transfer(status)];
+            let rows = snapshot(&state, None).outgoing;
+            assert_eq!(rows.len(), 2);
+            let sent = rows.iter().find(|row| row.transfer_id == "sent").unwrap();
+            assert_eq!(
+                sent.state,
+                if status == "ready" {
+                    "waiting"
+                } else {
+                    "delivered"
+                }
+            );
+            assert!(sent.message.is_none());
+            // A receiver can observe ready while the sender is still returning
+            // from complete. It must not delete a zip being read by that sender.
+            state.jobs[0].phase = Phase::Uploading;
+            reconcile_outbox(&mut state, vec![transfer(status)]).unwrap();
+            assert_eq!(state.jobs.len(), 2);
+            state.jobs[0].phase = Phase::Failed;
+            // A failed durable cleanup keeps the journal and job for a later pass.
+            state.path = Some(dir.path().to_owned());
+            assert!(reconcile_outbox(&mut state, vec![transfer(status)]).is_err());
+            assert_eq!(state.jobs.len(), 2);
+            assert_eq!(state.stored.sends.len(), 2);
+            state.path = Some(path.clone());
+            reconcile_outbox(&mut state, vec![transfer(status)]).unwrap();
+            assert_eq!(state.jobs.len(), 1);
+            assert_eq!(state.jobs[0].stored.transfer_id, "other");
+            assert!(state.jobs[0].retryable);
+            assert_eq!(Stored::load(&path).sends, state.stored.sends);
+            // A late response from before complete must not recreate the phantom row.
+            reconcile_outbox(&mut state, vec![transfer("uploading")]).unwrap();
+            let rows = snapshot(&state, None).outgoing;
+            assert!(!rows.iter().any(|row| row.state == "interrupted"));
+            assert_eq!(state.outbox[0].state, status);
+            reconcile_outbox(&mut state, vec![]).unwrap();
+            assert_eq!(state.outbox.len(), 1);
+        }
+    }
+
+    #[test]
+    fn completion_merge_keeps_delivery_but_accepts_expiry_and_prunes_old_history() {
+        let row = |status: &str| Transfer {
+            transfer_id: "t".into(),
+            batch_id: None,
+            to_device: None,
+            to_name: None,
+            file_name: "a".into(),
+            size_bytes: 1,
+            state: status.into(),
+            created_at: Some(now_rfc3339()),
+            failure: None,
+        };
+        assert_eq!(
+            merge_outbox(&[row("delivered")], vec![row("ready")])[0].state,
+            "delivered"
+        );
+        assert_eq!(
+            merge_outbox(&[row("ready")], vec![row("expired")])[0].state,
+            "expired"
+        );
+        let mut old = row("delivered");
+        old.created_at = Some((chrono::Utc::now() - chrono::Duration::days(8)).to_rfc3339());
+        assert!(merge_outbox(&[old], vec![]).is_empty());
     }
 
     #[test]
@@ -2613,13 +3278,46 @@ mod tests {
     }
 
     #[test]
+    fn direct_receipts_are_reacked_when_offered_and_not_swept_by_server() {
+        let mut row = received("direct", 0, true);
+        row.via = Some("lan".into());
+        let mut acks = 0;
+        acknowledge_saved(&row, || {
+            acks += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(acks, 1);
+        row.via = Some("tailscale".into());
+        assert!(matches!(
+            acknowledge_saved(&row, || Err(ApiError::Network)),
+            Err(ApiError::Network)
+        ));
+        row.publishing = true;
+        let mut server = row.clone();
+        server.transfer_id = "server".into();
+        server.via = None;
+        let stored = Stored {
+            received: vec![row, server],
+            ..Stored::default()
+        };
+        assert_eq!(
+            server_abandoned(&stored, &HashSet::new())
+                .iter()
+                .map(|r| r.transfer_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["server"]
+        );
+    }
+
+    #[test]
     fn a_crash_between_publication_and_receipt_does_not_publish_twice() {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(STATE_FILE);
         let (item, part, downloads) = arrival(root.path(), b"received");
         let mut stored = Stored::load(&state);
         let target = publish(&part, &downloads, "photo.jpg", None, |target| {
-            journal_destination(&mut stored, Some(&state), &item, target)
+            journal_destination(&mut stored, Some(&state), &item, target, None)
         })
         .unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"received");
@@ -2649,7 +3347,7 @@ mod tests {
         let (item, part, downloads) = arrival(root.path(), b"received");
         let mut stored = Stored::load(&state);
         let target = files::free_name(&downloads, "photo.jpg").unwrap();
-        journal_destination(&mut stored, Some(&state), &item, &target).unwrap();
+        journal_destination(&mut stored, Some(&state), &item, &target, None).unwrap();
         // The empty reservation was created, then the process died before the rename.
         fs::write(&target, b"").unwrap();
 
@@ -2657,7 +3355,7 @@ mod tests {
         let row = restarted.ledger(&item.transfer_id).cloned().unwrap();
         assert_eq!(journaled(&row), Journaled::Open);
         let saved = publish(&part, &downloads, "photo.jpg", Some(row.path), |target| {
-            journal_destination(&mut restarted, Some(&state), &item, target)
+            journal_destination(&mut restarted, Some(&state), &item, target, None)
         })
         .unwrap();
         assert_eq!(saved, target);
@@ -2681,6 +3379,7 @@ mod tests {
             Some(&state),
             &item,
             &downloads.join("photo.jpg"),
+            None,
         )
         .unwrap();
         // The state folder becomes unwritable: its path is now below a regular file.
@@ -2696,7 +3395,7 @@ mod tests {
         // A journal that cannot be written stops the publication before Downloads.
         let (other, other_part, _) = arrival(root.path(), b"second");
         let result = publish(&other_part, &downloads, "second.bin", None, |target| {
-            journal_destination(&mut stored, Some(&unwritable), &other, target)
+            journal_destination(&mut stored, Some(&unwritable), &other, target, None)
         });
         assert!(result.is_err());
         assert!(stored.ledger(&other.transfer_id).is_none());
@@ -2713,7 +3412,8 @@ mod tests {
         let (reserved, _, _) = arrival(root.path(), b"reserved");
         let (theirs, _, _) = arrival(root.path(), b"theirs");
         for (item, name) in [(&done, "a.bin"), (&reserved, "b.bin"), (&theirs, "c.bin")] {
-            journal_destination(&mut stored, Some(&state), item, &downloads.join(name)).unwrap();
+            journal_destination(&mut stored, Some(&state), item, &downloads.join(name), None)
+                .unwrap();
         }
         files::place(&done_part, &downloads.join("a.bin"), false).unwrap();
         fs::write(downloads.join("b.bin"), b"").unwrap();

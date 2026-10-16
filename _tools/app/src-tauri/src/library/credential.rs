@@ -286,6 +286,15 @@ pub(crate) fn set_notes_key(target: &str, value: &[u8]) -> Result<(), LibraryErr
         .map_err(map_backend_error)
 }
 
+/// Read LAN PKCS#8 bytes from the OS credential store.
+pub(crate) fn read_lan_identity_key() -> Result<Option<Vec<u8>>, LibraryError> {
+    notes_key("Lakomics/LanIdentity")
+}
+
+pub(crate) fn set_lan_identity_key(value: &[u8]) -> Result<(), LibraryError> {
+    set_notes_key("Lakomics/LanIdentity", value)
+}
+
 /// Interactive unlock of the OS credential store (the Linux keyring password dialog).
 /// Only for an explicit user action such as opening Notes; background readers never
 /// call this. Windows has no locked state to resolve.
