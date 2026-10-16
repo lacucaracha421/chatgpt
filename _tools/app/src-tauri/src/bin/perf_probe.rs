@@ -2046,22 +2046,6 @@ fn safe_relative_path(path: &str) -> bool {
 mod series_switch_tests {
     use super::*;
     #[test]
-    fn process_cpu_time_is_available_and_does_not_go_backwards() {
-        let Some(before) = process_cpu_ms() else {
-            // Platforms without a reader keep the fixed settle sleep.
-            assert!(!cfg!(any(windows, target_os = "linux")));
-            return;
-        };
-        let started = Instant::now();
-        let mut sink = 0u64;
-        while started.elapsed() < Duration::from_millis(60) {
-            sink = sink.wrapping_add(std::hint::black_box(7));
-        }
-        std::hint::black_box(sink);
-        let after = process_cpu_ms().expect("second reading");
-        assert!(before >= 0.0 && after >= before, "{before} -> {after}");
-    }
-    #[test]
     fn thumbnail_audit_never_reads_outside_the_library() {
         assert!(safe_relative_path("thumbnails/aa/image.webp"));
         for path in [

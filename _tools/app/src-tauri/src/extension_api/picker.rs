@@ -619,7 +619,7 @@ fn folders(library: &Library, privacy: Privacy, context: &PickerContext) -> Resu
     }
     let mut hits = HashMap::<usize, u64>::new();
     let mut current_asset: Option<&str> = None;
-    let mut settle = |hits: &mut HashMap<usize, u64>, totals: &mut Vec<u64>| {
+    let settle = |hits: &mut HashMap<usize, u64>, totals: &mut Vec<u64>| {
         for (ancestor, count) in hits.drain() {
             if count > 1 {
                 totals[ancestor] = totals[ancestor].saturating_sub(count - 1);

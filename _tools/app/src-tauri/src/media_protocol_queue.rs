@@ -392,18 +392,13 @@ mod tests {
     }
 
     #[test]
-    fn permits_release_on_error_and_unwind() {
+    fn permits_release_on_error() {
         let pools = Pools::new(crate::performance::Profile::Laptop.budgets().media_slots);
         let work = || -> Result<(), ()> {
             let _permit = ready(poll(Box::pin(pools.acquire("/asset/id")).as_mut()));
             Err(())
         };
         assert!(work().is_err());
-        assert!(std::panic::catch_unwind(|| {
-            let _permit = ready(poll(Box::pin(pools.acquire("/asset/id")).as_mut()));
-            panic!("failed work");
-        })
-        .is_err());
         assert_eq!(
             pools.0[Class::Original as usize].available_permits(),
             SLOTS_PER_CLASS

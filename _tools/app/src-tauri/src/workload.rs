@@ -375,18 +375,6 @@ pub(crate) fn workload_profile(
             .profile()),
     }
 }
-/// Async so the stop, which waits up to 2 s for a video scan item, runs off the UI thread.
-#[tauri::command]
-pub(crate) async fn workload_cancel_scans(app: tauri::AppHandle) {
-    let Some(library) = app.state::<crate::commands::AppState>().current_library() else {
-        return;
-    };
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        library.stop_character_scan();
-        library.stop_video_similarity_scan();
-    })
-    .await;
-}
 #[tauri::command]
 pub(crate) fn workload_quit(app: tauri::AppHandle) {
     if let Some(library) = app.state::<crate::commands::AppState>().current_library() {

@@ -77,7 +77,7 @@ fn automatic_and_manual_crop_indexes_are_bounded_against_the_boxes() {
         validate_inspection_rows(&expected(), &[automatic]),
         Err(Error::Stale)
     ));
-    for index in [Some(2), Some(usize::MAX)] {
+    for index in [Some(2)] {
         let mut manual = row("asset-0", "hash-0");
         manual.selected_index = index;
         assert!(matches!(

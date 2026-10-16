@@ -1164,10 +1164,6 @@ fn authorize(
     Ok(())
 }
 
-fn read_json_limited<R: Read>(reader: R) -> Result<Vec<u8>, ApiError> {
-    read_json_with_limit(reader, MAX_JSON_BYTES)
-}
-
 fn read_json_with_limit<R: Read>(reader: R, maximum: usize) -> Result<Vec<u8>, ApiError> {
     let mut limited = reader.take((maximum + 1) as u64);
     let mut bytes = Vec::new();
@@ -1533,7 +1529,7 @@ mod tests {
     fn rejects_oversized_json_body() {
         let bytes = vec![b'x'; MAX_JSON_BYTES + 1];
         assert_eq!(
-            read_json_limited(bytes.as_slice()).unwrap_err(),
+            read_json_with_limit(bytes.as_slice(), MAX_JSON_BYTES).unwrap_err(),
             ApiError::BodyTooLarge
         );
     }

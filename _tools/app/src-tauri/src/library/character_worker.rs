@@ -232,67 +232,6 @@ impl RuntimeConfig {
         })
     }
 
-    pub(crate) fn update_augmentation(
-        script: PathBuf,
-        settings: &Path,
-        enabled: bool,
-    ) -> Result<AugmentationSettings> {
-        if std::env::var_os("LAKOMICS_CHARACTER_AUGMENTATION_MODEL").is_some() {
-            return Err(Error::Invalid(
-                "환경 변수로 지정된 보완 설정입니다. 환경 변수를 해제하고 앱을 다시 시작해 주세요.",
-            ));
-        }
-        let before = if settings.exists() {
-            Some(std::fs::read(settings)?)
-        } else {
-            None
-        };
-        let mut saved = Self::load(script.clone(), settings)?;
-
-        saved.augmentation_disabled = !enabled;
-        if enabled {
-            let model = saved
-                .runtime
-                .augmentation_model
-                .as_deref()
-                .ok_or(Error::Invalid("설치된 경량 보완 모델을 찾을 수 없습니다."))?;
-            check_augmentation_model(model)?;
-            let temp = tempfile::tempdir()?;
-            let mut worker = Worker::start(
-                &saved.effective(),
-                temp.path(),
-                Arc::new(AtomicBool::new(false)),
-            )?;
-            let ready = worker.receive()?;
-            if ready["type"] != "ready"
-                || ready["baselineFingerprint"] != BASELINE
-                || ready["augmentationAvailable"] != true
-            {
-                return Err(Error::Invalid(
-                    "보완 모델을 사용할 수 없습니다. 분석 환경과 모델 파일을 확인해 주세요.",
-                ));
-            }
-        }
-        let current = if settings.exists() {
-            Some(std::fs::read(settings)?)
-        } else {
-            None
-        };
-        if before != current {
-            return Err(Error::Stale);
-        }
-        let parent = settings
-            .parent()
-            .ok_or(Error::Invalid("설정 경로가 없습니다."))?;
-        std::fs::create_dir_all(parent)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        temporary.write_all(&serde_json::to_vec(&saved)?)?;
-        temporary
-            .persist(settings)
-            .map_err(|e| Error::Io(e.error))?;
-        Self::augmentation_settings(script, settings)
-    }
-
     pub(crate) fn update_shadow(
         script: PathBuf,
         settings: &Path,

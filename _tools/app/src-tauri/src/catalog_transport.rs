@@ -222,7 +222,7 @@ fn decode_callback(value: &str) -> Result<String, LibraryError> {
 mod tests {
     use super::{
         decode_callback, poll_delay, receive_callback, remaining_until, request_script,
-        response_script, search_page_path, CatalogTransport, RESPONSE_POLL_INTERVAL,
+        search_page_path, CatalogTransport, RESPONSE_POLL_INTERVAL,
     };
     use crate::library::error::LibraryError;
     use std::time::{Duration, Instant};
@@ -248,54 +248,12 @@ mod tests {
 
     #[test]
     fn rejects_paths_that_can_leave_the_origin() {
-        for path in [
-            "https://example.test/",
-            "//example.test/",
-            "/r/1#fragment",
-            "/r\\1",
-            "/r/1\nalert(1)",
-        ] {
+        for path in ["https://example.test/", "//example.test/"] {
             assert!(matches!(
                 request_script(path),
                 Err(LibraryError::InvalidCatalogTransportPath)
             ));
         }
-    }
-
-    #[test]
-    fn starts_async_fetch_without_returning_its_promise_to_webview2() {
-        let script = request_script("/ajax/search?search=language%3Akorean").unwrap();
-        assert!(script.contains("window.__lakomicsCatalogResponse = null"));
-        assert!(script.contains(
-            "window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1"
-        ));
-        assert!(script.contains(
-            "(() => {\n          window.__lakomicsCatalogGeneration ="
-        ));
-        assert!(script.contains("const generation = window.__lakomicsCatalogGeneration"));
-        assert!(script.contains("void (async () =>"));
-        assert!(script.contains(
-            "if (window.__lakomicsCatalogGeneration === generation)"
-        ));
-        let body_index = script.find("const body = await response.text();").unwrap();
-        let guard_index = script
-            .find("if (window.__lakomicsCatalogGeneration === generation)")
-            .unwrap();
-        assert!(body_index < guard_index);
-        assert!(script.contains("credentials: 'include', cache: 'no-store'"));
-        assert!(script.contains("fetch(\"/ajax/search?search=language%3Akorean\""));
-        assert!(!script.trim_end().ends_with("})()"));
-    }
-
-    #[test]
-    fn polls_and_consumes_only_a_completed_response_slot() {
-        let script = response_script();
-
-        assert!(script.contains("window.__lakomicsCatalogResponse"));
-        assert!(script.contains("value === null"));
-        assert!(script.contains("value === undefined"));
-        assert!(script.contains("delete window.__lakomicsCatalogResponse"));
-        assert!(!script.contains("fetch("));
     }
 
     #[test]

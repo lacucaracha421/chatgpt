@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn augmentation_settings_keep_the_selected_model_when_disabled() {
+fn legacy_settings_with_a_model_stay_enabled() {
     let temp = tempfile::tempdir().unwrap();
     let settings = temp.path().join("settings.json");
     let script = temp.path().join("worker.py");
@@ -24,47 +24,6 @@ fn augmentation_settings_keep_the_selected_model_when_disabled() {
     let legacy: SavedRuntime = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
     assert!(!legacy.augmentation_disabled);
     assert_eq!(legacy.effective().augmentation_model, Some(model.clone()));
-    let status = RuntimeConfig::update_augmentation(script.clone(), &settings, false).unwrap();
-    assert!(!status.enabled);
-    assert_eq!(status.model_name.as_deref(), Some("model.onnx"));
-    assert!(
-        !status.model_ready,
-        "a model filename is not proof of valid weights"
-    );
-    let saved: SavedRuntime = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
-    assert_eq!(saved.runtime.augmentation_model, Some(model));
-    assert_eq!(saved.runtime.python, config.python);
-    assert!(saved.effective().augmentation_model.is_none());
-    assert!(RuntimeConfig::configured(script, &settings)
-        .unwrap()
-        .augmentation_model
-        .is_none());
-}
-
-#[test]
-fn invalid_augmentation_model_does_not_overwrite_settings() {
-    let temp = tempfile::tempdir().unwrap();
-    let settings = temp.path().join("settings.json");
-    let script = temp.path().join("worker.py");
-    let model = temp.path().join("augmentation").join("model_feat.onnx");
-    std::fs::write(&script, b"fixture").unwrap();
-    let config = RuntimeConfig {
-        performance: crate::performance::Profile::Laptop.budgets(),
-        python: script.clone(),
-        script: script.clone(),
-        models: temp.path().to_owned(),
-        augmentation_model: None,
-        s36_shadow_disabled: true,
-        shadow_model: None,
-    };
-    let before = serde_json::to_vec(&config).unwrap();
-    std::fs::write(&settings, &before).unwrap();
-    assert!(RuntimeConfig::update_augmentation(script.clone(), &settings, true).is_err());
-    assert_eq!(std::fs::read(&settings).unwrap(), before);
-    std::fs::create_dir(model.parent().unwrap()).unwrap();
-    std::fs::write(&model, b"not S36").unwrap();
-    assert!(RuntimeConfig::update_augmentation(script, &settings, true).is_err());
-    assert_eq!(std::fs::read(&settings).unwrap(), before);
 }
 
 #[test]
@@ -99,19 +58,10 @@ fn preconnected_model_is_resolved_without_enabling_legacy_runtime() {
     assert_eq!(std::fs::read(&settings).unwrap(), before);
     saved.augmentation_disabled = false;
     assert_eq!(saved.effective().augmentation_model, Some(model.clone()));
-    let status = RuntimeConfig::update_augmentation(script.clone(), &settings, false).unwrap();
-    assert!(!status.enabled);
-    let reloaded = RuntimeConfig::load(script, &settings).unwrap();
-    assert_eq!(reloaded.runtime.augmentation_model, Some(model));
-    assert!(reloaded.effective().augmentation_model.is_none());
 }
 
 #[test]
-fn augmentation_model_validation_agrees_with_the_python_pin() {
-    assert!(
-        include_str!("../../../character-runtime/character_encoder.py")
-            .contains("484ad463f569ab95308cf47e91ba358b01c40bc53289b90b950b94fcde7f2628")
-    );
+fn augmentation_model_path_must_be_absolute() {
     assert!(check_augmentation_model(Path::new("relative.onnx")).is_err());
 }
 

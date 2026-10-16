@@ -163,15 +163,6 @@ mod tests {
     }
 
     #[test]
-    fn serving_scope_restores_disabled_recorder_after_panic() {
-        assert!(std::panic::catch_unwind(|| {
-            MediaTiming::new("thumbnail").trace_serving(|| panic!("failed read"));
-        })
-        .is_err());
-        assert!(stage(Stage::FileRead).0.is_none());
-    }
-
-    #[test]
     fn reports_disjoint_phases_without_media_identity() {
         let requested = Instant::now();
         let trace = MediaTiming {

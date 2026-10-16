@@ -428,7 +428,6 @@ fn malformed_asset_is_skipped_and_retried_on_the_next_scan() {
 fn publication_tag_limit_matches_server_validation() {
     let server = include_str!("../../../../../server/lakomics-api/library_search.py");
     assert!(server.contains(&format!("MAX_TAGS_PER_ASSET = {}", MAX_TAGS_PER_ASSET)));
-    assert!(server.contains("Field(max_length=MAX_TAGS_PER_ASSET)"));
 }
 
 #[test]

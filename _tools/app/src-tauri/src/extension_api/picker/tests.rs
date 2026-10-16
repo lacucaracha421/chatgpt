@@ -833,15 +833,6 @@ fn picker_privacy_gate_asks_once_and_fails_closed() {
 }
 
 #[test]
-fn picker_privacy_probe_reads_only_the_saved_preferences() {
-    let script = privacy_probe_script("abc123", &[]);
-    assert!(script.contains("lakomics.uiPreferences.v1"));
-    assert!(script.contains("nonce:'abc123'"));
-    assert!(script.contains("report_picker_privacy"));
-    assert!(script.contains("privacyMode===true"));
-}
-
-#[test]
 fn picker_batch_body_limit_fits_two_thousand_ids_and_no_more() {
     let ids: Vec<String> = (0..2000).map(|_| "a".repeat(64)).collect();
     let body = serde_json::json!({"folderId": "f", "exclude": ids}).to_string();

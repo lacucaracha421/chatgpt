@@ -1121,26 +1121,6 @@ pub async fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSumm
 }
 
 #[tauri::command]
-pub async fn set_asset_favorite(
-    asset_id: String,
-    favorite: bool,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    off_ui_thread(move || library.set_asset_favorite(&asset_id, favorite).map_err(CommandError::from)).await
-}
-
-#[tauri::command]
-pub async fn set_assets_favorite(
-    asset_ids: Vec<String>,
-    favorite: bool,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    off_ui_thread(move || library.set_assets_favorite(&asset_ids, favorite).map_err(CommandError::from)).await
-}
-
-#[tauri::command]
 pub async fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library
@@ -1581,16 +1561,6 @@ pub async fn refresh_kakao(
 }
 
 #[tauri::command]
-pub fn get_kakao_connection(
-    collection_id: String,
-    state: State<'_, AppState>,
-) -> Result<Option<AladinConnection>, CommandError> {
-    current_required(state)?
-        .get_kakao_connection(&collection_id)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
 pub fn get_book_connection(collection_id: String, state: State<'_, AppState>) -> Result<Option<AladinConnection>, CommandError> {
     current_required(state)?.get_book_connection(&collection_id).map_err(CommandError::from)
 }
@@ -1887,17 +1857,6 @@ pub fn set_collection_showcase(
 ) -> Result<CollectionSummary, CommandError> {
     current_required(state)?
         .set_collection_showcase(&collection_id, showcase)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub fn set_collection_showcase_order(
-    collection_type: crate::library::models::CollectionType,
-    work_ids: Vec<String>,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_collection_showcase_order(collection_type, work_ids)
         .map_err(CommandError::from)
 }
 
@@ -2984,21 +2943,6 @@ pub async fn flush_catalog_bookmark_outbox(
     tauri::async_runtime::spawn_blocking(move || library.flush_catalog_bookmark_outbox())
         .await
         .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
-}
-
-/// Pending/confirmed delivery state for one bookmark entity (B6).
-///
-/// Local-only: it reports what this PC has queued and what the authority has
-/// already confirmed, without requiring a network round trip.
-#[tauri::command]
-pub fn catalog_bookmark_delivery_state(
-    provider: String,
-    work_id: String,
-    state: State<'_, AppState>,
-) -> Result<crate::library::bookmark_outbox::BookmarkDeliveryState, CommandError> {
-    current_required(state)?
-        .catalog_bookmark_delivery_state(&provider, &work_id)
         .map_err(CommandError::from)
 }
 

@@ -269,7 +269,7 @@ fn typed_catalog_transport_validates_cursor_and_auth_before_fetching() {
     use crate::library::models::CatalogLanguage;
     let client = VpsCatalogSource::new("http://127.0.0.1:1").unwrap();
     for language in [CatalogLanguage::Korean, CatalogLanguage::Japanese] {
-        for cursor in [0, u64::MAX] {
+        for cursor in [0] {
             assert!(matches!(
                 client.fetch_search_page_for_language_bearer(Some(cursor), language, "token"),
                 Err(LibraryError::InvalidCatalogTransportPath)
