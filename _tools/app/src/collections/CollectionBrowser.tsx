@@ -457,7 +457,7 @@ export function CollectionBrowser({
             {leading}
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
               : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={SPINE_SCALE.pc[viewSettings.spineSize ?? "normal"]} label={`${sectionLabel} 작품 목록`}
-                pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} controlRef={spineControl}
+                pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} prepare={spineData.prepare} controlRef={spineControl}
                 restoredFocusId={navigationMemory?.get(scope)?.focusId} entrance={spineEntrance} />
               : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}

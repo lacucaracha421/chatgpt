@@ -3,6 +3,7 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CASE_PLASTIC, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
 import { nearestCell, packSpineShelf, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
+import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
 
 /** One case on the 책장: plain data, so the PC and the tablet draw it the same way. */
@@ -28,12 +29,18 @@ const WORK_ART: SpineArt<SpineWork> = {
 
 /** Rows within this many viewports above and below the visible part stay mounted. */
 const OVERSCAN_VIEWPORTS = .5;
+/** The works within this many viewports are reported to `onWindow`, so a client can read their artwork before the rows mount. */
+const AHEAD_VIEWPORTS = 1.5;
+/** How long a changed list waits, showing the old shelf, for the first screen of the new one to be ready. */
+const CHANGE_HOLD_MS = 700;
+/** The same wait on the first appearance, when there is no old shelf to keep: shorter, so the blank stays brief. */
+const FIRST_HOLD_MS = 350;
 /** The viewport assumed until the scroll area has a measurable size. */
 const FALLBACK_VIEWPORT = 900;
 const ENTRANCE_MS = 800;
-/** The entries (labels and rows) that overlap the visible part of the shelf plus half a viewport on each side. */
-function windowRange(entries: readonly { top: number; height: number }[], top: number, height: number): [number, number] {
-  const low = top - height * OVERSCAN_VIEWPORTS, high = top + height * (1 + OVERSCAN_VIEWPORTS);
+/** The entries (labels and rows) that overlap the visible part of the shelf plus `overscan` viewports on each side. */
+function windowRange(entries: readonly { top: number; height: number }[], top: number, height: number, overscan = OVERSCAN_VIEWPORTS): [number, number] {
+  const low = top - height * overscan, high = top + height * (1 + overscan);
   let first = -1, last = -2;
   entries.forEach((entry, index) => { if (entry.top + entry.height >= low && entry.top <= high) { if (first < 0) first = index; last = index; } });
   return first < 0 ? [0, -1] : [first, last];
@@ -60,41 +67,62 @@ type Props<W extends SpineWork> = {
   restoredFocusId?: string | null;
   menu?(id: string): ContextMenuItem[];
   art?: SpineArt<W>;
-  /** The works whose rows are mounted, when that set changes (a client may read their artwork lazily). */
+  /** The works near the viewport (the mounted rows and the ones just beyond), when that set changes: a client may read their artwork lazily. */
   onWindow?(ids: string[]): void;
+  /**
+   * Set when a client reads artwork lazily. When the list changes (another sort, filter or scope) the shelf keeps
+   * showing the old one until this resolves for the new first screen: `ids` are the works of the rows that will be
+   * mounted, `visible` those on screen. The wait is bounded; after it the new list is shown whatever has arrived.
+   * Aborted when the list changes again before it resolved. Returning nothing means it is ready already: the new
+   * list replaces the old one before the next paint.
+   */
+  prepare?(ids: string[], visible: string[], signal: AbortSignal): Promise<void> | void;
   /** The rows of a first appearance rise in once, staggered by row. */
   entrance?: boolean;
   controlRef?: { current: SpineShelfControl | null };
 };
 
-export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, menu, art, onWindow, entrance = false, controlRef }: Props<W>) {
+export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, menu, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const [focusId, setFocusId] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null);
   const available = Math.max(1, width - gutter * 2);
-  const packed = useMemo(() => packSpineShelf(groups, available, scale), [groups, available, scale]);
+
+  // A changed list (not its artwork arriving) waits for its first screen while the old shelf stays up.
+  const key = useMemo(() => groups.map(group => `${group.label}\u0001${group.works.map(item => item.id).join(",")}`).join("\u0002"), [groups]);
+  const held = Boolean(prepare);
+  const [shownKey, setShownKey] = useState<string | null>(() => prepare ? null : key);
+  const lastGroups = useRef<ShelfGroup<W>[]>(prepare ? [] : groups);
+  const live = !held || shownKey === key;
+  if (live) lastGroups.current = groups;
+  const shownGroups = live ? groups : lastGroups.current;
+  const packed = useMemo(() => packSpineShelf(shownGroups, available, scale), [shownGroups, available, scale]);
   const { entries, rows, order, cells } = packed;
   const [range, setRange] = useState<[number, number]>(() => windowRange(entries, 0, FALLBACK_VIEWPORT));
+  const [ahead, setAhead] = useState<[number, number]>(() => windowRange(entries, 0, FALLBACK_VIEWPORT, AHEAD_VIEWPORTS));
   const tabbableId = focusId && cells.has(focusId) ? focusId : order[0] ?? null;
 
   // The scroll area the shelf lives in; its width is the shelf's, its scroll position drives the window.
   const rootOf = useCallback(() => hostRef.current?.closest<HTMLElement>(".collection-browser__list-scroll, .collection-scroll") ?? hostRef.current?.parentElement ?? null, []);
-  const windowFor = useCallback((): [number, number] => {
+  /** The part of the shelf on screen, in shelf pixels. */
+  const viewport = useCallback(() => {
     const host = hostRef.current, root = rootOf();
     let top = 0, height = FALLBACK_VIEWPORT;
     if (host && root && root.clientHeight > 0) {
       const offset = host.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
       top = root.scrollTop - offset; height = root.clientHeight;
     }
-    return windowRange(entries, top, height);
-  }, [entries, rootOf]);
+    return { top, height };
+  }, [rootOf]);
   const measure = useCallback(() => {
     const host = hostRef.current;
     if (host && host.clientWidth > 0) setWidth(current => current === host.clientWidth ? current : host.clientWidth);
-    const next = windowFor();
+    const { top, height } = viewport();
+    const next = windowRange(entries, top, height), far = windowRange(entries, top, height, AHEAD_VIEWPORTS);
     setRange(current => current[0] === next[0] && current[1] === next[1] ? current : next);
-  }, [windowFor]);
+    setAhead(current => current[0] === far[0] && current[1] === far[1] ? current : far);
+  }, [entries, viewport]);
   const measureRef = useRef(measure); measureRef.current = measure;
   // A new packing (width, size, list) moves the rows: measure again before painting.
   useLayoutEffect(() => { measure(); }, [measure]);
@@ -143,18 +171,40 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     return shown;
   }, [entries, range, pinned]);
 
-  const windowIds = useMemo(() => mounted.flatMap(entry => entry.kind === "row" ? entry.cells.map(cell => cell.work.id) : []), [mounted]);
+  const windowIds = useMemo(() => entries.slice(Math.max(0, ahead[0]), ahead[1] + 1).flatMap(entry => entry.kind === "row" ? entry.cells.map(cell => cell.work.id) : []), [entries, ahead]);
   const windowSignature = windowIds.length ? `${windowIds[0]}:${windowIds.length}:${windowIds[windowIds.length - 1]}` : "";
   const onWindowRef = useRef(onWindow); onWindowRef.current = onWindow;
   useEffect(() => { if (windowIds.length) onWindowRef.current?.(windowIds); }, [windowSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A changed list waits for its first screen (see `prepare`) while the old shelf stays up.
+  const prepareRef = useRef(prepare); prepareRef.current = prepare;
+  useLayoutEffect(() => {
+    if (!held) { if (shownKey !== key) setShownKey(key); return; }
+    if (shownKey === key) return;
+    if (!groups.some(group => group.works.length)) { setShownKey(key); return; }
+    const controller = new AbortController();
+    let finished = false;
+    const done = () => { if (finished) return; finished = true; window.clearTimeout(timer); setShownKey(key); };
+    const timer = window.setTimeout(done, shownKey === null ? FIRST_HOLD_MS : CHANGE_HOLD_MS);
+    // The first screen of the new list at the current scroll position and width.
+    const host = hostRef.current, inner = Math.max(1, (host?.clientWidth || width) - gutter * 2);
+    const incoming = packSpineShelf(groups, inner, scale), { top, height } = viewport();
+    const idsOf = ([first, last]: [number, number]) => incoming.entries.slice(Math.max(0, first), last + 1).flatMap(entry => entry.kind === "row" ? entry.cells.map(cell => cell.work.id) : []);
+    const ask = prepareRef.current;
+    if (!ask) { done(); return; }
+    const pending = ask(idsOf(windowRange(incoming.entries, top, height)), idsOf(windowRange(incoming.entries, top, height, 0)), controller.signal);
+    if (pending) pending.then(done, done); else done();
+    return () => { window.clearTimeout(timer); if (!finished) { finished = true; controller.abort(); } };
+  }, [key, shownKey, held]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // First appearance: the rows mounted by the first render rise in once; rows scrolled in later do not.
   const entering = useRef<Map<number, number> | null>(null);
-  if (entering.current === null) {
+  if (entering.current === null && mounted.some(entry => entry.kind === "row")) {
     entering.current = new Map();
     if (entrance && !reducedMotion()) mounted.forEach(entry => { if (entry.kind === "row" && entering.current!.size < 18) entering.current!.set(entry.index, entering.current!.size); });
   }
-  useEffect(() => { const timer = window.setTimeout(() => entering.current?.clear(), ENTRANCE_MS); return () => window.clearTimeout(timer); }, []);
+  const entranceStarted = entering.current !== null;
+  useEffect(() => { if (!entranceStarted) return; const timer = window.setTimeout(() => entering.current?.clear(), ENTRANCE_MS); return () => window.clearTimeout(timer); }, [entranceStarted]);
 
   // Put-down: the pulled-out cover of the previous pick turns back into its spine before it goes.
   const [leaving, setLeaving] = useState<string | null>(null);
@@ -287,7 +337,7 @@ const Spine = memo(SpineView) as typeof SpineView;
 
 /** The printed insert. Artwork fades in over the plastic once it is decoded; a template appears in one step. */
 function SpineArtView({ work, url, privacy }: { work: SpineWork; url: string | null; privacy: boolean }) {
-  const [settled, setSettled] = useState(!url || privacy);
+  const [settled, setSettled] = useState(!url || privacy || isSpineWarm(url));
   const data: CaseData = { title: work.title, platform: work.platform, developer: work.developer, front: null, spine: url, privacy };
   const settle = useCallback(() => setSettled(true), []);
   return <span className={spineInsertClass(data)} data-settled={settled}>

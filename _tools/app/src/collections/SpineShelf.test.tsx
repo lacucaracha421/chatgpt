@@ -125,3 +125,71 @@ it("mounts only a window of rows for a large shelf and follows the scroll", asyn
   expect(screen.queryByRole("button", { name: /^작품 300 ·/ })).toBeNull();
   expect(within(screen.getByRole("group", { name: "작품 목록" })).getAllByRole("button").length).toBeLessThan(600);
 });
+
+function Held({ works, prepare }: { works: SpineWork[]; prepare?: (ids: string[], visible: string[], signal: AbortSignal) => Promise<void> | void }) {
+  return <div className="collection-browser__list-scroll">
+    <SpineShelf groups={[{ label: "", works }]} scale={1.1} label="작품 목록" pickedId={null} onPick={() => undefined} onOpen={() => undefined} prepare={prepare} />
+  </div>;
+}
+type Prepare = (ids: string[], visible: string[], signal: AbortSignal) => Promise<void> | void;
+const shown = () => screen.queryAllByRole("button").map(button => button.getAttribute("aria-label")!.split(" ·")[0]);
+const ready = () => undefined;
+
+it("keeps the previous shelf until the new first screen is prepared, then swaps in one step", async () => {
+  let release!: () => void;
+  const prepare = vi.fn<Prepare>(ready);
+  const { rerender } = render(<Held works={[work(0), work(1)]} prepare={prepare} />);
+  expect(shown()).toEqual(["작품 0", "작품 1"]);
+  prepare.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  rerender(<Held works={[work(5), work(4), work(3)]} prepare={prepare} />);
+  expect(shown()).toEqual(["작품 0", "작품 1"]);
+  expect(prepare).toHaveBeenLastCalledWith(["w5", "w4", "w3"], ["w5", "w4", "w3"], expect.any(AbortSignal));
+  await act(async () => release());
+  expect(shown()).toEqual(["작품 5", "작품 4", "작품 3"]);
+});
+
+it("swaps after the wait even when the first screen never gets ready", () => {
+  vi.useFakeTimers();
+  try {
+    const prepare = vi.fn<Prepare>(ready);
+    const { rerender } = render(<Held works={[work(0)]} prepare={prepare} />);
+    prepare.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    rerender(<Held works={[work(1)]} prepare={prepare} />);
+    act(() => { vi.advanceTimersByTime(650); });
+    expect(shown()).toEqual(["작품 0"]);
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(shown()).toEqual(["작품 1"]);
+  } finally { vi.useRealTimers(); }
+});
+
+it("shows a list that is ready at once, and lets artwork arrive on an unchanged list without asking again", () => {
+  const prepare = vi.fn<Prepare>(ready);
+  const { rerender } = render(<Held works={[work(0, "sw2", { pending: true }), work(1, "sw2")]} prepare={prepare} />);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(spine("작품 0").querySelector(".ins")).toBeNull();
+  rerender(<Held works={[work(0, "sw2"), work(1, "sw2")]} prepare={prepare} />);
+  expect(spine("작품 0").querySelector(".ins")).not.toBeNull();
+  expect(prepare).toHaveBeenCalledTimes(1);
+  rerender(<Held works={[work(1, "sw2"), work(0, "sw2")]} prepare={prepare} />);
+  expect(shown()).toEqual(["작품 1", "작품 0"]);
+});
+
+it("holds the first appearance briefly while the first screen is prepared", async () => {
+  let release!: () => void;
+  render(<Held works={[work(0), work(1)]} prepare={() => new Promise<void>(resolve => { release = resolve; })} />);
+  expect(shown()).toEqual([]);
+  await act(async () => release());
+  expect(shown()).toEqual(["작품 0", "작품 1"]);
+});
+
+it("drops a pending preparation when the list changes again, and aborts it", () => {
+  const signals: AbortSignal[] = [];
+  const prepare = vi.fn<Prepare>((_ids, _visible, signal) => { signals.push(signal); return new Promise<void>(() => undefined); });
+  prepare.mockImplementationOnce(ready);
+  const { rerender } = render(<Held works={[work(0)]} prepare={prepare} />);
+  rerender(<Held works={[work(1)]} prepare={prepare} />);
+  rerender(<Held works={[work(2)]} prepare={prepare} />);
+  expect(signals[0].aborted).toBe(true);
+  expect(signals[1].aborted).toBe(false);
+  expect(shown()).toEqual(["작품 0"]);
+});
