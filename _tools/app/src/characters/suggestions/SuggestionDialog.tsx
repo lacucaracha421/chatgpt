@@ -61,16 +61,18 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
 
   const candidateImages = detail?.images.filter(image => !references.includes(image.assetId) && (includeOutside || image.insideSeries)) ?? [];
   const candidateCount = candidateImages.length;
-  const insideImages = (detail?.images.filter(image => image.insideSeries) ?? []).sort((a, b) =>
-    Number(b.solo) - Number(a.solo) || Math.max(b.pixaiScore, b.canaryScore) - Math.max(a.pixaiScore, a.canaryScore) || a.assetId.localeCompare(b.assetId));
-  const replacements = insideImages.filter(image => !references.includes(image.assetId));
-  const preview = insideImages.find(image => image.assetId === previewId);
+  // Every suggested image can be a reference; those outside the series folder move in on saving.
+  const choosableImages = [...(detail?.images ?? [])].sort((a, b) =>
+    Number(b.insideSeries) - Number(a.insideSeries) || Number(b.solo) - Number(a.solo) || Math.max(b.pixaiScore, b.canaryScore) - Math.max(a.pixaiScore, a.canaryScore) || a.assetId.localeCompare(b.assetId));
+  const replacements = choosableImages.filter(image => !references.includes(image.assetId));
+  const movingIn = references.filter(id => detail?.images.some(image => image.assetId === id && !image.insideSeries)).length;
+  const preview = choosableImages.find(image => image.assetId === previewId);
   const movePreview = (delta: number) => {
-    const index = insideImages.findIndex(image => image.assetId === previewId);
-    setPreviewId(insideImages[(index + delta + insideImages.length) % insideImages.length].assetId);
+    const index = choosableImages.findIndex(image => image.assetId === previewId);
+    setPreviewId(choosableImages[(index + delta + choosableImages.length) % choosableImages.length].assetId);
   };
   const toggleReference = (image: SuggestionImage) => {
-    if (busy || previewPending || !image.insideSeries) return;
+    if (busy || previewPending) return;
     setReferences(ids => ids.includes(image.assetId) ? ids.filter(id => id !== image.assetId) : ids.length < 8 ? [...ids, image.assetId] : ids);
   };
   async function save() {
@@ -119,7 +121,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
           </>}
           <label><input type="checkbox" checked={linkTag} disabled={busy || previewPending} onChange={event => setLinkTag(event.target.checked)} /> {mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</label>
           {!linkTag && <small>연결하지 않으면 이 태그가 다시 제안될 수 있어요.</small>}
-          <p className="character-suggestion-note">{mode === "register" ? "레퍼런스는 시리즈 폴더 안에서만 고를 수 있어요. 단독 이미지를 먼저 골라 두었어요." : "후보는 확인에서 볼 수 있어요. 바로 확정하지 않아요."}</p>
+          <p className="character-suggestion-note">{mode === "register" ? "시리즈 폴더 안의 단독 이미지를 먼저 골라 두었어요. 폴더 안 이미지가 5장보다 적으면 밖의 이미지로 채워요." : "후보는 확인에서 볼 수 있어요. 바로 확정하지 않아요."}</p>
         </div>
         {mode === "register" && <div className="character-suggestion-dialog__images" inert={detailSeries !== chosenSeries || previewPending ? true : undefined}>
           {!chosenSeries && <p>레퍼런스를 고를 시리즈 폴더를 선택해 주세요.</p>}
@@ -135,6 +137,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
               })}
             </div>
             {references.length < 5 && <p className="character-suggestion-warning">레퍼런스 5장 미만: 수동으로 시작해요.</p>}
+            {movingIn > 0 && <p className="character-suggestion-note">밖 표시가 있는 레퍼런스 {movingIn}장은 만들 때 시리즈 폴더로 옮겨요.</p>}
             <h3>레퍼런스 바꾸기<small>눌러서 크게 보기 · 단독 우선</small></h3>
             <div className="character-suggestion-replacements" role="group" aria-label="레퍼런스 바꾸기">
               {replacements.map(image => <ImageChoice key={image.assetId} image={image} privacyMode={privacyMode} disabled={busy || previewPending} onClick={() => setPreviewId(image.assetId)} />)}

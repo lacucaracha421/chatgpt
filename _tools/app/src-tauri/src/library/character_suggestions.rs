@@ -240,17 +240,53 @@ fn detail_in(c: &Connection, tag: &str, series: Option<&str>) -> Result<Suggesti
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    let reference_ids = images
+    // Inside images first. When the series folder holds fewer than a full set, the best
+    // outside images fill the gap; registering moves them in (a reference has to sit in
+    // the series folder), so only images that can be moved are offered that way.
+    let mut reference_ids = images
         .iter()
         .filter(|i| i.inside_series)
-        .take(5)
+        .take(REFERENCE_PRESELECT)
         .map(|i| i.asset_id.clone())
-        .collect();
+        .collect::<Vec<_>>();
+    if let Some(series) = series.filter(|_| reference_ids.len() < REFERENCE_PRESELECT) {
+        for image in images.iter().filter(|i| !i.inside_series) {
+            if reference_ids.len() >= REFERENCE_PRESELECT {
+                break;
+            }
+            if can_move_into_series(c, series, &image.asset_id)? {
+                reference_ids.push(image.asset_id.clone());
+            }
+        }
+    }
     Ok(SuggestionDetail {
         images,
         preview_token,
         reference_ids,
     })
+}
+
+const REFERENCE_PRESELECT: usize = 5;
+
+/// The checks a move into the series folder would make, so a default selection never
+/// fails the registration it belongs to.
+fn can_move_into_series(c: &Connection, series: &str, asset_id: &str) -> Result<bool> {
+    let mut statement =
+        c.prepare_cached("SELECT classification_id FROM asset_classifications WHERE asset_id=?1")?;
+    let folders = statement
+        .query_map([asset_id], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if folders.len() > 1 {
+        return Ok(false);
+    }
+    if let Some(folder) = folders.first() {
+        if super::classification::classification_in_role_scope(c, folder, "originals")? {
+            return Ok(false);
+        }
+    }
+    Ok(!super::character_hub::series_asset_excluded(
+        c, series, asset_id,
+    )?)
 }
 
 fn queue_in(
@@ -399,18 +435,15 @@ impl Library {
         if references.len() != request.reference_ids.len()
             || references.len() > 8
             || !references.is_disjoint(&excluded)
-            || references.iter().any(|id| {
-                !detail
-                    .images
-                    .iter()
-                    .any(|i| i.asset_id == *id && i.inside_series)
-            })
+            || references
+                .iter()
+                .any(|id| !detail.images.iter().any(|i| i.asset_id == *id))
             || excluded
                 .iter()
                 .any(|id| !detail.images.iter().any(|i| i.asset_id == *id))
         {
             return Err(Error::Invalid(
-                "참조는 시리즈 폴더 안에서 중복 없이 최대 8장까지 선택해 주세요.",
+                "레퍼런스는 제안된 이미지 중에서 중복 없이 최대 8장까지 선택해 주세요.",
             ));
         }
         if !request.include_outside {
@@ -437,6 +470,34 @@ impl Library {
             false,
             references.len() < 5,
         )?;
+        // A reference has to sit in the series folder: chosen images outside it move in,
+        // as a 맞음 would move them, and the target is read again for its new revision.
+        let outside = request
+            .reference_ids
+            .iter()
+            .filter(|id| {
+                detail
+                    .images
+                    .iter()
+                    .any(|i| i.asset_id == **id && !i.inside_series)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let saved = if outside.is_empty() {
+            saved
+        } else {
+            self.move_assets_to_characters_in(
+                &tx,
+                vec![super::characters::CharacterMoveTarget {
+                    target_id: saved.id.clone(),
+                    expected_fingerprint: saved.fingerprint.clone(),
+                }],
+                outside,
+                super::characters::DecisionKind::Accepted,
+                false,
+            )?;
+            self.read_character_target(&tx, &saved.id)?
+        };
         let target = self.replace_character_references_selection_in(
             &tx,
             &saved.id,

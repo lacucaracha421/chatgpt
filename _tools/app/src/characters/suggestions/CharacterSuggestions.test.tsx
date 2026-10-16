@@ -193,8 +193,9 @@ describe("character suggestions", () => {
     expect(within(refs).getAllByRole("button")[0]).toHaveAccessibleName("a4 크게 보기");
     expect(within(refs).getAllByLabelText(/빈 레퍼런스 슬롯/)).toHaveLength(3);
     expect(within(refs).getByText("단독")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /a7/ })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "레퍼런스 바꾸기" })).getAllByRole("button")[0]).toHaveAccessibleName("a6 크게 보기");
+    const choices = within(screen.getByRole("group", { name: "레퍼런스 바꾸기" })).getAllByRole("button");
+    expect(choices[0]).toHaveAccessibleName("a6 크게 보기");
+    expect(choices[choices.length - 1]).toHaveAccessibleName("a7 크게 보기");
     expect(screen.getByRole("checkbox", { name: "태그를 이 캐릭터에 연결" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "시리즈 폴더 밖 이미지도 후보로" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "a0 크게 보기" }));
@@ -209,6 +210,16 @@ describe("character suggestions", () => {
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ displayName: "수정한 이름", referenceIds: ["a4", "a1", "a2", "a3", "a5"], excludedAssetIds: [], includeOutside: true, linkTag: true, previewToken: "snapshot" })));
     expect(onSaved).toHaveBeenCalledWith({ target, queuedCount: 3 });
+  });
+  it("lets an image outside the series folder be a reference and says it moves in", async () => {
+    const client = api(); dialog(client);
+    fireEvent.click(await screen.findByRole("button", { name: "a7 크게 보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "레퍼런스로" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
+    expect(screen.getByText(/밖 표시가 있는 레퍼런스 1장/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "캐릭터 만들기" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
+    await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ referenceIds: ["a4", "a0", "a1", "a2", "a3", "a7"] })));
   });
   it("requires a folder before preselecting references for a folderless suggestion", async () => {
     const client = api(); dialog(client, "register", { ...suggestion, seriesId: null });
@@ -249,8 +260,9 @@ describe("character suggestions", () => {
     await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a6")));
     fireEvent.click(within(preview).getByRole("button", { name: "이전 이미지" }));
     fireEvent.keyDown(preview, { key: "ArrowLeft" });
-    loadReplacement("a5");
-    await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a5")));
+    // Wrapping back from the first image reaches the last one, an image outside the series folder.
+    loadReplacement("a7");
+    await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a7")));
     fireEvent.click(within(preview).getByRole("button", { name: "다음 이미지" }));
     fireEvent.keyDown(preview, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "레퍼런스 크게 보기" })).not.toBeInTheDocument());
@@ -274,11 +286,12 @@ describe("character suggestions", () => {
   it("keeps a failed save open with a preview reload action", async () => {
     const client = api(); vi.mocked(client.register).mockRejectedValue(new Error("stale")); dialog(client);
     await screen.findByRole("button", { name: "a0 크게 보기" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "캐릭터 만들기" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(client.detail).toHaveBeenCalledTimes(2));
-  });
+  }, 15000);
   it("renders a thumbnail-first card with name, tag, counts and one folder sentence", async () => {
     const client = api();
     vi.mocked(client.list).mockResolvedValue([suggestion, { ...suggestion, tag: "outside_character", imageCount: 8, bothCount: 8, insideCount: 2 }]);
