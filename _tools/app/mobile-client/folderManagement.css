@@ -3,4 +3,3 @@
 .folder-management-actions .ui-button { min-height:44px; }
 .folder-management .ui-dialog__actions .ui-button { min-height:44px; }
 .folder-management .hint { margin:0; }
-.folder-management-create { margin-block:var(--space-2); min-height:44px; }

@@ -20,24 +20,12 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 const open=(props:Partial<Parameters<typeof FolderManagement>[0]>={})=>{
   const onClose=vi.fn(),onChanged=vi.fn();
-  render(<FolderManagement authority={authority} folders={folders} onClose={onClose} onChanged={onChanged} {...props}/>);
+  render(<FolderManagement authority={authority} folders={folders} folder={folders[0]} onClose={onClose} onChanged={onChanged} {...props}/>);
   return {onClose,onChanged};
 };
 const waitEnabled=(name:string)=>waitFor(()=>expect((screen.getByRole('button',{name}) as HTMLButtonElement).disabled).toBe(false));
 
 describe('tablet folder create and rename',()=>{
-  it('creates a top-level folder as a root with the authority identity',async()=>{
-    const {onClose,onChanged}=open();
-    fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:'  새 최상위  '}});
-    fireEvent.click(screen.getByRole('button',{name:'만들기'}));
-    await waitFor(()=>expect(onClose).toHaveBeenCalledOnce());
-    const [path,signal,body,method]=commands()[0];
-    expect(path).toBe('/v1/classifications/authority/commands');expect(signal).toBeUndefined();expect(method).toBe('PUT');
-    expect(body).toMatchObject({libraryId:authority.libraryId,epoch:2,contractVersion:1,commandType:'createClassification',kind:'root',name:'새 최상위',parentId:null,iconKey:null,colorKey:null});
-    expect(body.classificationId).toMatch(/^[0-9a-f-]{36}$/);expect(body.operationId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(onChanged).toHaveBeenCalledWith({type:'create',folder:expect.objectContaining({name:'새 최상위',kind:'root'})});
-    expect(mocks.api.mock.calls.some(([path])=>String(path).includes('/baseline'))).toBe(false);
-  });
   it('creates a child folder as a tag under the open folder, with a new id',async()=>{
     const {onChanged}=open({folder:folders[0]});
     await waitEnabled('하위 폴더 만들기');
@@ -67,6 +55,8 @@ describe('tablet folder create and rename',()=>{
       return echo(body);
     });
     const {onClose}=open();
+    await waitEnabled('하위 폴더 만들기');
+    fireEvent.click(screen.getByRole('button',{name:'하위 폴더 만들기'}));
     fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:'중복'}});
     fireEvent.click(screen.getByRole('button',{name:'만들기'}));
     expect((await screen.findByRole('alert')).textContent).toContain('같은 위치에 같은 이름의 폴더가 있습니다.');
@@ -81,6 +71,8 @@ describe('tablet folder create and rename',()=>{
   it('starts a new operation when the name changes',async()=>{
     mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/baseline'))return baseline();throw new Error('연결 시간이 초과되었습니다.');});
     open();
+    await waitEnabled('하위 폴더 만들기');
+    fireEvent.click(screen.getByRole('button',{name:'하위 폴더 만들기'}));
     fireEvent.click(screen.getByRole('button',{name:'만들기'}));
     await screen.findByRole('alert');
     fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:'다른 이름'}});

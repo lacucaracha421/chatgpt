@@ -216,19 +216,19 @@ it("toggles the docked info panel with the button and i, with Escape closing onl
   expect(onClose).toHaveBeenCalledOnce();
 });
 
-it("ignores viewer shortcuts while typing in the character picker", async () => {
+it("ignores viewer shortcuts while typing in the info dock", async () => {
   const user = userEvent.setup();
   const onToggleFavorite = vi.fn();
   const onTrash = vi.fn();
   const onActiveIdChange = vi.fn();
   render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={onActiveIdChange} onClose={vi.fn()} onToggleFavorite={onToggleFavorite} onTrash={onTrash}
-    renderInfo={() => <p>info</p>} renderCharacterPicker={() => <input aria-label="캐릭터 찾기" />} />);
-  await user.click(screen.getByRole("button", { name: "캐릭터" }));
-  await user.type(screen.getByRole("textbox", { name: "캐릭터 찾기" }), "fi{ArrowRight}{Delete}");
+    renderInfo={() => <input aria-label="정보 편집" />} />);
+  await user.click(screen.getByRole("button", { name: "정보" }));
+  await user.type(screen.getByRole("textbox", { name: "정보 편집" }), "fi{ArrowRight}{Delete}");
   expect(onToggleFavorite).not.toHaveBeenCalled();
   expect(onTrash).not.toHaveBeenCalled();
   expect(onActiveIdChange).not.toHaveBeenCalled();
-  expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+  expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeInTheDocument();
 });
 
 it("pages with the mouse wheel: down = next, up = previous, one step per notch", () => {
@@ -492,10 +492,10 @@ it("keeps an overlay shown while the pointer rests on it, until the pointer leav
   }
 });
 
-it("keeps the overlay that holds Tab focus shown, and an open character panel keeps the top bar", () => {
+it("keeps the overlay that holds Tab focus shown", () => {
   vi.useFakeTimers();
   try {
-    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} renderCharacterPicker={() => <div>picker</div>} />);
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
     const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
     measureStage();
 
@@ -507,17 +507,6 @@ it("keeps the overlay that holds Tab focus shown, and an open character panel ke
 
     // Pointer activity drops the keyboard hold; the pointer is at the centre, so the bar goes.
     fireEvent.pointerMove(viewer, CENTRE);
-    expect(zoneState(viewer)).toEqual(NONE);
-
-    // A character panel stays open with the pointer elsewhere.
-    fireEvent.pointerMove(viewer, NEAR_TOP);
-    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
-    fireEvent.pointerMove(viewer, CENTRE);
-    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
-    expect(screen.getByText("picker")).toBeInTheDocument();
-    expect(zoneState(viewer).top).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
-    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
     expect(zoneState(viewer)).toEqual(NONE);
   } finally {
     vi.useRealTimers();

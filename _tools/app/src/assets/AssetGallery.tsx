@@ -76,6 +76,7 @@ type AssetGalleryProps = {
   onSelectAll?: () => void;
   onDeleteSelection?: () => void;
   onClearSelection?: () => void;
+  onBackgroundClick?: () => void;
   onAssignCharacter?: (asset?: AssetSummary) => void;
   onToggleFavorite?: (asset: AssetSummary) => void;
   /** Keyboard F can act on the current selection; tile hearts always act on one asset. */
@@ -93,7 +94,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onVideoDurationKnown, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onBackgroundClick = onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onVideoDurationKnown, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
@@ -443,7 +444,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
           && surface.offsetHeight > surface.clientHeight
           && event.clientY >= bounds.top + surface.clientHeight;
         if (clickedVerticalScrollbar || clickedHorizontalScrollbar) return;
-        if (!target.closest(".asset-gallery__asset, button, a, input, select, textarea, [contenteditable='true']")) onClearSelection?.();
+        if (!target.closest(".asset-gallery__asset, button, a, input, select, textarea, [contenteditable='true']")) onBackgroundClick?.();
       }}
       onKeyDown={(event) => {
         const focusedAsset = focusAssetId ? items.find((asset) => asset.id === focusAssetId) : null;

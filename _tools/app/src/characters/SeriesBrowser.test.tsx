@@ -622,7 +622,7 @@ it("keeps manual refresh available from the gallery context menu",async()=>{
   const item=await screen.findByRole("option",{name:"이미지 5.webp"});
   const calls=browse.mock.calls.length;
   await user.pointer({target:item,keys:"[MouseRight]"});
-  for (const name of ["좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
+  for (const name of ["FAULT", "작가 지정", "좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
     expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
   }
   await user.click(await screen.findByRole("menuitem",{name:"새로고침"}));
@@ -1308,7 +1308,9 @@ it("offers 이 캐릭터에서 빼기 in the viewer opened from a character, but
   const decide = vi.spyOn(api, "decide");
   await userEvent.dblClick(await screen.findByRole("option", { name: "이미지 5.webp" }));
   const exclude = await screen.findByRole("button", { name: "이 캐릭터에서 빼기" });
-  expect(screen.getByRole("button", { name: "캐릭터" })).toBeInTheDocument();
+  for (const name of ["캐릭터", "앨범", "이동"]) {
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  }
   expect(screen.getByRole("button", { name: "정보" })).toBeInTheDocument();
   await userEvent.click(exclude);
   await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", assetIds: ["image-5"], decision: "rejected" })));

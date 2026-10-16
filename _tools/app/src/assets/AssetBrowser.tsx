@@ -20,7 +20,6 @@ import { useArtistGateway, useArtistRevision } from "../artists/artistStore";
 import { AssignArtistDialog } from "../artists/AssignArtistDialog";
 import { useArtistScopeChrome } from "../artists/ArtistPage";
 import { isUnknownArtist } from "../artists/types";
-import { faultSelectionItem, useFaultGame } from "../games/FaultGame";
 import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
 import { useInfoPanelPreference } from "./useInfoPanelPreference";
@@ -33,7 +32,7 @@ import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
 import { visibleTileRect, type TileRect } from "../shared/viewer/useViewerMotion";
-import { AssetViewer, movableViewerFolders } from "./AssetViewer";
+import { AssetViewer } from "./AssetViewer";
 import { CharacterAssignToast, markAssignedTiles, type CharacterAssignNoticeState } from "./characterAssignNotice";
 import { SelectionBar } from "./SelectionBar";
 import { thumbnailUrl } from "./mediaUrl";
@@ -484,7 +483,6 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     }
     toggleFavorite(asset);
   };
-  const setSelectionFavorite = (favorite: boolean) => void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "좋아요를 변경하지 못했습니다.").then(changed => { if (changed) onMembershipChanged(); });
   const removeFromCollection = () => void (async () => {
     if (view.kind !== "collection") return;
     await runBatch(() => gateway.patchAssetCollections({
@@ -551,27 +549,6 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   })();
   // "기존 자산 열기"로 요청된 자산이 현재 페이지에 없으면 뷰어는 그 한 장만 보여 준다.
   const viewerItems = requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items;
-  const viewerFolders = useMemo(() => movableViewerFolders(classifications), [classifications]);
-  const addViewerAssetToAlbum = (asset: AssetSummary, albumId: string) => void (async () => {
-    try {
-      await gateway.patchAssetAlbums({ assetIds: [asset.id], addAlbumIds: [albumId], removeAlbumIds: [] });
-      refresh();
-      onMembershipChanged();
-      setMessage("앨범에 추가했습니다.");
-    } catch (error) {
-      setMessage(commandErrorMessage(error, "앨범에 추가하지 못했습니다."));
-    }
-  })();
-  const moveViewerAssetToFolder = (asset: AssetSummary, classificationId: string) => void (async () => {
-    try {
-      await gateway.setAssetClassification({ assetIds: [asset.id], classificationId });
-      refresh();
-      onMembershipChanged();
-      setMessage("폴더로 이동했습니다.");
-    } catch (error) {
-      setMessage(commandErrorMessage(error, "폴더로 이동하지 못했습니다."));
-    }
-  })();
   const trashViewerAsset = (asset: AssetSummary) => void (async () => {
     const index = viewerItems.findIndex((item) => item.id === asset.id);
     const next = index < 0 ? undefined : viewerItems[index + 1] ?? viewerItems[index - 1];
@@ -622,8 +599,6 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     const first = visibleItems[0];
     if (first) { viewerViewKeyRef.current = viewKey; setViewerAssetId(first.id); }
   } });
-  // FAULT: any gallery offers its selection.
-  const playFault = useFaultGame();
   const contextItems: ContextMenuItem[] = [
     ...(onReviewVideos && selectedAssets.length >= 2 && selectedAssets.length <= 100 && selectedAssets.every(asset => asset.media.kind === "video")
       ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: batchPending, onSelect: () => onReviewVideos([...selectedIds]) }]
@@ -636,8 +611,6 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 빼기", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [], removeAlbumIds: [view.albumId] })) }] : []),
     ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 빼기", disabled: batchPending, onSelect: removeFromCollection }] : []),
     ...(view.kind === "collection" && selectedIds.length === 1 ? [{ id: "cover", label: "대표 이미지로 지정", disabled: batchPending, onSelect: () => setCover(selectedIds[0]!) }] : []),
-    ...faultSelectionItem(playFault, selectedAssets),
-    ...(gateway.artists ? [{ id: "assign-artist", label: "작가 지정", disabled: batchPending, onSelect: () => setAssignOpen(true) }] : []),
     { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
     { id: "trash", label: "휴지통으로", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
@@ -707,7 +680,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
           const target = items.find((item) => item.id === id);
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
-        }} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+        }} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onBackgroundClick={() => { clearSelection(); setInspectorOpen(false); }} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   // One step, no shift: while the artist intro is still the placeholder, the screen already painted stays as it was
   // (inert, same element, so nothing remounts); with nothing painted yet, the loading skeleton shows instead of
   // a gallery whose intro would grow when the detail arrives.
@@ -733,7 +706,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       <div className="asset-browser__gallery">
         {shownResults}
         {artistScope?.panel}
-        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [...selectedIds] }) : undefined} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
+        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [...selectedIds] }) : undefined} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
@@ -753,12 +726,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       privacyMode={privacyMode}
       totalCount={viewerTotalCount}
       classifications={classifications}
-      albums={albums}
-      onAddToAlbum={addViewerAssetToAlbum}
-      folders={viewerFolders}
-      onMoveToFolder={moveViewerAssetToFolder}
       onSetVideoThumbnail={gateway.setVideoThumbnailFromFrame ? (asset, timeMs) => void setVideoThumbnailFromFrame(asset, timeMs) : undefined}
-      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [asset.id] }) : undefined} onAssign={(targets) => assignCharactersToAssets([asset.id], targets)} onClose={close} />}
       renderInfo={(asset) => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />}
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}
     />

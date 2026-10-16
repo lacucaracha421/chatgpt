@@ -919,6 +919,24 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
+  it("closes info on a grid background click while retaining the last asset during exit", async () => {
+    const user = userEvent.setup();
+    renderBrowser(createGateway({ items: [asset(0), asset(1)], nextCursor: null }));
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.keyboard("i");
+    const panel = screen.getByRole("complementary", { name: "자산 정보" });
+    await user.click(screen.getByRole("option", { name: "asset-1.png" }));
+    const preview = within(panel).getByRole("button", { name: "asset-1.png 감상 화면으로 열기" });
+    expect(preview).toBeVisible();
+
+    fireEvent.click(screen.getByRole("listbox", { name: "자산" }));
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    expect(panel).toContainElement(preview);
+    await waitFor(() => expect(preview).not.toBeInTheDocument());
+    await user.click(screen.getByRole("option", { name: "asset-0.png" }));
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+  });
+
   it("focuses on a single click and opens the viewer only on a double click", async () => {
     const user = userEvent.setup();
     renderBrowser(createGateway({ items: [asset(0), asset(1)], nextCursor: null }));
@@ -1051,7 +1069,7 @@ describe("AssetBrowser", () => {
     fireEvent.click(screen.getByRole("option", { name: "asset-1.png" }), { ctrlKey: true });
     fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
     expect(screen.getByRole("menuitem", { name: "2개 선택" })).toBeInTheDocument();
-    for (const name of ["좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
+    for (const name of ["FAULT", "작가 지정", "좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
       expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
     }
     expect(screen.getByRole("menuitem", { name: "정보 열기" })).toBeInTheDocument();
@@ -1098,8 +1116,8 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
-    await user.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "좋아요 켜기" }));
-    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
+    expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "좋아요 끄기" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "선택 해제" }));
     expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
   });
@@ -1841,20 +1859,19 @@ describe("plain-folder character picker", () => {
     characterGroups: [{ id: "group", name: "야니네코", seriesId: "series", revision: 1, targetIds: [], extrasTargetId: groupExtras.id }],
   };
 
-  async function openPicker(source: "selection" | "viewer") {
+  async function openPicker(source: "selection" | "keyboard") {
     const tile = await screen.findByRole("option", { name: "asset-0.png" });
     if (source === "selection") {
       fireEvent.click(tile, { ctrlKey: true });
       fireEvent.click(screen.getByRole("button", { name: "캐릭터 지정" }));
     } else {
-      fireEvent.doubleClick(tile);
-      const viewer = await screen.findByRole("dialog", { name: "asset-0.png" });
-      fireEvent.click(within(viewer).getByRole("button", { name: "캐릭터" }));
+      fireEvent.click(tile);
+      fireEvent.keyDown(tile, { key: "c" });
     }
     return screen.findByRole("listbox", { name: "캐릭터에 넣기" });
   }
 
-  it.each(["selection", "viewer"] as const)("scopes the %s picker to the nearest series and assigns the extras-only group's 기타", async source => {
+  it.each(["selection", "keyboard"] as const)("scopes the %s picker to the nearest series and assigns the extras-only group's 기타", async source => {
     vi.spyOn(characterApi, "characterAssignSuggestions").mockResolvedValue([]);
     const move = vi.spyOn(characterApi, "moveAssetsToCharacters").mockResolvedValue(1);
     const ensure = vi.spyOn(characterExtrasApi, "ensure");

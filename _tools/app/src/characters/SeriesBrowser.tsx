@@ -16,7 +16,7 @@ import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetS
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { AssetGallery, galleryFirstScreen, tileHasThumbnail, tileThumbnailUrl } from "../assets/AssetGallery";
-import { AssetViewer, movableViewerFolders } from "../assets/AssetViewer";
+import { AssetViewer } from "../assets/AssetViewer";
 import { AssetInspector } from "../assets/AssetInspector";
 import { AssetInfoPanel } from "../assets/AssetInfoPanel";
 import { AssetToolbar } from "../assets/AssetToolbar";
@@ -35,7 +35,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
-import { collectPages, faultAssets, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
+import { collectPages, faultAssets, useFaultGame, type FaultScope } from "../games/FaultGame";
 import { CharacterRegistry, characterDraft, needsFirstReferenceSetup, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterTaggerTags } from "./CharacterTaggerTags";
@@ -720,7 +720,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     onMembershipChanged?.();
   }, "휴지통 이동을 취소하지 못했습니다.");
   const viewerItems = externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items;
-  const viewerFolders = movableViewerFolders(classifications);
   const trashViewerAsset = (asset: AssetSummary) => {
     const index = viewerItems.findIndex(item => item.id === asset.id);
     const next = index < 0 ? undefined : viewerItems[index + 1] ?? viewerItems[index - 1];
@@ -750,8 +749,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ...libraryContextItems({ count: selectedIds.length, busy, albums,
       sourceUrls: page.items.filter(asset => selection.ids.has(asset.id)).map(asset => asset.sourceUrl), onMessage: setMessage,
       onAlbum: id => void batch(async () => { await gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] }); onMembershipChanged?.(); }, "앨범에 추가하지 못했습니다.") }),
-    ...faultSelectionItem(playFault, selectedAssets),
-    ...(gateway.artists ? [{ id: "assign-artist", label: "작가 지정", disabled: busy || !selectedIds.length, onSelect: () => setAssignArtistOpen(true) }] : []),
     { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
     { id: "refresh", label: "새로고침", onSelect: refresh },
     { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || !selectedIds.length, onSelect: trashSelection },
@@ -784,7 +781,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="맞음 · 아님을 기다리는 이미지를 하나씩 확인" onClick={() => setConfirmOpen(true)}>확인 {confirmCount.toLocaleString()}</Button>
     : null;
   const selectionView: AssetView = { kind: "classification", classificationId: series.classificationId, ...(targetId ? { characterId: targetId } : {}), ...(currentGroup ? { characterGroupId: currentGroup.id } : {}) };
-  const setSelectionFavorite = (favorite: boolean) => setAssetsFavorite(selectedIds, favorite);
   const characterExtraActions = currentExtras
     ? <Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} aria-description="한 번에 최대 200장" onClick={() => excludeFromCharacter(selectedIds)}>기타에서 빼기</Button>
     : characterTarget ? selectedReferenceCount > 0
@@ -955,7 +951,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         hasNextPage={Boolean(page.nextCursor) && !loading && !error && pageScope === scope} onLoadNextPage={() => void load(page.nextCursor)}
         onSelectionGesture={(a,gesture) => picking ? choose(a.id) : setSelection(old => applySelectionGesture(old, ids, a.id, gesture))}
         onFocusAsset={picking ? undefined : focusAssetOnly}
-        onSelectAll={picking ? undefined : () => setSelection(old => selectAllLoaded(old, ids))} onClearSelection={() => picking ? setPicking({ ...picking, ids: [] }) : setSelection(emptySelection())}
+        onSelectAll={picking ? undefined : () => setSelection(old => selectAllLoaded(old, ids))} onClearSelection={() => picking ? setPicking({ ...picking, ids: [] }) : setSelection(emptySelection())} onBackgroundClick={() => { if (picking) setPicking({ ...picking, ids: [] }); else { setSelection(emptySelection()); setInspectorOpen(false); } }}
         onToggleFavorite={picking ? undefined : toggleFavorite} onToggleFocusedFavorite={picking ? undefined : toggleFocusedFavorite}
         onDeleteSelection={picking ? undefined : trashSelection} onAssignCharacter={picking ? undefined : openCharacterPicker}
         onToggleInfo={picking ? undefined : () => setInspectorOpen(open => !open)}
@@ -973,7 +969,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           scopeSeriesId={series.classificationId} currentTargetId={current?.id} onCreate={!current && !currentGroup && !excludedOnly ? nameToCreate => createManualCharacter(nameToCreate) : undefined}
           onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />}
         extraActions={characterExtraActions}
-        onFavorite={setSelectionFavorite}
         onTrash={trashSelection}
         onClearSelection={() => setSelection(emptySelection())}
       />}
@@ -1017,16 +1012,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     <AssetViewer originRect={viewerOriginRect.current} items={viewerItems} activeId={viewer} onActiveIdChange={setViewer} onClose={() => { viewerOriginRect.current = undefined; setViewer(null); }} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())}
       onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset}
       totalCount={page.totalCount + viewerItems.length - page.items.length} classifications={classifications}
-      albums={albums} onAddToAlbum={(asset, albumId) => void (async () => {
-        try { await gateway.patchAssetAlbums({ assetIds: [asset.id], addAlbumIds: [albumId], removeAlbumIds: [] }); updateAssetSummary(await gateway.getAsset(asset.id)); onMembershipChanged?.(); setTrashUndo(null); setMessage("앨범에 추가했습니다."); }
-        catch (e) { setTrashUndo(null); setMessage(commandErrorMessage(e, "앨범에 추가하지 못했습니다.")); }
-      })()}
-      folders={viewerFolders} onMoveToFolder={(asset, classificationId) => void (async () => {
-        try { await gateway.setAssetClassification({ assetIds: [asset.id], classificationId }); refresh(); onMembershipChanged?.(); setTrashUndo(null); setMessage("폴더로 이동했습니다."); }
-        catch (e) { setTrashUndo(null); setMessage(commandErrorMessage(e, "폴더로 이동하지 못했습니다.")); }
-      })()}
-      renderCharacterPicker={(asset, close) => <CharacterAssignPicker assetIds={[asset.id]} targets={targets} extras={seriesExtras} ensureExtras={extrasApi.ensure} groups={groups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={busy}
-        scopeSeriesId={series.classificationId} currentTargetId={current?.id} onAssign={chosen => assignCharacters(chosen, [asset.id])} onClose={close} />}
       renderInfo={asset => <AssetInfoPanel preview={false} assets={[asset]} classifications={classifications} privacyMode={privacyMode} onOpenArtist={creatorKey => onNavigate({ kind: "creator", creatorKey })} onAssetUpdated={updateAssetSummary} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />}
       renderExtraActions={viewerExtraActions}
       onNearEnd={page.nextCursor && !loading && !error && pageScope === scope ? () => void load(page.nextCursor) : undefined} />

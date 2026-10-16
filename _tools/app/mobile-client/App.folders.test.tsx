@@ -223,9 +223,10 @@ describe('folder subtree',()=>{
 });
 
 describe('folder management entry points',()=>{
-  it('offers 새 폴더 and 폴더 관리 only when the server declares the authority identity',async()=>{
+  it('keeps root creation hidden and offers folder management only with authority',async()=>{
     render(<App/>);
-    expect(await screen.findByRole('button',{name:'새 폴더'})).toBeTruthy();
+    await screen.findByRole('button',{name:/^혼자/});
+    expect(screen.queryByRole('button',{name:'새 폴더'})).toBeNull();
     fireEvent.click(await screen.findByRole('button',{name:/^혼자/}));await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'더보기'}));expect(screen.getByRole('button',{name:'폴더 관리'})).toBeTruthy();
     cleanup();mocks.api.mockImplementation(server(2,{authority:null}));
@@ -234,30 +235,6 @@ describe('folder management entry points',()=>{
     expect(screen.queryByRole('button',{name:'새 폴더'})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:/^혼자/}));await screen.findByText('tile-a1');
     expect(screen.queryByRole('button',{name:'폴더 관리'})).toBeNull();
-  });
-  it('creates a folder from the library root and shows it straight away',async()=>{
-    // The server's own list includes the new folder once the command is accepted.
-    const created:Record<string,unknown>[]=[];
-    mocks.api.mockImplementation(async(path:string,signal:unknown,body:Record<string,unknown>)=>{
-      if(path==='/v1/classifications/authority/commands'){
-        const folder={id:body.classificationId,kind:'root',name:body.name,parentId:null,iconKey:null,colorKey:null,deleted:false,entityRevision:1};
-        created.push({id:folder.id,name:folder.name,asset_count:0,total_asset_count:0,parent_id:null});
-        return{classification:folder};
-      }
-      if(path.startsWith('/v1/library/classifications'))return{...folderList(2),items:[...folderList(2).items,...created]};
-      return server(2)(path);
-    });
-    render(<App/>);
-    fireEvent.click(await screen.findByRole('button',{name:'새 폴더'}));
-    fireEvent.change(await screen.findByLabelText('폴더 이름'),{target:{value:'새로 만든'}});
-    await act(async()=>fireEvent.click(screen.getByRole('button',{name:'만들기'})));
-    expect((await screen.findByRole('button',{name:/^새로 만든/})).getAttribute('aria-label')).toBe('새로 만든, 0개');
-    const command=mocks.api.mock.calls.find(call=>call[0]==='/v1/classifications/authority/commands')!;
-    expect(command[2]).toMatchObject({commandType:'createClassification',kind:'root',parentId:null,name:'새로 만든',epoch:1});
-    expect(command[3]).toBe('PUT');
-    // The list is read again, and the folder is still there.
-    await waitFor(()=>expect(mocks.api.mock.calls.filter(call=>call[0]==='/v1/library/classifications?subtree_counts=1').length).toBeGreaterThan(1));
-    expect(screen.getByRole('button',{name:/^새로 만든/})).toBeTruthy();
   });
   it('renames the open folder and the title follows',async()=>{
     let name='혼자';

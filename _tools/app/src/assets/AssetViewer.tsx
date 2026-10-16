@@ -5,13 +5,10 @@ import {
   ArrowTopRightOnSquareIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  FolderArrowDownIcon,
   InformationCircleIcon,
   LanguageIcon,
-  RectangleStackIcon,
   HeartIcon,
   TrashIcon,
-  UserIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -29,7 +26,7 @@ import { artistHandle } from "../artists/format";
 import { useAssetArtist } from "../artists/artistStore";
 import type { ArtistSummary } from "../artists/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
-import type { AlbumEntry, AssetSummary, ClassificationEntry } from "../library/types";
+import type { AssetSummary, ClassificationEntry } from "../library/types";
 import { breadcrumbPath } from "../shared/breadcrumb";
 import { displayDate, displayTime } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
@@ -37,7 +34,6 @@ import { ContextMenu } from "../shared/ui/ContextMenu";
 import { IconButton } from "../shared/ui/IconButton";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
-import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
 import { popToggle } from "../shared/motion/togglePop";
@@ -67,11 +63,6 @@ type AssetViewerProps = {
   mediaSource?: "library" | "vault";
   totalCount?: number | null;
   classifications?: ClassificationEntry[];
-  albums?: AlbumEntry[];
-  onAddToAlbum?: (asset: AssetSummary, albumId: string) => void;
-  folders?: ClassificationEntry[];
-  onMoveToFolder?: (asset: AssetSummary, folderId: string) => void;
-  renderCharacterPicker?: (asset: AssetSummary, close: () => void) => ReactNode;
   renderInfo?: (asset: AssetSummary) => ReactNode;
   /** Context actions of the place the viewer was opened from (a character's 이 캐릭터에서 빼기). */
   renderExtraActions?: (asset: AssetSummary) => ReactNode;
@@ -85,11 +76,6 @@ type AssetViewerProps = {
 /** Right-click actions on the viewer's video: only rendered when there is one to offer. */
 function ViewerMediaContextMenu({ enabled, onSetThumbnail, children }: { enabled: boolean; onSetThumbnail: () => void; children: ReactElement }) {
   return enabled ? <ContextMenu items={[{ id: "frame-thumbnail", label: "이 프레임을 썸네일로", onSelect: onSetThumbnail }]}>{children}</ContextMenu> : children;
-}
-
-/** Folders an asset may be moved to from the viewer: everything except the 오리지널 root. */
-export function movableViewerFolders(classifications: ClassificationEntry[]): ClassificationEntry[] {
-  return classifications.filter(entry => !(entry.parentId === null && (entry.id === "lakomics-originals" || entry.name === "오리지널")));
 }
 
 export function AssetViewer({
@@ -106,11 +92,6 @@ export function AssetViewer({
   mediaSource = "library",
   totalCount,
   classifications,
-  albums,
-  onAddToAlbum,
-  folders,
-  onMoveToFolder,
-  renderCharacterPicker,
   renderInfo,
   renderExtraActions,
   onSetVideoThumbnail,
@@ -132,7 +113,6 @@ export function AssetViewer({
   const [replacementFailed, setReplacementFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [folderPath, setFolderPath] = useState("");
-  const [characterOpen, setCharacterOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
   const [textSelection, setTextSelection] = useState<{ assetId: string; index: number } | null>(null);
@@ -170,11 +150,9 @@ export function AssetViewer({
   const favoriteButtonRef = useRef<HTMLButtonElement>(null);
   const chromeTimerRef = useRef<number | null>(null);
   // Overlays show only while the pointer is in their own zone (`viewerZones.ts`), or while held: pointer on the
-  // overlay, keyboard focus in it, an open menu or character panel (top bar), an active strip drag.
+  // overlay, keyboard focus in it, an open menu (top bar), an active strip drag.
   const pointerZonesRef = useRef<ViewerZoneSet>(NO_VIEWER_ZONES);
   const pointerOverRef = useRef({ top: false, left: false, right: false });
-  const characterOpenRef = useRef(false);
-  characterOpenRef.current = characterOpen;
   const keyboardFocusRef = useRef(false);
   const [zones, setZones] = useState<ViewerZoneSet>(NO_VIEWER_ZONES);
   const viewerOpen = Boolean(asset);
@@ -221,7 +199,7 @@ export function AssetViewer({
   const refreshZones = useCallback(() => {
     const root = chromeRef.current;
     const focusIn = (selector: string) => keyboardFocusRef.current && Boolean(root?.querySelector(selector)?.contains(document.activeElement));
-    const menuOpen = characterOpenRef.current || Boolean(root?.querySelector('.asset-viewer__topbar .ui-menu__trigger[data-state="open"]'));
+    const menuOpen = Boolean(root?.querySelector('.asset-viewer__topbar .ui-menu__trigger[data-state="open"]'));
     const next = viewerZonesShown(pointerZonesRef.current, {
       top: pointerOverRef.current.top || menuOpen || focusIn(".asset-viewer__topbar"),
       left: pointerOverRef.current.left || focusIn(".asset-viewer__edge--left"),
@@ -258,7 +236,6 @@ export function AssetViewer({
     if (!viewerOpen) {
       setTextOpen(false);
       setInfoOpen(false);
-      setCharacterOpen(false);
       openedAssetIds.current.clear();
       nearEndLengthRef.current = null;
       return;
@@ -277,7 +254,6 @@ export function AssetViewer({
     setImageFailed(false);
     setReplacementFailed(false);
     setVideoPlaying(false);
-    setCharacterOpen(false);
     setZoom(current => current.scale === 1 && current.x === 0 && current.y === 0 ? current : { scale: 1, x: 0, y: 0 });
   }, [asset?.id]);
 
@@ -341,14 +317,11 @@ export function AssetViewer({
     onPointerEnter: () => { pointerOverRef.current[zone] = true; refreshZones(); },
     onPointerLeave: () => { pointerOverRef.current[zone] = false; revealChrome(); },
   });
-  const albumItems = albums?.map((album) => ({ id: album.id, label: album.name, onSelect: () => onAddToAlbum?.(asset, album.id) })) ?? [];
-  const folderItems = folders?.map((folder) => ({ id: folder.id, label: breadcrumbPath(folder, folders), onSelect: () => onMoveToFolder?.(asset, folder.id) })) ?? [];
-  const closeCharacterPicker = () => setCharacterOpen(false);
   // Mouse wheel pages through the assets: down = next, up = previous. A notched wheel steps once per
   // notch; a trackpad's small deltas accumulate, and a short cooldown keeps one flick to one step.
   const zoomable = asset.media.kind === "image" && !privacyMode && !imageFailed;
   wheelHandlerRef.current = (event) => {
-    if (event.target instanceof HTMLElement && event.target.closest(".asset-viewer__character-popover, .ui-menu")) return;
+    if (event.target instanceof HTMLElement && event.target.closest(".ui-menu")) return;
     if (event.ctrlKey) {
       event.preventDefault();
       if (!zoomable || !stageRef.current) return;
@@ -396,7 +369,7 @@ export function AssetViewer({
         setInfoOpen(false);
         return;
       }
-      // Typing in a field inside the viewer (the character picker search) must not trigger viewer shortcuts.
+      // Typing in a field inside the viewer must not trigger viewer shortcuts.
       if (typesText(event.target)) return;
       if (event.key.toLowerCase() === "t" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.repeat && !event.defaultPrevented && hasText && textCurrent) {
         event.preventDefault(); toggleText(); revealChrome(); return;
@@ -447,7 +420,7 @@ export function AssetViewer({
       <div data-viewer-backdrop className="asset-viewer__backdrop" />
       <div className={`asset-viewer__stage${showFilmstrip ? " asset-viewer__stage--filmstrip" : ""}${seekable ? " asset-viewer__stage--video" : ""}`} ref={attachStage}
         onPointerDown={(event) => {
-          if (zoom.scale === 1 || event.button !== 0 || (event.target instanceof HTMLElement && event.target.closest("button, a, input, .ui-menu, .asset-viewer__character-popover"))) return;
+          if (zoom.scale === 1 || event.button !== 0 || (event.target instanceof HTMLElement && event.target.closest("button, a, input, .ui-menu"))) return;
           setTextGesture(true);
           panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
           event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -472,15 +445,9 @@ export function AssetViewer({
             </span>
             <span className="asset-viewer__spacer" />
             {hasText && textCurrent && <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${textOpen ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="번역" aria-pressed={textOpen} onClick={toggleText}><LanguageIcon aria-hidden="true" /><span>번역</span></Button>}
-            {renderCharacterPicker && <span className="asset-viewer__action-anchor">
-              <Button className="asset-viewer__vbtn asset-viewer__vbtn--text" variant="ghost" aria-label="캐릭터" aria-expanded={characterOpen} aria-haspopup="dialog" onClick={() => setCharacterOpen((open) => !open)}><UserIcon aria-hidden="true" /><span>캐릭터</span></Button>
-              {characterOpen && <div className="asset-viewer__character-popover" onPointerDown={(event) => event.stopPropagation()}>{renderCharacterPicker(asset, closeCharacterPicker)}</div>}
-            </span>}
             {renderExtraActions?.(asset)}
-            {albums && onAddToAlbum && <Menu label="앨범" triggerClassName="asset-viewer__vbtn asset-viewer__vbtn--text" disabled={albums.length === 0} trigger={<><RectangleStackIcon aria-hidden="true" /><span>앨범</span></>} items={albumItems} />}
             {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}
             {onToggleFavorite && <IconButton className="asset-viewer__vbtn asset-viewer__favorite" tone="heart" pop label="좋아요" icon={HeartIcon} activeIcon={HeartSolidIcon} active={asset.favorite} data-toggle-key={asset.id} ref={favoriteButtonRef} onClick={() => onToggleFavorite(asset)} />}
-            {folders && onMoveToFolder && <Menu label="이동" triggerClassName="asset-viewer__vbtn" trigger={<FolderArrowDownIcon aria-hidden="true" />} items={folderItems} />}
             {onExport && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
             {onTrash && <Button className="asset-viewer__vbtn" size="icon" variant="danger" aria-label="휴지통으로" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}
             {renderInfo && <Button className={`asset-viewer__vbtn${infoOpen ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="정보" aria-pressed={infoOpen} onClick={() => setInfoOpen((open) => !open)}><InformationCircleIcon aria-hidden="true" /></Button>}
