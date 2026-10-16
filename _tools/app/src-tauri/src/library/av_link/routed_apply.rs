@@ -25,14 +25,20 @@ const DONE_KEEP_DAYS: i64 = 7;
 /// row whose user-initiated apply is still talking to the server.
 static APPLYING: Mutex<std::collections::BTreeSet<String>> =
     Mutex::new(std::collections::BTreeSet::new());
-struct ApplyGuard(String);
+pub(super) struct ApplyGuard(String);
 impl ApplyGuard {
-    fn claim(key: String) -> Option<Self> {
-        APPLYING
+    pub(super) fn claim(key: String) -> Option<Self> {
+        let inserted = APPLYING
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key.clone())
-            .then_some(Self(key))
+            .insert(key.clone());
+        // Build the guard only for a winning claim, and only after the lock is released:
+        // dropping a guard locks `APPLYING` again and removes the owner's key.
+        if inserted {
+            Some(Self(key))
+        } else {
+            None
+        }
     }
 }
 impl Drop for ApplyGuard {

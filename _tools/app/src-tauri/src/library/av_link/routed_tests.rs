@@ -1748,3 +1748,33 @@ fn migration_never_puts_invalid_request_ids_in_action_urls() {
         .iter()
         .all(|(method, _, _)| method == "GET"));
 }
+
+#[test]
+fn a_cycle_that_meets_a_running_apply_skips_it_and_keeps_its_claim() {
+    use super::routed_apply::ApplyGuard;
+    let (_temp, library, _status) = routed(json!({"works":[]}));
+    library
+        .apply_av_link_routed_with(&item_server(ID, json!([])), ID, request_new())
+        .unwrap();
+    // The user's apply is still on its way out when the background cycle looks at the row.
+    let key = format!("{}|{ID}", library.root().display());
+    let running = ApplyGuard::claim(key.clone()).expect("the row is free");
+    let (done, finished) = std::sync::mpsc::channel();
+    let cycle = library.clone();
+    std::thread::spawn(move || {
+        let server = item_server(ID, json!([]));
+        let _ = done.send(cycle.resume_av_inbox_applies(&server, 5_000).is_ok());
+    });
+    let outcome = finished.recv_timeout(std::time::Duration::from_secs(10));
+    if outcome != Ok(true) {
+        // A deadlocked claim lock would also hang this test's own drop.
+        std::mem::forget(running);
+        panic!("the cycle must skip a claimed row instead of waiting on the claim lock");
+    }
+    assert!(
+        ApplyGuard::claim(key.clone()).is_none(),
+        "skipping must not release the running apply's claim"
+    );
+    drop(running);
+    assert!(ApplyGuard::claim(key).is_some(), "released when the apply ends");
+}
