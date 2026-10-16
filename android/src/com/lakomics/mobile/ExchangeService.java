@@ -58,6 +58,10 @@ final class ExchangeService {
     /** One transfer as this device sees it. */
     private static final class Row {
         String id, batchId, name, peerId, peer = "", state, code = "", sha, hint, uri, created;
+        /** A send moving over the LAN directly: "lan" or "tailscale"; null on the server path. */
+        String route;
+        /** The receiver was reached directly at least once, so a cancel is passed on to it. */
+        boolean lanTried;
         /** 폴더 보내기: the temporary zip this send uploads, deleted once the send is settled. */
         String zip;
         int skipped;
@@ -106,6 +110,11 @@ final class ExchangeService {
     private JSONArray lanPeers = new JSONArray();
     private String lanScope = "", reportedLan = "";
     private long lanUnsupportedUntil;
+    /** Direct sends the server never hears of: kept locally for the server's 7-day history, newest last. */
+    private JSONArray directSent = new JSONArray();
+    private LanSender lanSender;
+    private LanSender.Memo lanMemo = new LanSender.Memo(System::currentTimeMillis);
+    private static final int DIRECT_HISTORY = 200;
     private boolean recoveryReady;
     private final Set<String> directReceiving = new HashSet<>();
     private final Object publication = new Object();
@@ -123,6 +132,7 @@ final class ExchangeService {
         ledger = ExchangeTransfer.Ledger.decode(preferences.getString("ledger", null));
         if (ledger.prune(System.currentTimeMillis())) saveLedger();
         restoreSends();
+        loadDirectSent();
         sweepZips();
         // Before any new receive: the downloads worker runs one task at a time.
         try { downloads.execute(() -> {
@@ -227,6 +237,8 @@ final class ExchangeService {
     void reset() {
         synchronized (this) {
             closeLan(); lanPeers = new JSONArray(); lanScope = ""; reportedLan = ""; lanUnsupportedUntil = 0;
+            lanSender = null; lanMemo = new LanSender.Memo(System::currentTimeMillis); directSent = new JSONArray();
+            preferences.edit().remove("direct-sent").commit();
             preferences.edit().remove("lan-peers").remove("lan-scope").commit();
             epoch++;
             stopRefreshRetry();
@@ -878,6 +890,9 @@ final class ExchangeService {
             }
             // While the source is still readable: the timeline keeps showing it after the send.
             thumbnailOf(row.id, row.uri, row.name);
+            // Same transfer id on every route: the receiver's ledger dedupes a fallback after a direct attempt.
+            if (sendDirect(connection, row, resolver, uri)) return;
+            if (row.cancelled) return;
             JSONObject body = new JSONObject().put("transferId", row.id).put("batchId", row.batchId).put("toDevice", row.peerId)
                     .put("fileName", row.name).put("sizeBytes", row.size).put("sha256", row.sha);
             if (row.hint != null && row.hint.matches("[A-Za-z0-9!#$&^_.+-]{1,63}/[A-Za-z0-9!#$&^_.+-]{1,63}")) body.put("contentTypeHint", row.hint);
@@ -908,6 +923,142 @@ final class ExchangeService {
             String reason = failureCode(e);
             if (Arrays.asList("sizeMismatch", "transferGone", "transferIdReused", "uploadMissing").contains(reason)) row.freshId = true;
             fail(row, reason, () -> enqueueUpload(row));
+        }
+    }
+
+    private static final String HINT = "[A-Za-z0-9!#$&^_.+-]{1,63}/[A-Za-z0-9!#$&^_.+-]{1,63}";
+
+    /**
+     * Try the receiver directly (LAN, then Tailscale) before the server. True when the send is settled
+     * without the server: delivered, ended by the receiver, or cancelled here. False hands the same
+     * transfer id to the server path; a peer without LAN info costs nothing.
+     */
+    private boolean sendDirect(JSONObject connection, Row row, ContentResolver resolver, Uri uri) throws Exception {
+        LanSender.Peer peer = lanTarget(connection, row.peerId);
+        if (peer == null) return false;
+        LanSender sender = lanSender();
+        if (sender == null) return false;
+        LanSender.Job job = new LanSender.Job(row.id, row.batchId, deviceId(), row.name, row.size, row.sha,
+                row.hint != null && row.hint.matches(HINT) ? row.hint : null);
+        LanSender.Outcome outcome;
+        try {
+            outcome = sender.send(peer, job, () -> resolver.openInputStream(uri), (done, total) -> { row.bytes = done; changed(); }, () -> row.cancelled,
+                    kind -> { synchronized (this) { row.route = kind; row.lanTried = true; row.bytes = 0; } update(row, "uploading", ""); });
+        } catch (LanSender.Local local) {
+            synchronized (this) { row.route = null; }
+            throw new UserError(local.code);
+        }
+        switch (outcome.kind) {
+            case SAVED:
+                finishDirect(row, outcome.route);
+                return true;
+            case PEER_CANCELLED:
+                synchronized (this) { row.route = null; }
+                finishSend(row, "cancelled");
+                return true;
+            case CANCELLED:
+                return true;
+            default:
+                android.util.Log.i("LakomicsExchange", "Direct send fell back to the server: " + outcome.reason);
+                synchronized (this) { row.route = null; row.bytes = 0; }
+                if (outcome.refresh) requestRefresh(true);
+                if (!row.cancelled) update(row, "preparing", "");
+                return false;
+        }
+    }
+
+    /** The receiver's published LAN info for `peerId`, or null (no LAN info, revoked, unknown): the server path then runs as before. */
+    private LanSender.Peer lanTarget(JSONObject connection, String peerId) {
+        try {
+            if (peerId == null || peerId.equals(deviceId())) return null;
+            JSONArray source;
+            synchronized (this) { source = devices.length() > 0 ? devices : lanPeers; }
+            if (source.length() == 0 && lanScope(connection).equals(preferences.getString("lan-scope", "")))
+                source = new JSONArray(preferences.getString("lan-peers", "[]"));
+            for (int i = 0; i < source.length(); i++) {
+                JSONObject device = source.optJSONObject(i);
+                if (device == null || !peerId.equals(device.optString("deviceId")) || device.optBoolean("self")
+                        || device.optBoolean("revoked") || !device.isNull("revokedAt")) continue;
+                JSONObject lan = device.optJSONObject("lan");
+                JSONArray listed = lan == null ? null : lan.optJSONArray("addresses");
+                if (listed == null) return null;
+                List<LanSender.Address> addresses = new ArrayList<>();
+                for (int a = 0; a < listed.length(); a++) {
+                    JSONObject address = listed.optJSONObject(a);
+                    if (address != null) addresses.add(new LanSender.Address(address.optString("kind"), address.optString("ip")));
+                }
+                return new LanSender.Peer(peerId, lan.optString("certSha256"), lan.optInt("port", 0), addresses);
+            }
+        } catch (Exception unreadable) { android.util.Log.w("LakomicsExchange", "LAN peer unreadable", unreadable); }
+        return null;
+    }
+
+    /** The sender needs our own identity as the client certificate; without one every send uses the server. */
+    private LanSender lanSender() {
+        LanIdentity identity;
+        synchronized (this) { if (lanSender != null) return lanSender; identity = lanIdentity; }
+        try { if (identity == null) identity = LanIdentity.load(deviceId()); }
+        catch (Exception unavailable) { android.util.Log.w("LakomicsExchange", "LAN send unavailable", unavailable); return null; }
+        synchronized (this) {
+            if (lanSender == null) lanSender = new LanSender(new LanSender.Tls(identity), lanMemo);
+            return lanSender;
+        }
+    }
+
+    /** Best effort and off the caller's thread: the receiver drops its part and refuses the id from now on. */
+    private void cancelDirectPeer(Row row) {
+        final String id = row.id, peerId = row.peerId;
+        // Its own short-lived thread: an unreachable receiver can take several seconds and must not stall refreshes or sends.
+        Thread thread = new Thread(() -> {
+            try {
+                JSONObject connection = connection();
+                LanSender sender = lanSender();
+                LanSender.Peer peer = connection == null || sender == null ? null : lanTarget(connection, peerId);
+                if (peer != null) sender.cancel(peer, id);
+            } catch (Exception ignored) { /* The receiver's own cancel mark and the server delete still apply. */ }
+        }, "lakomics-exchange-lan-cancel");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Delivered without the server: the row leaves the live list for the local 7-day history. */
+    private void finishDirect(Row row, String route) {
+        synchronized (this) {
+            row.state = "delivered"; row.code = ""; row.attempts = 0; row.route = route; row.bytes = Math.max(0, row.size);
+            outgoing.remove(row.id);
+            try {
+                directSent.put(new JSONObject().put("id", row.id).put("batchId", row.batchId).put("name", row.name).put("size", row.size)
+                        .put("peer", row.peer).put("peerId", row.peerId).put("route", route).put("created", row.created == null ? "" : row.created)
+                        .put("at", System.currentTimeMillis()));
+            } catch (JSONException ignored) {}
+            pruneDirectSent();
+            saveSends();
+        }
+        release(row);
+        discard(row);
+        changed();
+    }
+
+    /** Called with the service monitor held: drops entries older than the server's history and keeps the newest 200. */
+    private void pruneDirectSent() {
+        long now = System.currentTimeMillis();
+        List<JSONObject> keep = new ArrayList<>();
+        for (int i = 0; i < directSent.length(); i++) {
+            JSONObject entry = directSent.optJSONObject(i);
+            long at = entry == null ? 0 : entry.optLong("at", 0);
+            if (entry != null && ExchangeTransfer.uuid(entry.optString("id")) && now - at <= ExchangeTransfer.LEDGER_MILLIS && at <= now + 86_400_000L) keep.add(entry);
+        }
+        JSONArray next = new JSONArray();
+        for (int i = Math.max(0, keep.size() - DIRECT_HISTORY); i < keep.size(); i++) next.put(keep.get(i));
+        directSent = next;
+        preferences.edit().putString("direct-sent", next.toString()).apply();
+    }
+
+    private void loadDirectSent() {
+        synchronized (this) {
+            try { directSent = new JSONArray(preferences.getString("direct-sent", "[]")); }
+            catch (JSONException damaged) { directSent = new JSONArray(); }
+            pruneDirectSent();
         }
     }
 
@@ -1003,6 +1154,7 @@ final class ExchangeService {
         }
         if (lanFile(id, ".json").exists()) synchronized (this) { writeLanFile(lanFile(id, ".cancel"), new byte[0]); }
         if (row != null) row.cancelled = true;
+        if (row != null && !row.incoming && row.lanTried) cancelDirectPeer(row);
         JSONObject connection = connection();
         if (connection != null) {
             // A row the server never created answers 404, which is the same outcome.
@@ -1014,6 +1166,14 @@ final class ExchangeService {
                 if (row.incoming) incoming.remove(id);
                 else { outgoing.remove(id); release(row); discard(row); saveSends(); }
             }
+            // A delivered direct send is only a local history row: removing it needs nothing from the server.
+            boolean removed = false;
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < directSent.length(); i++) {
+                JSONObject entry = directSent.optJSONObject(i);
+                if (entry != null && id.equals(entry.optString("id"))) removed = true; else if (entry != null) kept.put(entry);
+            }
+            if (removed) { directSent = kept; preferences.edit().putString("direct-sent", kept.toString()).apply(); }
         }
         if (row != null && row.incoming) new File(new File(context.getCacheDir(), "exchange"), id + ".part").delete();
         requestRefresh(false);
@@ -1328,12 +1488,15 @@ final class ExchangeService {
     }
 
     private static JSONObject rowView(Row row) throws JSONException {
-        return new JSONObject().put("transferId", row.id).put("batchId", row.batchId).put("fileName", row.name)
+        JSONObject view = new JSONObject().put("transferId", row.id).put("batchId", row.batchId).put("fileName", row.name)
                 .put("sizeBytes", row.size).put("bytes", row.bytes).put("peer", row.peer).put("state", row.state)
                 .put("code", row.code).put("createdAt", row.created == null ? "" : row.created)
                 .put("skipped", row.skipped).put("retryable", row.incoming || retryable(row))
                 .put("autoRetryPending", "failed".equals(row.state) && row.autoRetryPending)
                 .put("peerId", row.peerId == null ? "" : row.peerId);
+        // Only direct sends carry a route; the server path leaves the field absent.
+        if (!row.incoming && row.route != null) view.put("route", row.route);
+        return view;
     }
 
     /** A folder send can only be retried from its zip; once that is gone, the folder must be picked again. */
@@ -1470,6 +1633,7 @@ final class ExchangeService {
             List<Row> local = new ArrayList<>(outgoing.values());
             Collections.reverse(local);
             for (Row row : local) { out.put(rowView(row)); listed.add(row.id); }
+            List<JSONObject> history = new ArrayList<>();
             for (int i = 0; i < outbox.length(); i++) {
                 JSONObject item = outbox.getJSONObject(i);
                 String id = item.getString("transferId");
@@ -1478,12 +1642,23 @@ final class ExchangeService {
                 // A server row still "uploading" with no local upload was interrupted (another
                 // process or a closed share sheet); it expires on the server within 2 h.
                 if ("uploading".equals(state)) state = "stalled";
-                out.put(new JSONObject().put("transferId", id).put("batchId", item.optString("batchId")).put("fileName", item.optString("fileName"))
+                history.add(new JSONObject().put("transferId", id).put("batchId", item.optString("batchId")).put("fileName", item.optString("fileName"))
                         .put("sizeBytes", item.optLong("sizeBytes")).put("bytes", item.optLong("sizeBytes"))
                         .put("peer", item.isNull("toName") ? "" : item.optString("toName")).put("state", state)
                         .put("code", item.isNull("failure") ? "" : item.optString("failure")).put("createdAt", item.optString("createdAt"))
                         .put("peerId", item.optString("toDevice", "")));
             }
+            // Direct sends are delivered rows of their own; newest first like the server's list.
+            for (int i = 0; i < directSent.length(); i++) {
+                JSONObject sent = directSent.optJSONObject(i);
+                if (sent == null || listed.contains(sent.optString("id"))) continue;
+                history.add(new JSONObject().put("transferId", sent.optString("id")).put("batchId", sent.optString("batchId"))
+                        .put("fileName", sent.optString("name")).put("sizeBytes", sent.optLong("size")).put("bytes", sent.optLong("size"))
+                        .put("peer", sent.optString("peer")).put("state", "delivered").put("code", "").put("createdAt", sent.optString("created"))
+                        .put("peerId", sent.optString("peerId")).put("route", sent.optString("route")));
+            }
+            if (directSent.length() > 0) Collections.sort(history, (a, b) -> b.optString("createdAt").compareTo(a.optString("createdAt")));
+            for (JSONObject item : history) out.put(item);
             return new JSONObject().put("configured", configured).put("tokenConfigured", token)
                     .put("receiveSupported", receiveSupported()).put("deviceId", deviceId()).put("deviceName", deviceName())
                     .put("code", configured ? (token ? code : "tokenMissing") : "notConfigured")

@@ -327,6 +327,11 @@ public final class NetworkPolicyTest {
  for(String path:new String[]{"/v1/cards/state","/v1/cards/album","/v1/cards/album?after=abc_-&limit=50","/v1/cards/packs/d-20261016","/v1/cards/packs/b-20261016"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  for(String path:new String[]{"/v1/cards/packs/d-20261016/open","/v1/cards/packs/b-20261016/keep","/v1/cards/cutouts/asset_A-1/ticket"}){pass(()->NetworkPolicy.api(path,"POST"));for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  for(String path:new String[]{"/v1/cards/cutouts/prepare","/v1/cards/cutouts/asset_A-1/complete","/v1/cards/cutout-candidates","/v1/cards/packs/d-20261016/keep/extra","/v1/cards/packs/x-20261016/open","/v1/cards/packs/d-2026101/open","/v1/cards/packs/d-202610161/open","/v1/cards/packs/D-20261016","/v1/cards/packs/d-20261016/","/v1/cards/packs/../state","/v1/cards/packs/d-20261016/reset","/v1/cards/state/","/v1/cards/album/extra","/v1/cards/cutouts//ticket","/v1/cards/cutouts/a%2fb/ticket","/v1/cards/cutouts/../ticket","/v1/cards/cutouts/a/ticket/extra","/v1/cards","/v1/cards/"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ // Direct exchange peers: literal private/CGNAT IPv4 on the contract port only.
+ for(String ip:new String[]{"10.0.0.1","172.16.5.5","172.31.255.255","192.168.0.2","100.64.0.1","100.127.255.254"}){if(!NetworkPolicy.lanPeer(ip,53318))throw new AssertionError(ip);checks++;}
+ for(String ip:new String[]{"127.0.0.1","8.8.8.8","169.254.1.1","172.15.0.1","172.32.0.1","100.63.0.1","100.128.0.1","0.0.0.0","::1","[::1]","example.com","","10.1","010.0.0.1","192.168.0.256"}){if(NetworkPolicy.lanPeer(ip,53318))throw new AssertionError(ip);checks++;}
+ for(int port:new int[]{0,80,443,53317,53319,65535}){if(NetworkPolicy.lanPeer("192.168.0.2",port))throw new AssertionError("port "+port);checks++;}
+ if(NetworkPolicy.lanPeer(null,53318))throw new AssertionError("null");checks++;
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

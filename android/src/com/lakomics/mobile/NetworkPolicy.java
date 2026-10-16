@@ -15,6 +15,8 @@ final class NetworkPolicy {
   for(int i=0;i<4;i++){if(!p[i].matches("0|[1-9][0-9]{0,2}"))return false; n[i]=Integer.parseInt(p[i]);if(n[i]>255)return false;}
   return n[0]==10 || n[0]==127 || (n[0]==172 && n[1]>=16 && n[1]<=31) || (n[0]==192 && n[1]==168) || (n[0]==100 && n[1]>=64 && n[1]<=127);
  }
+ /** Direct exchange peers: a literal RFC1918 or Tailscale (100.64/10) IPv4 address on the contract port, nothing else. */
+ static boolean lanPeer(String ip,int port){return port==LanProtocol.PORT && LanProtocol.addressKind(ip)!=null;}
  static void catalogImage(String workId,String revision,String kind,int index,String raw) throws Exception {
   if(workId==null || !workId.matches("[1-9][0-9]{0,18}") || revision==null || !revision.matches("[a-f0-9]{64}") || !(kind.equals("cover") || kind.equals("page")) || index<0 || index>=2000 || (kind.equals("cover") && index!=0) || raw==null || raw.length()>16384)throw new IllegalArgumentException("Invalid catalog image");
   URI u=new URI(raw);String host=u.getHost()==null?"":u.getHost().toLowerCase(Locale.ROOT);int port=u.getPort();

@@ -73,9 +73,9 @@ def main():
             '-d', classes, *sorted((root / 'src').rglob('*.java')))
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
                   'MediaTransfer', 'MediaStreamRange', 'MediaStreamProxy', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto',
-                  'ExchangeTransfer', 'ExchangeZip', 'LanProtocol', 'NotesModel', 'ExchangeRefreshState', 'CancellableDispatch', 'CollectionArtworkRequests']
+                  'ExchangeTransfer', 'ExchangeZip', 'LanProtocol', 'LanSender', 'NotesModel', 'ExchangeRefreshState', 'CancellableDispatch', 'CollectionArtworkRequests']
         if args.check_only:
-            checks = ['NetworkPolicy', 'LanProtocol', 'ExchangeTransfer', 'ExchangeZip', 'ExchangeRefreshState']
+            checks = ['NetworkPolicy', 'LanProtocol', 'LanSender', 'ExchangeTransfer', 'ExchangeZip', 'ExchangeRefreshState']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.
