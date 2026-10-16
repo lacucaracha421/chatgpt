@@ -20,6 +20,7 @@
 //! `exchange://changed`.
 mod client;
 mod files;
+mod firewall;
 mod lan;
 mod thumbnail;
 mod zip;
@@ -1075,6 +1076,8 @@ struct Receiver {
 }
 
 static LAN_IDENTITY: OnceLock<lan::identity::Identity> = OnceLock::new();
+/// The LAN listener bound its port (the firewall helper has nothing to open otherwise).
+static LAN_LISTENING: AtomicBool = AtomicBool::new(false);
 
 /// Process-local reporting state; private key material never enters Stored.
 #[derive(Default)]
@@ -2629,12 +2632,11 @@ pub(crate) fn start(app: AppHandle) {
         .and_then(|dir| lan::identity::load(&dir, &device_id, &lan::identity::OsKeyStore))
     {
         Ok(identity) => {
-            if let Err(error) =
-                lan::server::start(&identity, Arc::new(lan::sink::DirectSink::new(app.clone())))
-            {
-                eprintln!(
+            match lan::server::start(&identity, Arc::new(lan::sink::DirectSink::new(app.clone()))) {
+                Ok(_) => LAN_LISTENING.store(true, Ordering::Relaxed),
+                Err(error) => eprintln!(
                     "file exchange LAN listener unavailable; direct receive disabled: {error}"
-                );
+                ),
             }
             let _ = LAN_IDENTITY.set(identity);
         }
@@ -2866,6 +2868,28 @@ fn mark_seen() {
 #[tauri::command]
 pub(crate) async fn exchange_mark_seen() {
     mark_seen();
+}
+
+/// Whether tablets can reach this PC's direct receiver through the Windows firewall.
+#[tauri::command]
+pub(crate) async fn exchange_direct_receive_status() -> firewall::DirectReceive {
+    let listening = LAN_LISTENING.load(Ordering::Relaxed);
+    tauri::async_runtime::spawn_blocking(move || firewall::status(listening))
+        .await
+        .unwrap_or(firewall::DirectReceive::Unknown)
+}
+
+/// Adds the Private-profile inbound allow rule through one elevated helper (one UAC prompt)
+/// and reports how it went together with the re-checked state.
+#[tauri::command]
+pub(crate) async fn exchange_open_firewall() -> firewall::OpenResult {
+    let listening = LAN_LISTENING.load(Ordering::Relaxed);
+    tauri::async_runtime::spawn_blocking(move || firewall::open(listening, lan::PORT))
+        .await
+        .unwrap_or(firewall::OpenResult {
+            outcome: firewall::OpenOutcome::Failed,
+            state: firewall::DirectReceive::Unknown,
+        })
 }
 
 #[tauri::command]

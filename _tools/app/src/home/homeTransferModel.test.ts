@@ -27,4 +27,12 @@ describe("recent transfers", () => {
     expect(recentTransfers([out("d")])[0]).toMatchObject({ state: "done", percent: null, at: "2026-10-15T10:00:00Z" });
     expect(recentTransfers([out("x", { state: "cancelled" })])[0]!.state).toBe("ended");
   });
+  it("carries a route only when the whole line travelled the same direct way", () => {
+    const lines = recentTransfers([
+      out("a1", { batchId: "same", route: "lan", createdAt: "2026-10-15T12:00:00Z" }), out("a2", { batchId: "same", route: "lan", createdAt: "2026-10-15T12:00:00Z" }),
+      out("m1", { batchId: "mix", route: "lan", createdAt: "2026-10-15T11:00:00Z" }), out("m2", { batchId: "mix", createdAt: "2026-10-15T11:00:00Z" }),
+      out("s", { createdAt: "2026-10-15T10:00:00Z" }),
+    ]);
+    expect(lines.map(line => [line.key, line.route])).toEqual([["same", "lan"], ["mix", null], ["s", null]]);
+  });
 });

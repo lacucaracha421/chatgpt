@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowsUpDownIcon, CheckIcon, ClockIcon, ExclamationTriangleIcon, XMarkIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { nativeDropClientPoint } from "../app/workspaceDragTargets";
 import { exchangeStore, useExchangeSnapshot, type ExchangeStore } from "../exchange/exchangeStore";
+import { routeWord } from "../exchange/route";
 import { dayKey } from "../exchange/timeline";
 import { claimNativeDrop } from "../ingestion/dropClaims";
 import { subscribeToTauriDrops, type DropSubscriber } from "../ingestion/useFileDrop";
@@ -11,9 +12,6 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { HomePresence } from "./HomeAttention";
 import { recentTransfers, type TransferLine } from "./homeTransferModel";
 import "./homeTools.css";
-
-export type TransferRoute = "server" | "direct";
-const SHORT_ROUTE: Record<TransferRoute, string> = { server: "서버", direct: "직접" };
 
 export type PickFiles = () => Promise<string[] | null>;
 const pickWithDialog: PickFiles = async () => {
@@ -27,8 +25,6 @@ type Props = {
   at: Date;
   /** The Home area is shown; a hidden Home never takes a drop. */
   enabled: boolean;
-  /** How the files travel. The direct network route comes later; until then everything goes through the server. */
-  route?: TransferRoute;
   /** Opens the full 전송 screen. */
   onOpenDetail: () => void;
   store?: ExchangeStore;
@@ -44,7 +40,7 @@ function Mark({ line }: { line: TransferLine }) {
   return <XMarkIcon aria-hidden="true" />;
 }
 
-export function HomeTransfer({ at, enabled, route = "server", onOpenDetail, store = exchangeStore, subscribeDrops = subscribeToTauriDrops, pickFiles = pickWithDialog }: Props) {
+export function HomeTransfer({ at, enabled, onOpenDetail, store = exchangeStore, subscribeDrops = subscribeToTauriDrops, pickFiles = pickWithDialog }: Props) {
   const snapshot = useExchangeSnapshot(store);
   const { availability } = snapshot;
   const device = snapshot.devices[0] ?? null;
@@ -118,7 +114,7 @@ export function HomeTransfer({ at, enabled, route = "server", onOpenDetail, stor
         <HomePresence items={lines.map(line => ({ key: line.key, content: <div className="home-sent__row" data-state={line.state}>
           <Mark line={line} />
           <span>{line.label}</span>
-          <small className="numeric">{[SHORT_ROUTE[route], trail(line)].filter(Boolean).join(" · ")}</small>
+          <small className="numeric">{[routeWord(line.route), trail(line)].filter(Boolean).join(" · ")}</small>
         </div> }))} />
       </div>
     </div>

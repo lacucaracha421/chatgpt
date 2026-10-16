@@ -1,11 +1,12 @@
 import {useState} from 'react';
 import {ArrowsUpDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {defaultTarget, errorCode, rowView, screenMessage, TOKEN_CODES, type ExchangeRow, type ExchangeSnapshot, type RowTone} from '../exchangeModel';
+import {blockRoute, routeWord, type ExchangeRoute} from '../../src/exchange/route';
 import {isImageName} from '../../src/exchange/timeline';
 import {SectionLabel} from '../ui';
 import {errorText, native} from '../transport';
 
-export type TransferLine = {key: string; label: string; state: string; tone: RowTone};
+export type TransferLine = {key: string; label: string; state: string; tone: RowTone; route: ExchangeRoute | null};
 const TONE_ORDER: RowTone[] = ['error', 'active', 'waiting', 'done', 'muted'];
 
 /** The newest sends to the target, the files of one batch folded into one line. */
@@ -18,7 +19,7 @@ export function recentSends(outgoing: ExchangeRow[], limit = 3): TransferLine[] 
     // One line takes the most pressing state of its files.
     const view = views.slice().sort((a, b) => TONE_ORDER.indexOf(a.tone) - TONE_ORDER.indexOf(b.tone))[0]!;
     const label = rows.length === 1 ? rows[0]!.fileName : rows.every(row => isImageName(row.fileName)) ? `사진 ${rows.length}장` : `파일 ${rows.length}개`;
-    return {key, label, state: view.label, tone: view.tone};
+    return {key, label, state: view.label, tone: view.tone, route: blockRoute(rows.map(row => row.route))};
   });
 }
 
@@ -48,7 +49,7 @@ export function TabletTransfer({exchange, onOpenDetail, send = (toDevice: string
       </button>
       {error && <p className="home-tab-transfer__error" role="alert">{error}</p>}
       {lines.length > 0 && <ul className="home-tab-sent" aria-label="최근 보낸 파일">
-        {lines.map(line => <li key={line.key} data-tone={line.tone}><span>{line.label}</span><small>{line.state}</small></li>)}
+        {lines.map(line => <li key={line.key} data-tone={line.tone}><span>{line.label}</span><small>{[routeWord(line.route), line.state].filter(Boolean).join(' · ')}</small></li>)}
       </ul>}
     </div>
   </section>;

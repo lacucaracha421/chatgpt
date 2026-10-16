@@ -89,7 +89,7 @@ it("says nothing about a reason while the connection is still starting", () => {
   expect(screen.queryByRole("button", { name: "받을 기기가 없습니다" })).toBeNull();
 });
 
-it("lists the last three sends with their route, progress or time, and opens the detail screen", async () => {
+it("lists the last three sends with progress or time and no route word for the server, and opens the detail screen", async () => {
   const rows = [
     out("old", { createdAt: new Date(2026, 9, 14, 9, 5).toISOString() }),
     out("done", { createdAt: new Date(2026, 9, 15, 21, 40).toISOString() }),
@@ -100,12 +100,24 @@ it("lists the last three sends with their route, progress or time, and opens the
   const tile = screen.getByRole("region", { name: "전송" });
   await within(tile).findByText("busy.png");
   expect(within(tile).queryByText("old.png")).toBeNull();
-  expect(within(tile).getByText("서버 · 50%")).toBeTruthy();
-  expect(within(tile).getByText("서버 · 받기 대기")).toBeTruthy();
-  expect(within(tile).getByText("서버 · 21:40")).toBeTruthy();
+  expect(within(tile).getByText("50%")).toBeTruthy();
+  expect(within(tile).getByText("받기 대기")).toBeTruthy();
+  expect(within(tile).getByText("21:40")).toBeTruthy();
   expect(await within(tile).findByRole("progressbar", { name: "busy.png 진행률" })).toHaveAttribute("aria-valuenow", "50");
   await userEvent.click(within(tile).getByRole("button", { name: /상세/ }));
   expect(onOpenDetail).toHaveBeenCalledOnce();
+});
+
+it("names the route of a direct send in front of its progress or time", async () => {
+  const rows = [
+    out("lan", { route: "lan", createdAt: new Date(2026, 9, 15, 21, 40).toISOString() }),
+    out("ts", { route: "tailscale", state: "uploading", sizeBytes: 200, done: 128, createdAt: new Date(2026, 9, 15, 21, 50).toISOString() }),
+  ];
+  setup(ready({ outgoing: rows }));
+  const tile = screen.getByRole("region", { name: "전송" });
+  await within(tile).findByText("Tailscale · 64%");
+  expect(within(tile).getByText("직접 · 21:40")).toBeTruthy();
+  expect(within(tile).queryByText(/서버/)).toBeNull();
 });
 
 it("picks files by click and reports a failed send on the tile", async () => {

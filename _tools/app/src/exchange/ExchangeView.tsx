@@ -12,6 +12,9 @@ import { commandErrorMessage } from "../library/errorMessage";
 import { subscribeToTauriDrops, type DropSubscriber } from "../ingestion/useFileDrop";
 import { exchangeStore, useExchangeSnapshot, type ExchangeDevice, type ExchangeIncoming, type ExchangeOutgoing, type ExchangeReceived, type ExchangeSnapshot, type ExchangeStore } from "./exchangeStore";
 import { batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type BatchPart, type TimelineBlock, type TimelineEntry } from "./timeline";
+import { blockRoute } from "./route";
+import { RouteWord } from "./RouteWord";
+import { DirectReceiveBlock } from "./DirectReceive";
 import "./exchange.css";
 
 export type FilePicker = () => Promise<string[] | null>;
@@ -24,13 +27,13 @@ const pickWithDialog = (directory: boolean): FilePicker => async () => {
 
 const percent = (done: number, total: number) => (total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 100);
 
-/** The row's state line: 업로드 중 → 대기 중 (받으면 삭제됨) → 전달됨, or a failure. */
+/** The row's state line: 업로드 중 (보내는 중 for a direct send, which has no waiting step) → 대기 중 (받으면 삭제됨) → 전달됨, or a failure. */
 export function outgoingLabel(row: ExchangeOutgoing): string {
   switch (row.state) {
     case "queued": return row.message ?? "보낼 차례를 기다리는 중";
     case "zipping": return `압축 중 ${percent(row.done, row.sizeBytes)}%`;
     case "hashing": return `파일 확인 중 ${percent(row.done, row.sizeBytes)}%`;
-    case "uploading": return `업로드 중 ${percent(row.done, row.sizeBytes)}%`;
+    case "uploading": return `${row.route ? "보내는 중" : "업로드 중"} ${percent(row.done, row.sizeBytes)}%`;
     case "waiting": return "대기 중 (받으면 삭제됨)";
     case "delivered": return "전달됨";
     case "expired": return "만료됨 (받지 않음)";
@@ -208,6 +211,7 @@ function Block({ block, peerName, store, onError }: { block: TimelineBlock<Item>
   const images = entries.length > 1 && entries.every((item) => isImageName(item.row.fileName));
   const delivered = block.mine && entries.every((item) => item.kind === "out" && item.row.state === "delivered");
   const time = clockLabel(block.at);
+  const route = blockRoute(entries.map((item) => item.kind === "in" ? null : item.row.route));
   const current = entries.find((item) => moving(item) && item.kind === "out" && item.row.state !== "queued") ?? entries.find(moving);
   const cancellable = entries.filter((item) => item.kind === "out" ? item.row.cancellable && item.row.state !== "failed" : item.kind === "in");
   // An arrival's own count is in the who line; a head is for sends and photo strips.
@@ -216,6 +220,7 @@ function Block({ block, peerName, store, onError }: { block: TimelineBlock<Item>
     <p className="exchange-who">
       {block.mine ? "이 PC" : peerName}{time && <> · <time dateTime={block.at}>{time}</time></>}
       {!block.mine && entries.length > 1 && <> · 파일 <span className="numeric">{entries.length}</span>개</>}
+      <RouteWord route={route} />
       {delivered && <> · 전달됨<CheckIcon className="exchange-delivered" aria-hidden="true" /></>}
     </p>
     <div className={`exchange-bubble${entries.some(failed) ? " is-error" : ""}`}>
@@ -274,6 +279,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
   // Opening the panel is how received files become "seen" (and leave the tray count).
   useEffect(() => { if (snapshot.unseen > 0) void store.markSeen().catch(() => undefined); }, [store, snapshot.unseen]);
   useEffect(() => { void store.refresh().catch(() => undefined); }, [store]);
+  useEffect(() => { void store.checkDirectReceive(); }, [store]);
 
   async function send(paths: string[]) {
     if (!paths.length) return;
@@ -341,6 +347,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
       </>}
     </div>
     <div className="exchange-index-foot">
+      <DirectReceiveBlock store={store} state={snapshot.directReceive ?? "unknown"} hasDevice={devices.length > 0} />
       <p className="exchange-index-label">받은 파일 저장 위치</p>
       <p className="exchange-index-value exchange-folder" title={snapshot.folder ?? undefined}>{snapshot.folder ?? "다운로드 폴더를 찾을 수 없음"}</p>
       <div className="exchange-index-links">

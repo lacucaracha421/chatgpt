@@ -28,7 +28,7 @@ import { HomeToday, type HomeReleaseCard } from "./HomeAttention";
 import { useHomeVisit } from "./useHomeVisit";
 import { HomeCalendar } from "./HomeCalendar";
 import { calendarPayments, calendarSavedQuery, releaseCalendarModel } from "./homeCalendarModel";
-import { HomeTransfer, type PickFiles, type TransferRoute } from "./HomeTransfer";
+import { HomeTransfer, type PickFiles } from "./HomeTransfer";
 import { HomeQuickMemo } from "./HomeQuickMemo";
 import { HomeDailyCard, HomeLinkVault } from "./HomeSlots";
 import { CardAlbum } from "../cards/CardAlbum";
@@ -78,13 +78,11 @@ export type HomeViewProps = {
   exchange?: ExchangeStore;
   subscribeDrops?: DropSubscriber;
   pickFiles?: PickFiles;
-  /** How the 전송 tile's files travel; the direct network route comes later. */
-  transferRoute?: TransferRoute;
 };
 
 /** PC Home (layout A): the release calendar and the tools on the left, today's card and attention on the right. */
 
-export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, transferRoute }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles }: HomeViewProps) {
   const [cardAlbum, setCardAlbum] = useState(false);
   const [linksView, setLinksView] = useState(false);
   const { gateway, library } = useLibrary();
@@ -389,7 +387,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
           {savedDaysError && <p role="status">저장한 이미지 수를 확인할 수 없습니다 <Button variant="quiet" onClick={() => setSavedDaysRetry(value => value + 1)}>다시 시도</Button></p>}
           {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
           <div className="home-tools">
-            <HomeTransfer at={at} enabled={active && visible} route={transferRoute} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
+            <HomeTransfer at={at} enabled={active && visible} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
             <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
             <HomeLinkVault key={root} store={store} root={root} onOpen={() => setLinksView(true)} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
           </div>

@@ -150,6 +150,19 @@ it('stacks both directions by time, mine on the right, with day lines', () => {
   expect(timeline.querySelectorAll('.exchange-day')).toHaveLength(2);
 });
 
+it('names a direct route in the who line and labels a direct upload 보내는 중', () => {
+  expect(rowView(row({state: 'uploading', route: 'lan'}), false).label).toBe('보내는 중');
+  expect(rowView(row({state: 'uploading'}), false).label).toBe('업로드 중');
+  const direct = row({transferId: '11111111-0000-4000-8000-000000000003', fileName: 'a.mp4', state: 'delivered', route: 'lan', createdAt: '2026-09-26T05:31:00Z'});
+  const viaTailscale = row({transferId: '11111111-0000-4000-8000-000000000004', fileName: 'b.psd', state: 'saved', route: 'tailscale', createdAt: '2026-09-26T06:31:00Z'});
+  const viaServer = row({transferId: '11111111-0000-4000-8000-000000000005', fileName: 'c.pdf', state: 'saved', createdAt: '2026-09-26T07:31:00Z'});
+  show(snapshot({incoming: [viaTailscale, viaServer], outgoing: [direct]}));
+  const who = (name: string) => screen.getByText(name).closest('.exchange-block')!.querySelector('.exchange-who')!;
+  expect(who('a.mp4').textContent).toMatch(/ · 직접 · 전달됨/);
+  expect(who('b.psd').textContent).toMatch(/ · Tailscale$/);
+  expect(who('c.pdf').textContent).not.toMatch(/직접|Tailscale/);
+});
+
 it('shows a multi-file send as one block with combined progress and a thumbnail strip', () => {
   const photos = Array.from({length: 8}, (_, i) => row({transferId: `33333333-0000-4000-8000-00000000000${i}`, batchId: 'batch', fileName: `IMG_${i}.jpg`, sizeBytes: 100,
     state: i < 4 ? 'ready' : i === 4 ? 'uploading' : 'preparing', bytes: i === 4 ? 50 : 0, createdAt: '2026-09-26T05:31:00Z'}));

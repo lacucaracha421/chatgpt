@@ -290,6 +290,8 @@ pub fn run() {
             exchange::exchange_retry,
             exchange::exchange_mark_seen,
             exchange::exchange_refresh,
+            exchange::exchange_direct_receive_status,
+            exchange::exchange_open_firewall,
             exchange::exchange_open,
             exchange::exchange_reveal,
             exchange::exchange_open_folder,

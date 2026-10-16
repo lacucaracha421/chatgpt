@@ -9,6 +9,9 @@
 .exchange-block.is-mine { align-self: flex-end; align-items: flex-end; }
 .exchange-who { display: flex; align-items: center; gap: 4px; margin: 0; font-size: var(--text-xs); color: var(--color-muted); }
 .exchange-who time { font-family: var(--font-numeric); font-size: var(--text-sm); }
+.exchange-route { color: var(--color-faint); }
+.exchange-route.is-new { animation: exchange-route-in 140ms var(--ease-standard) both; }
+@keyframes exchange-route-in { from { opacity: 0; } }
 .exchange-delivered { width: 14px; height: 14px; margin-left: 2px; color: var(--color-accent); }
 .exchange-bubble { width: 100%; min-width: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 2px; }
 .exchange-block.is-mine .exchange-bubble { background: var(--color-surface-elevated); border-color: var(--color-border-strong); }
@@ -84,6 +87,23 @@ button.exchange-strip-tile { cursor: pointer; }
 .exchange-filter button[aria-pressed="true"] { background: var(--color-filter-selected); color: var(--color-text); }
 .exchange-index-foot { flex: none; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-top: 1px solid var(--color-border); }
 .exchange-index-label { margin: 0; font-size: var(--text-xs); color: var(--color-muted); }
+/* 직접 받기: Windows firewall block at the top of the index foot (only while blocked or on a Public network). */
+.exchange-direct-wrap { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 200ms var(--ease-standard), opacity 140ms var(--ease-standard); }
+.exchange-direct-wrap[data-leaving] { grid-template-rows: 0fr; opacity: 0; }
+.exchange-direct-clip { min-height: 0; overflow: hidden; }
+.exchange-direct { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); transition: background-color 200ms var(--ease-standard); }
+.exchange-direct__head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.exchange-direct__head .ui-button--icon { width: 24px; height: 24px; min-height: 24px; margin-right: calc(-1 * var(--space-1)); color: var(--color-faint); }
+.exchange-direct__head .ui-button--icon svg { width: 16px; height: 16px; }
+.exchange-direct__line { margin: 0; font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); transition: color 200ms var(--ease-standard); }
+.exchange-direct__line svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; }
+.exchange-direct__line.is-done { color: var(--color-success); }
+.exchange-direct__line.is-error { color: var(--color-danger); }
+.exchange-direct .ui-button--secondary { justify-self: start; margin-top: var(--space-1); }
+.exchange-direct .ui-button--secondary svg { width: 16px; height: 16px; }
+.exchange-direct.is-entering { animation: exchange-direct-in 200ms var(--ease-standard) both; }
+.exchange-direct.is-tint { background: color-mix(in srgb, var(--color-success) 8%, transparent); }
+@keyframes exchange-direct-in { from { opacity: 0; transform: translateY(4px); } }
 .exchange-index-value { margin: 0; font-size: var(--text-sm); }
 .exchange-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
 .exchange-index-links { display: flex; gap: var(--space-2); margin-left: calc(-1 * var(--space-3) - var(--border-width)); }
@@ -94,4 +114,4 @@ button.exchange-strip-tile { cursor: pointer; }
   .exchange-block { width: 100%; }
   .exchange-composer-to { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .exchange-progress > span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .exchange-progress > span { transition: none; } .exchange-route.is-new { animation: none; } .exchange-direct-wrap, .exchange-direct, .exchange-direct__line { transition: none; } .exchange-direct.is-entering { animation: none; } }

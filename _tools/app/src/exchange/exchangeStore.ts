@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { ExchangeRoute } from "./route";
 
 /** PC ↔ tablet file exchange (보내기/받기). The native side owns every transfer; this store mirrors its snapshot. */
 export type ExchangeAvailability = { state: "starting" | "ready" | "offline" | "unavailable" | "held"; message: string | null; needsToken: boolean };
@@ -12,7 +13,7 @@ export type ExchangeOutgoing = {
   /** Files sent together share it; the receiving device. */
   batchId?: string | null; toDevice?: string | null;
   /** How a direct send travelled; absent for the server path. */
-  route?: "lan" | "tailscale";
+  route?: ExchangeRoute;
 };
 export type ExchangeIncoming = {
   transferId: string; fileName: string; sizeBytes: number; fromName: string | null; state: "downloading" | "failed"; done: number; message: string | null;
@@ -22,8 +23,14 @@ export type ExchangeReceived = {
   transferId: string; fileName: string; sizeBytes: number; fromName: string | null; receivedAt: string; exists: boolean;
   batchId?: string | null; fromDevice?: string | null;
   /** How a direct transfer arrived; absent for the server path. */
-  route?: "lan" | "tailscale";
+  route?: ExchangeRoute;
 };
+/**
+ * Whether a tablet can reach this PC directly (Windows firewall). Not part of native's pushed snapshot:
+ * the store keeps the last value it learned, so reopening 전송 shows it at once and a re-check never blanks it.
+ */
+export type DirectReceive = "unknown" | "allowed" | "blocked" | "public" | "unsupported";
+export type OpenFirewallOutcome = "opened" | "cancelled" | "failed";
 export type ExchangeSnapshot = {
   availability: ExchangeAvailability;
   selfName: string | null;
@@ -34,6 +41,7 @@ export type ExchangeSnapshot = {
   unseen: number;
   folder: string | null;
   tokenConfigured: boolean;
+  directReceive?: DirectReceive;
 };
 
 export type ExchangeRequest = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -51,7 +59,33 @@ export class ExchangeStore {
   constructor(readonly request: ExchangeRequest, private readonly listenChanges: ExchangeSubscribe) {}
   snapshot = () => this.value;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  private publish(next: ExchangeSnapshot) { this.value = next; this.listeners.forEach((listener) => listener()); }
+  private checking = false;
+  private publish(next: ExchangeSnapshot) {
+    const directReceive = next.directReceive ?? this.value.directReceive;
+    this.value = directReceive === undefined ? next : { ...next, directReceive };
+    this.listeners.forEach((listener) => listener());
+  }
+  /** Remembers a firewall state learned from native; "unknown" never replaces a known one. */
+  setDirectReceive(state: unknown) {
+    if (typeof state !== "string" || state === "unknown" || state === this.value.directReceive) return;
+    this.publish({ ...this.value, directReceive: state as DirectReceive });
+  }
+  /** Re-reads the firewall state; the old value stays until the answer arrives, and a failed check changes nothing. */
+  async checkDirectReceive() {
+    if (this.checking) return;
+    this.checking = true;
+    try { this.setDirectReceive(await this.request<DirectReceive>("exchange_direct_receive_status")); } catch { /* keep the last value */ } finally { this.checking = false; }
+  }
+  /**
+   * Runs the one elevated firewall helper (a Windows administrator prompt appears). Returns how it went and the
+   * re-checked state; the caller applies the state with [setDirectReceive] when it is ready to show it.
+   */
+  async openFirewall(): Promise<{ outcome: OpenFirewallOutcome; state: DirectReceive }> {
+    const result = await this.request<{ outcome: OpenFirewallOutcome; state: DirectReceive }>("exchange_open_firewall");
+    const outcome = result?.outcome ?? "failed";
+    // The helper succeeded; a failed re-check must not bring the block back.
+    return { outcome, state: outcome === "opened" && (!result?.state || result.state === "unknown") ? "allowed" : result?.state ?? "unknown" };
+  }
   async start() {
     if (this.started) return;
     this.started = true;

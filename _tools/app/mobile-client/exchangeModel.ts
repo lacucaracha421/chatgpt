@@ -1,3 +1,4 @@
+import type {ExchangeRoute} from '../src/exchange/route';
 import type {BatchPart, TimelineEntry} from '../src/exchange/timeline';
 
 /**
@@ -18,7 +19,7 @@ export type ExchangeRow = {
   /** Saved rows: when the file reached Download/Lakomics. */
   savedAt?: string;
   /** Direct transfers: how the file travelled. Absent for the server path. */
-  route?: 'lan' | 'tailscale';
+  route?: ExchangeRoute;
 };
 export type ExchangeDevice = {deviceId: string; name: string; kind: string; lastSeenAt: string};
 export type ExchangeSnapshot = {
@@ -115,7 +116,7 @@ export function rowView(row: ExchangeRow, incoming: boolean): RowView {
   switch (row.state) {
     case 'zipping': return {label: '압축 중', tone: 'active', progress: ratio(row), actions: ['cancel']};
     case 'preparing': return {label: '보낼 준비 중', tone: 'active', progress: null, actions: ['cancel']};
-    case 'uploading': return {label: '업로드 중', tone: 'active', progress: ratio(row), actions: ['cancel']};
+    case 'uploading': return {label: row.route ? '보내는 중' : '업로드 중', tone: 'active', progress: ratio(row), actions: ['cancel']};
     case 'completing': return {label: '업로드 확인 중', tone: 'active', progress: 1, actions: []};
     case 'ready': return {label: '대기 중 (받으면 삭제됨)', tone: 'waiting', progress: null, actions: ['cancel']};
     case 'delivered': return {label: '전달됨', tone: 'done', progress: null, actions: []};

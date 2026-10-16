@@ -15,6 +15,8 @@ import {
   ACTIVE_STATES, batchPart, defaultTarget, errorCode, EXCHANGE_NOTICE_EVENT, rowView, screenMessage, timelineEntries, TOKEN_CODES, withDevice,
   type ExchangeDevice, type ExchangeRow, type ExchangeSnapshot,
 } from './exchangeModel';
+import {blockRoute} from '../src/exchange/route';
+import {RouteWord} from '../src/exchange/RouteWord';
 import {batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type TimelineBlock} from '../src/exchange/timeline';
 import './exchange.css';
 
@@ -202,9 +204,11 @@ function Block({block, peerName, actions}: {block: TimelineBlock<ExchangeRow>; p
   const delivered = block.mine && rows.every(row => row.state === 'delivered');
   const images = rows.length > 1 && rows.every(row => isImageName(row.fileName));
   const time = clockLabel(block.at);
+  const route = blockRoute(rows.map(row => row.route));
   const who = <p className="exchange-who">
     {block.mine ? '나' : peerName}{time && <> · <time className="numeric" dateTime={block.at}>{time}</time></>}
     {incoming && rows.length > 1 && <> · 파일 <span className="numeric">{rows.length}</span>개</>}
+    <RouteWord route={route}/>
     {delivered && <> · 전달됨<CheckIcon className="exchange-delivered" aria-hidden="true"/></>}
   </p>;
   const cancellable = rows.filter(row => rowView(row, incoming).actions.includes('cancel'));

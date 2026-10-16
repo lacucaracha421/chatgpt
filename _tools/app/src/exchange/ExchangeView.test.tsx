@@ -41,6 +41,11 @@ it("labels every outgoing state in Korean", () => {
   expect(outgoingLabel(row({ state: "queued", message: "서버에 연결할 수 없음 — 자동 재시도" }))).toBe("서버에 연결할 수 없음 — 자동 재시도");
 });
 
+it("says 보내는 중 instead of 업로드 중 for a direct send", () => {
+  expect(outgoingLabel(row({ state: "uploading", done: 500, route: "lan" }))).toBe("보내는 중 50%");
+  expect(outgoingLabel(row({ state: "uploading", done: 500 }))).toBe("업로드 중 50%");
+});
+
 it("sends picked and dropped files to the only other device", async () => {
   const view = setup({ devices: [tablet] });
   await userEvent.click(await screen.findByRole("button", { name: "파일 보내기" }));
@@ -154,4 +159,31 @@ it("keeps explanations behind separate help buttons and preserves the full save 
   await userEvent.click(screen.getByRole("button", { name: "보내기 도움말" }));
   expect(screen.getByText(explanation)).toBeInTheDocument();
   expect(screen.queryByText(/보낸 파일과 받은 파일이 여기에 시간순으로/)).toBeNull();
+});
+
+it("names a direct route in the who line, and nothing for the server or a mixed batch", () => {
+  const view = setup({ devices: [tablet] });
+  view.push({ devices: [tablet],
+    outgoing: [
+      row({ transferId: "a", batchId: "ba", fileName: "lan.txt", state: "delivered", route: "lan", createdAt: "2026-09-26T05:31:00Z" }),
+      row({ transferId: "b", batchId: "bb", fileName: "server.txt", state: "delivered", createdAt: "2026-09-26T06:31:00Z" }),
+      row({ transferId: "c1", batchId: "bc", fileName: "m1.txt", state: "delivered", route: "tailscale", createdAt: "2026-09-26T07:31:00Z" }),
+      row({ transferId: "c2", batchId: "bc", fileName: "m2.txt", state: "delivered", createdAt: "2026-09-26T07:31:00Z" }),
+    ],
+    received: [{ transferId: "r", fileName: "ts.txt", sizeBytes: 1, fromName: "Galaxy Tab S11", fromDevice: "d1", receivedAt: "2026-09-26T08:31:00Z", exists: true, route: "tailscale" }] });
+  const who = (name: string) => screen.getByText(name).closest(".exchange-block")!.querySelector(".exchange-who")!;
+  expect(who("lan.txt")).toHaveTextContent(/ · 직접 · 전달됨/);
+  expect(who("server.txt")).not.toHaveTextContent(/직접|Tailscale/);
+  expect(who("m1.txt")).not.toHaveTextContent(/직접|Tailscale/);
+  expect(who("ts.txt")).toHaveTextContent(/ · Tailscale$/);
+});
+
+it("shows the 직접 받기 block only while the firewall blocks it, at the top of the index foot", async () => {
+  const view = setup({ devices: [tablet] });
+  expect(screen.queryByText("직접 받기")).toBeNull();
+  view.push({ devices: [tablet], directReceive: "blocked" });
+  const foot = screen.getByText("직접 받기").closest(".exchange-index-foot")!;
+  expect(foot.firstElementChild).toContainElement(screen.getByText("직접 받기"));
+  expect(screen.getByRole("button", { name: "방화벽 열기" })).toBeInTheDocument();
+  expect(view.calls.some(([command]) => command === "exchange_direct_receive_status")).toBe(true);
 });

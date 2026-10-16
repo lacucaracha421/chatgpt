@@ -541,6 +541,12 @@ describe('tablet Home tools', () => {
     fireEvent.click(await screen.findByRole('button', {name: /첫 글/}));
     await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('openExternal', {url: 'https://a.example/1'}));
   });
+  it('puts the route word of a direct send in front of its state on the 전송 tile', async () => {
+    const base = exchange(true);
+    render(<Home {...props({exchange: {...base, outgoing: base.outgoing.map(row => ({...row, route: 'tailscale' as const}))}})}/>);
+    const list = await screen.findByRole('list', {name: '최근 보낸 파일'});
+    expect(within(list).getByText('Tailscale · 보내는 중')).toBeTruthy();
+  });
   it('sends files to the PC through the exchange picker and lists the latest sends', async () => {
     const p = props({exchange: exchange(true)}); render(<Home {...p}/>);
     fireEvent.click(await screen.findByRole('button', {name: 'PC로 파일 보내기'}));
