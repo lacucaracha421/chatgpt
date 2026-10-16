@@ -45,6 +45,60 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 
 describe("AssetBrowser", () => {
+  it.each(["pointer", "ContextMenu", "Shift+F10"])("opens a single target without selecting it via %s", async trigger => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const gateway = createGateway({ items: [{ ...asset(0), sourceUrl: "https://example.com/target" }, asset(1)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    if (trigger === "pointer") await user.pointer({ target: first, keys: "[MouseRight]" });
+    else {
+      act(() => first.focus());
+      fireEvent.keyDown(first, { key: trigger === "ContextMenu" ? "ContextMenu" : "F10", shiftKey: trigger === "Shift+F10" });
+    }
+    expect(screen.getByRole("menuitem", { name: "1개" })).toBeVisible();
+    expect(screen.queryAllByRole("option", { selected: true })).toHaveLength(0);
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+    if (trigger === "pointer") expect(first).toHaveAttribute("data-focused", "true");
+    await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("https://example.com/target");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("option", { selected: true })).toHaveLength(0);
+    if (trigger === "pointer") expect(first).not.toHaveAttribute("data-focused");
+    writeText.mockRestore();
+  });
+
+  it("adds an unselected menu target to an album without creating a selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.patchAssetAlbums).mockResolvedValue(undefined);
+    renderBrowser(gateway, { albums: [{ id: "album-1", name: "Target album", parentId: null, colorKey: null, iconKey: null }] });
+    fireEvent.contextMenu(await screen.findByRole("option", { name: "asset-1.png" }));
+    const albumMenu = screen.getByRole("menuitem", { name: /앨범에 추가/ });
+    act(() => albumMenu.focus());
+    await user.keyboard("{ArrowRight}");
+    await user.click(await screen.findByRole("menuitem", { name: "Target album" }));
+    await waitFor(() => expect(gateway.patchAssetAlbums).toHaveBeenCalledExactlyOnceWith({ assetIds: ["asset-1"], addAlbumIds: ["album-1"], removeAlbumIds: [] }));
+    expect(screen.queryAllByRole("option", { selected: true })).toHaveLength(0);
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+  });
+
+  it("opens information for the menu target while preserving another selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.click(first, { ctrlKey: true });
+    fireEvent.contextMenu(screen.getByRole("option", { name: "asset-1.png" }));
+    await user.click(screen.getByRole("menuitem", { name: "정보 열기" }));
+    expect(within(await screen.findByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "asset-1.png 감상 화면으로 열기" })).toBeVisible();
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "asset-1.png" })).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(first);
+    expect(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "asset-0.png 감상 화면으로 열기" })).toBeVisible();
+  });
+
   it("toggles only the clicked tile heart while F still toggles the selection", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
@@ -1075,9 +1129,13 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("menuitem", { name: "정보 열기" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     fireEvent.contextMenu(screen.getByRole("option", { name: "asset-2.png" }));
-    expect(screen.getByRole("menuitem", { name: "1개 선택" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "asset-2.png" })).toHaveAttribute("aria-selected", "true");
-    expect(first).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("menuitem", { name: "1개" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "asset-2.png" })).toHaveAttribute("aria-selected", "false");
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("toolbar", { name: "선택 작업" })).toHaveTextContent("2개 선택");
+    await user.click(screen.getByRole("menuitem", { name: "휴지통으로" }));
+    expect(gateway.trashAssets).toHaveBeenCalledExactlyOnceWith(["asset-2"]);
+    expect(first).toHaveAttribute("aria-selected", "true");
   });
 
   it("copies selected source URLs without duplicates and disables copying for missing sources", async () => {
@@ -1369,7 +1427,7 @@ function withWorkspaceChrome(child: ReactNode) {
   );
 }
 
-type BrowserOptions = Pick<ComponentProps<typeof AssetBrowser>, "characterSeries" | "characterExtras" | "characterTargets" | "characterGroups" | "onCharactersChanged" | "classificationOrderIds" | "onReorderFolders"> & { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
+type BrowserOptions = Pick<ComponentProps<typeof AssetBrowser>, "albums" | "characterSeries" | "characterExtras" | "characterTargets" | "characterGroups" | "onCharactersChanged" | "classificationOrderIds" | "onReorderFolders"> & { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
 function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn(), classifications: viewClassifications = classifications, folderShelfApi, ...characterProps }: BrowserOptions = {}) {
   return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser {...characterProps} navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={viewClassifications} folderShelfApi={folderShelfApi} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
 }

@@ -8,12 +8,13 @@ export type ContextMenuItem = MenuItem & { children?: MenuItem[]; separatorBefor
 type ContextMenuProps = PropsWithChildren<{
   children: ReactElement;
   items: ContextMenuItem[];
+  onOpenChange?: (open: boolean) => void;
 }>;
 
-export function ContextMenu({ children, items }: ContextMenuProps) {
+export function ContextMenu({ children, items, onOpenChange }: ContextMenuProps) {
   const surfaceRef = useMotionSurface("menu");
   return (
-    <RadixContextMenu.Root modal={false}>
+    <RadixContextMenu.Root modal={false} onOpenChange={onOpenChange}>
       <RadixContextMenu.Trigger asChild>{children}</RadixContextMenu.Trigger>
       <RadixContextMenu.Portal>
         <RadixContextMenu.Content ref={surfaceRef} className="ui-menu">

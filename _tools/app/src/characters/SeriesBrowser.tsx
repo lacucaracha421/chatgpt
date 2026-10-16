@@ -1,3 +1,4 @@
+import { useAssetContextTarget } from "../assets/useAssetContextTarget";
 import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { viewFilterEmptyTitle, viewFilterLabel } from "../shared/viewFilterLabel";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -658,7 +659,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // counts, suggestions, page and hub are not reloaded for them.
   const selectedAssets = page.items.filter(asset => selection.ids.has(asset.id));
   const focusedAsset = selection.focusId ? page.items.find(asset => asset.id === selection.focusId) ?? null : null;
-  const inspectorAssets = selectedAssets.length > 0 ? selectedAssets : focusedAsset ? [focusedAsset] : [];
+  const contextTarget = useAssetContextTarget(page.items, selection, scope);
+  const inspectorAssets = contextTarget.infoAssets ?? (selectedAssets.length > 0 ? selectedAssets : focusedAsset ? [focusedAsset] : []);
   function updateAssets(update: (asset: AssetSummary) => AssetSummary, assetIds: ReadonlySet<string>) {
     setPage(old => ({ ...old, items: old.items.map(asset => assetIds.has(asset.id) ? update(asset) : asset) }));
     setExternalAsset(asset => asset && assetIds.has(asset.id) ? update(asset) : asset);
@@ -694,7 +696,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     const gone = new Set(assetIds);
     const removed = page.items.flatMap((asset, index) => gone.has(asset.id) ? [{ asset, index }] : []);
     setPage(old => ({ ...old, items: old.items.filter(asset => !gone.has(asset.id)), totalCount: Math.max(0, old.totalCount - removed.length) }));
-    setSelection(old => old.ids.size === 0 && !(old.focusId && gone.has(old.focusId)) ? old : emptySelection());
+    setSelection(old => [...old.ids].some(id => gone.has(id)) ? emptySelection() : {
+      ...old,
+      focusId: old.focusId && gone.has(old.focusId) ? null : old.focusId,
+      anchorId: old.anchorId && gone.has(old.anchorId) ? null : old.anchorId,
+    });
     if (externalAsset && gone.has(externalAsset.id)) setExternalAsset(null);
     setTrashUndo({ scope, removed });
     setMessage(assetIds.length === 1 ? "휴지통으로 이동했습니다." : `${assetIds.length.toLocaleString("ko-KR")}개 자산을 휴지통으로 이동했습니다.`);
@@ -743,15 +749,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const contextItems: ContextMenuItem[] = picking ? [
     { id: "cancel-pick", label: "이미지 선택 취소", onSelect: () => finishPick(false) },
   ] : [
-    ...(onReviewVideos && selectedAssets.length >= 2 && selectedAssets.length <= 100 && selectedAssets.every(asset => asset.media.kind === "video")
-      ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: busy, onSelect: () => onReviewVideos([...selectedIds]) }]
+    ...(onReviewVideos && contextTarget.targetAssets.length >= 2 && contextTarget.targetAssets.length <= 100 && contextTarget.targetAssets.every(asset => asset.media.kind === "video")
+      ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: busy, onSelect: () => onReviewVideos([...contextTarget.targetIds]) }]
       : []),
-    ...libraryContextItems({ count: selectedIds.length, busy, albums,
-      sourceUrls: page.items.filter(asset => selection.ids.has(asset.id)).map(asset => asset.sourceUrl), onMessage: setMessage,
-      onAlbum: id => void batch(async () => { await gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] }); onMembershipChanged?.(); }, "앨범에 추가하지 못했습니다.") }),
-    { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
-    { id: "refresh", label: "새로고침", onSelect: refresh },
-    { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || !selectedIds.length, onSelect: trashSelection },
+    ...libraryContextItems({ count: contextTarget.targetIds.length, targetsSelection: contextTarget.targetsSelection, busy, albums,
+      sourceUrls: contextTarget.targetAssets.map(asset => asset.sourceUrl), onMessage: setMessage,
+      onAlbum: id => void batch(async () => { await gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [id], removeAlbumIds: [] }); onMembershipChanged?.(); }, "앨범에 추가하지 못했습니다.") }),
+    { id: "info", label: "정보 열기", onSelect: () => { contextTarget.showInfo(); setInspectorOpen(true); } },
+    { id: "refresh", label: "새로고침", disabled: busy, onSelect: () => {
+      if (contextTarget.targetsSelection) { refresh(); return; }
+      void batch(async () => {
+        const updated = await Promise.all(contextTarget.targetIds.map(id => gateway.getAsset(id)));
+        for (const asset of updated) updateAssetSummary(asset);
+      }, "자산을 새로고침하지 못했습니다.");
+    } },
+    { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || !contextTarget.targetIds.length, onSelect: () => void trashAssets(contextTarget.targetIds) },
   ];
   const faultItem = playFault && faultScope ? [{ id: "fault", label: "FAULT로 플레이", onSelect: () => playFault(faultScope) }] : [];
   const characterMenuItems = characterTarget ? [
@@ -874,11 +886,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <Button size="sm" disabled={busy || !picking.ids.length} onClick={() => finishPick(true)}>완료</Button><Button size="sm" variant="ghost" onClick={() => finishPick(false)}>취소</Button>
     </div>}
     <div className="series-browser__body asset-browser__workspace" data-info-open={inspectorOpen}>
-    <ContextMenu items={contextItems}><div className="series-gallery" aria-busy={loading} inert={pageScope !== scope && page.items.length > 0 ? true : undefined} onContextMenu={event => {
-      if (picking) return;
-      const id = (event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId;
-      if (id && !selection.ids.has(id)) setSelection(old => applySelectionGesture(old, ids, id, { range: false, toggle: false }));
-    }}>
+    <ContextMenu items={contextItems} onOpenChange={contextTarget.onOpenChange}><div className="series-gallery" aria-busy={loading} inert={pageScope !== scope && page.items.length > 0 ? true : undefined} onContextMenu={event => {
+      if (!picking) {
+        if ((event.target as HTMLElement).closest("[data-asset-id]")) contextTarget.onContextMenu(event);
+        else contextTarget.onOpenChange(false);
+      }
+    }} onKeyDown={picking ? undefined : contextTarget.onKeyDown} onPointerDownCapture={picking ? undefined : contextTarget.onPointerDownCapture}>
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
         {!picking && !excludedOnly && <SeriesShelf hidden={Boolean(current)} scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && (!folderLoading || Boolean(cachedFolders))) || Boolean(folderError))}>
@@ -947,7 +960,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {!loading && !error && !page.items.length && !filtered && <EmptyState className="series-gallery__empty" title={picking ? "선택할 수 있는 이미지가 없습니다" : currentExtras ? "기타에 이미지가 없습니다" : current ? "이 캐릭터의 이미지가 없습니다" : currentGroup ? "이 그룹에 연결된 이미지가 없습니다" : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다" : excludedOnly ? "제외한 이미지가 없습니다" : "미분류 이미지가 없습니다"} />}
       </>} layout={galleryLayout} groupDates={!shelfShown && (sorted === "newest" || sorted === "oldest")} favoritesView={sorted === "favorites"} infoOpen={inspectorOpen} scrubberHidden={viewer !== null} items={page.items} scopeKey={pageScope ?? undefined} navigationScopeKey={pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:')} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}
-        selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
+        selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId} contextTargetId={picking ? null : contextTarget.targetId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error && pageScope === scope} onLoadNextPage={() => void load(page.nextCursor)}
         onSelectionGesture={(a,gesture) => picking ? choose(a.id) : setSelection(old => applySelectionGesture(old, ids, a.id, gesture))}
         onFocusAsset={picking ? undefined : focusAssetOnly}

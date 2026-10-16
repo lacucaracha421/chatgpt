@@ -59,6 +59,7 @@ type AssetGalleryProps = {
   scrubberHidden?: boolean;
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
+  contextTargetId?: string | null;
   targetRowHeight?: number;
   metadataVisible?: boolean;
   captionLabel?: (asset: AssetSummary) => string | null;
@@ -94,7 +95,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onBackgroundClick = onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onVideoDurationKnown, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, navigationScopeKey = scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, contextTargetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onBackgroundClick = onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onVideoDurationKnown, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
@@ -493,7 +494,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
           </div>;
         })}
         {mountedTiles.map(tile => <div key={tile.asset.id} className="asset-gallery__masonry-cell" data-gallery-cell="" data-date-label={collectedDate(tile.asset.collectedAt).label} style={{ left: tile.left, top: tile.top, width: tile.width, height: tile.height }}>
-          <AssetTile asset={sourceAssets.get(tile.asset.id)!} width={tile.width} height={tile.imageHeight} selected={selectedAssetIds.has(tile.asset.id)} hasSelection={selectedAssetIds.size > 0} focused={focusAssetId ? focusAssetId === tile.asset.id : tile.index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === tile.asset.id} captionLabel={captionLabel?.(tile.asset)} favoritesView={favoritesView} {...tileEvents} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} arrivals={arrivals} activePreview={activePreviewId === tile.asset.id} onRequestPreview={requestPreview} onReleasePreview={releasePreview} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} />
+          <AssetTile asset={sourceAssets.get(tile.asset.id)!} width={tile.width} height={tile.imageHeight} selected={selectedAssetIds.has(tile.asset.id)} hasSelection={selectedAssetIds.size > 0} focused={focusAssetId ? focusAssetId === tile.asset.id : tile.index === 0} focusVisible={(contextTargetId ?? focusAssetId) === tile.asset.id} captionLabel={captionLabel?.(tile.asset)} favoritesView={favoritesView} {...tileEvents} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} arrivals={arrivals} activePreview={activePreviewId === tile.asset.id} onRequestPreview={requestPreview} onReleasePreview={releasePreview} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} />
         </div>)}
       </div>
     </div>

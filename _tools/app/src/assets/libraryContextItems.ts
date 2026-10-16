@@ -8,7 +8,8 @@ function destinationLabel(entry: AlbumEntry, entries: AlbumEntry[]) {
 }
 
 /** Ordinary asset actions use the same menu in folder and character galleries. */
-export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage, onAlbum }: {
+export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage, onAlbum, targetsSelection = true }: {
+  targetsSelection?: boolean;
   count: number; busy: boolean; albums: AlbumEntry[];
   sourceUrls: (string | null)[]; onMessage: (message: string) => void;
   onAlbum: (id: string) => void;
@@ -16,7 +17,7 @@ export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage
   const disabled = busy || count === 0;
   const sources = [...new Set(sourceUrls.map(url => url?.trim()).filter((url): url is string => Boolean(url)))];
   return [
-    { id: "count", label: `${count}개 선택`, disabled: true, onSelect: () => undefined },
+    { id: "count", label: targetsSelection ? `${count}개 선택` : `${count}개`, disabled: true, onSelect: () => undefined },
     { id: "copy-source", label: "출처 복사", disabled: disabled || sources.length === 0, onSelect: async () => {
       if (disabled || !sources.length) return;
       try {

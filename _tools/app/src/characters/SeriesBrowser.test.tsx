@@ -617,7 +617,8 @@ it("keeps character selection in place without a persistent refresh button",asyn
 });
 
 it("keeps manual refresh available from the gallery context menu",async()=>{
-  const {browse,changed}=await mount();
+  const getAsset = vi.fn().mockResolvedValue({ ...fixtureAssets[5], originalName: "refreshed.webp" });
+  const {browse,changed}=await mount(undefined, false, [], undefined, false, { gateway: { getAsset } });
   const user=userEvent.setup();
   const item=await screen.findByRole("option",{name:"이미지 5.webp"});
   const calls=browse.mock.calls.length;
@@ -626,8 +627,11 @@ it("keeps manual refresh available from the gallery context menu",async()=>{
     expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
   }
   await user.click(await screen.findByRole("menuitem",{name:"새로고침"}));
-  await waitFor(()=>expect(browse.mock.calls.length).toBeGreaterThan(calls));
-  expect(changed).toHaveBeenCalled();
+  await screen.findByRole("option", { name: "refreshed.webp" });
+  expect(getAsset).toHaveBeenCalledExactlyOnceWith("image-5");
+  expect(browse).toHaveBeenCalledTimes(calls);
+  expect(changed).not.toHaveBeenCalled();
+  expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
 });
 
 it("creates an underfilled character as manual management",async()=>{
@@ -848,6 +852,8 @@ it("copies a character asset source and reports clipboard failures without chang
   const { changed } = await mount("hina", false, [], undefined, false, { sourceUrl: "https://example.com/pilot" });
   const item = await screen.findByRole("option", { name: "이미지 5.webp" });
   await user.pointer({ target: item, keys: "[MouseRight]" });
+  expect(item).toHaveAttribute("aria-selected", "false");
+  expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
   expect(writeText).toHaveBeenCalledWith("https://example.com/pilot");
   expect(await screen.findByText("출처를 복사했습니다.")).toBeVisible();
@@ -856,6 +862,36 @@ it("copies a character asset source and reports clipboard failures without chang
   await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
   expect(await screen.findByText("출처를 복사하지 못했습니다.")).toBeVisible();
   expect(changed).not.toHaveBeenCalled();
+});
+
+it("keeps the character selection and uses only an outside menu target", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+  const trashAssets = vi.fn().mockResolvedValue(undefined);
+  await mount("hina", false, [], undefined, false, { sourceUrl: "https://example.com/target", gateway: { trashAssets } });
+  const first = await screen.findByRole("option", { name: "이미지 5.webp" });
+  const second = screen.getByRole("option", { name: "이미지 6.webp" });
+  const outside = screen.getByRole("option", { name: "이미지 7.webp" });
+  fireEvent.click(first, { ctrlKey: true });
+  fireEvent.click(second, { ctrlKey: true });
+  fireEvent.contextMenu(first);
+  expect(screen.getByRole("menuitem", { name: "2개 선택" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  act(() => outside.focus());
+  fireEvent.keyDown(outside, { key: "F10", shiftKey: true });
+  expect(screen.getByRole("menuitem", { name: "1개" })).toBeVisible();
+  expect(first).toHaveAttribute("aria-selected", "true");
+  expect(second).toHaveAttribute("aria-selected", "true");
+  expect(outside).toHaveAttribute("aria-selected", "false");
+  await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith("https://example.com/target");
+  expect(screen.queryAllByRole("option", { selected: true })).toEqual([first, second]);
+  await user.pointer({ target: outside, keys: "[MouseRight]" });
+  await user.click(screen.getByRole("menuitem", { name: "휴지통으로" }));
+  await waitFor(() => expect(outside).not.toBeInTheDocument());
+  expect(trashAssets).toHaveBeenCalledExactlyOnceWith(["image-7"]);
+  expect(screen.queryAllByRole("option", { selected: true })).toEqual([first, second]);
+  writeText.mockRestore();
 });
 
 // Region inspection is optional and draft-only: it never saves, and it never
