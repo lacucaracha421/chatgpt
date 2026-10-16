@@ -62,3 +62,10 @@
 .collection-browser__list-scroll > .ui-section-bar { margin-inline: calc(-1 * var(--space-3)); }
 .collection-browser__showcase-scroll { flex: 1; min-height: 0; overflow: auto; }
 .collection-exhibition > .ui-section-drop-slot { margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-3)) var(--space-2); }
+
+/* 격자 for games, AV and manga: the front cover alone, flat, standing on the bottom of the row's cover band.
+   The band is as tall as the tallest common cover (a Switch case), so wider covers keep their own height. */
+.collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: 105 / 170; background: transparent; outline: none; overflow: hidden; border-radius: 0; }
+.collection-card--manga .collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: 256 / 368; }
+.collection-card__cover--flat > .collection-cover-image { background: transparent; object-fit: contain; object-position: center bottom; }
+.collection-card--exhibition .collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: auto; }

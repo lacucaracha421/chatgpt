@@ -134,6 +134,14 @@ pub struct AvCoverSet {
     pub back_id: Option<String>,
     pub revision: String,
 }
+/// One work's cover set in the batched shelf read.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvCoverSetEntry {
+    pub collection_id: String,
+    #[serde(flatten)]
+    pub set: AvCoverSet,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalArtworkPreview {

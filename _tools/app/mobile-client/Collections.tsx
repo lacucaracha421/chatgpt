@@ -20,6 +20,7 @@ import {ShelfTile, ShelfViewSheet, ShelfViewSection, useShelfColumns, useShelfVi
 import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
+import {TabletSpineShelf} from './CollectionSpineShelf';
 import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen, avPerformerView} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
@@ -667,11 +668,15 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const listActive=live&&!selected&&!overlayOpen&&!performer;
   const showcaseActive=live&&!selected&&!performer&&showcaseAll;
   // Both surfaces use the type's same layout, per-row setting and shared shelf geometry.
-  const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals)=>{
+  const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals,inShowcase=false)=>{
     const items=deletedWorks.size?listed.filter(work=>!deletedWorks.has(work.id)):listed;
-    const settings=viewOf(kind),order=items.map(work=>work.id);
+    // 쇼케이스 stays on the turned-case shelf; the spine 책장 is the library's view of games and AV.
+    const own=viewOf(kind),order=items.map(work=>work.id);
+    const settings=inShowcase&&own.layout==='bookcase'&&(kind==='game'||kind==='av')?{...own,layout:'shelf' as const}:own;
     if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
+    if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
+      picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
     return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':columns(settings.perRow)} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
@@ -756,7 +761,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
-      <BusyLabel busy={!ready} idle={ready ? unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals) : null}><p className="hint" role="status">쇼케이스를 준비하는 중…</p></BusyLabel>
+      <BusyLabel busy={!ready} idle={ready ? unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals,true) : null}><p className="hint" role="status">쇼케이스를 준비하는 중…</p></BusyLabel>
       <BusyLabel busy={!!(showcase.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {showcase.moreError&&<div className="inline-error" role="alert"><span>{showcase.moreError}</span><Button variant="ghost" onClick={showcase.retryMore}>다시 시도</Button></div>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>

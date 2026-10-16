@@ -4,15 +4,19 @@ import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Re
 import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
+import { isSpineSize, type SpineSize } from "./case/caseDimensions";
 
-export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort" };
+/** 격자 is flat front covers, 선반 the turned cases on planks, 책장 the bookcase (manga volumes; for games and AV the spine-only shelf). */
+export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort"; /** 책장 size of the games and AV spine shelf. */ spineSize?: SpineSize };
+/** Which types have a 책장 in their 보기 menu. */
+export const hasBookcase = (type: CollectionType) => type === "manga" || type === "game" || type === "av";
 type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
-    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: "device" };
+    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: "device", spineSize: "normal" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
-      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (type === "manga" && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];
+      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (hasBookcase(type) && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device", spineSize: isSpineSize(value.spineSize) ? value.spineSize : "normal" }];
     } catch { /* Use the approved start state when storage is unavailable. */ }
     return [type, fallback];
   })) as Record<CollectionType, CollectionViewSettings>;

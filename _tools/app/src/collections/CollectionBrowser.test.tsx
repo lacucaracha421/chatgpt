@@ -19,6 +19,9 @@ import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
 import type { AvLinkApi } from "./AvLinkInbox";
 import { resetMangaShelvesForTests } from "./MangaShelfList";
+import { avGateway } from "./avClient";
+import { resetSpineShelfDataForTests } from "./spineShelfData";
+import { resetShelfCasesForTests } from "./case/shelfCaseInfo";
 import { forgetMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
 
 afterEach(() => { cleanup(); localStorage.clear(); resetReleaseDataForTests(); });
@@ -1007,13 +1010,97 @@ describe("CollectionBrowser manga shelf", () => {
     expect(screen.queryByRole("region", { name: "쇼케이스" })).not.toBeInTheDocument();
   });
 
-  it("ignores stored bookcase for games and only offers grid and shelf", async () => {
-    localStorage.setItem("lakomics.collections.view.game.v1", JSON.stringify({ layout: "bookcase", perRow: 7, grouping: "device" }));
+  it("offers 격자, 선반 and 책장 for games, AV and manga, and only 격자 and 선반 for movies", async () => {
+    const user = userEvent.setup();
+    for (const [type, labels] of [["game", ["격자", "선반", "책장"]], ["av", ["격자", "선반", "책장"]], ["manga", ["격자", "선반", "책장"]], ["movie", ["격자", "선반"]]] as const) {
+      renderBrowser({ collections: [{ ...sample, type }], typeFilter: type, showcase: false });
+      await user.click(screen.getByRole("button", { name: "보기" }));
+      expect(within(screen.getByRole("radiogroup", { name: "배치" })).getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(labels);
+      cleanup();
+    }
+  });
+
+  it("keeps stored 격자 and 선반 working for games, and ignores 책장 for movies", () => {
+    localStorage.setItem("lakomics.collections.view.game.v1", JSON.stringify({ layout: "grid", perRow: 7, grouping: "device" }));
+    localStorage.setItem("lakomics.collections.view.movie.v1", JSON.stringify({ layout: "bookcase", perRow: 7, grouping: "device" }));
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
-    expect(screen.getByRole("group", { name: "게임 작품 목록" })).toHaveClass("collection-list--shelf");
-    await userEvent.setup().click(screen.getByRole("button", { name: "보기" }));
-    expect(await screen.findByRole("radio", { name: "선반" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByRole("radio", { name: "책장" })).toBeNull();
+    expect(screen.getByRole("group", { name: "게임 작품 목록" })).toHaveClass("collection-list--grid");
+    cleanup();
+    renderBrowser({ collections: [{ ...sample, type: "movie" }], typeFilter: "movie", showcase: false });
+    expect(screen.getByRole("group", { name: "영화 작품 목록" })).toHaveClass("collection-list--shelf");
+  });
+
+  it.each(["game", "av", "manga"] as const)("draws the %s 격자 as flat front covers, not 3D cases", async type => {
+    localStorage.setItem(`lakomics.collections.view.${type}.v1`, JSON.stringify({ layout: "grid", perRow: 8, grouping: "device" }));
+    renderBrowser({ collections: [{ ...sample, type, coverAssetId: "cover-a" }], typeFilter: type, showcase: false });
+    const list = screen.getByRole("group", { name: `${type === "av" ? "AV" : type === "game" ? "게임" : "만화"} 작품 목록` });
+    expect(list).toHaveClass("collection-list--grid");
+    const cover = list.querySelector(".collection-card__cover")!;
+    expect(cover.querySelector("img")).not.toBeNull();
+    expect(cover.querySelector("canvas, .game-case, .physical-cover")).toBeNull();
+    expect(list.querySelector(".collection-light-case")).toBeNull();
+  });
+
+  describe("책장 for games and AV", () => {
+    const store = (type: string, extra: object = {}) => localStorage.setItem(`lakomics.collections.view.${type}.v1`, JSON.stringify({ layout: "bookcase", perRow: 8, grouping: "sort", ...extra }));
+    afterEach(() => { vi.restoreAllMocks(); resetSpineShelfDataForTests(); resetShelfCasesForTests(); });
+
+    it("pulls a game's case out on the first click, opens it on the second and puts it back on Esc", async () => {
+      store("game");
+      const onOpenWork = vi.fn();
+      renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Celeste" }], typeFilter: "game", showcase: false, onOpenWork });
+      const shelf = await screen.findByRole("group", { name: "게임 작품 목록" });
+      expect(shelf).toHaveClass("spine-shelf");
+      expect(shelf.querySelector(".collection-light-case, canvas")).toBeNull();
+      const spines = within(shelf).getAllByRole("button");
+      expect(spines.map(spine => spine.getAttribute("aria-label"))).toEqual(["Astral Chain · PlatinumGames", "Celeste · PlatinumGames"]);
+      fireEvent.click(spines[1]);
+      expect(spines[1]).toHaveAttribute("aria-pressed", "true");
+      expect(onOpenWork).not.toHaveBeenCalled();
+      fireEvent.click(shelf.querySelector(".spine-shelf__out")!);
+      expect(onOpenWork).toHaveBeenCalledWith("c2", expect.arrayContaining(["c1", "c2"]));
+      fireEvent.keyDown(spines[1], { key: "Escape" });
+      expect(spines[1]).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("sizes the shelf with 작게 · 보통 · 크게 instead of 한 줄에 N개, and remembers the choice", async () => {
+      store("game");
+      const user = userEvent.setup();
+      renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
+      await screen.findByRole("group", { name: "게임 작품 목록" });
+      await user.click(screen.getByRole("button", { name: "보기" }));
+      expect(screen.queryByRole("slider", { name: "한 줄에" })).toBeNull();
+      expect(within(screen.getByRole("radiogroup", { name: "책등 크기" })).getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["작게", "보통", "크게"]);
+      const before = Number.parseInt(screen.getByRole("button", { name: /Astral Chain/ }).style.getPropertyValue("--h"));
+      await user.click(screen.getByRole("radio", { name: "크게" }));
+      expect(JSON.parse(localStorage.getItem("lakomics.collections.view.game.v1")!)).toMatchObject({ layout: "bookcase", spineSize: "large" });
+      expect(Number.parseInt(screen.getByRole("button", { name: /Astral Chain/ }).style.getPropertyValue("--h"))).toBeGreaterThan(before);
+      // Back to 격자 brings 한 줄에 N개 back.
+      await user.click(screen.getByRole("radio", { name: "격자" }));
+      expect(screen.getByRole("slider", { name: "한 줄에" })).toBeInTheDocument();
+    });
+
+    it("reads the AV artwork of the mounted works in one call and keeps the spines plastic until it arrives", async () => {
+      store("av");
+      let answer!: (value: Awaited<ReturnType<NonNullable<typeof avGateway.listCoverSets>>>) => void;
+      const read = vi.spyOn(avGateway, "listCoverSets").mockReturnValue(new Promise(resolve => { answer = resolve; }));
+      renderBrowser({ collections: [{ ...sample, id: "a1", name: "첫 작품", type: "av" }, { ...sample, id: "a2", name: "둘째 작품", type: "av" }], typeFilter: "av", showcase: false });
+      const shelf = await screen.findByRole("group", { name: "AV 작품 목록" });
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      expect([...read.mock.calls[0][0]].sort()).toEqual(["a1", "a2"]);
+      expect(shelf.querySelectorAll(".spine .ins")).toHaveLength(0);
+      await act(async () => answer([{ collectionId: "a1", frontId: "f1", spineId: "s1", backId: null, revision: "r1" }, { collectionId: "a2", frontId: null, spineId: null, backId: null, revision: "r2" }]));
+      await waitFor(() => expect(shelf.querySelectorAll(".spine .ins")).toHaveLength(2));
+      expect(shelf.querySelector(".spine img")).toHaveAttribute("src", expect.stringContaining("s1"));
+      expect(read).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the Showcase on the turned-case shelf", () => {
+      store("game");
+      renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true });
+      expect(screen.getByRole("group", { name: "게임 쇼케이스" })).toHaveClass("collection-list--shelf");
+      expect(document.querySelector(".spine-shelf")).toBeNull();
+    });
   });
 
   it("honours stored 책장 and keeps volume picking and opening on each work row", async () => {

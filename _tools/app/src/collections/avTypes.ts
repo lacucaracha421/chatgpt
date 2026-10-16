@@ -26,6 +26,7 @@ export type CoverSurface = "front" | "spine" | "back";
 export const COVER_SURFACES: CoverSurface[] = ["front", "spine", "back"];
 export const SURFACE_LABEL: Record<CoverSurface, string> = { front: "앞면", spine: "책등", back: "뒷면" };
 export type AvCoverSet = { frontId: string | null; spineId: string | null; backId: string | null; revision: string };
+export type AvCoverSetEntry = AvCoverSet & { collectionId: string };
 export type LocalArtworkPreview = {
   path: string; surface: CoverSurface; sha256: string; width: number; height: number;
   mimeType: string; thumbnailDataUrl: string;
@@ -89,6 +90,8 @@ export interface AvGateway {
   previewArtwork(path: string, surface: CoverSurface): Promise<LocalArtworkPreview>;
   applyArtwork(collectionId: string, input: ApplyAvArtwork): Promise<AvCoverSet>;
   getCoverSet(collectionId: string): Promise<AvCoverSet>;
+  /** One read for a window of works; a work that is gone or not AV is left out. */
+  listCoverSets?(collectionIds: string[]): Promise<AvCoverSetEntry[]>;
   getRelated(collectionId: string): Promise<AvRelated>;
   getPerformer(personId: string): Promise<AvPerformerPage>;
   savePersonMemo(personId: string, memo: string | null): Promise<AvPerformerPage>;

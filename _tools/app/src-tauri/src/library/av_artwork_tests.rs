@@ -122,3 +122,12 @@ fn av_daily_backup_restore_recovers_metadata_people_order_and_all_cover_roles() 
         assert!(library.resolve_work_artwork(&artwork_id).is_ok());
     }
 }
+
+#[test]
+fn batched_cover_sets_match_single_reads_and_skip_works_that_are_not_av() {
+    let (_dir,library,id,path)=setup(); let preview=library.preview_av_artwork(&path,CoverSurface::Front).unwrap();
+    let saved=library.apply_av_artwork(&id,request(library.get_av_cover_set(&id).unwrap().revision,ArtworkDecision::Local{path,sha256:preview.sha256},ArtworkDecision::Keep)).unwrap();
+    let batch=library.list_av_cover_sets(&[id.clone(),"missing".into()]).unwrap();
+    assert_eq!(batch.len(),1); assert_eq!(batch[0].collection_id,id);
+    assert_eq!(batch[0].set.front_id,saved.front_id); assert_eq!(batch[0].set.revision,saved.revision);
+}

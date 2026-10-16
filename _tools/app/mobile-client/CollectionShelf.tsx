@@ -2,6 +2,9 @@ import {memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode} fr
 import {LightCase} from '../src/collections/case/LightCase';
 import {workCasePlatform, type CaseData} from '../src/collections/case/CollectionCase';
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
+import {SpineSizeRow} from '../src/collections/CollectionViewSections';
+import {isSpineSize, type SpineSize} from '../src/collections/case/caseDimensions';
+import {hasBookcase} from '../src/collections/CollectionList';
 import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 // The shared shelf geometry (rows, planks, the picked case's title) is the PC list's stylesheet.
 import '../src/collections/CollectionBrowser.css';
@@ -13,7 +16,7 @@ import {collectionCover, type CollectionKind, type CollectionSummary} from './co
 import './collectionShelf.css';
 
 export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
-export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'};
+export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'; /** 책장 size of the games and AV spine shelf. */spineSize?: SpineSize};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
@@ -40,9 +43,10 @@ function readView(type: CollectionKind): ShelfView {
     const value = JSON.parse(localStorage.getItem(viewKey(type)) ?? 'null') as Partial<ShelfView> | null;
     if (!value) return fallback;
     return {
-      layout: value.layout === 'grid' || value.layout === 'shelf' || (type === 'manga' && value.layout === 'bookcase') ? value.layout : fallback.layout,
+      layout: value.layout === 'grid' || value.layout === 'shelf' || (hasBookcase(type) && value.layout === 'bookcase') ? value.layout : fallback.layout,
       perRow: Number.isInteger(value.perRow) ? Math.max(SHELF_PER_ROW.min, Math.min(SHELF_PER_ROW.max, value.perRow!)) : fallback.perRow,
       grouping: value.grouping === 'device' || value.grouping === 'year' || value.grouping === 'sort' ? value.grouping : undefined,
+      spineSize: isSpineSize(value.spineSize) ? value.spineSize : undefined,
     };
   } catch { return fallback; }
 }
@@ -98,10 +102,12 @@ export function ShelfViewSheet({type, view, onChange, onClose}: {type: Collectio
   return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet"><ShelfViewSection type={type} view={view} onChange={onChange}/></div></BottomSheet>;
 }
 export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void}) {
-  const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(type === 'manga' ? [{value: 'bookcase' as const, label: '책장'}] : [])];
+  const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(hasBookcase(type) ? [{value: 'bookcase' as const, label: '책장'}] : [])];
+  const spineBookcase = view.layout === 'bookcase' && (type === 'game' || type === 'av');
   return <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
-      <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
-      <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p>
+      {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} onChange={spineSize => onChange({spineSize})}/> : <>
+        <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
+        <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p></>}
     </ViewOptionsSection>;
 }

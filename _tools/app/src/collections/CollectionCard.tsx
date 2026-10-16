@@ -1,8 +1,6 @@
 import { StarIcon } from "@heroicons/react/20/solid";
 import { CollectionShelfCase } from "./case/LightCase";
-import { GameCase } from "./GameCase";
 import { useState, type ButtonHTMLAttributes } from "react";
-import { PhysicalCover } from "./physical/PhysicalCover";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import type { ReleaseCaption } from "./releaseCaption";
@@ -16,7 +14,6 @@ export function CollectionCard({
   coverUrl,
   onClick,
   selected,
-  scope = "",
   exhibition = false,
   meta = true,
   shelf = false,
@@ -28,7 +25,6 @@ export function CollectionCard({
   coverUrl: string | null;
   onClick: () => void;
   selected: boolean;
-  scope?: string;
   exhibition?: boolean;
   /** The year and star rating; a Showcase row keeps only the 신간 marker. */
   meta?: boolean;
@@ -67,10 +63,8 @@ export function CollectionCard({
     >
       {lightCase && shelfMounted && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
       {flatMounted && <span aria-hidden={!flat} className={`collection-card__object collection-card__object--${collection.type}`}>
-        <span className="collection-card__cover">
-          {visibleCoverUrl && !privacyMode && (collection.type === "game" || collection.type === "av") ? <GameCase src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} /> : visibleCoverUrl && !privacyMode && collection.type === "manga" ? (
-            <PhysicalCover kind="book" src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} />
-          ) : visibleCoverUrl && !privacyMode ? (
+        <span className={`collection-card__cover${collection.type === "movie" ? "" : " collection-card__cover--flat"}`}>
+          {visibleCoverUrl && !privacyMode ? (
             <img
               ref={collectionCoverSourceRef}
               className="collection-cover-image"

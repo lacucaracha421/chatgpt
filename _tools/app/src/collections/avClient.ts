@@ -19,6 +19,7 @@ export const avGateway: AvGateway = {
   saveDetails: (collectionId, input) => invoke("save_av_details", { collectionId, input }),
   searchPeople: query => invoke("search_av_people", { query }),
   getCoverSet: collectionId => invoke("get_av_cover_set", { collectionId }),
+  listCoverSets: collectionIds => invoke("list_av_cover_sets", { collectionIds }),
   applyArtwork: (collectionId, input) => invoke("apply_av_artwork", { collectionId, input }),
   previewArtwork: async (path, surface) => {
     const wire = await invoke<Omit<LocalArtworkPreview, "thumbnailDataUrl"> & { thumbnailBytes: number[] }>("preview_av_artwork", { path, surface });

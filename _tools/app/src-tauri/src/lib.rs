@@ -605,6 +605,7 @@ pub fn run() {
             commands::av::preview_av_artwork,
             commands::av::apply_av_artwork,
             commands::av::get_av_cover_set,
+            commands::av::list_av_cover_sets,
             commands::ingest_media,
             commands::prepare_pending_videos,
             commands::retry_video_preparation,

@@ -11,7 +11,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { CollectionCard } from "./CollectionCard";
-import { coverSourceUrl } from "./physical/collectibleRuntime";
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 8, 23)); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -115,19 +114,18 @@ describe("CollectionCard", () => {
     expect(document.querySelector(".collection-card__line")).toHaveTextContent(/^신간 알림 1$/);
   });
 
-  it("uses a game package shell while manga and movie stay flat", () => {
-    const { rerender } = render(<CollectionCard collection={{ ...sample, type: "game" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(document.querySelector(".collection-card__object--game")).toBeInTheDocument();
-    rerender(<CollectionCard collection={{ ...sample, type: "manga" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(document.querySelector(".collection-card__package")).not.toBeInTheDocument();
-    rerender(<CollectionCard collection={{ ...sample, type: "movie" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(document.querySelector(".collection-card__package")).not.toBeInTheDocument();
+  it.each(["game", "av", "manga", "movie"] as const)("draws a %s grid cover as the flat front image, not a 3D case", type => {
+    const { container } = render(<CollectionCard collection={{ ...sample, type }} coverUrl="/front.jpg" selected={false} onClick={vi.fn()} />);
+    const cover = container.querySelector(".collection-card__cover")!;
+    expect(cover.querySelectorAll("img")).toHaveLength(1);
+    expect(cover.querySelector("img")).toHaveAttribute("src", "/front.jpg");
+    expect(cover.querySelector("canvas, .game-case, .physical-cover")).toBeNull();
   });
 
   it("keeps click and cover alt behavior", () => {
     const onClick = vi.fn();
     render(<CollectionCard collection={sample} coverUrl="cover.jpg" selected={true} onClick={onClick} />);
-    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", coverSourceUrl({ src: "cover.jpg", scope: "", revision: sample.updatedAt }));
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "cover.jpg");
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
     expect(screen.getByRole("button")).toHaveAttribute("aria-selected", "true");
     screen.getByRole("button").click();
@@ -146,7 +144,7 @@ describe("CollectionCard", () => {
     view.rerender(
       <CollectionCard collection={sample} coverUrl="working.jpg" selected={false} onClick={vi.fn()} />,
     );
-    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", coverSourceUrl({ src: "working.jpg", scope: "", revision: sample.updatedAt }));
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "working.jpg");
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
   });
 });

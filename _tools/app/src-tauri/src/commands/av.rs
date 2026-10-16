@@ -84,6 +84,18 @@ pub async fn get_av_cover_set(
 }
 
 #[tauri::command]
+pub async fn list_av_cover_sets(
+    collection_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<AvCoverSetEntry>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_av_cover_sets(&collection_ids))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn get_av_related(
     collection_id: String,
     state: State<'_, AppState>,

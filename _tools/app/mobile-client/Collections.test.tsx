@@ -933,15 +933,47 @@ it('offers manga grid, shelf and bookcase, persists bookcase and opens its Showc
   expect(within(screen.getByRole('dialog',{name:'쇼케이스'})).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
 });
 
-it('ignores stored bookcase for games and offers only grid and shelf',async()=>{
+it('offers grid, shelf and bookcase for games with 책등 크기 in place of 한 줄에, and keeps stored grid and shelf',async()=>{
   localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'bookcase',perRow:4}));
   render(<Collections active paused={false} backRef={{current:null}}/>);
-  const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
-  await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(1));
+  const bookcase=await screen.findByRole('group',{name:'게임 작품 목록'});
+  expect(bookcase.classList.contains('spine-shelf')).toBe(true);
   fireEvent.click(screen.getByRole('button',{name:'보기'}));
   const sheet=await screen.findByRole('dialog',{name:'보기'});
-  expect(within(sheet).getByRole('radio',{name:'선반'}).getAttribute('aria-checked')).toBe('true');
-  expect(within(sheet).queryByRole('radio',{name:'책장'})).toBeNull();
+  expect(within(within(sheet).getByRole('radiogroup',{name:'배치'})).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['격자','선반','책장']);
+  expect(within(sheet).getByRole('radio',{name:'책장'}).getAttribute('aria-checked')).toBe('true');
+  expect(within(within(sheet).getByRole('radiogroup',{name:'책등 크기'})).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['작게','보통','크게']);
+  expect(within(sheet).queryByRole('slider',{name:'한 줄에'})).toBeNull();
+  fireEvent.click(within(sheet).getByRole('radio',{name:'크게'}));
+  expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.game.v1')!)).toEqual({layout:'bookcase',perRow:4,spineSize:'large'});
+  fireEvent.click(within(sheet).getByRole('radio',{name:'선반'}));
+  expect(within(sheet).getByRole('slider',{name:'한 줄에'})).toBeTruthy();
+  fireEvent.click(within(sheet).getByRole('button',{name:'닫기'}));
+  await waitFor(()=>expect(screen.getByRole('group',{name:'게임 작품 목록'}).querySelectorAll('.collection-light-case')).toHaveLength(1));
+});
+
+it('stands games on the spine bookcase: a tap picks a case, a tap on the turned case opens the work, and Showcase keeps the cases',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'bookcase',perRow:4}));
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('showcase=true')?[item]:[item]}:{revision:'r1',item});
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  const bookcase=await screen.findByRole('group',{name:'게임 작품 목록'});
+  const spine=within(bookcase).getByRole('button',{name:new RegExp(`^${item.name}`)});
+  expect(bookcase.querySelector('.collection-light-case')).toBeNull();
+  fireEvent.click(spine);
+  expect(spine.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByRole('heading',{level:1,name:item.name})).toBeNull();
+  fireEvent.click(bookcase.querySelector('.spine-shelf__out')!);
+  await screen.findByRole('heading',{level:1,name:item.name});
+});
+
+it('keeps the Showcase of games on the turned-case shelf while the library is on the spine bookcase',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'bookcase',perRow:4}));
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await screen.findByRole('group',{name:'게임 작품 목록'});
+  pressShowcase(screen.getByRole('button',{name:'쇼케이스'}));
+  const showcase=screen.getByRole('dialog',{name:'쇼케이스'});
+  await waitFor(()=>expect(showcase.querySelector('.collection-light-case')).not.toBeNull());
+  expect(showcase.querySelector('.spine-shelf')).toBeNull();
 });
 
 it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{

@@ -15,9 +15,13 @@ import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { ViewOptionsSection } from "../shared/ui/ViewOptionsSection";
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { CollectionRatingSection, CollectionSortSection } from "./CollectionViewSections";
+import { CollectionRatingSection, CollectionSortSection, SpineSizeRow } from "./CollectionViewSections";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
-import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
+import { CollectionList, hasBookcase, shelfGroups, useCollectionView } from "./CollectionList";
+import { SpineShelf, type SpineShelfControl } from "./SpineShelf";
+import { useSpineShelfWorks } from "./spineShelfData";
+import { SPINE_SCALE } from "./case/caseDimensions";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { useShelfPutDown } from "./useShelfPutDown";
 import { MangaShelfList } from "./MangaShelfList";
 import type { MangaShelfPick } from "./MangaShelfRow";
@@ -53,6 +57,8 @@ import "../styles/collectionSpines.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = KIND_LABEL;
 const TYPES: CollectionType[] = ["game", "manga", "movie", "av"];
+/** Shelves whose first appearance has played this session; revisits, sorts and filters do not animate. */
+const enteredSpineShelves = new Set<string>();
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
 type CollectionBrowserProps = {
@@ -175,7 +181,9 @@ export function CollectionBrowser({
 
   const showcaseItems = useMemo(() => collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)), [collections, typeFilter]);
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
-  const visible = useMemo(() => showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems]);
+  // 책장 for games and AV: the spine-only shelf. Showcase keeps the turned-case shelf.
+  const spineBookcase = !showcase && (typeFilter === "game" || typeFilter === "av") && viewSettings.layout === "bookcase";
+  const visible = useMemo(() => showcase ? showcaseItems : (viewSettings.layout === "shelf" || spineBookcase) && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
@@ -269,6 +277,17 @@ export function CollectionBrowser({
     pick={mangaPick} onPick={setMangaPick} menu={collectionMenu} onOpen={openMangaAt} />;
 
   const libraryRoot = library?.root ?? "";
+  const { privacyMode } = usePrivacy();
+  const spineData = useSpineShelfWorks(libraryItems, typeFilter === "av" ? "av" : "game", { enabled: spineBookcase, gateway, root: libraryRoot, privacy: privacyMode, coverUrl: collectionCoverUrl, refreshKey: spineBatch.running });
+  const spineGroups = useMemo(() => spineBookcase ? shelfGroups(libraryItems, viewSettings.grouping).map(group => ({ label: group.label, works: group.items.map(spineData.toWork) })) : [],
+    [spineBookcase, libraryItems, viewSettings.grouping, spineData.toWork]);
+  const libraryById = useMemo(() => new Map(libraryItems.map(item => [item.id, item])), [libraryItems]);
+  const spineMenu = useCallback((id: string) => { const item = libraryById.get(id); return item ? collectionMenu(item) : []; }, [libraryById, collectionMenu]);
+  const openSpine = useCallback((id: string) => { const item = libraryById.get(id); if (item) latest.current.openCollection(item); }, [libraryById]);
+  const spineControl = useRef<SpineShelfControl | null>(null);
+  const spineShelfKey = `${libraryRoot}:${typeFilter}`;
+  const spineEntrance = spineBookcase && !enteredSpineShelves.has(spineShelfKey);
+  useEffect(() => { if (spineBookcase) enteredSpineShelves.add(spineShelfKey); }, [spineBookcase, spineShelfKey]);
   const board = releases.data?.board;
   const viewLayout = viewSettings.layout;
   const renderCollection = useCallback((collection: CollectionSummary) => {
@@ -288,7 +307,6 @@ export function CollectionBrowser({
                 lightCase
                 shelf={shelf}
                 releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
-                scope={libraryRoot}
                 onClick={() => { if (work) setPickedId(collection.id); else latest.current.openCollection(collection); }}
                 onDoubleClick={() => { if (work) open(); }}
                 onKeyDown={event => { if (work && event.key === "Enter") { event.preventDefault(); open(); } }}
@@ -354,8 +372,9 @@ export function CollectionBrowser({
       </button>}
   </ViewOptionsSection> : null;
   // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
-  const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(typeFilter === "manga" ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
+  const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
     onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
+    sizeControl={spineBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
     leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
     <CollectionSortSection sort={libraryState.sort} direction={libraryState.direction} onSortChange={next => patchLibraryState(next)}
       grouping={typeFilter === "game" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" ? grouping => patchViewSettings({ grouping }) : undefined} />
@@ -388,7 +407,11 @@ export function CollectionBrowser({
     ? {kind: "name", values: visible.map(work => work.name)}
     : {kind: "date", values: visible.map(work => libraryState.sort === "recent" ? work.createdAt : work.releaseDate ?? work.createdAt)},
   [visible, libraryState.sort]);
-  const scrubberList = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
+  const listScrubber = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
+  // The spine shelf mounts only a window of rows, so it seeks by its own packing.
+  const spineSeek = useCallback((index: number) => spineControl.current?.seek(index), []);
+  const spineIndexAtScroll = useCallback(() => spineControl.current?.indexAtScroll() ?? 0, []);
+  const scrubberList = spineBookcase ? { onSeek: spineSeek, indexAtScroll: spineIndexAtScroll } : listScrubber;
   const shelfPutDown = useShelfPutDown(() => { setPickedId(null); setMangaPick(null); });
 
   return (
@@ -414,7 +437,7 @@ export function CollectionBrowser({
           className="collection-browser__content-final"
           data-search-results=""
           onContextMenu={(event) => {
-            if (inbox || (event.target as HTMLElement).closest(".collection-card, .manga-shelf-row, .ui-section-bar")) return;
+            if (inbox || (event.target as HTMLElement).closest(".collection-card, .manga-shelf-row, .ui-section-bar, .spine, .spine-shelf__out")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
@@ -433,6 +456,9 @@ export function CollectionBrowser({
             {sectionDrop.inline}
             {leading}
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
+              : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={SPINE_SCALE.pc[viewSettings.spineSize ?? "normal"]} label={`${sectionLabel} 작품 목록`}
+                pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} controlRef={spineControl}
+                restoredFocusId={navigationMemory?.get(scope)?.focusId} entrance={spineEntrance} />
               : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}

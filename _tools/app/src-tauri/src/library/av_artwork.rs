@@ -40,6 +40,11 @@ impl Library {
         Ok(LocalArtworkPreview { path:path.into(),surface,sha256:digest(&bytes),width,height,mime_type:format.to_mime_type().into(),thumbnail_bytes:thumbnail.into_inner() })
     }
     pub fn get_av_cover_set(&self,id: &str) -> Result<AvCoverSet,AvError> { cover_set(&*self.connection()?,id) }
+    /// The spine shelf reads a window of works at once; a work that is gone or not AV is left out.
+    pub fn list_av_cover_sets(&self,ids: &[String]) -> Result<Vec<AvCoverSetEntry>,AvError> {
+        let connection = self.connection()?;
+        Ok(ids.iter().filter_map(|id| cover_set(&connection,id).ok().map(|set| AvCoverSetEntry { collection_id:id.clone(),set })).collect())
+    }
     pub fn apply_av_artwork(&self,id: &str,input: ApplyAvArtwork) -> Result<AvCoverSet,AvError> {
         // Check adoption before reading local files; the transaction re-checks below.
         super::collection_authority::collection_write_status(&*self.connection()?)?;

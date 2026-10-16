@@ -184,3 +184,6 @@
 .tablet-performer__edits:empty { display: none; }
 .tablet-performer__edits .ui-button { min-height: var(--touch-target); }
 .tablet-performer__edit-note { margin: 0; color: var(--color-muted); font-size: var(--type-meta); }
+
+/* 게임 · AV · 책장: the shared spine shelf runs to the screen edge like the planks; its rows keep the gutter. */
+.mobile-collections .spine-shelf { margin: 0 calc(var(--mobile-gutter) * -1); }
