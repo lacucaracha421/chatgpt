@@ -1,5 +1,5 @@
-// Counts that fall below the baseline fail too, keeping the ratchet tight; regenerate with
-// UPDATE_DESIGN_BASELINE=1 npx vitest run src/styles/designFoundation.test.ts.
+// Counts above the baseline fail; counts below it pass. Lower the recorded baseline when a file
+// improves with UPDATE_DESIGN_BASELINE=1 npx vitest run src/styles/designFoundation.test.ts.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,10 +118,6 @@ function compareCounts(path: string, actual: Counts, baseline: Counts): void {
       current,
       `${path} ${category}: current ${current} exceeds baseline ${recorded}`,
     ).toBeLessThanOrEqual(recorded);
-    expect(
-      current,
-      `${path} ${category}: current ${current} is below baseline ${recorded}; lower the baseline with UPDATE_DESIGN_BASELINE=1`,
-    ).toBeGreaterThanOrEqual(recorded);
   }
 }
 

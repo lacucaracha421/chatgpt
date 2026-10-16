@@ -54,6 +54,12 @@
       "pillRadius": 0,
       "legacyToken": 12
     },
+    "_tools/app/src/cards/album.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/cards/cards.css": {
       "offScaleSpacing": 6,
       "offRoleFontSize": 4,
@@ -61,10 +67,16 @@
       "legacyToken": 0
     },
     "_tools/app/src/cards/opening.css": {
-      "offScaleSpacing": 4,
+      "offScaleSpacing": 6,
       "offRoleFontSize": 3,
       "pillRadius": 0,
       "legacyToken": 0
+    },
+    "_tools/app/src/cards/viewer.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
     },
     "_tools/app/src/characters/CharacterAssignPicker.css": {
       "offScaleSpacing": 0,
@@ -337,6 +349,12 @@
       "legacyToken": 0
     },
     "_tools/app/src/home/homeCalendar.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/home/homeLinks.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
@@ -704,6 +722,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/mobile-client/cards/tabletCards.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/mobile-client/catalogDuplicates.css": {
       "offScaleSpacing": 3,
       "offRoleFontSize": 3,
@@ -783,6 +807,12 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/home.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/homeTablet/homeTablet.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,

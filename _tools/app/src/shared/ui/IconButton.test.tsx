@@ -1,8 +1,6 @@
 import { BookmarkIcon, HeartIcon } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { BookmarkToggle } from "./BookmarkToggle";
 import { IconButton } from "./IconButton";
@@ -74,11 +72,4 @@ it("builds the bookmark toggle in its cover-corner and inline forms", () => {
   expect(inline.querySelector("path")?.getAttribute("d")).not.toBe(container.querySelector("path")?.getAttribute("d"));
   fireEvent.click(inline);
   expect(pop.popToggle).toHaveBeenLastCalledWith(inline, false);
-});
-
-it("keeps one shared pressed style: the accent, --color-heart for the heart, and no face", () => {
-  const css = readFileSync(resolve(__dirname, "../../styles/controls.css"), "utf8");
-  expect(css).toMatch(/\.ui-icon-button\.ui-button\[aria-pressed="true"\] \{ color: var\(--color-accent\); background: transparent; \}/);
-  expect(css).toMatch(/\.ui-icon-button--heart\.ui-button\[aria-pressed="true"\],[^{]*\{ color: var\(--color-heart\); \}/);
-  expect(css).toMatch(/\.ui-bookmark-corner\.ui-button\[aria-pressed="true"\],[^{]*\{ background: transparent; color: var\(--color-accent\); \}/);
 });

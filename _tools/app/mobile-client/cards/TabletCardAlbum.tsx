@@ -2,7 +2,8 @@ import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject
 import {FilterChip} from '../../src/shared/ui/FilterChip';
 import {CardViewer} from '../../src/cards/CardViewer';
 import {TradingCard} from '../../src/cards/TradingCard';
-import {cardTiers, tierRank, type CardData, type CardTier} from '../../src/cards/types';
+import {groupAlbum} from '../../src/cards/groupAlbum';
+import {cardTiers, type CardData, type CardTier} from '../../src/cards/types';
 import {usePrivacyMode} from '../privacyMode';
 import {TopBar} from '../TopBar';
 import {useSyncSignal} from '../syncSignals';
@@ -11,19 +12,6 @@ import {CardsPrivacy} from './CardsPrivacy';
 import {displayCards, tabletCardsApi, type TabletCardsApi} from './cardsClient';
 import {useAndroidBack} from './useAndroidBack';
 import './tabletCards.css';
-
-/** Series → characters → the cards owned of each, best tier first. */
-export function groupAlbum(cards: readonly CardData[], tier: CardTier | 'all' = 'all') {
-  const series = new Map<string, Map<string, CardData[]>>();
-  for (const card of cards) {
-    if (tier !== 'all' && card.tier !== tier) continue;
-    const name = card.seriesName || '시리즈 없음', character = card.characterId ?? card.id;
-    if (!series.has(name)) series.set(name, new Map());
-    const characters = series.get(name)!;
-    characters.set(character, [...(characters.get(character) ?? []), card].sort((a, b) => tierRank(b.tier) - tierRank(a.tier)));
-  }
-  return [...series].sort(([a], [b]) => a.localeCompare(b, 'ko'));
-}
 
 interface Snapshot { cards: CardData[]; next: string | null; revision: number; pages: number }
 interface AlbumProps {

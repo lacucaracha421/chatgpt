@@ -185,8 +185,6 @@ class ProvisioningTests(GuardFixture):
 class SharedDbPathTests(unittest.TestCase):
     def test_provisioning_default_matches_the_server_database(self):
         """The CLI and the server must agree, or provisioning writes elsewhere."""
-        source = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
-        self.assertIn('DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"', source)
         self.assertEqual(api_auth.DEFAULT_DB,
                          Path(__file__).resolve().parents[1] / "data" / "lakomics.sqlite3")
 

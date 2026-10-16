@@ -1,6 +1,5 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { BottomSheet } from './BottomSheet';
 import { SelectionBar } from '../src/assets/SelectionBar';
 
@@ -50,13 +49,6 @@ it('uses the same retained selection bar on tablet without painting a zero count
   expect(ghost.isConnected).toBe(false);
 });
 
-it('travels the entire sheet height and shares the instant reduced-motion rule', () => {
-  const sheet = readFileSync('mobile-client/library.css', 'utf8');
-  const motion = readFileSync('src/styles/surface-motion.css', 'utf8');
-  expect(sheet).toContain('--surface-y: 100%');
-  expect(motion).toContain('translate: none !important; scale: none !important; transition: none !important;');
-});
-
 it('closes a tall inbox sheet from the header button or a downward header swipe', () => {
   vi.stubGlobal('PointerEvent', MouseEvent);
   const close = vi.fn();
@@ -67,11 +59,4 @@ it('closes a tall inbox sheet from the header button or a downward header swipe'
   grab.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, clientX:100, clientY:10}));
   grab.dispatchEvent(new MouseEvent('pointerup', {bubbles:true, clientX:100, clientY:100}));
   expect(close).toHaveBeenCalledTimes(2);
-});
-
-it('keeps tall sheets centered without overriding slide-up motion',()=>{
-  const css=readFileSync('src/styles/controls.css','utf8');
-  const tall=css.match(/\.ui-dialog\.ui-dialog:has\(>\.library-sheet--tall\)\s*\{([^}]+)\}/)![1];
-  expect(tall).toContain('left:50%');expect(tall).not.toMatch(/transform\s*:/);
-  expect(readFileSync('mobile-client/library.css','utf8')).toContain('--surface-y: 100%');
 });

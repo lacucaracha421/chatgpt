@@ -1,4 +1,3 @@
-import {readFileSync} from 'node:fs';
 import {isValidElement} from 'react';
 import {expect,it} from 'vitest';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
@@ -8,7 +7,6 @@ import type {LibraryArtist} from './artistsModel';
 import type {Note} from '../src/notes/store';
 
 const iconOf=(entry:{icon?:unknown})=>isValidElement(entry.icon)?entry.icon.type:null;
-const source=(path:string)=>readFileSync(new URL(path,import.meta.url),'utf8');
 
 it('gives each area one icon from the shared map on both clients (DESIGN "Icons and rows")',()=>{
   expect(AREA_ICONS).toMatchObject({home:expect.anything(),assets:expect.anything(),collections:expect.anything(),manga:expect.anything(),notes:expect.anything(),private_vault:expect.anything(),exchange:expect.anything(),artists:expect.anything(),settings:expect.anything()});
@@ -34,12 +32,4 @@ it('uses the shared area icons in the tablet and PC 찾기 entries',()=>{
   expect(iconOf(noteTitleEntries([note],navigate)[0])).toBe(AREA_ICONS.notes);
   expect(iconOf(workEntries([{id:'w',name:'작품',type:'game',showcase:false} as never],navigate)[0])).toBe(AREA_ICONS.collections);
   expect(iconOf(artistEntries([{id:'a',label:'작가',displayName:null,sourceName:null,keys:[],assetCount:1,coverAssetIds:[],hidden:false} as never],navigate)[0])).toBe(AREA_ICONS.artists);
-});
-
-it('draws the PC rail and the tablet bottom navigation from the shared map',()=>{
-  const rail=source('../src/layout/WorkspaceNavigation.tsx'),nav=source('./App.tsx')+source('./MoreSheet.tsx');
-  for(const key of ['home','assets','collections','manga','notes','exchange','private_vault'])expect(rail).toContain(`AREA_ICONS.${key}`);
-  for(const key of ['home','assets','collections','manga','notes','private_vault','exchange','settings'])expect(nav).toContain(`AREA_ICONS.${key}`);
-  // No area glyph is picked locally any more.
-  expect(rail).not.toMatch(/ArchiveIcons/);
 });

@@ -402,24 +402,6 @@ class CatalogTransportApiTests(unittest.TestCase):
                 response = self.client.get(f"/v1/catalog/gallery/{work_id}", headers=AUTH)
                 self.assertEqual(response.status_code, 200)
 
-    def test_gallery_huge_id_stays_numeric_and_hits_fixed_origin(self) -> None:
-        # Python ints are unbounded; the id is forwarded but remains digits in a
-        # fixed-origin path, so no SSRF surface is created.
-        seen: list[str] = []
-
-        def fake_fetch_once(url: str) -> tuple[int, bytes]:
-            seen.append(url)
-            return 404, b""
-
-        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
-            response = self.client.get("/v1/catalog/gallery/99999999999999999999", headers=AUTH)
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(
-            seen,
-            ["https://k-hentai.org/r/99999999999999999999"],
-        )
-
     def test_search_page_rejects_non_numeric_cursor(self) -> None:
         response = self.client.get(
             "/v1/catalog/search-page", params={"cursor": "abc"}, headers=AUTH

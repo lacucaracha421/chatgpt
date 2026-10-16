@@ -1,7 +1,8 @@
 import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import type {MutableRefObject} from 'react';
-import {TabletCardAlbum, groupAlbum} from './TabletCardAlbum';
+import {TabletCardAlbum} from './TabletCardAlbum';
+import {groupAlbum} from '../../src/cards/groupAlbum';
 import type {AlbumPage, ServerCard, TabletCardsApi} from './cardsClient';
 
 const serverCard = (changes: Partial<ServerCard> = {}): ServerCard => ({

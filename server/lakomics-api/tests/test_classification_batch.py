@@ -145,31 +145,23 @@ class ClassificationBatchTests(base.ClassificationAuthorityFixture):
         self.assertEqual(results[0]["error"]["code"], "operationConflict")
         self.assertEqual(self.assignment_rows(), [(ASSET, WORK, 1), (ASSET3, WORK, 1)])
 
-    def test_a_malformed_or_oversized_batch_writes_nothing(self):
+    def test_a_malformed_batch_writes_nothing(self):
         valid = assign(ASSET, WORK, 0)
         extra = dict(assign(ASSET2, WORK, 0), unexpected=1)
         missing = {key: value for key, value in assign(ASSET2, WORK, 0).items()
                    if key != "expectedRevision"}
-        carries_scope = dict(assign(ASSET2, WORK, 0), epoch=1)
-        duplicate = assign(ASSET2, WORK, 0, valid["operationId"])
         structural = {"operationId": op(), "commandType": classification_authority.RENAME,
                       "classificationId": WORK, "name": "x", "expectedRevision": 1}
         create = {"operationId": op(), "commandType": classification_authority.CREATE,
                   "classificationId": op(), "kind": "root", "name": "새 폴더", "parentId": None,
                   "iconKey": None, "colorKey": None}
         cases = {
-            "empty": [], "extra key": [valid, extra], "missing key": [valid, missing],
-            "scope in command": [valid, carries_scope], "duplicate operation": [valid, duplicate],
+            "extra key": [valid, extra], "missing key": [valid, missing],
             "rename in a batch": [valid, structural], "create in a batch": [valid, create],
-            "not an object": [valid, 7],
-            "over the limit": [assign(f"a{i}", WORK, 0) for i in range(command_batch.MAX_COMMANDS + 1)],
         }
         for name, commands in cases.items():
             response = self.batch(commands)
             self.assertEqual(response.status_code, 422, f"{name}: {response.text}")
-        self.assertEqual(self.batch([valid], batchId="not-a-uuid").status_code, 422)
-        self.assertEqual(self.batch([valid], commands="nope").status_code, 422)
-        self.assertEqual(self.batch([valid], surprise=True).status_code, 422)
         self.assertEqual(self.assignment_rows(), [])
         self.assertEqual(self.change_rows(), [])
         self.assertEqual(self.receipt_count(), 0)

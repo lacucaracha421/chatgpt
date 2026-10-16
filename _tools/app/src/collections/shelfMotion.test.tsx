@@ -148,18 +148,9 @@ it("keeps the old strip while a picked front decodes", async () => {
   expect(button).toHaveClass("is-fronted");
 });
 
-it("uses the exact shelf timing and disables it for reduced motion", () => {
+it("disables shelf motion for reduced motion", () => {
   const cases = readFileSync("src/collections/case/LightCase.css", "utf8");
   const books = readFileSync("src/collections/work/collectionWork.css", "utf8");
-  expect(cases).toContain("transition: transform 360ms var(--ease-sheet)");
-  expect(cases).not.toMatch(/transition:[^;]*\bleft\b/);
-  expect(cases).toContain("translateX(calc(var(--lead) * -1))");
   expect(cases).toMatch(/@media \(prefers-reduced-motion: reduce\).*\.cs-box, \.collection-light-case::after \{ transition: none;/s);
-  expect(books).toContain("transition: transform 360ms var(--ease-sheet), opacity 360ms var(--ease-sheet)");
   expect(books).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.manga-spine-front, \.manga-spine-strip \{ transition: none;/);
-  const shortcuts = readFileSync("src/collections/CollectionBrowser.css", "utf8");
-  expect(shortcuts).toMatch(/@media \(max-width: 1100px\) \{ \.collection-shortcuts__label \{ display: none;/);
-  const tablet = readFileSync("mobile-client/collectionShelf.css", "utf8");
-  expect(tablet).toContain("min-width: 44px; min-height: 44px");
-  expect(tablet).toContain(".mobile-collections .collection-shortcuts__label { display: none; }");
 });

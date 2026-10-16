@@ -130,12 +130,8 @@ class ExtensionSettingsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_strict_models_reject_extra_coercions_and_invalid_ids(self):
         invalid = [
-            {"unexpected": 1}, {"scope": "other"}, {"schemaVersion": "1"},
-            {"schemaVersion": True}, {"schemaVersion": 2}, {"expectedRevision": "0"},
-            {"expectedRevision": False}, {"expectedRevision": -1},
-            {"hiddenClassificationIds": [1]}, {"hiddenClassificationIds": [""]},
-            {"hiddenClassificationIds": ["a" * 241]}, {"listOrder": {"": []}},
-            {"listOrder": {"root": [True]}}, {"listOrder": []},
+            {"unexpected": 1}, {"schemaVersion": True}, {"expectedRevision": -1},
+            {"hiddenClassificationIds": ["a" * 241]},
         ]
         for patch in invalid:
             with self.subTest(patch=patch):

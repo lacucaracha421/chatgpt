@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
-import { CardAlbum, groupAlbum } from "./CardAlbum";
+import { CardAlbum } from "./CardAlbum";
+import { groupAlbum } from "./groupAlbum";
 import { HomeDailyCard } from "./HomeDailyCard";
 import { PackOpening } from "./PackOpening";
 import { TradingCard } from "./TradingCard";
@@ -126,7 +127,7 @@ it("groups owned characters by series, chooses the best tier, pages and filters,
   const original = vi.fn(), folder = vi.fn(); render(<CardAlbum api={api} onBack={vi.fn()} onOpenAsset={original} onCharacter={folder} />); await settle();
   fireEvent.click(screen.getByRole("button", { name: "루나 · UR" }));
   expect(screen.getByRole("dialog", { name: "루나 UR 크게 보기" })).toBeInTheDocument(); fireEvent.click(screen.getByRole("button", { name: "닫기" })); await settle();
-  const detail = screen.getByRole("complementary", { name: "카드 상세" }); expect(detail).toHaveTextContent("Lv.3"); expect(detail).toHaveTextContent("2026");
+  const detail = screen.getByRole("complementary", { name: "카드 상세" }); expect(detail).toHaveTextContent("Lv.3"); expect(detail).toHaveTextContent("10.15");
   fireEvent.click(within(detail).getByRole("button", { name: "원본 열기" })); expect(original).toHaveBeenCalledWith("a1");
   fireEvent.click(within(detail).getByRole("button", { name: "캐릭터 폴더" })); expect(folder).toHaveBeenCalledWith("c1");
   fireEvent.click(screen.getByRole("button", { name: "더 보기" })); await settle(); expect(api.album).toHaveBeenLastCalledWith("next"); expect(screen.getByRole("button", { name: "아리아 · LR" })).toBeInTheDocument();

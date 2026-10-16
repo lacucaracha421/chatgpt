@@ -36,7 +36,7 @@ it("opens as a dialog with the card, its details and the actions the album wires
   const dialog = screen.getByRole("dialog", { name: "하나 SSR 크게 보기" });
   expect(within(dialog).getByRole("img", { name: /SSR 하나/ })).toBeInTheDocument();
   const info = within(dialog).getByLabelText("카드 정보");
-  for (const text of ["별자리", "SSR", "2장", "Lv.3", "2026", "7"]) expect(info).toHaveTextContent(text);
+  for (const text of ["별자리", "SSR", "2장", "Lv.3", "10.15", "7"]) expect(info).toHaveTextContent(text);
   expect(within(dialog).getByText("3 / 3")).toBeInTheDocument();
   fireEvent.click(within(info).getByRole("button", { name: "원본 열기" })); expect(asset).toHaveBeenCalledWith("a-하나");
   fireEvent.click(within(info).getByRole("button", { name: "캐릭터 폴더" })); expect(character).toHaveBeenCalledWith("c-하나");

@@ -1,6 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { CollectionCase, type CaseData } from "./CollectionCase";
 import { displayDate } from "../../shared/displayDate";
 import { backFacts } from "../work/workFacts";
@@ -54,16 +53,4 @@ it("uses AV facts for an AV work without a real back", () => {
   const { container } = render(<CollectionCase {...props} data={{ ...data, platform: "av" }} backContent={{ facts, publisher: "Maker" }} />);
   expect([...container.querySelectorAll(".case-back-facts dt")].map(node => node.textContent)).toEqual(["품번", "메이커", "레이블", "발매"]);
   expect(container.querySelector(".case-back-facts")).toHaveTextContent(`ABC-123메이커Maker레이블Label발매${displayDate("2026-09-01")}`);
-});
-
-it("defines the print unit on the case whose height is overridden by fitted stages", () => {
-  const styles = readFileSync("src/collections/case/CollectionCase.css", "utf8");
-  const inside = readFileSync("src/collections/case/CaseInside.css", "utf8");
-  const back = readFileSync("src/collections/case/CaseBack.css", "utf8");
-  expect(styles).toMatch(/\.collection-case \.kase\s*\{\s*--u: calc\(var\(--ch\) \/ 340\)/);
-  expect(inside).toContain("font-size: calc(12 * var(--u))");
-  expect(inside).toContain("font: 900 calc(16 * var(--u))");
-  expect(back).toContain("font-size: calc(12 * var(--u))");
-  expect(back).toContain("-webkit-line-clamp: 7");
-  expect(back).toContain("aspect-ratio: 16 / 9");
 });

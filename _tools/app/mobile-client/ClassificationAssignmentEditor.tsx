@@ -46,8 +46,7 @@ export interface FlatAssignmentRow {classification:AssignmentClassification;dept
  * reusing that projection would offer targets the authority cannot accept.
  *
  * A node whose parent the replica does not hold is shown at the top level rather than
- * dropped, and `seen` bounds the walk so a malformed parent chain renders partially
- * instead of looping.
+ * dropped. The server refuses parent cycles, and `seen` keeps the walk finite regardless.
  */
 export function flattenAssignmentTree(rows:AssignmentClassification[],collapsed:Set<string>):FlatAssignmentRow[] {
   const known=new Set(rows.map(row=>row.id));
@@ -60,23 +59,6 @@ export function flattenAssignmentTree(rows:AssignmentClassification[],collapsed:
   }
   const sort=(list:AssignmentClassification[])=>list.sort((a,b)=>a.name.localeCompare(b.name,'ko')||a.id.localeCompare(b.id));
   for(const list of byParent.values())sort(list);
-  // A node belongs to the projected forest iff its parent chain reaches a node with no
-  // parent *present in the list*. Only a parent cycle fails that test — a node merely hidden
-  // by a collapsed ancestor still has a legitimate place, so recovering it here would
-  // resurrect exactly the rows the caller asked to collapse.
-  const byId=new Map<string,AssignmentClassification>(rows.map(row=>[row.id,row] as const));
-  const inCycle=(row:AssignmentClassification):boolean=>{
-    const seen=new Set<string>();
-    let current:AssignmentClassification|undefined=row;
-    while(current){
-      if(seen.has(current.id))return true;
-      seen.add(current.id);
-      const parent:AssignmentClassification|undefined=current.parentId?byId.get(current.parentId):undefined;
-      if(!parent)return false;
-      current=parent;
-    }
-    return false;
-  };
   const result:FlatAssignmentRow[]=[],seen=new Set<string>();
   const visit=(row:AssignmentClassification,depth:number)=>{
     if(seen.has(row.id))return;
@@ -86,7 +68,6 @@ export function flattenAssignmentTree(rows:AssignmentClassification[],collapsed:
     if(!collapsed.has(row.id))for(const child of children)visit(child,depth+1);
   };
   for(const row of byParent.get(null)??[])visit(row,0);
-  for(const row of sort([...rows]))if(!seen.has(row.id)&&inCycle(row))visit(row,0);
   return result;
 }
 

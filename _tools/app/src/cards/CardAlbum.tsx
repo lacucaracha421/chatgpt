@@ -5,23 +5,14 @@ import { FilterChip } from "../shared/ui/FilterChip";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { displayDate } from "../shared/displayDate";
 import { CardViewer } from "./CardViewer";
 import { TradingCard } from "./TradingCard";
 import { cardsApi, displayCards, type CardsApi } from "./api";
+import { groupAlbum } from "./groupAlbum";
 import { cardTiers, tierRank, type CardData, type CardTier } from "./types";
 import "./album.css";
 
-export function groupAlbum(cards: readonly CardData[], tier: CardTier | "all" = "all") {
-  const series = new Map<string, Map<string, CardData[]>>();
-  for (const card of cards) {
-    if (tier !== "all" && card.tier !== tier) continue;
-    const name = card.seriesName || "시리즈 없음", character = card.characterId ?? card.id;
-    if (!series.has(name)) series.set(name, new Map());
-    const characters = series.get(name)!;
-    characters.set(character, [...(characters.get(character) ?? []), card].sort((a, b) => tierRank(b.tier) - tierRank(a.tier)));
-  }
-  return [...series].sort(([a], [b]) => a.localeCompare(b, "ko"));
-}
 interface Snapshot { cards: CardData[]; next: string | null; revision: number; pages: number }
 export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: {
   api?: CardsApi; onBack: () => void; onOpenAsset?: (id: string) => void; onCharacter?: (id: string) => void;
@@ -106,7 +97,7 @@ export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: 
       <aside className="card-album__detail" aria-label="카드 상세">{detail ? <div key={detail.id} className="card-album__detail-content">
         <TradingCard card={detail} /><h2>{detail.characterName}</h2><p>{detail.seriesName}</p>
         <div className="card-album__ladder">{characterCards.map(card => <FilterChip key={card.id} aria-pressed={card.id === detail.id} onClick={() => setSelectedTier(card.tier)}>{card.tier.toUpperCase()} ×{card.count}</FilterChip>)}</div>
-        <dl><dt>등급</dt><dd>{detail.tier.toUpperCase()}</dd><dt>보유</dt><dd>{detail.count}장</dd><dt>레벨</dt><dd>Lv.{detail.level}</dd><dt>처음 뽑음</dt><dd>{detail.firstDrawnAt ? new Date(detail.firstDrawnAt).toLocaleDateString("ko-KR") : "—"}</dd></dl>
+        <dl><dt>등급</dt><dd>{detail.tier.toUpperCase()}</dd><dt>보유</dt><dd>{detail.count}장</dd><dt>레벨</dt><dd>Lv.{detail.level}</dd><dt>처음 뽑음</dt><dd>{displayDate(detail.firstDrawnAt) || "—"}</dd></dl>
         <Button onClick={() => openViewer(detail)}>크게 보기</Button>
         <Button disabled={!onOpenAsset || !detail.artAssetId} onClick={() => onOpenAsset?.(detail.artAssetId!)}>원본 열기</Button>
         <Button variant="quiet" disabled={!onCharacter || !detail.characterId} onClick={() => onCharacter?.(detail.characterId!)}>캐릭터 폴더</Button>

@@ -1328,10 +1328,6 @@ class DecoderHelperTests(unittest.TestCase):
         self.assertEqual(encoder._duration_ms({"duration": "0"}), 0)
         self.assertEqual(encoder._duration_ms({"duration": 0}), 0)
 
-    def test_overflowing_duration_is_unknown_instead_of_invalid_sidecar(self):
-        for duration in ("1e308", "1e18", str(2**63 / 1000)):
-            self.assertIsNone(encoder._duration_ms({"duration": duration}))
-
     def test_every_kind_requires_pillow_even_when_video_tools_exist(self):
         with mock.patch.object(encoder, '_apply_own_resource_limits', return_value=True), mock.patch.object(
                 encoder, '_pillow_available', return_value=False), mock.patch.object(

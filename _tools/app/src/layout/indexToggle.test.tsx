@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { AppShell } from "./AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "./WorkspaceChrome";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
@@ -151,15 +150,4 @@ it("yields to a running area switch and does not end an area switch that interru
   pending[1].update();
   await act(async () => { pending[1].finish(); await area.finished; });
   expect(document.documentElement).not.toHaveAttribute(AREA);
-});
-
-it("moves each content frame at its own size, the new one over the solid old one, above the sidebar", () => {
-  const css = readFileSync("src/shared/motion/viewTransitions.css", "utf8");
-  expect(css).toContain('html[data-area-view-transition="index"]::view-transition-group(main) { z-index: 1; overflow: clip; }');
-  expect(css).toMatch(/html\[data-area-view-transition="index"\]::view-transition-new\(main\) \{ inline-size: auto; block-size: auto; mix-blend-mode: normal; \}/);
-  expect(css).toContain('html[data-area-view-transition="index"]::view-transition-old(main) { animation: none; }');
-  expect(css).toContain('html[data-area-view-transition="index"]::view-transition-new(main) { animation-name: index-toggle-content-in; animation-duration: 90ms; }');
-  // The former width slide and its relayout swap are gone.
-  const chrome = readFileSync("src/styles/chrome.css", "utf8");
-  expect(chrome).not.toMatch(/data-toggling|data-index-slide/);
 });

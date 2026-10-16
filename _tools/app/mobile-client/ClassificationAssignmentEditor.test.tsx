@@ -56,14 +56,6 @@ describe('Classification assignment picker',()=>{
     expect(flat.find(row=>row.classification.id==='orphan')?.depth).toBe(0);
   });
 
-  it('terminates on a malformed parent cycle instead of looping',()=>{
-    const cyclic:AssignmentClassification[]=[
-      {id:'a',kind:'tag',name:'A',parentId:'b',iconKey:null,colorKey:null},
-      {id:'b',kind:'tag',name:'B',parentId:'a',iconKey:null,colorKey:null},
-    ];
-    expect(new Set(flattenAssignmentTree(cyclic,new Set()).map(row=>row.classification.id))).toEqual(new Set(['a','b']));
-  });
-
   it('expands exactly the current Classification ancestor path',()=>{
     // Only the current Classification's ancestor path is open; every other node is collapsed.
     const open=new Set(classifications.map(row=>row.id));

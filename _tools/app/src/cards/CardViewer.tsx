@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useAssetMask } from "../privacy/PrivacyContext";
+import { displayDate } from "../shared/displayDate";
 import { preloadImages } from "../shared/motion/viewportImages";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -135,7 +136,7 @@ export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, 
           <div><dt>등급</dt><dd>{tier}</dd></div>
           <div><dt>보유</dt><dd>{shown.count}장</dd></div>
           <div><dt>레벨</dt><dd>Lv.{shown.level}</dd></div>
-          <div><dt>처음 뽑음</dt><dd>{shown.firstDrawnAt ? new Date(shown.firstDrawnAt).toLocaleDateString("ko-KR") : "—"}</dd></div>
+          <div><dt>처음 뽑음</dt><dd>{displayDate(shown.firstDrawnAt) || "—"}</dd></div>
           {shown.serial && <div><dt>일련번호</dt><dd>{shown.serial}</dd></div>}
         </dl>
         {(canAsset || canCharacter) && <div className="card-viewer__actions">

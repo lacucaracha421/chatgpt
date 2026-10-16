@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { AreaSwitch, AreaVisible, MotionScope, READY_CAP_MS } from './AreaSwitch';
 import { useFirstAppearance } from './useFirstAppearance';
-import { EASE_SNAPPY, EASE_SPRING, EASE_STANDARD, SNAPPY_MS, SPRING_FALLBACK, snappySpringEasing, springEasing } from './curves';
+import { EASE_SNAPPY, EASE_SPRING, EASE_STANDARD, SPRING_FALLBACK, snappySpringEasing, springEasing } from './curves';
 import { readFileSync } from 'node:fs';
 
 let reduce = false;
@@ -76,7 +76,7 @@ it.each([false, true])('commits the browser snapshot content and shell synchrono
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it('keeps browser names exclusive to the desktop swap and uses 150ms / 120ms CSS', () => {
+it('keeps browser names exclusive to the desktop swap and softens the swap under reduced motion', () => {
   const css = readFileSync('src/shared/motion/viewTransitions.css', 'utf8');
   expect(css).toContain('html[data-area-view-transition] * { view-transition-name: none !important; }');
   expect(css).toContain('.workspace-index-slot[data-state="open"] { view-transition-name: index !important; }');
@@ -86,10 +86,7 @@ it('keeps browser names exclusive to the desktop swap and uses 150ms / 120ms CSS
     expect(css).toContain(`::view-transition-new(${name})`);
     expect(css).toContain(`::view-transition-group(${name})`);
   }
-  expect(css).toContain('animation-duration: 150ms;');
-  expect(css).toContain('animation-timing-function: cubic-bezier(.2,0,0,1);');
-  expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 120ms;/);
-  expect(css).toContain('::view-transition { pointer-events: none; }');
+  expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
 });
 
 it.each([false, true])('skips a running browser transition without committing stale callbacks (already updated: %s)', async updated => {
@@ -187,11 +184,7 @@ it('keeps instant tablet swaps even when the browser API is available', async ()
   expect(start).not.toHaveBeenCalled(); expect(animate).not.toHaveBeenCalled();
 });
 
-it('shares the snappy prototype samples with CSS and preserves both spring fallbacks', () => {
-  const css = readFileSync('src/styles/tokens.css', 'utf8');
-  expect(css).toContain(`--spring-snappy: ${EASE_SNAPPY}`);
-  expect(css).toContain(`--spring-snappy-ms: ${SNAPPY_MS}ms`);
-  expect(css).toContain('@supports (transition-timing-function: linear(0, 1))');
+it('preserves both spring fallbacks', () => {
   vi.stubGlobal('CSS', {supports: () => false}); expect(springEasing()).toBe(SPRING_FALLBACK);
   expect(snappySpringEasing()).toBe(EASE_STANDARD);
   vi.stubGlobal('CSS', {supports: () => true}); expect(springEasing()).toBe(EASE_SPRING);

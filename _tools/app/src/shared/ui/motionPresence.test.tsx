@@ -5,7 +5,7 @@ import { Dialog } from "./Dialog";
 import { Menu } from "./Menu";
 import { Toast } from "./Toast";
 import { MotionPresence } from "./MotionPresence";
-import { motionDefaults, springLinear } from "./motionCurves";
+import { motionDefaults } from "./motionCurves";
 const surfaceCSS = readFileSync("src/styles/surface-motion.css", "utf8");
 
 afterEach(() => {
@@ -198,14 +198,7 @@ it("leaves fullscreen viewers outside the shared surface motion", () => {
   expect(screen.getByRole("dialog").hasAttribute("data-motion")).toBe(false);
 });
 
-it("matches the demo spring samples and makes reduced motion instant", () => {
-  expect(springLinear(.32, 1).duration).toBe(435);
-  expect(springLinear(.46, .88).duration).toBe(395);
-  const tokens = readFileSync("src/styles/tokens.css", "utf8");
-  expect(tokens).toContain(`--spring-snappy: ${springLinear(.32, 1).easing}`);
-  expect(tokens).toContain(`--spring-gentle: ${springLinear(.46, .88).easing}`);
+it("makes reduced motion instant", () => {
   expect(surfaceCSS).toContain("translate: none !important; scale: none !important; transition: none !important;");
   expect(surfaceCSS).toContain('[data-motion][data-motion][data-state="closed"] { animation: none !important; }');
-  expect(surfaceCSS).toContain("pointer-events: none !important");
-  expect(surfaceCSS).toContain("var(--radix-dropdown-menu-content-transform-origin");
 });

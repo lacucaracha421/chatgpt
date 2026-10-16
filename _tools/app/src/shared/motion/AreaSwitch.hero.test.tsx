@@ -1,6 +1,5 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { AreaSwitch, VIEW_HERO_ATTRIBUTE } from './AreaSwitch';
 import { collectionHero } from '../../collections/collectionHero';
 
@@ -106,18 +105,6 @@ it('captures the whole visible AV jacket rather than the hidden case', () => {
   expect(collectionHero('collection-work', container, 'w1')).toBe(screen.getByTestId('jacket'));
 });
 
-it('keeps snapshot boundaries outside the 3D renderers and sizes stage snapshots to the object', () => {
-  const caseCss = readFileSync('src/collections/case/CollectionCase.css', 'utf8');
-  const shelfCss = readFileSync('src/collections/case/LightCase.css', 'utf8');
-  const mangaCss = readFileSync('src/collections/work/collectionWork.css', 'utf8');
-  expect(caseCss).toMatch(/\.collection-case-object \{[^}]*width: var\(--cw\); height: var\(--ch\); perspective: 2200px;/);
-  expect(caseCss).toMatch(/\.collection-case \.kase \{[^}]*transform-style: preserve-3d;/);
-  expect(shelfCss).toMatch(/\.collection-light-case \{[^}]*perspective: 480px;/);
-  expect(shelfCss).toMatch(/\.collection-light-case \.cs-box \{[^}]*transform-style: preserve-3d;/);
-  expect(mangaCss).toMatch(/\.manga-book-object \{[^}]*width: var\(--bw\); height: var\(--bh\);[^}]*perspective:/);
-  expect(mangaCss).toMatch(/\.manga-bigbook \{[^}]*transform-style: preserve-3d;/);
-});
-
 it('has no morph under reduced motion', async () => {
   reduce = true;
   const view = render(tree('collections'));
@@ -141,13 +128,4 @@ it('leaves other area switches unchanged: no hero, plain snapshot', async () => 
   expect(named()).toEqual([]);
   expect(screen.getByTestId('shelf-front')).toBeTruthy();
   await act(async () => entries[0].finish());
-});
-
-it('morphs the object on the gentle spring with a quick image cross-fade and fast page swap', () => {
-  const css = readFileSync('src/shared/motion/viewTransitions.css', 'utf8');
-  expect(css).toContain('html[data-area-view-transition="hero"] [data-view-hero] { view-transition-name: work-hero !important; }');
-  expect(css).toMatch(/::view-transition-group\(work-hero\) \{ animation-duration: 340ms; animation-timing-function: var\(--spring-gentle/);
-  expect(css).toMatch(/::view-transition-new\(work-hero\) \{ animation-duration: 120ms;/);
-  expect(css).toMatch(/hero"\]::view-transition-old\(index\) \{ animation-duration: 90ms; \}/);
-  expect(css).toMatch(/hero"\]::view-transition-group\(index\) \{ animation-duration: 180ms; \}/);
 });

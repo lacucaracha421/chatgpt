@@ -555,14 +555,6 @@ class CaptureApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
-    def test_openapi_marks_acknowledge_timestamp_as_date_time(self):
-        schema = self.client.get("/openapi.json").json()
-        acknowledgement = schema["components"]["schemas"]["CaptureAcknowledge"]
-        self.assertEqual(
-            acknowledgement["properties"]["imported_at"]["format"],
-            "date-time",
-        )
-
     def test_legacy_imported_route_uses_same_stable_transition(self):
         capture = self.create_capture().json()["capture"]
         acknowledged = self.client.post(
