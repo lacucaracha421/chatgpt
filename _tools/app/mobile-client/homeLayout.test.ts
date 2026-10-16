@@ -17,6 +17,4 @@ it('stacks the PC parts in one column, pairs card with 오늘 할 것 and memo w
   expect(base).toContain('min-height:44px; min-width:44px;');
   // The removed sections leave no layout rules behind.
   for (const gone of ['home-tablet-media-column', 'home-tablet-day-column', 'home-tablet-playing', 'home-tablet-releases', 'home-tablet-day ']) expect(base).not.toContain(gone);
-  const shared = readFileSync('src/home/home.css', 'utf8');
-  expect(shared).toMatch(/home-daily__image[^}]*object-fit:contain/);
 });

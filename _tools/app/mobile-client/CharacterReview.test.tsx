@@ -15,7 +15,6 @@ vi.mock('./media',()=>({
 import {ApiError} from './transport';
 import {warmThumbnail} from './media';
 import {CharacterReview,CharacterReviewEntry} from './CharacterReview';
-import {CharacterAddSheet} from './CharacterAddSheet';
 import {commitReviewDecision,readReviewIntents,REVIEW_OUTBOX_FULL} from './characterReviewOutbox';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
@@ -345,7 +344,7 @@ describe('character review screen, marking only the wrong ones',()=>{
   });
 });
 
-describe('review entry points and viewer add sheet',()=>{
+describe('review entry points',()=>{
   it('shows the Library row only with a positive count, minus queued local decisions',async()=>{
     install(feed());
     commitReviewDecision({libraryId:LIBRARY,targetId:'c',assetId:'a1',decision:'accepted',origin:'feed',basis:'b1'});
@@ -357,17 +356,6 @@ describe('review entry points and viewer add sheet',()=>{
     render(<CharacterReviewEntry enabled={false} refreshKey={1} onOpen={open}/>);
     expect(screen.queryByRole('button')).toBeNull();
     expect(mocks.api).not.toHaveBeenCalled();
-  });
-  it('offers the asset series characters and queues a viewer accept',async()=>{
-    mocks.api.mockImplementation(async(path:string)=>{
-      if(path==='/v1/library/characters/review?asset=a9')return {version:1,ready:true,assetId:'a9',targets:[{targetId:'c',name:'루미',seriesId:'s',seriesName:'시리즈'},{targetId:'d',name:'둘째',seriesId:'s',seriesName:'시리즈'}]};
-      throw new ApiError('offline',null,null);
-    });
-    const added=vi.fn();
-    render(<CharacterAddSheet assetId="a9" libraryId={LIBRARY} onClose={()=>{}} onAdded={added}/>);
-    fireEvent.click(await screen.findByRole('button',{name:/둘째/}));
-    expect(readReviewIntents()['d:a9']).toMatchObject({decision:'accepted',origin:'viewer',basis:null});
-    expect(added).toHaveBeenCalledWith('둘째');
   });
 });
 

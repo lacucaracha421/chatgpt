@@ -1,7 +1,6 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { PublicationStatus } from "../layout/PublicationStatus";
-import { dismissPublication, startPublication, type PublishProgress } from "./publicationJobs";
+import { dismissPublication, publicationProgressText, startPublication, usePublicationJobs, type PublishProgress } from "./publicationJobs";
 
 afterEach(() => { cleanup(); dismissPublication("catalog"); dismissPublication("characters"); });
 
@@ -9,34 +8,35 @@ it("keeps progress and duplicate protection across screen unmounts, completing o
   let progress!: (value: PublishProgress) => void;
   let complete!: (value: number) => void;
   const run = vi.fn((notify: (value: PublishProgress) => void) => { progress = notify; return new Promise<number>(resolve => { complete = resolve; }); });
-  const first = render(<PublicationStatus />);
+  const first = renderHook(() => usePublicationJobs());
   let task!: Promise<void>;
-  act(() => { task = startPublication("catalog", run, result => `${result}개 완료`); });
+  act(() => { task = startPublication("catalog", run, result => `${result} items complete`); });
   first.unmount();
   act(() => { progress({ phase: "uploading", completed: 5, total: 10, unit: "bytes" }); });
-  render(<PublicationStatus />);
-  expect(screen.getByText(/50%/)).toBeTruthy();
+  const { result } = renderHook(() => usePublicationJobs());
+  expect(publicationProgressText(result.current.catalog!.progress)).toContain("50%");
   await act(async () => { await startPublication("catalog", run, String); });
   expect(run).toHaveBeenCalledTimes(1);
   act(() => { progress({ phase: "publishing", completed: 0, total: null, unit: "items" }); });
-  expect(screen.getByText(/서버 반영/)).toBeTruthy();
-  expect(screen.queryByText(/개 완료/)).toBeNull();
+  expect(result.current.catalog?.progress.phase).toBe("publishing");
+  expect(result.current.catalog?.running).toBe(true);
   await act(async () => { complete(12); await task; });
-  expect(screen.getByText(/12개 완료/)).toBeTruthy();
+  expect(result.current.catalog).toMatchObject({ running: false, message: "12 items complete" });
 });
 
 it("retains errors after navigation and allows an explicit retry without blocking the other job", async () => {
   await act(async () => { await startPublication("characters", async () => { throw new Error("offline"); }, String); });
-  const first = render(<PublicationStatus />);
-  expect(screen.getByRole("alert")).toBeTruthy();
+  const first = renderHook(() => usePublicationJobs());
+  expect(first.result.current.characters?.error).toBe(true);
   first.unmount();
-  render(<PublicationStatus />);
-  expect(screen.getByRole("alert")).toBeTruthy();
+  const { result } = renderHook(() => usePublicationJobs());
+  expect(result.current.characters?.error).toBe(true);
   await act(async () => { await Promise.all([
-    startPublication("characters", async () => 4, result => `${result}개 완료`),
-    startPublication("catalog", async () => 9, result => `${result}개 완료`),
+    startPublication("characters", async () => 4, result => `${result} items complete`),
+    startPublication("catalog", async () => 9, result => `${result} items complete`),
   ]); });
-  expect(screen.getByText(/4개 완료/)).toBeTruthy();
-  expect(screen.getByText(/9개 완료/)).toBeTruthy();
-  expect(screen.queryByRole("alert")).toBeNull();
+  expect(result.current.characters).toMatchObject({ running: false, message: "4 items complete" });
+  expect(result.current.catalog).toMatchObject({ running: false, message: "9 items complete" });
+  expect(result.current.characters?.error).toBe(false);
+  expect(result.current.catalog?.error).toBe(false);
 });

@@ -2,13 +2,20 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BoosterPack } from "./BoosterPack";
 import { CardBack } from "./CardBack";
-import { demoDeck } from "./demoDeck";
 import { CardSequence, createPointerTilt } from "./motion";
 import { PackOpening } from "./PackOpening";
 import { TradingCard } from "./TradingCard";
-import { cardTiers, completesTear, revealOrder, tearProgress, tierClass } from "./types";
+import { cardTiers, completesTear, revealOrder, tearProgress, tierClass, type CardData } from "./types";
 
-const fixture = demoDeck();
+const artUrl = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='840'/%3E";
+const fixture = {
+  cards: cardTiers.map((tier, index): CardData => ({
+    id: 'card-' + index, characterName: 'Character ' + index, seriesName: 'Series', tier,
+    artUrl, artWidth: 600, artHeight: 840, cutoutUrl: index >= 3 ? artUrl : undefined,
+    count: index + 1, level: Math.min(5, index + 1), isNew: index !== 1,
+  })),
+  cover: { imageUrls: Array.from({ length: 7 }, () => artUrl), centreCutoutUrl: artUrl },
+};
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 let reduced = false;
 beforeEach(() => {

@@ -73,7 +73,6 @@
 .series-picking__chosen button { width: 32px; height: 42px; padding: 0; position: relative; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text); cursor: pointer; }
 .series-picking__chosen img { width: 100%; height: 100%; object-fit: cover; }
 .series-picking__chosen span { position: absolute; right: 0; top: 0; padding: 0 var(--space-1); background: var(--color-bg); }
-.series-automation { padding: var(--space-1) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
 .character-folder-content { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .character-folder-content > .asset-browser { flex: 1; min-height: 0; }
 /* Layout-neutral at rest; a preparing browser takes the painted one's box (FolderKindSwitch). */
@@ -120,8 +119,6 @@
 .character-check { padding-block: var(--space-2); font-size: var(--text-md); }
 .character-description textarea { box-sizing: border-box; line-height: var(--line-copy); }
 .character-description textarea:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--space-1); }
-.series-automation { color: var(--color-muted); min-height: var(--control-height-sm); gap: var(--space-3); }
-.series-automation > span { flex: 1; line-height: var(--line-copy); }
 .character-registry .series-description { word-break: keep-all; }
 
 .character-series-suggestions { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; }

@@ -3,8 +3,6 @@ import {cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks=vi.hoisted(()=>({native:vi.fn(),errors:vi.fn()}));
 vi.mock('./transport',()=>({native:mocks.native,errorText:(reason:unknown)=>mocks.errors(reason) as string}));
-// The picker section polls its own operation; it is not what these checks are about.
-vi.mock('./PickerSettings',()=>({PickerSettings:()=>(<section aria-label="다른 앱에서 첨부하기"><h3>다른 앱에서 첨부하기</h3></section>)}));
 import {Settings} from './Settings';
 beforeEach(()=>{
   mocks.native.mockReset(); mocks.errors.mockReset(); mocks.errors.mockReturnValue('연결을 확인한 뒤 다시 시도해 주세요.');

@@ -24,7 +24,7 @@ import {apiOn, outboxConnection} from './outboxConnection';
 import {confirmReviewIntent, readReviewIntents, reissueReviewIntent, type ReviewIntent} from './characterReviewOutbox';
 import type {Asset} from './types';
 
-export const REVIEW_PATH = '/v1/library/characters/review';
+const REVIEW_PATH = '/v1/library/characters/review';
 export const REVIEW_DECISIONS_PATH = '/v1/library/characters/review/decisions';
 
 /** `tagger` (태그 추천) comes only from a server that lists it in `itemSources`; an older one never sends it. */
@@ -41,7 +41,6 @@ export type ReviewFeed = {
   /** Exact per-character counts. Its presence also means the route accepts `series=`. */
   countsByTarget?: ReviewTargetCount[];
 };
-export type ReviewAssetTargets = {version: 1; ready: boolean; assetId: string; targets: {targetId: string; name: string; seriesId: string; seriesName: string | null}[]};
 
 /** `series` only for a server that sends `countsByTarget`: an older one refuses unknown parameters. */
 export function reviewPath(params: {target?: string | null; series?: string | null; cursor?: string | null; limit?: number}) {

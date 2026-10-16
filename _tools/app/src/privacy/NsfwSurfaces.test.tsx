@@ -4,26 +4,23 @@ import {PrivacyProvider} from './PrivacyContext';
 import {AssetImage} from './AssetImage';
 import {VideoPlayer} from '../video/VideoPlayer';
 import {ArtistCollage} from '../artists/ArtistCollage';
-import {HomeRevisit} from '../home/HomeRevisit';
 import type {LibraryGateway,AssetSummary} from '../library/types';
 afterEach(cleanup);
 const ratings={g:'g',s:'s',q:'q',e:'e',u:null} as const;
 const refreshAssets=vi.fn(async(_query:unknown,ids:string[])=>ids.map(id=>({id,contentRating:ratings[id as keyof typeof ratings]}) as AssetSummary));
-const gateway={refreshAssets,getRevisitSlate:vi.fn(async()=>({bundles:[{kind:'date',assetIds:Object.keys(ratings)}]}))} as unknown as LibraryGateway;
-it('batches mosaic, home and preview summary reads and reveals only individual g cells',async()=>{
+const gateway={refreshAssets} as unknown as LibraryGateway;
+it('batches mosaic and preview summary reads and reveals only individual g cells',async()=>{
  refreshAssets.mockClear();
  const {container,rerender}=render(<PrivacyProvider gateway={gateway} privacyMode={false} setPrivacyMode={vi.fn()} nsfwFilter>
   <ArtistCollage assetIds={['g','s','u']} privacyMode={false}/>
-  <HomeRevisit gateway={gateway} localDate="2026-10-03" privacyMode={false}/>
   <AssetImage src="http://lakomics.localhost/thumbnail/e"/>
  </PrivacyProvider>);
  expect(container.querySelector('img[src]')).toBeNull();
- await waitFor(()=>expect(container.querySelectorAll('img[src]')).toHaveLength(2));
+ await waitFor(()=>expect(container.querySelectorAll('img[src]')).toHaveLength(1));
  expect([...container.querySelectorAll('img[src]')].every(img=>img.getAttribute('src')?.endsWith('/g'))).toBe(true);
- expect(refreshAssets.mock.calls.flatMap(call=>call[1])).toEqual(expect.arrayContaining(['g','s','u','e','q']));
+ expect(refreshAssets.mock.calls.flatMap(call=>call[1])).toEqual(expect.arrayContaining(['g','s','u','e']));
  expect(refreshAssets.mock.calls.length).toBeLessThan(5);
  expect(container.querySelectorAll('.artist-collage__cell')).toHaveLength(3);
- expect(container.querySelectorAll('.home-revisit__cell')).toHaveLength(5);
  rerender(<PrivacyProvider gateway={gateway} privacyMode setPrivacyMode={vi.fn()} nsfwFilter><ArtistCollage assetIds={['g','s','u']} privacyMode={false}/></PrivacyProvider>);
  expect(container.querySelector('img[src]')).toBeNull();
 });

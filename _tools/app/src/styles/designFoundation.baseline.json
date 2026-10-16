@@ -100,7 +100,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 1,
       "pillRadius": 0,
-      "legacyToken": 20
+      "legacyToken": 19
     },
     "_tools/app/src/characters/suggestions/CharacterSuggestions.css": {
       "offScaleSpacing": 5,
@@ -354,17 +354,11 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
-    "_tools/app/src/layout/PublicationStatus.css": {
-      "offScaleSpacing": 0,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 0
-    },
     "_tools/app/src/layout/StatusCenter.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 6
+      "legacyToken": 4
     },
     "_tools/app/src/layout/windowResizeHandles.css": {
       "offScaleSpacing": 0,
@@ -474,18 +468,6 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
-    "_tools/app/src/shared/markdown/markdown.css": {
-      "offScaleSpacing": 1,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 3
-    },
-    "_tools/app/src/shared/markdown/markdownHelp.css": {
-      "offScaleSpacing": 0,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 5
-    },
     "_tools/app/src/shared/motion/areaMotion.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -580,7 +562,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 5
+      "legacyToken": 4
     },
     "_tools/app/src/styles/shared-hover.css": {
       "offScaleSpacing": 0,
