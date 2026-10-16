@@ -71,6 +71,20 @@ class SimilarityReviewTests(unittest.TestCase):
             body['items'] = items
         return self.put_feed(body)
 
+    def test_old_and_new_optional_clues_round_trip(self):
+        old = feed_fixture()
+        similarity_review.Feed.model_validate(old)
+        item = old['items'][0]
+        item.update(clues={'account': 'a', 'posted': 'b', 'resolution': None, 'bytes': None}, reason='account')
+        item['a'].update(accountHandle='@author', accountRole='artist', sourceHost='x.com',
+                         sourcePublishedAt='2026-10-17T10:00:00Z')
+        self.assertEqual(self.put_feed(old).status_code, 200)
+        actual = self.read()['items'][0]
+        self.assertEqual(actual['clues'], item['clues'])
+        self.assertEqual(actual['reason'], 'account')
+        for field in ('accountHandle', 'accountRole', 'sourceHost', 'sourcePublishedAt'):
+            self.assertEqual(actual['a'][field], item['a'][field])
+
     def test_inactive_until_adoption_and_roles(self):
         page = self.read()
         self.assertFalse(page['ready'])
@@ -405,6 +419,29 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertTrue(sent.json()['pendingPc'])
         self.assertFalse(self.log().json()['items'][0]['serverApplied'])
         self.assertEqual(self.decide(self.command('r1', 'withdrawn')).status_code, 200)
+
+    def test_server_applied_discard_carries_classification_and_album_memberships_once(self):
+        import album_authority
+        self.server_apply()
+        _, digest = self.with_asset_authority()
+        album_authority.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO authority_domains VALUES(?,'albums',1,1,0,?,NULL,'2026')", (LIBRARY, 'a' * 64))
+            db.execute("INSERT INTO classification_authority_state VALUES(?,'folder','root','Folder',NULL,NULL,NULL,0,1,'2026','2026')", (LIBRARY,))
+            db.execute("INSERT INTO classification_authority_assignments VALUES(?,'s1','folder',1,'2026','2026')", (LIBRARY,))
+            db.execute("INSERT INTO album_authority_state VALUES(?,'saved','Saved',NULL,NULL,NULL,0,1,'2026','2026')", (LIBRARY,))
+            db.execute("INSERT INTO album_authority_members VALUES(?,'saved','s1',1,1,'2026','2026')", (LIBRARY,))
+            db.commit()
+        command = self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1'))
+        first = self.decide(command)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(self.decide(command).json(), first.json())
+        with api_app.get_db() as db:
+            assignment = db.execute("SELECT classification_id,entity_revision FROM classification_authority_assignments WHERE asset_id='a'").fetchone()
+            membership = db.execute("SELECT desired_state,entity_revision FROM album_authority_members WHERE album_id='saved' AND asset_id='a'").fetchone()
+            self.assertEqual(tuple(assignment), ('folder', 1))
+            self.assertEqual(tuple(membership), (1, 1))
+        self.assertEqual(self.trash_changes(), 1)
 
     def test_switch_on_trashes_the_discarded_image_at_once_and_idempotently(self):
         self.server_apply()

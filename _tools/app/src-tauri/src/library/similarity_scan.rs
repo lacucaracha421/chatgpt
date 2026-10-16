@@ -291,7 +291,7 @@ fn load_comparable(connection: &Connection) -> Result<Vec<ScanAsset>, LibraryErr
 /// Record one historical pair unless an input changed or the pair is already known (either
 /// orientation, incoming reviews and decided pairs included). Returns whether it was created.
 fn insert_historical_review(
-    connection: &Connection,
+    connection: &rusqlite::Transaction<'_>,
     existing: &ScanAsset,
     candidate: &ScanAsset,
     distance: u32,
@@ -309,21 +309,37 @@ fn insert_historical_review(
         |row| row.get(0),
     )?;
     if known {
+        let open: Option<(String,String,String)> = connection.query_row(
+            "SELECT id,existing_asset_id,candidate_asset_id FROM similarity_reviews WHERE status='open' AND review_kind='historical'
+             AND min(existing_asset_id,candidate_asset_id)=min(?1,?2) AND max(existing_asset_id,candidate_asset_id)=max(?1,?2)",
+            params![existing.id,candidate.id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        if let Some((id, a, b)) = open {
+            super::similarity::auto_resolve_repost(connection, &id, &a, &b, distance)?;
+        }
         return Ok(false);
     }
+    let review_id = uuid::Uuid::new_v4().to_string();
     connection.execute(
         "INSERT INTO similarity_reviews
          (id, existing_asset_id, candidate_asset_id, distance, fingerprint_kind, review_kind, status, created_at)
          VALUES (?1, ?2, ?3, ?4, 'pdq-v1', 'historical', 'open', ?5)",
         params![
-            uuid::Uuid::new_v4().to_string(),
+            review_id,
             existing.id,
             candidate.id,
             distance,
             now
         ],
     )?;
-    Ok(true)
+    let resolved = super::similarity::auto_resolve_repost(
+        connection,
+        &review_id,
+        &existing.id,
+        &candidate.id,
+        distance,
+    )?
+    .is_some();
+    Ok(!resolved)
 }
 
 fn scan_progress(connection: &Connection) -> Result<Option<ImageSimilarityScan>, LibraryError> {
@@ -394,6 +410,7 @@ fn input_is_current(connection: &Connection, asset: &ScanAsset) -> Result<bool, 
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::params;
     use tempfile::TempDir;
 
     use super::super::{
@@ -614,6 +631,261 @@ mod tests {
                 .total_count,
             0
         );
+    }
+
+    #[test]
+    fn similarity_clues_rank_accounts_time_resolution_and_byte_ties() {
+        use super::super::{
+            models::{AccountRole::*, ClueKey::*, ClueSide::*},
+            similarity::comparison_clues,
+        };
+        let temp = TempDir::new().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "a", [0; 32], [0; 32]);
+        insert_asset(&library, "b", [0; 32], [0; 32]);
+        let mut a = library.get_asset("a").unwrap();
+        let mut b = library.get_asset("b").unwrap();
+        a.creator_handle = Some("author".into());
+        b.creator_handle = Some("other".into());
+        a.source_url = Some("https://x.com/author/status/1".into());
+        b.source_url = Some("https://x.com/other/status/2".into());
+        for (ar, br, winner) in [
+            (Artist, Unknown, Some(A)),
+            (Unknown, Reposter, Some(A)),
+            (Reposter, Artist, Some(B)),
+            (Reposter, Unknown, Some(B)),
+            (Artist, Artist, None),
+            (Reposter, Reposter, None),
+        ] {
+            let (clues, reason, side) = comparison_clues(&a, ar, &b, br);
+            assert_eq!(clues.account, winner);
+            assert_eq!(side, winner);
+            assert_eq!(reason, winner.map(|_| Account));
+        }
+        a.source_published_at = Some("2025-01-01T10:01:59Z".into());
+        b.source_published_at = Some("2025-01-01T10:02:00Z".into());
+        assert_eq!(comparison_clues(&a, Reposter, &b, Reposter).1, Some(Posted));
+        assert_eq!(
+            comparison_clues(&a, Reposter, &b, Reposter).0.posted,
+            Some(A)
+        );
+        b.creator_handle = Some("AUTHOR".into());
+        b.width = 200;
+        let (clues, reason, side) = comparison_clues(&a, Artist, &b, Artist);
+        assert_eq!(
+            (clues.account, clues.posted, reason, side),
+            (None, None, Some(Resolution), Some(B))
+        );
+        b.width = a.width;
+        a.byte_size = 10000;
+        b.byte_size = 9800;
+        assert_eq!(comparison_clues(&a, Artist, &b, Artist).2, None);
+        b.byte_size = 9799;
+        assert_eq!(comparison_clues(&a, Artist, &b, Artist).1, Some(Bytes));
+        b.creator_handle = Some("other".into());
+        b.source_published_at = Some("2025-01-01T10:01:00Z".into());
+        assert_eq!(comparison_clues(&a, Unknown, &b, Unknown).0.posted, None);
+        b.source_published_at = None;
+        assert_eq!(comparison_clues(&a, Unknown, &b, Unknown).0.posted, None);
+    }
+
+    fn mark_posting_role(library: &Library, id: &str, reposter: bool) {
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE assets SET source_url=?2,creator_handle=?1 WHERE id=?1",
+                params![id, format!("https://x.com/{id}/status/1")],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO artists(id,reposter,hidden,created_at,updated_at) VALUES(?1,?2,1,'now','now')",params![id,reposter]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO artist_members(creator_key,artist_id,added_at) VALUES(?1,?1,'now')",
+                [id],
+            )
+            .unwrap();
+    }
+
+    fn organize_repost(library: &Library, discarded: &str) -> String {
+        use super::super::models::{
+            AssetAlbumPatch, ClassificationKind, CreateAlbum, CreateClassification,
+        };
+        let folder = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Folder".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let album = library
+            .create_album(CreateAlbum {
+                name: "Saved".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+                params![discarded, folder.id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE library_settings SET likes_album_id=?1 WHERE singleton=1",
+                [&album.id],
+            )
+            .unwrap();
+        drop(connection);
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec![discarded.into()],
+                add_album_ids: vec![album.id],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        folder.id
+    }
+
+    fn assert_inherited(library: &Library, kept: &str, discarded: &str, folder: &str) {
+        assert!(library.get_asset(kept).unwrap().favorite);
+        assert_eq!(library.get_asset_albums(kept).unwrap().len(), 1);
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT classification_id FROM asset_classifications WHERE asset_id=?1",
+                    [kept],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            folder
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT status FROM assets WHERE id=?1", [discarded], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+            "trash"
+        );
+    }
+
+    #[test]
+    fn similarity_auto_repost_is_strict_and_inherits_metadata_for_either_orientation() {
+        use super::super::similarity::auto_resolve_repost;
+        for incoming in [false, true] {
+            for reverse in [false, true] {
+                for distance in [8, 9] {
+                    let temp = TempDir::new().unwrap();
+                    let library = Library::open(temp.path()).unwrap();
+                    insert_asset(&library, "a", [0; 32], [0; 32]);
+                    insert_asset(&library, "b", [0; 32], [0; 32]);
+                    let (kept, discarded) = if reverse { ("b", "a") } else { ("a", "b") };
+                    mark_posting_role(&library, kept, false);
+                    mark_posting_role(&library, discarded, true);
+                    let folder = organize_repost(&library, discarded);
+                    let mut connection = library.connection().unwrap();
+                    let tx = connection.transaction().unwrap();
+                    if incoming {
+                        tx.execute("UPDATE assets SET status='review' WHERE id='b'", [])
+                            .unwrap();
+                    }
+                    tx.execute("INSERT INTO similarity_reviews(id,existing_asset_id,candidate_asset_id,distance,fingerprint_kind,review_kind,status,created_at) VALUES('r','a','b',?1,'pdq-v1',?2,'open','now')",params![distance,if incoming {"incoming"}else{"historical"}]).unwrap();
+                    let result = auto_resolve_repost(&tx, "r", "a", "b", distance).unwrap();
+                    tx.commit().unwrap();
+                    drop(connection);
+                    assert_eq!(
+                        result.as_deref(),
+                        if distance == 8 { Some(kept) } else { None }
+                    );
+                    if distance == 8 {
+                        assert_inherited(&library, kept, discarded, &folder);
+                    }
+                }
+            }
+        }
+        let temp = TempDir::new().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "a", [0; 32], [0; 32]);
+        insert_asset(&library, "b", [0; 32], [0; 32]);
+        mark_posting_role(&library, "a", false);
+        let completed = run_to_completion(&library, library.start_image_similarity_scan().unwrap());
+        assert_eq!(completed.reviews_created, 1);
+        assert!(library.get_asset("b").is_ok());
+        let items = library.list_similarity_reviews(None, 1).unwrap().items;
+        assert_eq!(
+            items[0].existing.account_role,
+            super::super::models::AccountRole::Artist
+        );
+        assert_eq!(
+            items[0].clues.account,
+            Some(super::super::models::ClueSide::A)
+        );
+        assert_eq!(
+            items[0].reason,
+            Some(super::super::models::ClueKey::Account)
+        );
+    }
+
+    #[test]
+    fn similarity_auto_compare_does_not_discard_unknown_posting_accounts() {
+        for reposter in [false, true] {
+            let temp = TempDir::new().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            insert_asset(&library, "a", [0; 32], [0; 32]);
+            insert_asset(&library, "b", [0; 32], [0; 32]);
+            mark_posting_role(&library, "a", reposter);
+            library.connection().unwrap().execute("UPDATE assets SET creator_handle='unknown',source_url='https://x.com/unknown/status/1' WHERE id='b'",[]).unwrap();
+            library.connection().unwrap().execute("INSERT INTO similarity_auto_compare_queue(asset_id,queued_at) VALUES('b','now')",[]).unwrap();
+            assert_eq!(
+                library
+                    .run_similarity_auto_compare_with_policy(|| false)
+                    .unwrap(),
+                1
+            );
+            assert!(library.get_asset("a").is_ok());
+            assert!(library.get_asset("b").is_ok());
+        }
+    }
+
+    #[test]
+    fn similarity_historical_manual_and_scan_auto_carry_organization() {
+        for automatic in [false, true] {
+            for reverse in [false, true] {
+                let temp = TempDir::new().unwrap();
+                let library = Library::open(temp.path()).unwrap();
+                insert_asset(&library, "a", [0; 32], [0; 32]);
+                insert_asset(&library, "b", [0; 32], [0; 32]);
+                let (kept, discarded) = if reverse { ("b", "a") } else { ("a", "b") };
+                let folder = organize_repost(&library, discarded);
+                if automatic {
+                    mark_posting_role(&library, kept, false);
+                    mark_posting_role(&library, discarded, true);
+                }
+                let completed =
+                    run_to_completion(&library, library.start_image_similarity_scan().unwrap());
+                assert_eq!(completed.reviews_created, if automatic { 0 } else { 1 });
+                if !automatic {
+                    let review = library
+                        .list_similarity_reviews(None, 1)
+                        .unwrap()
+                        .items
+                        .remove(0);
+                    library
+                        .decide_similarity_review(SimilarityDecisionRequest {
+                            review_id: review.id,
+                            decision: if reverse {
+                                SimilarityDecision::ReplaceExisting
+                            } else {
+                                SimilarityDecision::KeepExisting
+                            },
+                        })
+                        .unwrap();
+                }
+                assert_inherited(&library, kept, discarded, &folder);
+            }
+        }
     }
 
     fn run_to_completion(

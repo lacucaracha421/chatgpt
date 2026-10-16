@@ -200,7 +200,10 @@ fn export_lists_open_historical_pairs_of_normal_assets_with_a_known_sha256() {
         )
         .unwrap();
         c.execute_batch(
-            "INSERT INTO classification_entries(id,kind,name,created_at) VALUES('t1','tag','원본','2026');
+            "UPDATE assets SET creator_handle='artist' WHERE id='a';
+             INSERT INTO artists(id,reposter,created_at,updated_at) VALUES('author',0,'now','now');
+             INSERT INTO artist_members(creator_key,artist_id,added_at) VALUES('artist','author','now');
+             INSERT INTO classification_entries(id,kind,name,created_at) VALUES('t1','tag','원본','2026');
              INSERT INTO asset_classifications(asset_id,classification_id) VALUES('a','t1');",
         )
         .unwrap();
@@ -218,7 +221,7 @@ fn export_lists_open_historical_pairs_of_normal_assets_with_a_known_sha256() {
     let items = f.library.similarity_review_feed_items().unwrap();
     let ids: Vec<_> = items.iter().map(|i| i.review_id.as_str()).collect();
     assert_eq!(ids, ["r1", "r2", "r3"]);
-    // Recommendation: the side with provenance; a → keep_existing, b → replace_existing.
+    // Recommendation: the registered artist side; a → keep_existing, b → replace_existing.
     let recommended: Vec<_> = items
         .iter()
         .map(|i| {
@@ -242,11 +245,13 @@ fn export_lists_open_historical_pairs_of_normal_assets_with_a_known_sha256() {
         serde_json::json!({
             "reviewId": "r1", "kind": "historical", "distance": 4,
             "recommendedAssetId": "a", "recommendation": "keep_existing",
+            "clues": {"account":"a","posted":null,"resolution":null,"bytes":null}, "reason":"account",
             "a": {"assetId": "a", "sha256": sha("a"), "width": 100, "height": 80, "byteSize": 1234,
                   "format": "PNG", "sourceLabel": "x.com/artist/status/1",
+                  "sourceHost":"x.com", "accountHandle":"@artist", "accountRole":"artist",
                   "collectedAt": "2026-09-20T10:00:00Z", "classifications": ["원본"]},
             "b": {"assetId": "b", "sha256": sha("b"), "width": 100, "height": 80, "byteSize": 1234,
-                  "format": "PNG", "sourceLabel": null,
+                  "format": "PNG", "sourceLabel": null, "accountRole":"unknown",
                   "collectedAt": "2026-09-20T10:00:00Z", "classifications": []}
         })
     );

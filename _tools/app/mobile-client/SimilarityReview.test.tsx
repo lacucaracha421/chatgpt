@@ -39,7 +39,7 @@ function mount(){
   return {back,onClose};
 }
 const choose=(name:RegExp)=>fireEvent.click(screen.getByRole('button',{name}));
-const shown=()=>screen.getByLabelText('A 정보').textContent;
+const shown=()=>screen.getByRole('table',{name:'단서 비교'}).textContent;
 const doubleTap=(target:HTMLElement)=>{for(let i=0;i<2;i++){fireEvent.pointerDown(target,{pointerId:1,button:0,clientX:10,clientY:10});fireEvent.pointerUp(target,{pointerId:1,clientX:10,clientY:10});}};
 const scales=()=>screen.getAllByRole('img').map(img=>(img as HTMLImageElement).style.transform.match(/scale\(([\d.]+)\)/)?.[1]);
 
@@ -49,16 +49,18 @@ beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.m
 describe('similarity review screen',()=>{
   it('shows A and B with metadata, accents the larger image, marks the recommendation and warms the next pairs',async()=>{
     const reply=feed({counts:{open:3,pendingPc:4,skipped:2}});
-    reply.items[0]!.a.collectedAt='2025-09-20T10:00:00';
+    Object.assign(reply.items[0]!.a,{sourcePublishedAt:'2025-09-20T10:00:00'});
+    Object.assign(reply.items[0]!,{clues:{account:null,posted:null,resolution:'a',bytes:'a'},reason:'resolution'});
     install(reply);mount();
-    expect(await screen.findByLabelText('A 정보')).toBeTruthy();
+    expect(await screen.findByRole('table',{name:'단서 비교'})).toBeTruthy();
     expect(shown()).toContain('2,400 × 3,200');
     expect(shown()).toContain('PNG');
     expect(shown()).toContain('2025.9.20');
     expect(shown()).toContain('권장');
-    expect(screen.getByLabelText('A 정보').querySelectorAll('[data-accent]')).toHaveLength(2);
-    expect(screen.getByLabelText('B 정보').querySelectorAll('[data-accent]')).toHaveLength(0);
-    expect(screen.getByRole('button',{name:/A 유지 · B 휴지통/}).textContent).toContain('권장');
+    expect(screen.getByRole('table',{name:'단서 비교'}).querySelectorAll('[data-favoured]')).toHaveLength(2);
+    expect(screen.getByRole('table',{name:'단서 비교'}).querySelectorAll('[data-deciding]')).toHaveLength(1);
+    expect(screen.getByRole('button',{name:/A 유지 · B 휴지통/}).className).toContain('ui-button--primary');
+    expect(screen.getByRole('button',{name:/A 유지 · B 휴지통/}).getAttribute('aria-description')).toBe('권장');
     expect(screen.getByRole('button',{name:/B 유지 · A 휴지통/}).textContent).not.toContain('권장');
     expect(screen.getByText('PC가 반영하기 전까지 원본은 바뀌지 않습니다. 버린 이미지는 휴지통으로 갑니다.')).toBeTruthy();
     expect(screen.getByText('0 / 3 · PC 반영 대기 4 · 건너뜀 2')).toBeTruthy();
@@ -67,13 +69,28 @@ describe('similarity review screen',()=>{
     // Thumbnails only until zoom.
     expect(mediaTicket).not.toHaveBeenCalled();
   });
+  it('uses old-feed recommendation without inventing clues or a reason',async()=>{
+    install(feed());mount();
+    const table=await screen.findByRole('table',{name:'단서 비교'});
+    expect(table.querySelectorAll('[data-favoured], [data-deciding]')).toHaveLength(0);
+    expect(document.querySelector('.similarity-reason')).toBeNull();
+    expect(document.querySelectorAll('.similarity-buttons .ui-button--primary')).toHaveLength(1);
+  });
+  it('has no primary decision when Rust provides no recommendation',async()=>{
+    const reply=feed();reply.items[0]!.recommendation=null;reply.items[0]!.recommendedAssetId=null;
+    Object.assign(reply.items[0]!,{clues:{account:null,posted:null,resolution:null,bytes:null},reason:null});
+    install(reply);mount();
+    await screen.findByRole('table',{name:'단서 비교'});
+    expect(document.querySelectorAll('.similarity-buttons .ui-button--primary')).toHaveLength(0);
+    expect(screen.getByText('단서가 같거나 없어 권장하지 않습니다.')).toBeTruthy();
+  });
   it('queues a decision with its basis, hides pairs holding the trashed image, and undoes both',async()=>{
     install(feed());mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     choose(/A 유지 · B 휴지통/);
     expect(readSimilarityIntents()['r1']).toMatchObject({decision:'keep_existing',libraryId:LIBRARY,aAssetId:'a',bAssetId:'s1',basis:{feedRevision:REV,aSha256:SHA,bSha256:SHA}});
     // r2 holds s1, which r1 will trash, so the next pair is r3.
-    await waitFor(()=>expect(screen.getByLabelText('A 정보').textContent).toContain('1,200 × 1,600'));
+    await waitFor(()=>expect(screen.getByRole('table',{name:'단서 비교'}).textContent).toContain('1,200 × 1,600'));
     expect(screen.getByText('1 / 3 · PC 반영 대기 1')).toBeTruthy();
     expect(screen.getByText('A 유지 · B 휴지통으로 저장')).toBeTruthy();
     choose(/둘 다 보관/);
@@ -91,7 +108,7 @@ describe('similarity review screen',()=>{
   it('undo after sending queues a withdrawal and keeps only five undo steps',async()=>{
     const many=Array.from({length:7},(_,i)=>pair(`r${i}`,side(`a${i}`),side(`b${i}`)));
     install(feed({items:many,counts:{open:7,pendingPc:0,skipped:0}}));mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     choose(/둘 다 보관/);
     localStorage.clear(); // Sent and confirmed meanwhile.
     choose(/되돌리기/);
@@ -102,7 +119,7 @@ describe('similarity review screen',()=>{
   });
   it('with server apply, labels the move and offers undo only while the decision is unsent, never as a withdrawal',async()=>{
     install(feed({features:['similarityServerApply'],counts:{open:3,pendingPc:0,skipped:0}}));mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     expect(screen.getByText('선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.')).toBeTruthy();
     vi.useFakeTimers();
     choose(/A 유지 · B 휴지통/);
@@ -125,7 +142,7 @@ describe('similarity review screen',()=>{
   });
   it('with server apply, undo during a send in flight is refused with a restore hint and queues no withdrawal',async()=>{
     install(feed({features:['similarityServerApply'],counts:{open:3,pendingPc:0,skipped:0}}));mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     choose(/둘 다 보관/);
     // The send starts and its outcome is not known yet.
     mocks.api.mockImplementation(async(path:string)=>{
@@ -142,7 +159,7 @@ describe('similarity review screen',()=>{
   });
   it('without the server feature a legacy server keeps the PC wording and undo after sending',async()=>{
     install(feed());mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     expect(screen.queryByText('선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.')).toBeNull();
     choose(/둘 다 보관/);
     expect(screen.getByText('둘 다 보관으로 저장')).toBeTruthy();
@@ -150,7 +167,7 @@ describe('similarity review screen',()=>{
   });
   it('zooms both images together, loads originals, and Back resets zoom before closing',async()=>{
     install(feed());const {back,onClose}=mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     await waitFor(()=>expect(screen.getAllByRole('img')).toHaveLength(2));
     doubleTap(screen.getByLabelText('A 이미지',{selector:'div'}));
     await waitFor(()=>expect(scales()).toEqual(['2','2']));
@@ -163,7 +180,7 @@ describe('similarity review screen',()=>{
   });
   it('compares in one pane with hold, automatic flicker and a wipe divider',async()=>{
     install(feed());mount();
-    await screen.findByLabelText('A 정보');
+    await screen.findByRole('table',{name:'단서 비교'});
     fireEvent.click(screen.getByRole('button',{name:'한 화면에서 비교'}));
     const stage=screen.getByLabelText('비교 화면');
     expect(stage.dataset.showing).toBe('A');
@@ -225,7 +242,7 @@ it('masks review images and does not request current or prefetched media in priv
   vi.mocked(media.loadThumbnail).mockClear();vi.mocked(media.mediaTicket).mockClear();vi.mocked(media.warmThumbnail).mockClear();
   localStorage.setItem('lakomics.mobile.privacyMode','1');
   install(feed());mount();
-  await screen.findByLabelText('A 정보');
+  await screen.findByRole('table',{name:'단서 비교'});
   expect(document.querySelector('img[src]')).toBeNull();
   expect(document.querySelector('.privacy-mask')).toBeTruthy();
   expect(media.loadThumbnail).not.toHaveBeenCalled();expect(media.mediaTicket).not.toHaveBeenCalled();expect(media.warmThumbnail).not.toHaveBeenCalled();

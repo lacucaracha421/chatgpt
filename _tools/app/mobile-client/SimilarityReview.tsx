@@ -1,14 +1,15 @@
 import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
-import {displayDate} from '../src/shared/displayDate';
+import {SimilarityClues} from '../src/similarity/SimilarityClues';
+import {sourceHost, reasonSentence, SIMILARITY_CHOICES as CHOICES, type ClueSideData} from '../src/similarity/clues';
+import {Badge} from '../src/shared/ui/Badge';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PauseIcon, PhotoIcon, PlayIcon, Square2StackIcon} from '@heroicons/react/24/outline';
 import {Button, EmptyState, IconButton} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {decodeImage, loadThumbnail, mediaTicket, warmThumbnail} from './media';
-import {sizeLabel} from './ViewerInfo';
 import {commitSimilarityDecision, intentKey, queuedSimilarity, readSimilarityIntents, trashedBy, undoSimilarityDecision,
   SIMILARITY_REVIEW_EVENT, SIMILARITY_SERVER_APPLY, type SimilarityChoice, type SimilarityIntent} from './similarityReviewOutbox';
 import {flushSimilarityReview, isSimilarityInFlight, similarityPath, type SimilarityCounts, type SimilarityFeed,
@@ -16,6 +17,7 @@ import {flushSimilarityReview, isSimilarityInFlight, similarityPath, type Simila
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import './characterReview.css';
 import './similarityReview.css';
+import '../src/similarity/similarity-clues.css';
 
 const UNDO_DEPTH = 5;
 const PAGE = 20;
@@ -25,13 +27,6 @@ const FLICKER_MS = 500;
 /** Zoom and pan shared by both images, in normalized image coordinates (0..1). */
 export type CompareView = {scale: number; x: number; y: number};
 export const FIT: CompareView = {scale: 1, x: 0.5, y: 0.5};
-
-/** `saved`: queued for the PC; `moved`: the server applies it right after the undo window. */
-const CHOICES: {decision: SimilarityChoice; label: string; saved: string; moved: string}[] = [
-  {decision: 'keep_existing', label: 'A 유지 · B 휴지통', saved: 'A 유지 · B 휴지통으로 저장', moved: 'A 유지 · B 휴지통으로 보냄'},
-  {decision: 'replace_existing', label: 'B 유지 · A 휴지통', saved: 'B 유지 · A 휴지통으로 저장', moved: 'B 유지 · A 휴지통으로 보냄'},
-  {decision: 'keep_both', label: '둘 다 보관', saved: '둘 다 보관으로 저장', moved: '둘 다 보관으로 정리'},
-];
 
 type Undo = {item: SimilarityItem; intent: SimilarityIntent; hidden: SimilarityItem[]};
 type State =
@@ -183,7 +178,7 @@ function Pane({side, name, view, onView}: {side: SimilaritySide; name: 'A' | 'B'
   const gestures = useCompareGestures(view, onView, box, image);
   return <div ref={host} className="similarity-pane" aria-label={`${name} 이미지`} {...gestures}>
     <PairImage side={side} original={view.scale > 1} label={`${name} 이미지`} style={{transform: transformFor(view, box, image)}}/>
-    <span className="similarity-pane-tag" aria-hidden="true">{name}</span>
+    <Badge variant="scrim" aria-hidden="true">{name}</Badge>
   </div>;
 }
 
@@ -200,30 +195,12 @@ function CompareStage({item, view, onView, mode, showB, wipe}: {item: Similarity
       <PairImage side={item.b} original={view.scale > 1} label="B 이미지" style={{transform: transformFor(view, box, b)}}/>
     </div>
     {mode === 'wipe' && <span className="similarity-divider" style={{left: `${wipe}%`}} aria-hidden="true"/>}
-    <span className="similarity-pane-tag" aria-hidden="true">{mode === 'wipe' ? 'A | B' : showB ? 'B' : 'A'}</span>
+    <Badge variant="scrim" aria-hidden="true">{mode === 'wipe' ? 'A | B' : showB ? 'B' : 'A'}</Badge>
   </div>;
 }
 
-function dateText(value: string | null) {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? displayDate(value) : null;
-}
-
-/** Resolution, size, format, source, date and classifications; the larger resolution/file is accented. */
-function MetaStrip({side, other, name, recommended}: {side: SimilaritySide; other: SimilaritySide; name: 'A' | 'B'; recommended: boolean}) {
-  const pixels = (s: SimilaritySide) => (s.width ?? 0) * (s.height ?? 0);
-  const bigger = pixels(side) > pixels(other);
-  const heavier = (side.byteSize ?? -1) > (other.byteSize ?? -1);
-  const collected = dateText(side.collectedAt);
-  return <dl className="similarity-meta" aria-label={`${name} 정보`}>
-    <div className="similarity-meta-head"><strong>{name}</strong>{recommended && <span className="similarity-badge">권장</span>}</div>
-    {side.width && side.height ? <div data-accent={bigger || undefined}><dt>해상도</dt><dd className="numeric">{side.width.toLocaleString()} × {side.height.toLocaleString()}</dd></div> : null}
-    {side.byteSize != null && <div data-accent={heavier || undefined}><dt>크기</dt><dd className="numeric">{sizeLabel(side.byteSize)}</dd></div>}
-    <div><dt>형식</dt><dd>{side.format}</dd></div>
-    {side.sourceLabel && <div><dt>출처</dt><dd>{side.sourceLabel}</dd></div>}
-    {collected && <div><dt>수집일</dt><dd className="numeric">{collected}</dd></div>}
-    {!!side.classifications.length && <div><dt>분류</dt><dd>{side.classifications.join(', ')}</dd></div>}
-  </dl>;
+function clueSide(side: SimilaritySide): ClueSideData {
+  return {handle: side.accountHandle ?? null, host: side.sourceHost ?? sourceHost(side.sourceLabel ? `https://${side.sourceLabel}` : null), role: side.accountRole ?? 'unknown', postedAt: side.sourcePublishedAt ?? null, width: side.width, height: side.height, byteSize: side.byteSize, format: side.format};
 }
 
 /**
@@ -430,15 +407,13 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
           <Pane side={current.a} name="A" view={view} onView={setView}/>
           <Pane side={current.b} name="B" view={view} onView={setView}/>
         </div>}
-      <div className="similarity-metas">
-        <MetaStrip side={current.a} other={current.b} name="A" recommended={current.recommendedAssetId === current.a.assetId}/>
-        <MetaStrip side={current.b} other={current.a} name="B" recommended={current.recommendedAssetId === current.b.assetId}/>
-      </div>
+      <SimilarityClues names={['A','B']} sides={[clueSide(current.a),clueSide(current.b)]} clues={current.clues} reason={current.reason} recommended={current.recommendedAssetId === current.a.assetId ? 'a' : current.recommendedAssetId === current.b.assetId ? 'b' : null}/>
     </div>}
     {ready && <footer className="similarity-actions">
+      {current?.clues && <p className="similarity-reason" data-none={!current.reason || undefined}>{reasonSentence(current.reason ?? null, current.clues, ['A','B'], [clueSide(current.a),clueSide(current.b)])}</p>}
       <div className="similarity-buttons">
-        {CHOICES.map(choice => <Button key={choice.decision} variant={current?.recommendation === choice.decision ? 'primary' : 'secondary'} disabled={!current} onClick={() => act(choice.decision)}>
-          {choice.label}{current?.recommendation === choice.decision && <span className="similarity-badge">권장</span>}
+        {CHOICES.map(choice => <Button key={choice.decision} variant={current?.recommendation === choice.decision ? 'primary' : 'secondary'} aria-description={current?.recommendation === choice.decision ? '권장' : undefined} disabled={!current} onClick={() => act(choice.decision)}>
+          {choice.label}
         </Button>)}
       </div>
       <p className="hint">{serverApply ? '선택한 결정은 5초 뒤 바로 반영됩니다. 버린 이미지는 휴지통에서 복원할 수 있습니다.' : 'PC가 반영하기 전까지 원본은 바뀌지 않습니다. 버린 이미지는 휴지통으로 갑니다.'}</p>

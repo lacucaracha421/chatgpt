@@ -7,7 +7,7 @@ use std::{
 };
 
 use image::{ImageDecoder, ImageReader};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -16,9 +16,10 @@ use super::{
         dimensions_are_compatible, fingerprint, minimum_distance, ImageFingerprint,
     },
     models::{
-        AssetCursor, AssetSummary, ClassificationEntry, ClassificationKind, SimilarityDecision,
-        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewAsset,
-        SimilarityReviewPage, SimilarityReviewSummary,
+        AccountRole, AssetCursor, AssetSummary, ClassificationEntry, ClassificationKind, ClueKey,
+        ClueSide, SimilarityClues, SimilarityDecision, SimilarityDecisionRequest,
+        SimilarityIndexProgress, SimilarityReviewAsset, SimilarityReviewPage,
+        SimilarityReviewSummary,
     },
     query::asset_summary_from_row,
     Library, MediaVariant,
@@ -26,6 +27,7 @@ use super::{
 
 pub(super) const PDQ_QUALITY_MIN: u8 = 50;
 pub(super) const PDQ_DISTANCE_MAX: u32 = 20;
+pub(super) const AUTO_REPOST_DISTANCE_MAX: u32 = 8;
 const INDEX_BATCH_SIZE: u32 = 50;
 // Bound decoding across overlapping UI requests, including a reopened library.
 static INDEX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -148,6 +150,7 @@ impl Library {
         let summaries = load_asset_summaries(&transaction, &asset_ids)?;
         // 상태는 AssetSummary에 없으므로 id별 상태를 별도 맵으로 모은다.
         let statuses = load_asset_statuses(&transaction, &asset_ids)?;
+        let roles = load_account_roles(&transaction, &asset_ids)?;
         let classifications = classifications_for_assets(&transaction, &asset_ids)?;
         let review_asset = |asset_id: &str,
                             expected_status: &str|
@@ -165,6 +168,11 @@ impl Library {
             }
             let format = review_format(&asset.relative_path);
             Ok(SimilarityReviewAsset {
+                account_role: if posting_handle(&asset).is_some() {
+                    roles.get(asset_id).copied().unwrap_or_default()
+                } else {
+                    AccountRole::Unknown
+                },
                 asset,
                 format,
                 classifications: classifications.get(asset_id).cloned().unwrap_or_default(),
@@ -181,20 +189,23 @@ impl Library {
                     if row.historical { "normal" } else { "review" },
                 )
                 .ok()?;
-                let recommended_asset_id = if row.historical {
-                    match provenance_rank(&existing.asset).cmp(&provenance_rank(&candidate.asset)) {
-                        std::cmp::Ordering::Greater => Some(existing.asset.id.clone()),
-                        std::cmp::Ordering::Less => Some(candidate.asset.id.clone()),
-                        std::cmp::Ordering::Equal => None,
-                    }
-                } else {
-                    None
-                };
+                let (clues, reason, favoured) = comparison_clues(
+                    &existing.asset,
+                    existing.account_role,
+                    &candidate.asset,
+                    candidate.account_role,
+                );
+                let recommended_asset_id = favoured.map(|side| match side {
+                    ClueSide::A => existing.asset.id.clone(),
+                    ClueSide::B => candidate.asset.id.clone(),
+                });
                 Some(SimilarityReviewSummary {
                     id: row.id,
                     distance: row.distance,
                     historical: row.historical,
                     recommended_asset_id,
+                    clues,
+                    reason,
                     existing,
                     candidate,
                 })
@@ -395,8 +406,6 @@ impl Library {
         verify_asset_status(&transaction, existing_id, "normal")?;
         verify_asset_status(&transaction, candidate_id, "normal")?;
         // Resolve first so the lifecycle trigger only invalidates OTHER overlapping pairs.
-        // Both assets already belong to the library: never use incoming-file cleanup or
-        // overwrite either asset's source, classifications, albums, or personal metadata.
         resolve_review(&transaction, &request.review_id, decision)?;
         let discarded = match request.decision {
             SimilarityDecision::KeepExisting => Some(candidate_id),
@@ -404,6 +413,12 @@ impl Library {
             SimilarityDecision::KeepBoth => None,
         };
         if let Some(asset_id) = discarded {
+            let kept = if asset_id == existing_id {
+                candidate_id
+            } else {
+                existing_id
+            };
+            merge_review_metadata(&transaction, asset_id, kept)?;
             super::trash::update_trash_status_in_transaction(
                 &transaction,
                 &[asset_id.to_owned()],
@@ -426,86 +441,7 @@ impl Library {
         let transaction = connection.transaction()?;
         verify_asset_status(&transaction, existing_id, "normal")?;
         verify_asset_status(&transaction, candidate_id, "review")?;
-        let existing_classification = incoming_promotion_classification(&transaction, existing_id)?;
-        let candidate_classification =
-            incoming_promotion_classification(&transaction, candidate_id)?;
-        if let Some(classification_id) = existing_classification.as_deref() {
-            transaction.execute(
-                "DELETE FROM asset_classifications WHERE asset_id=?1",
-                [candidate_id],
-            )?;
-            transaction.execute(
-                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
-                params![candidate_id, classification_id],
-            )?;
-        }
-        let final_classification = existing_classification.or(candidate_classification);
-        // Under the Collections authority the inherited memberships and covers are server
-        // commands too; inactive libraries keep the legacy local rewrite only.
-        let authority = super::collection_authority::collection_write_status(&transaction)?;
-        let joined: Vec<String> = transaction
-            .prepare(
-                "SELECT collection_id FROM collection_assets WHERE asset_id = ?1
-                 AND collection_id NOT IN (SELECT collection_id FROM collection_assets WHERE asset_id = ?2)",
-            )?
-            .query_map(params![existing_id, candidate_id], |r| r.get(0))?
-            .collect::<Result<_, _>>()?;
-        let covered: Vec<(String, serde_json::Value)> = if authority.active {
-            transaction
-                .prepare("SELECT id FROM collections WHERE cover_asset_id = ?1")?
-                .query_map([existing_id], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|id| {
-                    let before = super::collection_authority::editable_work(&transaction, &id)?;
-                    Ok((id, before))
-                })
-                .collect::<Result<_, LibraryError>>()?
-        } else {
-            Vec::new()
-        };
-        transaction.execute(
-            "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
-             SELECT collection_id, ?2, added_at
-             FROM collection_assets WHERE asset_id = ?1",
-            params![existing_id, candidate_id],
-        )?;
-        transaction.execute(
-            "UPDATE collections
-             SET cover_asset_id = ?2, updated_at = ?3
-             WHERE cover_asset_id = ?1",
-            params![existing_id, candidate_id, chrono::Utc::now().to_rfc3339()],
-        )?;
-        if authority.active {
-            for collection_id in &joined {
-                let entity_key = serde_json::json!([collection_id, candidate_id]).to_string();
-                let revision = super::collection_authority::predicted_collection_revision(
-                    &transaction,
-                    "memberships",
-                    &entity_key,
-                )?;
-                super::collection_authority::enqueue_collection_command(
-                    &transaction,
-                    &authority,
-                    "setMembership",
-                    &entity_key,
-                    serde_json::json!({"workId":collection_id,"assetId":candidate_id,"desiredState":true,"expectedRevision":revision}),
-                )?;
-            }
-            for (collection_id, before) in &covered {
-                super::collection_authority::enqueue_work_changes(
-                    &transaction,
-                    &authority,
-                    collection_id,
-                    before,
-                )?;
-            }
-        }
-        transaction.execute(
-            "UPDATE assets SET favorite = (SELECT favorite FROM assets WHERE id = ?1)
-             WHERE id = ?2 AND status = 'review'",
-            params![existing_id, candidate_id],
-        )?;
+        merge_review_metadata(&transaction, existing_id, candidate_id)?;
         transaction.execute(
             "UPDATE assets SET status = 'trash', trashed_at = ?2 WHERE id = ?1 AND status = 'normal'",
             params![existing_id, chrono::Utc::now().to_rfc3339()],
@@ -515,20 +451,10 @@ impl Library {
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
-        Library::enqueue_classification_assignment_intent(
-            &transaction,
-            candidate_id,
-            final_classification.as_deref(),
-        )?;
         super::character_autotag::enqueue(
             &transaction,
             candidate_id,
             super::character_autotag::Cause::SimilarityResolution,
-        )?;
-        crate::cloud::queue::enqueue_asset_upsert(
-            &transaction,
-            candidate_id,
-            &chrono::Utc::now().to_rfc3339(),
         )?;
         resolve_review(&transaction, review_id, "replace_existing")?;
         // Other incoming reviews against the Asset just trashed are released, not stranded.
@@ -882,6 +808,35 @@ pub(super) fn load_asset_summaries(
     Ok(map)
 }
 
+pub(super) fn load_account_roles(
+    connection: &Connection,
+    ids: &[String],
+) -> Result<HashMap<String, AccountRole>, LibraryError> {
+    let mut roles = HashMap::new();
+    for chunk in ids.chunks(400) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut stmt = connection.prepare(&format!(
+            "SELECT scope.asset_id, artists.reposter
+            FROM asset_artist_scope scope JOIN artists ON scope.scope_ref = 'artist:' || artists.id
+            WHERE scope.asset_id IN ({placeholders})"
+        ))?;
+        for row in stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
+        })? {
+            let (id, reposter) = row?;
+            roles.insert(
+                id,
+                if reposter {
+                    AccountRole::Reposter
+                } else {
+                    AccountRole::Artist
+                },
+            );
+        }
+    }
+    Ok(roles)
+}
+
 /// 여러 자산의 상태를 한 번의 IN 쿼리로 로드한다.
 fn load_asset_statuses(
     connection: &Connection,
@@ -1006,14 +961,255 @@ fn load_asset_summary(
         .ok_or(LibraryError::AssetNotFound)
 }
 
-pub(super) fn provenance_rank(asset: &AssetSummary) -> (bool, bool) {
-    let present =
-        |value: &Option<String>| value.as_deref().is_some_and(|text| !text.trim().is_empty());
+/// Carry the discarded image's user organization to the kept image. Classifications
+/// have one direct membership: as with replacement, the discarded assignment wins.
+fn merge_review_metadata(
+    transaction: &Transaction<'_>,
+    discarded_id: &str,
+    kept_id: &str,
+) -> Result<(), LibraryError> {
+    let source = incoming_promotion_classification(transaction, discarded_id)?;
+    let final_classification = source.or(incoming_promotion_classification(transaction, kept_id)?);
+    if let Some(id) = &final_classification {
+        transaction.execute(
+            "DELETE FROM asset_classifications WHERE asset_id=?1",
+            [kept_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+            params![kept_id, id],
+        )?;
+    }
+    // Under the Collections authority the inherited memberships and covers are server
+    // commands too; inactive libraries keep the legacy local rewrite only.
+    let authority = super::collection_authority::collection_write_status(transaction)?;
+    let joined: Vec<String> = transaction
+            .prepare(
+                "SELECT collection_id FROM collection_assets WHERE asset_id = ?1
+                 AND collection_id NOT IN (SELECT collection_id FROM collection_assets WHERE asset_id = ?2)",
+            )?
+            .query_map(params![discarded_id, kept_id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+    let covered: Vec<(String, serde_json::Value)> = if authority.active {
+        transaction
+            .prepare("SELECT id FROM collections WHERE cover_asset_id = ?1")?
+            .query_map([discarded_id], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|id| {
+                let before = super::collection_authority::editable_work(transaction, &id)?;
+                Ok((id, before))
+            })
+            .collect::<Result<_, LibraryError>>()?
+    } else {
+        Vec::new()
+    };
+    transaction.execute(
+        "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
+             SELECT collection_id, ?2, added_at
+             FROM collection_assets WHERE asset_id = ?1",
+        params![discarded_id, kept_id],
+    )?;
+    transaction.execute(
+        "UPDATE collections
+             SET cover_asset_id = ?2, updated_at = ?3
+             WHERE cover_asset_id = ?1",
+        params![discarded_id, kept_id, chrono::Utc::now().to_rfc3339()],
+    )?;
+    if authority.active {
+        for collection_id in &joined {
+            let entity_key = serde_json::json!([collection_id, kept_id]).to_string();
+            let revision = super::collection_authority::predicted_collection_revision(
+                transaction,
+                "memberships",
+                &entity_key,
+            )?;
+            super::collection_authority::enqueue_collection_command(
+                transaction,
+                &authority,
+                "setMembership",
+                &entity_key,
+                serde_json::json!({"workId":collection_id,"assetId":kept_id,"desiredState":true,"expectedRevision":revision}),
+            )?;
+        }
+        for (collection_id, before) in &covered {
+            super::collection_authority::enqueue_work_changes(
+                transaction,
+                &authority,
+                collection_id,
+                before,
+            )?;
+        }
+    }
+
+    let albums = transaction.prepare("SELECT album_id FROM asset_albums WHERE asset_id=?1 AND album_id NOT IN (SELECT album_id FROM asset_albums WHERE asset_id=?2)")?
+        .query_map(params![discarded_id,kept_id], |r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    for album in albums {
+        transaction.execute(
+            "INSERT INTO asset_albums(asset_id,album_id) VALUES(?1,?2)",
+            params![kept_id, album],
+        )?;
+        Library::enqueue_album_membership_intent(transaction, &album, kept_id, true)?;
+    }
+    transaction.execute("UPDATE assets SET favorite=MAX(favorite,(SELECT favorite FROM assets WHERE id=?1)) WHERE id=?2",params![discarded_id,kept_id])?;
+    Library::enqueue_classification_assignment_intent(
+        transaction,
+        kept_id,
+        final_classification.as_deref(),
+    )?;
+    crate::cloud::queue::enqueue_asset_upsert(
+        transaction,
+        kept_id,
+        &chrono::Utc::now().to_rfc3339(),
+    )?;
+    Ok(())
+}
+
+/// Resolve within the caller's transaction: no incoming-file deletion, even when A wins.
+pub(super) fn auto_resolve_repost(
+    transaction: &Transaction<'_>,
+    review_id: &str,
+    a: &str,
+    b: &str,
+    distance: u32,
+) -> Result<Option<String>, LibraryError> {
+    if distance > AUTO_REPOST_DISTANCE_MAX {
+        return Ok(None);
+    }
+    let ids = vec![a.to_owned(), b.to_owned()];
+    let summaries = load_asset_summaries(transaction, &ids)?;
+    let roles = load_account_roles(transaction, &ids)?;
+    let (Some(aa), Some(bb)) = (summaries.get(a), summaries.get(b)) else {
+        return Ok(None);
+    };
+    if posting_handle(aa).is_none() || posting_handle(bb).is_none() {
+        return Ok(None);
+    }
+    if posting_handle(aa)
+        .zip(posting_handle(bb))
+        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+    {
+        return Ok(None);
+    }
+    let ar = roles.get(a).copied().unwrap_or_default();
+    let br = roles.get(b).copied().unwrap_or_default();
+    let (kept, discarded, decision) = match (ar, br) {
+        (AccountRole::Artist, AccountRole::Reposter) => (a, b, "keep_existing"),
+        (AccountRole::Reposter, AccountRole::Artist) => (b, a, "replace_existing"),
+        _ => return Ok(None),
+    };
+    resolve_review(transaction, review_id, decision)?;
+    transaction.execute(
+        "UPDATE assets SET status='normal' WHERE id=?1 AND status='review'",
+        [b],
+    )?;
+    merge_review_metadata(transaction, discarded, kept)?;
+    super::trash::update_trash_status_in_transaction(
+        transaction,
+        &[discarded.to_owned()],
+        "normal",
+        "trash",
+        Some(&chrono::Utc::now().to_rfc3339()),
+    )?;
+    super::character_autotag::enqueue(
+        transaction,
+        kept,
+        super::character_autotag::Cause::SimilarityResolution,
+    )?;
+    release_incoming_reviews_without_existing(transaction, None)?;
+    Ok(Some(kept.to_owned()))
+}
+
+/// Only X exposes a posting handle today. Other sources remain unknown/manual.
+pub(super) fn posting_handle(asset: &AssetSummary) -> Option<&str> {
+    let url = url::Url::parse(asset.source_url.as_deref()?).ok()?;
+    if !matches!(
+        url.host_str()?.trim_start_matches("www."),
+        "x.com" | "twitter.com" | "mobile.twitter.com"
+    ) {
+        return None;
+    }
+    asset
+        .creator_handle
+        .as_deref()
+        .map(|h| h.trim().trim_start_matches('@'))
+        .filter(|h| !h.is_empty())
+}
+
+pub(super) fn comparison_clues(
+    a: &AssetSummary,
+    ar: AccountRole,
+    b: &AssetSummary,
+    br: AccountRole,
+) -> (SimilarityClues, Option<ClueKey>, Option<ClueSide>) {
+    use std::cmp::Ordering;
+    let favour = |order| match order {
+        Ordering::Greater => Some(ClueSide::A),
+        Ordering::Less => Some(ClueSide::B),
+        Ordering::Equal => None,
+    };
+    let ah = posting_handle(a);
+    let bh = posting_handle(b);
+    let same = matches!((ah, bh), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b));
+    let rank = |r| match r {
+        AccountRole::Artist => 2,
+        AccountRole::Unknown => 1,
+        AccountRole::Reposter => 0,
+    };
+    let account = if same || (ah.is_none() && bh.is_none()) {
+        None
+    } else {
+        favour(rank(ar).cmp(&rank(br)))
+    };
+    let minute = |value: &Option<String>| {
+        value
+            .as_deref()
+            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+            .map(|v| v.timestamp().div_euclid(60))
+    };
+    let posted = if same {
+        None
+    } else {
+        match (
+            minute(&a.source_published_at),
+            minute(&b.source_published_at),
+        ) {
+            (Some(a), Some(b)) => favour(b.cmp(&a)),
+            _ => None,
+        }
+    };
+    let pixels = |s: &AssetSummary| {
+        (s.width > 0 && s.height > 0).then_some(u64::from(s.width) * u64::from(s.height))
+    };
+    let resolution = match (pixels(a), pixels(b)) {
+        (Some(a), Some(b)) => favour(a.cmp(&b)),
+        _ => None,
+    };
+    let largest = a.byte_size.max(b.byte_size) as u128;
+    let bytes =
+        if largest == 0 || u128::from(a.byte_size.abs_diff(b.byte_size)) * 100 <= largest * 2 {
+            None
+        } else {
+            favour(a.byte_size.cmp(&b.byte_size))
+        };
+    let clues = SimilarityClues {
+        account,
+        posted,
+        resolution,
+        bytes,
+    };
+    let deciding = [
+        (ClueKey::Account, account),
+        (ClueKey::Posted, posted),
+        (ClueKey::Resolution, resolution),
+        (ClueKey::Bytes, bytes),
+    ]
+    .into_iter()
+    .find(|(_, side)| side.is_some());
     (
-        present(&asset.source_url),
-        present(&asset.creator_url)
-            || present(&asset.creator_handle)
-            || present(&asset.creator_name),
+        clues,
+        deciding.map(|(key, _)| key),
+        deciding.and_then(|(_, side)| side),
     )
 }
 
@@ -1260,6 +1456,93 @@ mod tests {
         old_tag: String,
         candidate_asset_path: PathBuf,
         candidate_thumbnail_path: PathBuf,
+    }
+
+    #[test]
+    fn similarity_ingest_auto_keeps_the_artist_and_retains_both_files_in_library_trash() {
+        use image::{
+            codecs::png::{CompressionType, FilterType as PngFilter, PngEncoder},
+            ImageEncoder,
+        };
+        for first_reposts in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path().join("library")).unwrap();
+            let base = striped_fixture(900, 600, StripeDirection::Vertical);
+            let original = temp.path().join("first.png");
+            let second = temp.path().join("second.png");
+            base.save(&original).unwrap();
+            let rgb = base.to_rgb8();
+            PngEncoder::new_with_quality(
+                fs::File::create(&second).unwrap(),
+                CompressionType::Best,
+                PngFilter::NoFilter,
+            )
+            .write_image(rgb.as_raw(), 900, 600, image::ExtendedColorType::Rgb8)
+            .unwrap();
+            {
+                let c = library.connection().unwrap();
+                for (handle, reposter) in [("author", false), ("repost", true)] {
+                    c.execute("INSERT INTO artists(id,reposter,created_at,updated_at) VALUES(?1,?2,'now','now')",params![handle,reposter]).unwrap();
+                    c.execute("INSERT INTO artist_members(creator_key,artist_id,added_at) VALUES(?1,?1,'now')",[handle]).unwrap();
+                }
+            }
+            let request = |path, handle: &str| IngestMediaRequest {
+                source_path: path,
+                classification_id: None,
+                source_url: Some(format!("https://x.com/{handle}/status/1")),
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: Some(handle.into()),
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
+            };
+            let first = library
+                .ingest_media(request(
+                    original,
+                    if first_reposts { "repost" } else { "author" },
+                ))
+                .unwrap();
+            let IngestOutcome::Added { asset: first } = first else {
+                panic!("first must be added")
+            };
+            let outcome = library
+                .ingest_media(request(
+                    second,
+                    if first_reposts { "author" } else { "repost" },
+                ))
+                .unwrap();
+            let IngestOutcome::Added { asset: kept } = outcome else {
+                panic!("automatic resolution must not prompt")
+            };
+            assert_eq!(kept.creator_handle.as_deref(), Some("author"));
+            assert_eq!(kept.id == first.id, !first_reposts);
+            assert_eq!(
+                library
+                    .list_similarity_reviews(None, 10)
+                    .unwrap()
+                    .total_count,
+                0
+            );
+            let c = library.connection().unwrap();
+            let rows = c
+                .prepare("SELECT relative_path,status FROM assets")
+                .unwrap()
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(
+                rows.iter().filter(|(_, status)| status == "trash").count(),
+                1
+            );
+            for (path, _) in rows {
+                assert!(library.root().join(path).exists());
+            }
+        }
     }
 
     #[test]

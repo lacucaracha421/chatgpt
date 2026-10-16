@@ -1,12 +1,14 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
+import { SimilarityClues } from "./SimilarityClues";
+import { assetClueSide, choiceLabel, EMPTY_CLUES, reasonSentence, sideNames, SIMILARITY_CHOICES } from "./clues";
+import { Badge } from "../shared/ui/Badge";
 import { assetUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ImageSimilarityScan, LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { usePrivacy } from "../privacy/PrivacyContext";
+import { useAssetMask, usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -37,6 +39,8 @@ export function SimilarityReviewBrowser({ videoAssetIds = NO_VIDEO_SELECTION, ..
 
 function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props) {
   const [review, setReview] = useState<SimilarityReviewSummary | null>(null);
+  const reviewRef = useRef<SimilarityReviewSummary | null>(null);
+  const [staged, setStaged] = useState<{review: SimilarityReviewSummary; count: number; generation: number} | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [initialTotal, setInitialTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -57,11 +61,19 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
     setLoading(true);
+    setStaged(null);
     setMessage(null);
     try {
       const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
       if (generation !== generationRef.current) return;
-      setReview(page.items[0] ?? null);
+      const next = page.items[0] ?? null;
+      if (reviewRef.current && next && next.id !== reviewRef.current.id) {
+        setStaged({ review: next, count: page.totalCount, generation });
+        return;
+      }
+      setStaged(null);
+      setReview(next);
+      reviewRef.current = next;
       setTotalCount(page.totalCount);
       setInitialTotal((current) => Math.max(current, page.totalCount));
       onCountChange(page.totalCount);
@@ -153,7 +165,14 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   }
 
   const current = initialTotal > 0 ? initialTotal - totalCount + 1 : 0;
-  const recommendation = review ? reviewRecommendation(review) : "";
+  const names = sideNames(review?.historical ?? false);
+  const sides = review ? [assetClueSide(review.existing.asset, review.existing.accountRole, review.existing.format), assetClueSide(review.candidate.asset, review.candidate.accountRole, review.candidate.format)] as const : null;
+  const recommended = review?.recommendedAssetId === review?.existing.asset.id ? "a" : review?.recommendedAssetId === review?.candidate.asset.id ? "b" : null;
+  const promote = () => {
+    if (!staged || staged.generation !== generationRef.current) return;
+    reviewRef.current = staged.review;
+    setReview(staged.review); setTotalCount(staged.count); onCountChange(staged.count); setStaged(null);
+  };
   return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
     <ViewToolbar
       title="유사 검토"
@@ -165,24 +184,21 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
       running={scanRunning}
       onRun={() => void runHistoricalScan()}
     />}
-    {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
+    {loading && !review ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
     ) : <>
-      <p className="similarity-review__difference">
-        {recommendation && <><span>{recommendation}</span> · </>}
-        {comparisonSummary(review)}
-      </p>
-      <div className="similarity-review__comparison">
-        <ReviewAssetPanel side={review.historical ? "이미지 A" : "기존 이미지"} reviewAsset={review.existing} />
-        <ReviewAssetPanel side={review.historical ? "이미지 B" : "새 이미지"} reviewAsset={review.candidate} />
+      <div className="similarity-review__pairs">
+        {[review, ...(staged ? [staged.review] : [])].map(pair => <ReviewPair key={pair.id} review={pair} visible={pair.id === review.id} onReady={pair.id === staged?.review.id ? promote : undefined} />)}
       </div>
       <footer className="similarity-review__actions">
+        {review.clues !== undefined && sides && <p className="similarity-review__reason" data-none={!review.reason || undefined}>{reasonSentence(review.reason ?? null, review.clues ?? EMPTY_CLUES, names, [...sides])}</p>}
         <p className="similarity-review__action-hint">{review.historical
           ? "유지하지 않은 이미지는 휴지통으로 이동합니다. 결정 전에는 원본을 변경하지 않습니다."
           : "기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다."}</p>
-        <Button disabled={pending} onClick={() => void decide("keep_existing")}>{review.historical ? "이미지 A 유지" : "기존 이미지 유지"}</Button>
-        <Button disabled={pending} onClick={() => void decide("replace_existing")}>{review.historical ? "이미지 B 유지" : "새 이미지로 교체"}</Button>
-        <Button variant="secondary" disabled={pending} onClick={() => void decide("keep_both")}>둘 다 보관</Button>
+        <div className="similarity-review__buttons">{SIMILARITY_CHOICES.map(choice => {
+          const primary = (choice.decision === "keep_existing" && recommended === "a") || (choice.decision === "replace_existing" && recommended === "b");
+          return <Button key={choice.decision} variant={primary ? "primary" : "secondary"} aria-description={primary ? "권장" : undefined} disabled={pending || loading || !!staged} onClick={() => void decide(choice.decision)}>{choiceLabel(choice.decision, review.historical)}</Button>;
+        })}</div>
       </footer>
     </>}
   </section>;
@@ -211,37 +227,29 @@ function HistoricalScanStatus({ scan, running, onRun }: {
   </section>;
 }
 
-function ReviewAssetPanel({ side, reviewAsset }: { side: string; reviewAsset: SimilarityReviewAsset }) {
+function ReviewPair({review, visible, onReady}: {review: SimilarityReviewSummary; visible: boolean; onReady?: () => void}) {
+  const loaded = useRef(new Set<string>());
+  const names = sideNames(review.historical);
+  useEffect(() => { if (loaded.current.size === 2) onReady?.(); }, [onReady]);
+  const ready = (id: string) => { loaded.current.add(id); if (loaded.current.size === 2) onReady?.(); };
+  return <div className="similarity-review__comparison" data-staged={!visible || undefined} aria-hidden={!visible || undefined}>
+    <ReviewAssetPanel side={names[0]} position="a" reviewAsset={review.existing} onReady={() => ready(review.existing.asset.id)} />
+    <ReviewAssetPanel side={names[1]} position="b" reviewAsset={review.candidate} onReady={() => ready(review.candidate.asset.id)} />
+    <SimilarityClues names={names} sides={[assetClueSide(review.existing.asset, review.existing.accountRole, review.existing.format), assetClueSide(review.candidate.asset, review.candidate.accountRole, review.candidate.format)]} clues={review.clues} reason={review.reason} recommended={review.recommendedAssetId === review.existing.asset.id ? "a" : review.recommendedAssetId === review.candidate.asset.id ? "b" : null} />
+  </div>;
+}
+
+function ReviewAssetPanel({ side, position, reviewAsset, onReady }: { side: string; position: "a" | "b"; reviewAsset: SimilarityReviewAsset; onReady(): void }) {
   const { privacyMode } = usePrivacy();
-  const { asset, format, classifications } = reviewAsset;
-  return <section className="similarity-review__asset" aria-label={side}>
-    <h3 className="similarity-review__side">{side}</h3>
-    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <AssetImage asset={asset} src={assetUrl(asset.id)} alt={side} />}</div>
-    <p className="similarity-review__filename">{asset.title || asset.originalName}</p>
-    <dl>
-      <div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>
-      <div><dt>파일 크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div>
-      <div><dt>형식</dt><dd>{format}</dd></div>
-      <div><dt>출처</dt><dd>{sourceLabel(asset.sourceUrl)}</dd></div>
-      <div><dt>가져온 날짜</dt><dd>{localDate(asset.collectedAt)}</dd></div>
-      <div><dt>분류</dt><dd>{classifications.map((entry) => entry.name).join(", ") || "미분류"}</dd></div>
-    </dl>
+  const masked = useAssetMask(reviewAsset.asset);
+  useEffect(() => { if (privacyMode || masked) onReady(); }, [privacyMode, masked, onReady]);
+  const { asset } = reviewAsset;
+  return <section className={`similarity-review__preview similarity-review__preview--${position}`} aria-label={side}>
+    {privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <AssetImage asset={asset} src={assetUrl(asset.id)} alt={side} onLoad={event => {
+      const image = event.currentTarget;
+      if (typeof image.decode === "function") void image.decode().catch(() => {}).then(onReady);
+      else onReady();
+    }} onError={onReady} />}
+    <Badge variant="scrim">{side}</Badge>
   </section>;
-}
-
-function reviewRecommendation(review: SimilarityReviewSummary): string {
-  if (!review.historical || !review.recommendedAssetId) return "";
-  const side = review.recommendedAssetId === review.existing.asset.id ? "이미지 A" : "이미지 B";
-  return `출처 정보가 더 충분한 ${side}를 권장합니다.`;
-}
-
-function comparisonSummary(review: SimilarityReviewSummary): string {
-  const previous = review.existing.asset;
-  const next = review.candidate.asset;
-  const resolution = previous.width === next.width && previous.height === next.height
-    ? "해상도 동일"
-    : `해상도 ${previous.width} × ${previous.height} → ${next.width} × ${next.height}`;
-  const bytes = next.byteSize - previous.byteSize;
-  const size = bytes === 0 ? "파일 크기 동일" : `새 이미지가 ${formatBytes(Math.abs(bytes))} 더 ${bytes > 0 ? "큼" : "작음"}`;
-  return `${resolution} · ${size}`;
 }

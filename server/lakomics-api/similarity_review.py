@@ -9,7 +9,8 @@ unchanged; only this review queue hides decided pairs.
 
 Server apply (``LAKOMICS_SIMILARITY_SERVER_APPLY``, default OFF, and only while the Asset
 authority is active): the decision route moves the image that is not kept to Library Trash
-itself, through the Asset authority lifecycle command (``asset_authority.apply_command``), in
+itself, after carrying classifications, albums (including likes) and collection links to
+its partner through their active authorities, through the Asset authority lifecycle command (``asset_authority.apply_command``), in
 the same transaction as the decision log entry. The entry is marked in
 ``mobile_similarity_review_server_applied`` and the log tells the PC (``serverApplied``) to
 record the review as resolved without applying or trashing anything again; the PC learns the
@@ -84,6 +85,8 @@ CREATE TABLE IF NOT EXISTS mobile_similarity_review_skipped (
  sequence INTEGER PRIMARY KEY, reason TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS mobile_similarity_review_server_applied (
  sequence INTEGER PRIMARY KEY, lifecycle_operation_id TEXT, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mobile_similarity_review_clues (
+ review_id TEXT PRIMARY KEY, clues_json TEXT NOT NULL, reason TEXT);
 """
 
 # The newest decision per review above the applied cursor, when it is not a withdrawal.
@@ -111,6 +114,17 @@ class Side(Strict):
     sourceLabel: Label | None
     collectedAt: Token | None
     classifications: list[Label] = Field(max_length=MAX_CLASSIFICATIONS)
+    accountHandle: Label | None = None
+    sourceHost: Label | None = None
+    accountRole: Literal["artist", "unknown", "reposter"] | None = None
+    sourcePublishedAt: Token | None = None
+
+
+class Clues(Strict):
+    account: Literal["a", "b"] | None
+    posted: Literal["a", "b"] | None
+    resolution: Literal["a", "b"] | None
+    bytes: Literal["a", "b"] | None
 
 
 class Item(Strict):
@@ -119,6 +133,8 @@ class Item(Strict):
     distance: int = Field(ge=0, le=1024)
     recommendedAssetId: ID | None = None
     recommendation: Choice | None = None
+    clues: Clues | None = None
+    reason: Literal["account", "posted", "resolution", "bytes"] | None = None
     a: Side
     b: Side
 
@@ -355,7 +371,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             content = {"libraryId": feed.libraryId, "decisionCursor": feed.decisionCursor,
                        "generatedAt": feed.generatedAt,
                        "skipped": [s.model_dump() for s in sorted(feed.skipped, key=lambda s: s.sequence)],
-                       "items": [i.model_dump() for i in kept]}
+                       "items": [i.model_dump(exclude_unset=True) for i in kept]}
             revision = hashlib.sha256(encode(content).encode()).hexdigest()
             result = {"version": 1, "revision": revision, "items": len(kept),
                       "dropped": len(feed.items) - len(kept)}
@@ -373,10 +389,14 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     generated_at=?,published_at=? WHERE singleton=1""",
                            (revision, feed.decisionCursor, feed.generatedAt, now))
             db.execute("DELETE FROM mobile_similarity_review_items")
+            db.execute("DELETE FROM mobile_similarity_review_clues")
+            db.executemany("INSERT INTO mobile_similarity_review_clues VALUES(?,?,?)",
+                           ((i.reviewId, encode(i.clues.model_dump()), i.reason)
+                            for i in kept if i.clues is not None))
             db.executemany("INSERT INTO mobile_similarity_review_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                            ((position, i.reviewId, i.kind, i.distance, i.recommendedAssetId, i.recommendation,
-                             i.a.assetId, i.a.sha256, encode(i.a.model_dump()),
-                             i.b.assetId, i.b.sha256, encode(i.b.model_dump()))
+                             i.a.assetId, i.a.sha256, encode(i.a.model_dump(exclude_unset=True)),
+                             i.b.assetId, i.b.sha256, encode(i.b.model_dump(exclude_unset=True)))
                             for position, i in enumerate(kept)))
             db.executemany("INSERT OR REPLACE INTO mobile_similarity_review_skipped VALUES(?,?)",
                            ((s.sequence, s.reason) for s in feed.skipped))
@@ -434,10 +454,15 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             assets = hydrate(db, [r["a_asset_id"] for r in rows] + [r["b_asset_id"] for r in rows])
             skipped = db.execute("SELECT COUNT(*) FROM mobile_similarity_review_skipped").fetchone()[0]
             items = []
+            evidence_by_review = {r[0]: (json.loads(r[1]), r[2]) for r in db.execute(
+                "SELECT review_id,clues_json,reason FROM mobile_similarity_review_clues WHERE review_id IN (" +
+                ",".join("?" for _ in rows) + ")", [r["review_id"] for r in rows])} if rows else {}
             for row in rows:
                 if row["a_asset_id"] not in assets or row["b_asset_id"] not in assets:
                     continue
+                evidence = evidence_by_review.get(row["review_id"])
                 items.append({"reviewId": row["review_id"], "kind": row["kind"], "distance": row["distance"],
+                              **({"clues": evidence[0], "reason": evidence[1]} if evidence else {}),
                               "recommendedAssetId": row["recommended_asset_id"],
                               "recommendation": row["recommendation"],
                               "a": {**json.loads(row["a_json"]), "asset": assets[row["a_asset_id"]]},
@@ -459,6 +484,52 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
         if set(request.query_params.keys()) - {"limit", "cursor"}:
             raise HTTPException(422, "Invalid similarity review request")
         return read_feed(limit, cursor)
+
+    def server_merge(db, library_id, discarded, kept, operation_id):
+        """Carry organization through each active authority before the lifecycle changes."""
+        import classification_authority
+        import album_authority
+        import collection_authority
+        now = datetime.now(timezone.utc).isoformat()
+
+        def apply(module, owner, command_type, key, entity):
+            module.apply_command(db, library_id=library_id, epoch=owner["epoch"],
+                                 contract_version=owner["contractVersion"], command_type=command_type,
+                                 operation_id=str(uuid_module.uuid5(LIFECYCLE_NAMESPACE, operation_id + ":" + key)),
+                                 entity=entity, now=now)
+
+        owner = authority.active_domain(db, "classifications")
+        if owner is not None:
+            source = classification_authority.assignment_row(db, library_id, discarded)
+            target = classification_authority.assignment_row(db, library_id, kept)
+            if source is not None and source[0] is not None:
+                apply(classification_authority, owner, classification_authority.ASSIGNMENT, "classification",
+                      {"assetId": kept, "classificationId": source[0], "expectedRevision": target[1] if target else 0})
+        owner = authority.active_domain(db, "albums")
+        if owner is not None:
+            albums = db.execute("SELECT album_id FROM album_authority_members WHERE library_id=? AND asset_id=? AND desired_state=1",
+                                (library_id, discarded)).fetchall()
+            for album in albums:
+                target = album_authority.membership_row(db, library_id, album[0], kept)
+                if target is not None and target[0]:
+                    continue
+                apply(album_authority, owner, album_authority.MEMBERSHIP, "album:" + album[0],
+                      {"albumId": album[0], "assetId": kept, "desiredState": True, "expectedRevision": target[1] if target else 0})
+        owner = authority.active_domain(db, "collections")
+        if owner is not None:
+            works = db.execute("SELECT work_id FROM collection_authority_members WHERE library_id=? AND asset_id=? AND desired_state=1",
+                               (library_id, discarded)).fetchall()
+            for work in works:
+                target = db.execute("SELECT desired_state,entity_revision FROM collection_authority_members WHERE library_id=? AND work_id=? AND asset_id=?",
+                                    (library_id, work[0], kept)).fetchone()
+                if target is None or not target[0]:
+                    apply(collection_authority, owner, collection_authority.MEMBERSHIP, "work:" + work[0],
+                          {"workId": work[0], "assetId": kept, "desiredState": True, "expectedRevision": target[1] if target else 0})
+            covers = db.execute("SELECT work_id FROM collection_authority_works WHERE library_id=? AND lifecycle='live' AND json_extract(fields,'$.coverAssetId')=?",
+                                (library_id, discarded)).fetchall()
+            for work in covers:
+                apply(collection_authority, owner, collection_authority.UPDATE, "cover:" + work[0],
+                      {"workId": work[0], "changes": {"coverAssetId": kept}, "expected": {"coverAssetId": discarded}})
 
     def server_trash(db, owner, asset_id, operation_id):
         """Move ``asset_id`` to Library Trash through the Asset authority, inside the caller's transaction."""
@@ -543,6 +614,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                 if serve:
                     # Server apply: the trash, the log entry and its marker commit together or not at all.
                     if trash is not None:
+                        server_merge(db, command.libraryId, trash, b_id if trash == a_id else a_id, command.operationId)
                         lifecycle_operation = server_trash(db, owner, trash, command.operationId)
                     result = {**result, "pendingPc": False, "serverApplied": True}
                 db.execute("INSERT INTO mobile_similarity_review_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

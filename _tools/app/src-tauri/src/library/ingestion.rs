@@ -268,7 +268,7 @@ impl Library {
             distance: candidate.distance,
             review_id: uuid::Uuid::new_v4().to_string(),
         });
-        self.register_asset(
+        let auto_kept = self.register_asset(
             &asset,
             &content_hash,
             perceptual_hash,
@@ -279,6 +279,11 @@ impl Library {
         )?;
 
         pending.commit();
+        if let Some(kept) = auto_kept {
+            return Ok(IngestOutcome::Added {
+                asset: self.get_asset(&kept)?,
+            });
+        }
         Ok(match registration {
             Registration::Normal => IngestOutcome::Added { asset },
             Registration::Review { review_id, .. } => IngestOutcome::ReviewPending { review_id },
@@ -522,7 +527,7 @@ impl Library {
         classification_id: Option<&str>,
         registration: &Registration,
         materialized: bool,
-    ) -> Result<(), LibraryError> {
+    ) -> Result<Option<String>, LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let status = match registration {
@@ -608,11 +613,29 @@ impl Library {
         if matches!(registration, Registration::Normal) {
             super::artists::fill_ingested_artist(&transaction, &asset.id, &asset.collected_at)?;
         }
+        let auto_kept = if let Registration::Review {
+            existing_asset_id,
+            review_id,
+            distance,
+        } = registration
+        {
+            super::similarity::auto_resolve_repost(
+                &transaction,
+                review_id,
+                existing_asset_id,
+                &asset.id,
+                *distance,
+            )?
+        } else {
+            None
+        };
         transaction.commit()?;
         self.publication_inputs.signal(&[10, 11]);
         drop(connection);
-        if !materialized { self.remember_new_ingest(&asset.id, true); }
-        Ok(())
+        if !materialized {
+            self.remember_new_ingest(auto_kept.as_deref().unwrap_or(&asset.id), true);
+        }
+        Ok(auto_kept)
     }
 
     fn register_video_asset(

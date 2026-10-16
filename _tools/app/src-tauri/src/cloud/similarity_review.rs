@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::library::error::LibraryError;
+use crate::library::models::{AccountRole, ClueKey, SimilarityClues};
 
 pub(crate) const MAX_ITEMS: usize = 5_000;
 pub(crate) const MAX_SKIPPED: usize = 1_000;
@@ -29,6 +30,14 @@ pub(crate) struct FeedSide {
     pub source_label: Option<String>,
     pub collected_at: Option<String>,
     pub classifications: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_role: Option<AccountRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_published_at: Option<String>,
 }
 
 /// One open historical pair. `a` is the existing image, `b` the candidate.
@@ -40,6 +49,10 @@ pub(crate) struct FeedItem {
     pub distance: u32,
     pub recommended_asset_id: Option<String>,
     pub recommendation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clues: Option<SimilarityClues>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ClueKey>,
     pub a: FeedSide,
     pub b: FeedSide,
 }

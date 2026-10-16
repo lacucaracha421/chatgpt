@@ -1,3 +1,4 @@
+import type { AccountRole, ClueKey, Clues } from "../similarity/clues";
 import type {ProfilePerson} from "../collections/av/personProfileFields";
 import type { AvPortrait } from "../collections/avTypes";
 
@@ -1037,6 +1038,7 @@ export type SimilarityDecision =
   | "keep_both";
 
 export type SimilarityReviewAsset = {
+  accountRole?: AccountRole;
   asset: AssetSummary;
   format: string;
   classifications: ClassificationEntry[];
@@ -1047,6 +1049,8 @@ export type SimilarityReviewSummary = {
   distance: number;
   historical: boolean;
   recommendedAssetId: string | null;
+  clues?: Clues;
+  reason?: ClueKey | null;
   existing: SimilarityReviewAsset;
   candidate: SimilarityReviewAsset;
 };

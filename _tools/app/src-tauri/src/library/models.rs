@@ -571,9 +571,44 @@ pub struct SimilarityDecisionRequest {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SimilarityReviewAsset {
+    pub account_role: AccountRole,
     pub asset: AssetSummary,
     pub format: String,
     pub classifications: Vec<ClassificationEntry>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountRole {
+    Artist,
+    #[default]
+    Unknown,
+    Reposter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClueSide {
+    A,
+    B,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClueKey {
+    Account,
+    Posted,
+    Resolution,
+    Bytes,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SimilarityClues {
+    pub account: Option<ClueSide>,
+    pub posted: Option<ClueSide>,
+    pub resolution: Option<ClueSide>,
+    pub bytes: Option<ClueSide>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -583,6 +618,8 @@ pub struct SimilarityReviewSummary {
     pub distance: u32,
     pub historical: bool,
     pub recommended_asset_id: Option<String>,
+    pub clues: SimilarityClues,
+    pub reason: Option<ClueKey>,
     pub existing: SimilarityReviewAsset,
     pub candidate: SimilarityReviewAsset,
 }
@@ -1736,9 +1773,10 @@ pub struct MangaCatalogRecoveryRemoteResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, CollectionSummary,
-        CollectionType, MangaDexApplyRequest, MangaDexApplyTarget, MediaSummary, MetadataBackup,
-        SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
+        AccountRole, AssetSummary, BackupKind, ClassificationEntry, ClassificationKind,
+        CollectionSummary, CollectionType, MangaDexApplyRequest, MangaDexApplyTarget, MediaSummary,
+        MetadataBackup, SimilarityClues, SimilarityReviewAsset, SimilarityReviewSummary,
+        VideoPreparationState,
     };
     use super::thumbnail_revision;
 
@@ -1946,6 +1984,7 @@ mod tests {
             media: MediaSummary::Image,
         };
         let review_asset = SimilarityReviewAsset {
+            account_role: AccountRole::Unknown,
             asset,
             format: "PNG".into(),
             classifications: vec![ClassificationEntry {
@@ -1961,6 +2000,8 @@ mod tests {
             }],
         };
         let value = serde_json::to_value(SimilarityReviewSummary {
+            clues: SimilarityClues::default(),
+            reason: None,
             id: "review-1".into(),
             distance: 2,
             historical: false,

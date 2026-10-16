@@ -48,8 +48,8 @@ use super::{
     error::LibraryError,
     models::{SimilarityDecision, SimilarityDecisionRequest},
     similarity::{
-        classifications_for_assets, load_asset_summaries, provenance_rank, review_format,
-        ServerAppliedRecord,
+        classifications_for_assets, comparison_clues, load_account_roles, load_asset_summaries,
+        posting_handle, review_format, ServerAppliedRecord,
     },
     Library,
 };
@@ -216,6 +216,7 @@ impl Library {
             summaries.extend(load_asset_summaries(&transaction, chunk)?);
             classifications.extend(classifications_for_assets(&transaction, chunk)?);
         }
+        let roles = load_account_roles(&transaction, &ids)?;
         transaction.commit()?;
 
         let side = |(id, sha256): &(String, String)| -> Option<FeedSide> {
@@ -232,6 +233,21 @@ impl Library {
                 })
                 .unwrap_or_default();
             Some(FeedSide {
+                account_handle: posting_handle(asset).map(|h| format!("@{h}")),
+                source_host: asset
+                    .source_url
+                    .as_deref()
+                    .and_then(|value| url::Url::parse(value).ok())
+                    .and_then(|url| {
+                        url.host_str()
+                            .map(|host| host.trim_start_matches("www.").to_owned())
+                    }),
+                account_role: Some(if posting_handle(asset).is_some() {
+                    roles.get(id).copied().unwrap_or_default()
+                } else {
+                    Default::default()
+                }),
+                source_published_at: asset.source_published_at.clone(),
                 asset_id: id.clone(),
                 sha256: sha256.clone(),
                 width: (1..=1_000_000)
@@ -253,19 +269,24 @@ impl Library {
             let (Some(a), Some(b)) = (side(&row.a), side(&row.b)) else {
                 continue;
             };
-            let recommended = match provenance_rank(&summaries[&row.a.0])
-                .cmp(&provenance_rank(&summaries[&row.b.0]))
-            {
-                std::cmp::Ordering::Greater => Some(row.a.0.as_str()),
-                std::cmp::Ordering::Less => Some(row.b.0.as_str()),
-                std::cmp::Ordering::Equal => None,
-            };
+            let (clues, reason, favoured) = comparison_clues(
+                &summaries[&row.a.0],
+                a.account_role.unwrap_or_default(),
+                &summaries[&row.b.0],
+                b.account_role.unwrap_or_default(),
+            );
+            let recommended = favoured.map(|side| match side {
+                super::models::ClueSide::A => row.a.0.as_str(),
+                super::models::ClueSide::B => row.b.0.as_str(),
+            });
             let mut item = FeedItem {
                 review_id: row.review_id.clone(),
                 kind: "historical".into(),
                 distance: row.distance,
                 recommended_asset_id: None,
                 recommendation: None,
+                clues: Some(clues),
+                reason,
                 a,
                 b,
             };

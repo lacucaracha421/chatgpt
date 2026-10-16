@@ -12,6 +12,7 @@
 @import "../assets/asset-inspector.css";
 @import "../safety/trash-browser.css";
 @import "../similarity/similarity-review.css";
+@import "../similarity/similarity-clues.css";
 @import "../manga/manga.css";
 @import "shared-responsive.css";
 @import "../collections/collections.css";

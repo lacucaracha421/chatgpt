@@ -1,3 +1,4 @@
+import type { AccountRole, ClueKey, Clues } from "../src/similarity/clues";
 /**
  * Sending durable similarity-review decisions (`similarityReviewOutbox.ts`). The protocol
  * follows `characterReviewDelivery.ts`:
@@ -26,10 +27,12 @@ export const SIMILARITY_DECISIONS_PATH = '/v1/library/similarity/review/decision
 
 export type SimilarityCounts = {open: number; pendingPc: number; skipped: number};
 export type SimilaritySide = {
+  accountHandle?: string | null; sourceHost?: string | null; accountRole?: AccountRole | null; sourcePublishedAt?: string | null;
   assetId: string; sha256: string; width: number | null; height: number | null; byteSize: number | null;
   format: string; sourceLabel: string | null; collectedAt: string | null; classifications: string[]; asset: Asset;
 };
 export type SimilarityItem = {
+  clues?: Clues | null; reason?: ClueKey | null;
   reviewId: string; kind: 'historical'; distance: number;
   recommendedAssetId: string | null; recommendation: Exclude<SimilarityChoice, 'keep_both'> | null;
   a: SimilaritySide; b: SimilaritySide;

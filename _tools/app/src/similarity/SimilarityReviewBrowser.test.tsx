@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LibraryGateway, SimilarityReviewSummary } from "../library/types";
@@ -28,20 +28,33 @@ it("does not publish a late image decision result after switching to video", asy
 
 it("shows both public assets and advances after a successful decision", async () => {
   const gateway = reviewGateway();
+  const next = review("review-2");
+  next.candidate.asset.width = 3840;
+  next.clues = {account: null, posted: null, resolution: "b", bytes: null};
+  next.reason = "resolution";
+  next.recommendedAssetId = next.candidate.asset.id;
   vi.mocked(gateway.listSimilarityReviews)
     .mockResolvedValueOnce(reviewPage([review("review-1")], 2))
-    .mockResolvedValueOnce(reviewPage([review("review-2")], 1));
+    .mockResolvedValueOnce(reviewPage([next], 1));
   const onCountChange = vi.fn();
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
 
   expect(await screen.findByRole("heading", { name: "유사 검토" })).toBeInTheDocument();
   expect(await screen.findByRole("img", { name: "기존 이미지" })).toHaveAttribute("src", assetUrl("existing-review-1"));
   expect(await screen.findByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-1"));
-  expect(screen.getAllByText("1920 × 1080")).toHaveLength(2);
+  expect(screen.getAllByText("1,920 × 1,080")).toHaveLength(2);
 
   await userEvent.click(screen.getByRole("button", { name: "둘 다 보관" }));
   expect(gateway.decideSimilarityReview).toHaveBeenCalledWith({ reviewId: "review-1", decision: "keep_both" });
-  expect(await screen.findByText("candidate-review-2.png")).toBeInTheDocument();
+  await waitFor(() => expect(document.querySelector('[data-staged]')).toBeTruthy());
+  const images = document.querySelectorAll('[data-staged] img');
+  await act(async () => { fireEvent.load(images[0]); });
+  expect(screen.getByRole("img", {name: "새 이미지"})).toHaveAttribute("src", assetUrl("candidate-review-1"));
+  expect(screen.queryByText("해상도가 더 큰 새 이미지를 권장합니다.")).not.toBeInTheDocument();
+  await act(async () => { fireEvent.load(images[1]); });
+  expect(screen.getByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-2"));
+  expect(screen.getByText("해상도가 더 큰 새 이미지를 권장합니다.")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "새 이미지로 교체"})).toHaveClass("ui-button--primary");
   expect(onCountChange).toHaveBeenLastCalledWith(1);
 });
 
@@ -51,13 +64,13 @@ it("keeps the current pair and disables decisions while a decision is pending", 
   let reject!: (reason: unknown) => void;
   vi.mocked(gateway.decideSimilarityReview).mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
-  await screen.findByText("candidate-review-1.png");
+  await screen.findByRole("img", { name: "새 이미지" });
 
   await userEvent.click(screen.getByRole("button", { name: "새 이미지로 교체" }));
   expect(screen.getByRole("button", { name: "기존 이미지 유지" })).toBeDisabled();
   reject(new Error("conflict"));
   expect(await screen.findByRole("status")).toBeInTheDocument();
-  expect(screen.getByText("candidate-review-1.png")).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-1"));
 });
 
 it("reloads when a phone decision was applied underneath the screen", async () => {
@@ -67,11 +80,13 @@ it("reloads when a phone decision was applied underneath the screen", async () =
     .mockResolvedValueOnce(reviewPage([review("review-2")], 1));
   const onCountChange = vi.fn();
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
-  await screen.findByText("candidate-review-1.png");
+  await screen.findByRole("img", { name: "새 이미지" });
 
   act(() => { window.dispatchEvent(new Event(SIMILARITY_REVIEW_CHANGED_EVENT)); });
 
-  expect(await screen.findByText("candidate-review-2.png")).toBeInTheDocument();
+  await waitFor(() => expect(document.querySelector('[data-staged]')).toBeTruthy());
+  await act(async () => { for (const img of document.querySelectorAll('[data-staged] img')) fireEvent.load(img); });
+  expect(screen.getByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-2"));
   expect(gateway.decideSimilarityReview).not.toHaveBeenCalled();
   expect(onCountChange).toHaveBeenLastCalledWith(1);
 });
@@ -82,7 +97,7 @@ it("hides the position counter after the last review is resolved", async () => {
     .mockResolvedValueOnce(reviewPage([review("review-1")], 1))
     .mockResolvedValueOnce(reviewPage([], 0));
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
-  await screen.findByText("candidate-review-1.png");
+  await screen.findByRole("img", { name: "새 이미지" });
 
   await userEvent.click(screen.getByRole("button", { name: "기존 이미지 유지" }));
 
@@ -116,7 +131,7 @@ it("masks both previews with skeletons in privacy mode", async () => {
     <SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />
   </PrivacyProvider>);
 
-  expect(await screen.findByText("candidate-review-1.png")).toBeInTheDocument();
+  expect(await screen.findByRole("table", {name: "단서 비교"})).toBeInTheDocument();
   expect(screen.queryByRole("img", { name: "기존 이미지" })).not.toBeInTheDocument();
   expect(screen.queryByRole("img", { name: "새 이미지" })).not.toBeInTheDocument();
   expect(screen.getAllByRole("status", { name: "비공개 모드" })).toHaveLength(2);
@@ -151,12 +166,33 @@ it("uses non-destructive historical review labels and recommendations", async ()
   vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([historical], 1));
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
 
-  expect(await screen.findByRole("img", { name: "이미지 A" })).toBeInTheDocument();
-  expect(screen.getByText("출처 정보가 더 충분한 이미지 A를 권장합니다.")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "이미지 B 유지" }));
+  expect(await screen.findByRole("img", { name: "A" })).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "A 유지 · B 휴지통"})).toHaveClass("ui-button--primary");
+  expect(screen.queryByText(/권장합니다/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "B 유지 · A 휴지통" }));
   expect(gateway.decideSimilarityReview).toHaveBeenCalledWith({
     reviewId: "review-1", decision: "replace_existing",
   });
+});
+
+it.each([true, false])("renders Rust clues and uses a primary decision only with a recommendation (%s)", async (recommended) => {
+  const gateway = reviewGateway();
+  const item = review("clues");
+  item.clues = {account: recommended ? "b" : null, posted: null, resolution: "b", bytes: null};
+  item.reason = recommended ? "account" : null;
+  item.recommendedAssetId = recommended ? item.candidate.asset.id : null;
+  item.candidate.accountRole = "artist";
+  item.candidate.asset.creatorHandle = "author";
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([item], 1));
+  const {container} = render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+  expect(await screen.findByRole("table", {name: "단서 비교"})).toBeInTheDocument();
+  expect(screen.getByText("@author")).toBeInTheDocument();
+  expect(container.querySelectorAll('.similarity-review__buttons .ui-button--primary')).toHaveLength(recommended ? 1 : 0);
+  expect(container.querySelectorAll('tr[data-deciding]')).toHaveLength(recommended ? 1 : 0);
+  if (recommended) {
+    expect(screen.getByRole("button", {name: "새 이미지로 교체"})).toHaveAttribute("aria-description", "권장");
+    expect(screen.getByText("작가 계정에 올라온 새 이미지를 권장합니다.")).toBeInTheDocument();
+  }
 });
 
 function review(id: string): SimilarityReviewSummary {
