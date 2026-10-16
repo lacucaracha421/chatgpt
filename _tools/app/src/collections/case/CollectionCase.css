@@ -111,18 +111,24 @@
 .case-spine-art .t-band .spine-title { max-height: 100%; }
 .case-spine-art .t-foot { flex: none; width: 100%; display: flex; align-items: center; justify-content: center; padding: 45% 0 55%; }
 .case-spine-art .t-pub { white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .28); line-height: 1; color: #fff; }
-.case-spine-art .sw2 .t-head { aspect-ratio: 96 / 203; background: url("./marks/switch2-head.png") center / 100% 100% no-repeat, rgb(230,72,45); }
+/* Platform heads are cut from real package spines (user decision, 2026-10-01).
+   Switch 2 prints the same red as Switch 1 (user, 2026-10-17); its foot carries the Nintendo racetrack mark for every game, in place of the developer. */
+.case-spine-art .sw2 .t-head { aspect-ratio: 96 / 203; background: url("./marks/switch2-head.png") center / 100% 100% no-repeat, rgb(218,24,32); }
 .case-spine-art .sw2 .t-band { background: var(--color-surface); }
-.case-spine-art .sw2 .t-foot { background: rgb(230,72,45); }
+.case-spine-art .sw2 .t-foot { aspect-ratio: 96 / 198; padding: 0; background: rgb(218,24,32); }
+.case-spine-art .sw2 .t-mark { width: 46%; aspect-ratio: 46 / 188; background: url("./marks/nintendo-mark.svg") center / contain no-repeat; }
 .case-spine-art .sw .t-head { aspect-ratio: 96 / 92; background: url("./marks/switch-head.png") center / 100% 100% no-repeat; }
 .case-spine-art .sw { background: rgb(218,24,32); }
 .case-spine-art .ps5 .t-head { aspect-ratio: 96 / 271; background: url("./marks/ps5-head.png") center / 100% 100% no-repeat, #fff; box-shadow: 0 2px 0 #2a4fb0; }
 .case-spine-art .ps5 .t-band, .case-spine-art .ps5 .t-foot { background: #050505; }
+/* PC games print a Steam package spine: package colours from the Steam client, not UI tokens. "PC" ends as far above the
+   title band as "PS5" does on the PS5 head (about 0.4 spine widths; user, 2026-10-17). */
+.case-spine-art .pc { background: linear-gradient(#1b2838 40%, #223a52); }
+.case-spine-art .pc .t-head { position: relative; aspect-ratio: 96 / 200; background: url("./marks/steam-mark.svg") center 14% / 64% auto no-repeat, #0f1217; }
+.case-spine-art .pc .t-head::after { content: "PC"; position: absolute; left: 50%; bottom: 17.5%; transform: translateX(-50%); writing-mode: vertical-rl; text-orientation: sideways; font: 800 calc(var(--cd) * .46) / 1 var(--font-ui); letter-spacing: .08em; color: #fff; }
+.case-spine-art .pc .t-pub { color: #c7d5e0; }
 @media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow,
   .collection-case--fitted[data-unfolding] .collection-case-object, .collection-case--fitted[data-unfolding]::before, .collection-case--fitted[data-unfolding] .floor-shadow { transition: none; } }
-/* Platform marks are cut from real package spines (user decision, 2026-10-01). A Nintendo-published Switch 2 game carries the publisher oval at the foot. */
-.case-spine-art .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
-.case-spine-art .sw2[data-nintendo] .t-pub { display: none; }
 
 .collection-case .note { max-height: 20%; overflow: hidden; }
 .collection-case .work-names-note { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }

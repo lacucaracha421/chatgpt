@@ -193,7 +193,7 @@ describe("CollectionCase", () => {
     expect(screen.getByRole("img", { name: "게임 책등" })).toHaveAttribute("src", "/spine");
     expect(container.querySelector("[data-spine-template]")).toBeNull();
   });
-  it.each(["sw2", "sw", "ps5"] as const)("draws the %s package blocks without invented logos", platform => {
+  it.each(["sw", "ps5", "pc"] as const)("draws the %s package blocks without invented logos", platform => {
     const { container } = render(<Case value={{ ...data, platform, developer: "개발사" }} />);
     expect(container.querySelector(`[data-spine-template="${platform}"]`)).not.toBeNull();
     expect(container.querySelector(".k-spine")).toHaveTextContent("게임");
@@ -201,8 +201,30 @@ describe("CollectionCase", () => {
     expect(container.querySelector(".k-spine")).toHaveTextContent("개발사");
     expect(container.querySelector(".k-spine")).not.toHaveTextContent("배급사");
     expect(container.querySelector(".t-head img")).toBeNull();
+    expect(container.querySelector("[data-spine-mark]")).toBeNull();
+  });
+  it("ends every Switch 2 spine in the Nintendo mark instead of the developer", () => {
+    const { container } = render(<Case value={{ ...data, platform: "sw2", developer: "Nihon Falcom", publisher: "Nihon Falcom" }} />);
+    const spine = container.querySelector(".k-spine")!;
+    expect(spine.querySelector('[data-spine-template="sw2"] .t-foot [data-spine-mark="nintendo"]')).not.toBeNull();
+    expect(spine).toHaveTextContent("게임");
+    expect(spine).not.toHaveTextContent("Nihon Falcom");
+    expect(spine.querySelector("img")).toBeNull();
+  });
+  it("prints the PC template for Windows games without a spine image", () => {
+    const platform = casePlatform(null, "PC (Microsoft Windows)");
+    expect(platform).toBe("pc");
+    const { container } = render(<Case value={{ ...data, platform, developer: "FromSoftware" }} />);
+    expect(container.querySelector(".k-spine .ins")).toHaveClass("full");
+    expect(container.querySelector('.k-spine [data-spine-template="pc"]')).toHaveTextContent("FromSoftware");
   });
   it("derives the template from actual platform data", () => {
+    for (const pc of ["PC (Microsoft Windows)", "Windows", "Mac", "macOS", "Linux", "Steam Deck", "SteamVR", "Steam", "MS-DOS"]) {
+      expect([pc, casePlatform(null, pc)]).toEqual([pc, "pc"]);
+    }
+    for (const notPc of ["Windows Phone", "PC Engine", "PC-FX", "NEC PC-8801", "NEC PC-9801", "TurboGrafx-16", "DOS"]) {
+      expect([notPc, casePlatform(notPc)]).toEqual([notPc, "other"]);
+    }
     expect(casePlatform("Nintendo Switch 2 · PC")).toBe("sw2");
     expect(casePlatform("Nintendo Switch")).toBe("sw");
     expect(casePlatform("PC · PlayStation 5")).toBe("pc");

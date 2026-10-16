@@ -1,5 +1,6 @@
 .collection-case .case-back { --back-band: #343c48; position: absolute; inset: 0; display: flex; flex-direction: column; background: #121a24; color: #e8eef5; font-family: var(--font-ui); }
-.collection-case .case-back--sw2 { --back-band: #e6482d; }
+.collection-case .case-back--sw2 { --back-band: #da1820; }
+.collection-case .case-back--pc { --back-band: #1b2838; }
 .collection-case .case-back--sw { --back-band: #da1820; }
 .collection-case .case-back--ps5 { --back-band: #2a4fb0; }
 .collection-case .case-back--av { --back-band: #171719; }

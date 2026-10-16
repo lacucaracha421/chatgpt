@@ -14,20 +14,24 @@ export function casePlatform(platforms: string | null, ownedPlatform?: string | 
   if (/switch\s*2/i.test(platform)) return "sw2";
   if (/switch/i.test(platform)) return "sw";
   if (/ps5|playstation\s*5/i.test(platform)) return "ps5";
-  if (/\b(pc|windows|linux|mac|macos)\b|steam deck/i.test(platform)) return "pc";
+  // Steam, MS-DOS, Windows, Mac and Linux games share the PC (Steam) spine; NEC machines and Windows Phone are not PCs.
+  const notPc = /windows\s*phone|pc[\s-]?(engine|fx|8\d|9\d)|turbografx/i.test(platform);
+  if (!notPc && /\b(pc|windows|linux|mac|macos|ms-dos)\b|steam/i.test(platform)) return "pc";
   return "other";
 }
+/** Platforms printed from a package spine template (`.tpl` in CollectionCase.css); the rest get a bare spine with the title. */
+const SPINE_TEMPLATES: CasePlatform[] = ["sw2", "sw", "ps5", "pc"];
 /** The case a work is drawn as: books, AV and films by type, games by their owned or first device. */
 export function workCasePlatform(type: string, platforms: string | null | undefined, ownedPlatform?: string | null): CasePlatform {
   return type === "manga" ? "book" : type === "av" ? "av" : type === "movie" ? "film" : casePlatform(platforms ?? null, ownedPlatform);
 }
 export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
-  pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
+  pc: "rgba(16,18,22,.9)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
 export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; /** A game spine names its developer (user, 2026-10-05); books, films and AV keep the publisher/maker. */ developer?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
 export function spineInsertClass(data: CaseData) {
-  return `ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`;
+  return `ins${data.spine || data.privacy ? "" : SPINE_TEMPLATES.includes(data.platform) ? " full" : " bare"}`;
 }
 export type Fact = [string, ReactNode];
 export function CaseFacts({ rows }: { rows: Fact[] }) {
@@ -202,7 +206,7 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
     if (!data.privacy && data.spine && ((painted !== null && slots[painted] === data.spine) || failed === data.spine)) onSettled?.(data.spine);
   });
 
-  const template = ["sw2", "sw", "ps5"].includes(data.platform);
+  const template = SPINE_TEMPLATES.includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
   return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
     {slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" loading={decorative ? "lazy" : undefined} alt={decorative ? "" : `${data.title} 책등`} draggable={false}
@@ -214,8 +218,9 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
         if (image.isConnected && wanted.current === url) setPainted(index as 0 | 1);
       }} onError={() => { if (wanted.current === url) setFailed(url); }} />)}
     {!hasPaintedSpine && (templatePainted.current || failed === data.spine) && (template ?
-    <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}>
-      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.platform === "book" || data.platform === "film" || data.platform === "av" ? data.publisher : data.developer}</span></span>
+    <span className={`tpl ${data.platform}`} data-spine-template={data.platform}>
+      {/* Every Switch 2 spine ends in the Nintendo mark instead of the developer (user, 2026-10-17). */}
+      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot">{data.platform === "sw2" ? <span className="t-mark" data-spine-mark="nintendo" aria-hidden="true" /> : <span className="t-pub">{data.developer}</span>}</span>
     </span> : title)}
   </>}</span>;
 }
