@@ -54,3 +54,6 @@ describe("accepted find priority", () => {
     }
   });
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../../nl-search-runtime/enabled.json", () => ({ default: true }));

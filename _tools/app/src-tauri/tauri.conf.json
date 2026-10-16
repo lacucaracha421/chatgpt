@@ -53,6 +53,8 @@
       "../character-runtime/replay_dataset.py": "character-runtime/replay_dataset.py",
       "../character-runtime/holdout_dataset.py": "character-runtime/holdout_dataset.py",
       "../nl-search-runtime/nl_query_worker.py": "nl-search-runtime/nl_query_worker.py",
+      "../nl-search-runtime/enabled.json": "nl-search-runtime/enabled.json",
+      "../nl-search-runtime/feature.py": "nl-search-runtime/feature.py",
       "../nl-search-runtime/runtime_support.py": "nl-search-runtime/runtime_support.py",
       "licenses/*": "licenses/"
     },

@@ -1,6 +1,23 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
+#[test]
+fn paused_caption_lane_preserves_pending_publication_and_cached_captions() {
+    if super::super::nl_search::enabled() {
+        return;
+    }
+    let (_temp, library) = fixture();
+    cache(&library, Some(&[("a1", "existing caption")]));
+    let fake = Fake::default();
+    run(&library, &fake, 1000).unwrap();
+    let before = serde_json::to_value(state(&library)).unwrap();
+    let stamp = library.nl_search_cache_stamp();
+    library.run_due_caption_publication(ENDPOINT).unwrap();
+    assert_eq!(serde_json::to_value(state(&library)).unwrap(), before);
+    assert_eq!(library.nl_search_cache_stamp(), stamp);
+    assert_eq!(digests(&library, "caption"), 1);
+}
+
 #[derive(Default)]
 struct Fake {
     bodies: RefCell<Vec<Value>>,

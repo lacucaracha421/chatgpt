@@ -276,6 +276,9 @@ impl Library {
     }
 
     pub(crate) fn run_due_caption_publication(&self, endpoint: &str) -> Result<(), LibraryError> {
+        if !super::nl_search::enabled() {
+            return Ok(());
+        }
         self.ensure_send_to(endpoint)?;
         // The lane reads the whole cache and the character tables; lightweight mode holds it.
         if crate::workload::is_lightweight() {

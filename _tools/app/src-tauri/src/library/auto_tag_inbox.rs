@@ -158,6 +158,9 @@ impl Library {
         };
         let (settings_path, id) = self.inbox_settings_location()?;
         for name in FILES {
+            if name == FILES[2] && !super::nl_search::enabled() {
+                continue;
+            }
             if crate::workload::is_restricted() {
                 result.skipped = Some("절약 모드 또는 복구 대기 중에는 가져오지 않습니다.".into());
                 break;

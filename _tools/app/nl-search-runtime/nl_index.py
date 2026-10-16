@@ -1,4 +1,9 @@
 """Resumable GPU image indexing, hash-keyed storage and atomic inbox publication."""
+# Exit before importing model dependencies or opening any state/library files.
+if __name__ == '__main__':
+    from feature import exit_if_paused
+    exit_if_paused()
+
 import argparse
 from datetime import datetime, timezone
 import gc

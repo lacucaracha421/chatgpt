@@ -2,6 +2,16 @@
 
 Machine-local components for Korean natural-language image search, located at `_tools/app/nl-search-runtime/` in the Lakomics repository. The GPU index job writes an inbox export; the desktop imports it into a disposable library cache and ranks queries in Rust. This directory contains runtime code and fixture tests, not research artefacts or model weights.
 
+## Paused by the user (2026-10-17)
+
+`enabled.json` is the single feature switch, currently `false`. Desktop Rust and both frontends
+embed it at build time; standalone Python entry points read it before loading dependencies or
+opening library/state files and exit successfully when paused. The app skips NL inbox imports,
+caption publication and scene-search entry points. Stored captions, vectors and checkpoints remain.
+Set the file to `true`, rebuild/restart the desktop and rebuild/install the tablet client to resume.
+The scheduled wrapper also runs automatic tagging: keep that task enabled so tagging continues.
+The feature's ranking/import/publication fixture tests remain usable; scene UI tests mock the flag on.
+
 | File | Runs on | Needs |
 |---|---|---|
 | `nl_index.py` | main PC, GPU, nightly or manual | torch (CUDA), transformers, bitsandbytes, Pillow; models SigLIP2 so400m-384 and Qwen3-VL-Embedding-8B |

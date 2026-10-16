@@ -1,4 +1,5 @@
 import { createKoreanMatcher, normalizeSearchText, matchesKoreanSearch } from "./koreanSearch";
+import naturalLanguageSearchEnabled from "../../nl-search-runtime/enabled.json";
 import type { NavigationEntry, NavigationEntryGroup } from "./findEntries";
 
 export const FIND_SCOPES = ["전체", "작품", "폴더·캐릭터", "태그", "작가", "메모", "메뉴"] as const;
@@ -18,7 +19,7 @@ const TAB_ORDER: Record<FindTab, NavigationEntryGroup[]> = {
   notes: ["note", "search", "menu", "work", "place", "tag", "artist"],
   menu: ["menu", "search", "work", "place", "tag", "artist", "note"],
 };
-export function allowsSceneSearch(tab: FindTab) { return tab === "assets" || tab === "home"; }
+export function allowsSceneSearch(tab: FindTab) { return naturalLanguageSearchEnabled && (tab === "assets" || tab === "home"); }
 export function findPlaceholder(tab: FindTab) {
   return { assets: "캐릭터, 폴더, 태그 찾기", collections: "작품 찾기", manga: "망가 제목 찾기", notes: "메모 찾기", home: "작품, 캐릭터, 폴더, 태그 찾기", menu: "메뉴, 작품, 폴더 찾기" }[tab];
 }

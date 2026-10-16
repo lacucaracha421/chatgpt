@@ -5,6 +5,11 @@ Merges into `<state>/captions.jsonl`, the file `nl_index.py` turns into the gate
 syncs every batch before starting the next (so an interrupted run loses at most one batch), and stops
 at `--limit` new captions or `--max-seconds`, whichever comes first. Run it before `nl_index.py`.
 """
+# Exit before importing model dependencies or opening any state/library files.
+if __name__ == '__main__':
+    from feature import exit_if_paused
+    exit_if_paused()
+
 import argparse
 import json
 import os

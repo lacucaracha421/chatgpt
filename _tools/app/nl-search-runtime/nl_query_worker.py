@@ -1,4 +1,9 @@
 """Persistent CPU opus/SigLIP2 text worker; stdout is bounded JSON lines only."""
+# Exit before importing model dependencies or opening any state/library files.
+if __name__ == '__main__':
+    from feature import exit_if_paused
+    exit_if_paused()
+
 import argparse
 from contextlib import redirect_stdout
 import ctypes

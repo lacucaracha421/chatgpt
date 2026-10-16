@@ -177,3 +177,6 @@ describe("이미지 내용 palette group", () => {
     expect(findGroups(list, "별과", "작품", []).map(group => group.group)).toEqual(["best", "search"]);
   });
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../../nl-search-runtime/enabled.json", () => ({ default: true }));

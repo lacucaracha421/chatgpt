@@ -61,6 +61,21 @@ fn auto_tag_inbox_imports_applies_once_and_skips_unchanged() {
 }
 
 #[test]
+fn auto_tag_inbox_paused_nl_export_is_left_untouched_while_tags_import() {
+    if crate::library::nl_search::enabled() {
+        return;
+    }
+    let (f, _) = fixture();
+    let export = f.temp.path().join(FILES[2]);
+    let contents = b"pending NL export";
+    std::fs::write(&export, contents).unwrap();
+    let result = f.library.run_auto_tag_inbox().unwrap();
+    assert_eq!(result.processed, vec![FILES[0]]);
+    assert!(!result.settings.last.unwrap().contains_key(FILES[2]));
+    assert_eq!(std::fs::read(export).unwrap(), contents);
+}
+
+#[test]
 fn auto_tag_inbox_bad_file_rolls_back_and_retries_only_after_hour_or_change() {
     let (f, _) = fixture();
     f.library.run_auto_tag_inbox().unwrap();

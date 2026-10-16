@@ -80,3 +80,6 @@ it('before captions exist the result state says 아직 준비 중 without an err
   expect((await screen.findAllByText('아직 준비 중')).length).toBeGreaterThan(0);
   expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('button',{name:'그래도 가장 비슷한 그림 보기'})).toBeNull();
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../nl-search-runtime/enabled.json", () => ({ default: true }));

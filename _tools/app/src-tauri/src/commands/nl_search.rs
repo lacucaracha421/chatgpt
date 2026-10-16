@@ -26,6 +26,9 @@ fn error(message: impl Into<String>) -> CommandError {
     }
 }
 fn config(app: &AppHandle) -> Result<Config, String> {
+    if !nl_search::enabled() {
+        return Err("내용 검색이 일시 중지되었습니다.".into());
+    }
     let runtime = if cfg!(debug_assertions) {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../nl-search-runtime")
     } else {
@@ -51,7 +54,9 @@ fn availability(
     let (indexed, qwen_indexed) = counts.as_ref().copied().unwrap_or((0, 0));
     // The active profile is fixed for the process, as in all other performance budgets.
     let main = crate::performance::budgets() == crate::performance::Profile::Main.budgets();
-    let reason = nl_search::unavailable(main, config.is_ok(), indexed)
+    let reason = (!nl_search::enabled())
+        .then_some("내용 검색이 일시 중지되었습니다.")
+        .or_else(|| nl_search::unavailable(main, config.is_ok(), indexed))
         .map(str::to_owned)
         .or_else(|| {
             counts

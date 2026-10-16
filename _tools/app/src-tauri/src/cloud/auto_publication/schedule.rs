@@ -218,6 +218,9 @@ impl Library {
             ("cloud_metadata_publication_state", "generation<>published_generation", "metadata", normalized.as_str()),
             ("caption_publication_state", "json_extract(state_json,'$.more')=1", "autoTags", normalized.as_str()),
         ] {
+            if table == "caption_publication_state" && !crate::library::nl_search::enabled() {
+                continue;
+            }
             let pending = db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE endpoint=?1 AND ({predicate}))"), [key], |r| r.get::<_, bool>(0))?;
             if pending { kinds.push(super::lane_label(kind).to_owned()); }
         }
@@ -362,9 +365,10 @@ impl Library {
             && (self
                 .auto_tag_publication_due_on(&db, endpoint, now)
                 .unwrap_or(true)
-                || self
-                    .caption_publication_due_on(&db, endpoint, now)
-                    .unwrap_or(true));
+                || (crate::library::nl_search::enabled()
+                    && self
+                        .caption_publication_due_on(&db, endpoint, now)
+                        .unwrap_or(true)));
         Ok(due)
     }
 }

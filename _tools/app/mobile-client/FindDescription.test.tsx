@@ -94,3 +94,6 @@ it('requests no media for masked ratings and shows a quiet failure instead of an
   type('눈 내리는 겨울');await settle(400);await settle();
   expect(screen.getByText('내용 검색을 할 수 없습니다.')).toBeTruthy();
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../nl-search-runtime/enabled.json", () => ({ default: true }));

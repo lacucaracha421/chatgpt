@@ -469,6 +469,13 @@ fn nl_search_inbox_dispatch_counts_and_unchanged_skip() {
     )
     .unwrap();
     let result = fixture.library.run_auto_tag_inbox().unwrap();
+    if !enabled() {
+        assert!(result.processed.is_empty());
+        assert!(result.settings.last.is_none());
+        assert_eq!(fixture.library.nl_search_counts().unwrap(), (0, 0));
+        assert!(path.is_file());
+        return;
+    }
     assert_eq!(result.processed, vec!["nl-search-latest.sqlite"]);
     let last = &result.settings.last.as_ref().unwrap()["nl-search-latest.sqlite"];
     assert_eq!(last.error, None);

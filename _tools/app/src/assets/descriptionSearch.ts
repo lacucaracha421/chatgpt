@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import naturalLanguageSearchEnabled from "../../nl-search-runtime/enabled.json";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { DescriptionSearchResult, LibraryGateway } from "../library/types";
 
@@ -66,6 +67,7 @@ export function descriptionSearchError(error: unknown) {
 }
 
 export function descriptionSearchSource(gateway: LibraryGateway | null | undefined): DescriptionSearchSource | null {
+  if (!naturalLanguageSearchEnabled) return null;
   if (!gateway?.descriptionSearchStatus || !gateway.prewarmDescriptionSearch || !gateway.searchByDescription) return null;
   return { status: gateway.descriptionSearchStatus, prewarm: gateway.prewarmDescriptionSearch, search: gateway.searchByDescription };
 }

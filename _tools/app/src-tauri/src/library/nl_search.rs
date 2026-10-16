@@ -14,6 +14,11 @@ use std::{
 };
 
 const SIGLIP_DIM: usize = 1152;
+/// User pause (2026-10-17). Shared with the UI and standalone Python entry points.
+pub(crate) fn enabled() -> bool {
+    serde_json::from_str::<bool>(include_str!("../../../nl-search-runtime/enabled.json"))
+        .expect("NL search switch must be a JSON boolean")
+}
 const QWEN_DIM: usize = 4096;
 const SCHEMA: &str = "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE siglip(asset_id TEXT PRIMARY KEY,vector BLOB NOT NULL);

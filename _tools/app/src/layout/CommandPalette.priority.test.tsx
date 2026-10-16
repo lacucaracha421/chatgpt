@@ -35,3 +35,6 @@ it.each(["collections", "manga", "notes"] as const)("does not offer scene search
   fireEvent.change(screen.getByRole('combobox'),{target:{value:'비 오는 거리'}}); await act(async () => {});
   expect(screen.queryByText(/장면 찾기/)).toBeNull(); expect(search.status).not.toHaveBeenCalled();
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../../nl-search-runtime/enabled.json", () => ({ default: true }));

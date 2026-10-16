@@ -1904,3 +1904,6 @@ describe("Chrome 03b app integration", () => {
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith(expect.objectContaining({ sourcePath: "C:\\images\\picked.png", classificationId: games.id, importSource: "direct" })));
   });
 });
+
+// Exercise the retained feature while the shipped default remains paused.
+vi.mock("../../nl-search-runtime/enabled.json", () => ({ default: true }));
