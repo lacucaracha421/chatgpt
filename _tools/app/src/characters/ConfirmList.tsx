@@ -11,10 +11,11 @@ import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { assetPreviewUrl, assetUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ClassificationEntry } from "../library/types";
-import type { CharacterTarget, DecisionRequest, DecisionRequestKind } from "./api";
+import type { CharacterTarget } from "./api";
 import { confirmSources, getConfirmOverviewRead, readConfirmItems, type ConfirmRead, type ConfirmScope, type ConfirmSources } from "./confirmClient";
 import { CONFIRM_KINDS, confirmCounts, confirmGroups, confirmKindLabel, groupByCharacter, keyRange, needsSingleLook, reasonBadges, tallyConfirm, type ConfirmItem, type ConfirmKind } from "./confirmModel";
 import { ConfirmGrid } from "./ConfirmGrid";
+import { BATCH_MAX, decisionRequest, saveJudgments, type Decision, type Judgment } from "./confirmSave";
 import { classificationIsInSeries, taggerDecisionApi, type TaggerDecisionApi } from "./taggerReviewClient";
 import "./ConfirmList.css";
 
@@ -48,20 +49,20 @@ type Props = {
   decisions?: TaggerDecisionApi;
 };
 
-type Decision = Extract<DecisionRequestKind, "accepted" | "rejected" | "accepted_wrong_region">;
-/** `moved` judgments put the image into the character's series, which 되돌리기 cannot take back. */
-type Judgment = { item: ConfirmItem; decision: Decision; moved: boolean };
 type Folder = { key: string; state: "inside" | "outside" };
-
-const decisionRequest = (item: ConfirmItem, decision: DecisionRequestKind): DecisionRequest => ({
-  targetId: item.targetId, expectedFingerprint: item.targetFingerprint, assetIds: [item.assetId], decision, baselineFingerprint: null, scanId: null,
-});
 /** What the grid is about to apply: 아님 for the marked, 맞음 for the rest of what is shown. */
 type BulkAsk = { accept: ConfirmItem[]; reject: ConfirmItem[]; single: number };
 /** One bulk run: how many were stored per decision, and which ones could not be (they stay in the grid). */
 type BulkResult = { accepted: number; rejected: number; failed: { item: ConfirmItem; message: string }[] };
-const BATCH_MAX = 200;
 const LOOKUP_AT_ONCE = 8;
+/**
+ * One-at-a-time judgments advance at once and are stored in the background: a flush starts when this many wait, or after
+ * this long without a new judgment, and always before the screen closes or moves on. If the app is killed mid-review, at
+ * most the judgments of the last flush window (under FLUSH_AT queued plus one batch in flight, about a second of work)
+ * are lost; nothing else is kept on disk.
+ */
+const FLUSH_AT = 5;
+const FLUSH_IDLE_MS = 1000;
 const decisionText = (decision: Decision) => decision === "rejected" ? "아님" : decision === "accepted" ? "맞음" : "맞음 · 위치 틀림";
 
 /**
@@ -95,6 +96,19 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const stageRef = useRef<HTMLDivElement>(null);
   const judged = useRef(new Map<string, Judgment>());
   const pending = useRef(false);
+  /** Judgments made but not yet sent, those being sent, and the background sends in order. */
+  const queue = useRef<Judgment[]>([]);
+  const inflight = useRef(new Set<Judgment>());
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const failures = useRef(0);
+  /** Keys of judgments that came back after a failed save; the error line stays until they are all stored. */
+  const retryKeys = useRef(new Set<string>());
+  const waitingForSave = useRef(false);
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
   const classificationsRef = useRef(classifications);
@@ -265,55 +279,102 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const clearMarks = () => { setMarked(new Set()); anchor.current = null; };
   const chooseKind = (tab: ConfirmKind | "all") => { setKind(tab); setGridMode(false); };
 
-  async function judge(decision: Decision) {
-    if (!current || pending.current) return;
+  /** The queued judgments go out now, in order behind any send already running. Never throws; failures come back into the list. */
+  function flushNow(): Promise<void> {
+    clearTimeout(flushTimer.current);
+    if (queue.current.length === 0) return chain.current;
+    const batch = queue.current.splice(0);
+    for (const judgment of batch) inflight.current.add(judgment);
+    chain.current = chain.current.then(async () => {
+      const { saved, failed } = await saveJudgments(decisionsRef.current, batch, classificationsRef.current);
+      for (const judgment of batch) inflight.current.delete(judgment);
+      if (saved.length > 0) {
+        const hadRetries = retryKeys.current.size > 0;
+        for (const judgment of saved) retryKeys.current.delete(judgment.item.key);
+        if (hadRetries && retryKeys.current.size === 0) setDecisionError(null);
+        // A move cannot be taken back, so its 되돌리기 goes away once the move is stored.
+        setLast(previous => previous?.moved ? null : previous);
+        onChangedRef.current?.();
+      }
+      if (failed.length > 0) {
+        failures.current += failed.length;
+        const back = new Set(failed.map(row => row.judgment.item.key));
+        for (const key of back) { judged.current.delete(key); retryKeys.current.add(key); }
+        setItems(previous => [...failed.map(row => row.judgment.item), ...previous.filter(row => !back.has(row.key))]);
+        setLast(previous => previous && back.has(previous.item.key) ? null : previous);
+        setDecisionError(`${failed[0]!.message} ${failed.length.toLocaleString()}장은 저장하지 못해 목록에 남겼습니다.`);
+      }
+    });
+    return chain.current;
+  }
+  const scheduleFlush = () => {
+    clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(() => void flushNow(), FLUSH_IDLE_MS);
+  };
+  /** Runs `action` once every judgment is stored; if a save failed it is not run, and the failed images are back in the list. */
+  function afterSaved(action: () => void) {
+    if (queue.current.length === 0 && inflight.current.size === 0) { action(); return; }
+    if (waitingForSave.current) return;
+    waitingForSave.current = true;
+    const failuresBefore = failures.current;
+    void flushNow().then(() => { if (failures.current === failuresBefore) action(); }).finally(() => { waitingForSave.current = false; });
+  }
+  const close = () => afterSaved(onClose);
+  // Leaving without onClose (the parent unmounts the screen) still sends what is queued.
+  useEffect(() => () => { void flushNow(); }, []);
+
+  /** Advances at once; the judgment is stored in the background (see FLUSH_AT). */
+  function judge(decision: Decision) {
+    if (!current || pending.current || judged.current.has(current.key)) return;
     if (decision === "accepted_wrong_region" && !current.crop) return;
     const item = current;
-    const following = next?.key ?? null;
-    pending.current = true;
-    setBusy(true); setDecisionError(null); setBulkResult(null);
-    try {
-      let moved = false;
-      if (decision !== "rejected" && item.fromTags) {
-        const ids = await decisions.classifications(item.assetId);
-        if (!classificationIsInSeries(ids, item.fromTags.seriesId, classificationsRef.current)) {
-          await decisions.move(item.targetId, item.targetFingerprint, [item.assetId], decision === "accepted");
-          moved = true;
-        }
-      }
-      if (!moved) await decisions.decide(decisionRequest(item, decision));
-      const judgment = { item, decision, moved };
-      judged.current.set(item.key, judgment);
-      setItems(previous => previous.filter(row => row.key !== item.key));
-      setMarked(previous => { if (!previous.has(item.key)) return previous; const rest = new Set(previous); rest.delete(item.key); return rest; });
-      setZoomKey(following);
-      setLast(moved ? null : judgment);
-      onChanged?.();
-    } catch (e) {
-      setDecisionError(commandErrorMessage(e, "판단을 저장하지 못했습니다."));
-    } finally {
-      pending.current = false;
-      setBusy(false);
-    }
+    const judgment: Judgment = { item, decision, moved: false };
+    judged.current.set(item.key, judgment);
+    queue.current.push(judgment);
+    setBulkResult(null);
+    setItems(previous => previous.filter(row => row.key !== item.key));
+    setMarked(previous => { if (!previous.has(item.key)) return previous; const rest = new Set(previous); rest.delete(item.key); return rest; });
+    setZoomKey(next?.key ?? null);
+    setLast(judgment);
+    // Nothing left to look at: store now so the finished block does not wait on the idle timer.
+    if (!next || queue.current.length >= FLUSH_AT) void flushNow(); else scheduleFlush();
   }
+  /** Puts a judged image back in the list and opens it alone. */
+  function restore(judgment: Judgment) {
+    judged.current.delete(judgment.item.key);
+    const restoreScope = Boolean((targetId && judgment.item.targetId !== targetId) || (seriesId && judgment.item.seriesId !== seriesId));
+    setItems(previous => [judgment.item, ...previous.filter(row => row.key !== judgment.item.key && (!restoreScope || row.targetId === judgment.item.targetId))]);
+    setZoomKey(judgment.item.key);
+    setKind("all");
+    setGridMode(false);
+    if (restoreScope) {
+      const restoredSeries = judgment.item.seriesId && classificationsRef.current.find(entry => entry.id === judgment.item.seriesId);
+      setActiveScope({ ...(restoredSeries ? { series: { id: restoredSeries.id, name: restoredSeries.name } } : {}),
+        target: { id: judgment.item.targetId, name: judgment.item.targetName } });
+    }
+    setLast(null);
+  }
+  /** A judgment still waiting in the queue is simply taken out of it; a stored one is cleared on the server. */
   async function undo() {
     if (!last || pending.current) return;
+    const judgment = last;
+    const queuedAt = queue.current.indexOf(judgment);
+    if (queuedAt >= 0) {
+      queue.current.splice(queuedAt, 1);
+      setDecisionError(null);
+      restore(judgment);
+      return;
+    }
     pending.current = true;
     setBusy(true); setDecisionError(null);
     try {
-      await decisions.decide(decisionRequest(last.item, "cleared"));
-      judged.current.delete(last.item.key);
-      const restoreScope = Boolean((targetId && last.item.targetId !== targetId) || (seriesId && last.item.seriesId !== seriesId));
-      setItems(previous => [last.item, ...previous.filter(row => row.key !== last.item.key && (!restoreScope || row.targetId === last.item.targetId))]);
-      setZoomKey(last.item.key);
-      setKind("all");
-      setGridMode(false);
-      if (restoreScope) {
-        const restoredSeries = last.item.seriesId && classificationsRef.current.find(entry => entry.id === last.item.seriesId);
-        setActiveScope({ ...(restoredSeries ? { series: { id: restoredSeries.id, name: restoredSeries.name } } : {}),
-          target: { id: last.item.targetId, name: last.item.targetName } });
+      if (inflight.current.has(judgment)) {
+        await chain.current;
+        // It failed (and is back in the list) or was a move: there is nothing to take back.
+        if (judged.current.get(judgment.item.key) !== judgment || judgment.moved) { setLast(null); return; }
       }
-      setLast(null);
+      await decisions.decide(decisionRequest(judgment.item, "cleared"));
+      restore(judgment);
       onChanged?.();
     } catch (e) {
       setDecisionError(commandErrorMessage(e, "판단을 되돌리지 못했습니다."));
@@ -440,14 +501,17 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const stageItems = [...prepared, ...nextPrepared.filter(item => !prepared.some(row => row.key === item.key))];
   function continueReview() {
     if (busy || loading || switchTo) return;
-    if (!nextCharacter) { onClose(); return; }
+    if (!nextCharacter) { close(); return; }
     setDecisionError(null);
     if (!nextScope) return;
-    const cached = prefetches.get(scopeKey(nextScope));
-    if (cached?.read && cached.read.failed.length === 0) {
-      activatedCache.current = cached;
-      activateScope(nextScope, cached.read);
-    } else setSwitchTo(nextScope);
+    // Everything judged here is stored before the next character opens (at once when nothing waits).
+    afterSaved(() => {
+      const cached = prefetches.get(scopeKey(nextScope));
+      if (cached?.read && cached.read.failed.length === 0) {
+        activatedCache.current = cached;
+        activateScope(nextScope, cached.read);
+      } else setSwitchTo(nextScope);
+    });
   }
   const tabs: (ConfirmKind | "all")[] = ["all", ...CONFIRM_KINDS.filter(candidate => counts[candidate] > 0)];
   const allFailed = failed.length === CONFIRM_KINDS.length;
@@ -456,7 +520,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const intro = !gridSeen.current;
   useEffect(() => { if (!zooming && ordered.length > 0) gridSeen.current = true; }, [zooming, ordered.length]);
 
-  return <Dialog open variant="fullscreen" title="확인" onClose={onClose}
+  return <Dialog open variant="fullscreen" title="확인" onClose={close}
     onKeyDown={event => {
       if (bulkAsk || switchTo || event.nativeEvent.isComposing) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -486,7 +550,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
           </button>)}
         </div>
         <span className="confirm-list__remaining" aria-live="polite">남은 항목 <b className="numeric">{(activeKind === "all" ? counts.total : counts[activeKind]).toLocaleString()}</b></span>
-        <Button size="icon" variant="ghost" aria-label="확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="확인 닫기" onClick={close}><XMarkIcon aria-hidden="true" /></Button>
       </header>
       <BusyLabel busy={loading && !loaded}><p className="character-message confirm-list__notice" role="status">불러오는 중…</p></BusyLabel>
       {loaded && failed.length > 0 && !allFailed && <p className="character-message confirm-list__notice" role="status">
@@ -563,7 +627,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
                       <Button data-confirm-continue variant="primary" disabled={busy || loading || switchTo !== null} onClick={continueReview}>
                         {nextCharacter ? `다음: ${nextCharacter.character.name} · ${nextCharacter.count.toLocaleString()}장` : "닫기"} <kbd>Enter</kbd>
                       </Button>
-                      {nextCharacter && <Button disabled={busy} onClick={onClose}>닫기 <kbd>Esc</kbd></Button>}
+                      {nextCharacter && <Button disabled={busy} onClick={close}>닫기 <kbd>Esc</kbd></Button>}
                     </div>
                   </> : <>
                     <p className="confirm-list__empty-copy">새 이미지를 분석하면 여기에 나타납니다.</p>

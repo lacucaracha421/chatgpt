@@ -67,6 +67,8 @@ const withBox = (id: string, targetId = "hina") => { const row = tagItem(id, "re
 /** A grid tile: the picking button named by character and file. */
 const tile = (character: string, file: string) => screen.findByRole("button", { name: `${character} · ${file}` });
 const applyButton = (name: string | RegExp) => screen.getByRole("button", { name });
+/** One-at-a-time judgments are stored in the background, after a short idle (about a second) or when enough have piled up. */
+const stored = (assertion: () => void) => waitFor(assertion, { timeout: 3000 });
 /** Open the apply confirmation and press its button. */
 async function confirmApply(user: ReturnType<typeof userEvent.setup>, label: string | RegExp) {
   await user.click(applyButton(label));
@@ -463,7 +465,7 @@ it("opens one image alone by double click or the magnifier, and returns to the g
   expect(await screen.findByRole("heading", { level: 3, name: "키사키?" })).toBeInTheDocument();
   expect(screen.getByText("c3.png")).toBeInTheDocument();
   await user.keyboard("{ArrowRight}");
-  await waitFor(() => expect(decisions.decide).toHaveBeenCalledWith(request("kisaki", "c3", "accepted")));
+  await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("kisaki", "c3", "accepted")));
   // On to the next image in the grid's order, not back to the grid.
   expect(await screen.findByText("c1.png")).toBeInTheDocument();
 });
@@ -474,11 +476,11 @@ it("stores 맞음 and 아님 from the single view as direct decisions, with keyb
   await user.click(await screen.findByRole("button", { name: "히나 · c1.png 크게 보기" }));
   await screen.findByRole("heading", { level: 3, name: "히나?" });
   await user.keyboard("{ArrowRight}");
-  await waitFor(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c1", "accepted")));
   expect(await screen.findByRole("heading", { level: 3, name: "키사키?" })).toBeInTheDocument();
-  expect(onChanged).toHaveBeenCalledTimes(1);
+  await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c1", "accepted")));
+  await stored(() => expect(onChanged).toHaveBeenCalledTimes(1));
   await user.keyboard("a");
-  await waitFor(() => expect(decisions.decide).toHaveBeenLastCalledWith(request("kisaki", "c2", "rejected")));
+  await stored(() => expect(decisions.decide).toHaveBeenLastCalledWith(request("kisaki", "c2", "rejected")));
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
   expect(decisions.move).not.toHaveBeenCalled();
 });
@@ -489,7 +491,7 @@ it("keeps 맞음 · 위치 틀림 for images that carry a person box, and stores
   await user.click(await screen.findByRole("button", { name: /^히나 · w1\.png · 한 장씩 보기 필요/ }));
   expect(await screen.findByRole("img", { name: "히나 감지 영역" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /맞음 · 위치 틀림/ }));
-  await waitFor(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "w1", "accepted_wrong_region")));
+  await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "w1", "accepted_wrong_region")));
   // The next image has no box: the action is not offered.
   expect(await screen.findByText("w2.png")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^맞음 · 위치 틀림/ })).not.toBeInTheDocument();
@@ -504,7 +506,7 @@ it("moves a tag-listed image outside the series in when judged 맞음 alone, and
   await waitFor(() => expect(decisions.move).toHaveBeenCalledWith("hina", "fp-hina", ["o1"], true));
   expect(decisions.decide).not.toHaveBeenCalled();
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /되돌리기/ })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("button", { name: /되돌리기/ })).not.toBeInTheDocument());
 });
 
 it("rejects alone without moving, even outside the series", async () => {
@@ -524,7 +526,7 @@ it("skips to the next image in the single view and undoes the last judgment", as
   expect(decisions.decide).not.toHaveBeenCalled();
   expect(screen.getByLabelText("확인 정보")).toHaveTextContent("c2.png");
   await user.click(screen.getByRole("button", { name: /^맞음/ }));
-  await waitFor(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c2", "accepted")));
+  await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c2", "accepted")));
   await user.click(await screen.findByRole("button", { name: /되돌리기: 히나 맞음/ }));
   await waitFor(() => expect(decisions.decide).toHaveBeenLastCalledWith(request("hina", "c2", "cleared")));
   expect(await screen.findByLabelText("확인 정보")).toHaveTextContent("c2.png");
@@ -538,6 +540,124 @@ it("keeps the item and shows the native error when a single judgment is refused"
   await user.click(await screen.findByRole("button", { name: /^맞음/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("시리즈 폴더 안의 지원되는 자산을 선택해 주세요.");
   expect(screen.getByText("c1.png")).toBeInTheDocument();
+});
+
+const hinaRows = (count: number) => Array.from({ length: count }, (_, index) => shadowItem(`c${index + 1}`, "hina", "히나"));
+const panel = () => screen.getByLabelText("확인 정보");
+
+it("advances at once on every judgment and stores three in a row as one batch", async () => {
+  const { decisions, onChanged } = singleFixture({ candidates: hinaRows(4) });
+  const user = userEvent.setup();
+  expect(await screen.findByLabelText("확인 정보")).toHaveTextContent("c1.png");
+  await user.keyboard("ddd");
+  expect(panel()).toHaveTextContent("c4.png");
+  expect(screen.getByRole("dialog", { name: "확인" })).toHaveTextContent(/남은 항목\s*1/);
+  expect(decisions.decide).not.toHaveBeenCalled();
+  expect(decisions.decideBatch).not.toHaveBeenCalled();
+  expect(onChanged).not.toHaveBeenCalled();
+  await stored(() => expect(decisions.decideBatch).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(decisions.decideBatch).mock.calls[0]![0]).toEqual([request("hina", "c1", "accepted"), request("hina", "c2", "accepted"), request("hina", "c3", "accepted")]);
+  expect(decisions.decide).not.toHaveBeenCalled();
+  await stored(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  expect(panel()).toHaveTextContent("c4.png");
+});
+
+it("keeps advancing while an earlier batch is still being stored", async () => {
+  const { decisions } = singleFixture({ candidates: hinaRows(8) });
+  let release: () => void = () => undefined;
+  vi.mocked(decisions.decideBatch).mockImplementation(() => new Promise<number>(resolve => { release = () => resolve(1); }));
+  const user = userEvent.setup();
+  await screen.findByLabelText("확인 정보");
+  await user.keyboard("ddddd");
+  await waitFor(() => expect(decisions.decideBatch).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(decisions.decideBatch).mock.calls[0]![0]).toHaveLength(5);
+  await user.keyboard("dd");
+  expect(panel()).toHaveTextContent("c8.png");
+  await act(async () => release());
+});
+
+it("does not wait for the folder lookup of a tag-listed image before showing the next one", async () => {
+  const { decisions } = singleFixture({ tags: Array.from({ length: 7 }, (_, index) => tagItem(`o${index + 1}`)) });
+  vi.mocked(decisions.classifications).mockImplementation(() => new Promise<string[]>(() => undefined));
+  const user = userEvent.setup();
+  await screen.findByLabelText("확인 정보");
+  await user.keyboard("dddddd");
+  expect(panel()).toHaveTextContent("o7.png");
+  expect(decisions.move).not.toHaveBeenCalled();
+});
+
+it("takes a judgment still waiting out of the queue on undo, without any server call", async () => {
+  const { decisions, onClose } = singleFixture({ candidates: hinaRows(3) });
+  const user = userEvent.setup();
+  expect(await screen.findByLabelText("확인 정보")).toHaveTextContent("c1.png");
+  await user.keyboard("d");
+  expect(panel()).toHaveTextContent("c2.png");
+  await user.click(screen.getByRole("button", { name: /되돌리기: 히나 맞음/ }));
+  expect(panel()).toHaveTextContent("c1.png");
+  expect(screen.getByRole("dialog", { name: "확인" })).toHaveTextContent(/남은 항목\s*3/);
+  // Closing sends nothing: the undone judgment is gone from the queue.
+  await user.keyboard("{Escape}");
+  await user.keyboard("{Escape}");
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(decisions.decide).not.toHaveBeenCalled();
+  expect(decisions.decideBatch).not.toHaveBeenCalled();
+});
+
+it("puts a judgment that could not be stored back in the list with the count and the reason", async () => {
+  const { decisions, onChanged } = singleFixture({ candidates: hinaRows(3) });
+  vi.mocked(decisions.decideBatch).mockRejectedValueOnce(new Error("batch down"));
+  vi.mocked(decisions.decide).mockImplementation(async request => {
+    if (request.assetIds[0] === "c2") throw { code: "invalid_character_request", message: "시리즈 폴더 안의 지원되는 자산을 선택해 주세요." };
+    return 1;
+  });
+  const user = userEvent.setup();
+  await screen.findByLabelText("확인 정보");
+  await user.keyboard("ddd");
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("시리즈 폴더 안의 지원되는 자산을 선택해 주세요.");
+  expect(alert).toHaveTextContent("1장은 저장하지 못해 목록에 남겼습니다");
+  expect(panel()).toHaveTextContent("c2.png");
+  expect(screen.getByRole("dialog", { name: "확인" })).toHaveTextContent(/남은 항목\s*1/);
+  expect(decisions.decide).toHaveBeenCalledTimes(3);
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  // Judging it again stores it and clears the error line.
+  vi.mocked(decisions.decide).mockResolvedValue(1);
+  await user.keyboard("d");
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(decisions.decide).toHaveBeenLastCalledWith(request("hina", "c2", "accepted"));
+});
+
+it("stores what is still queued before closing, and closes after", async () => {
+  const { decisions, onClose } = singleFixture({ candidates: hinaRows(3) });
+  const user = userEvent.setup();
+  await screen.findByLabelText("확인 정보");
+  await user.keyboard("d");
+  await user.keyboard("{Escape}");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c1", "accepted"));
+  expect(vi.mocked(decisions.decide).mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0]!);
+});
+
+it("stays open with the failed image in the list when closing cannot store a judgment", async () => {
+  const { decisions, onClose } = singleFixture({ candidates: hinaRows(3) });
+  vi.mocked(decisions.decide).mockRejectedValue(new Error("offline"));
+  const user = userEvent.setup();
+  await screen.findByLabelText("확인 정보");
+  await user.keyboard("d");
+  await user.keyboard("{Escape}");
+  await user.keyboard("{Escape}");
+  expect(await screen.findByRole("alert")).toHaveTextContent("1장은 저장하지 못해 목록에 남겼습니다");
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "확인" })).toHaveTextContent(/남은 항목\s*3/);
+});
+
+it("stores what is still queued when the screen is removed without closing", async () => {
+  const { decisions } = singleFixture({ candidates: hinaRows(3) });
+  await screen.findByLabelText("확인 정보");
+  await userEvent.setup().keyboard("d");
+  cleanup();
+  await waitFor(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "c1", "accepted")));
 });
 
 it("limits both the list and its reads to the scope", async () => {
