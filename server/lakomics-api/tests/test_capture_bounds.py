@@ -286,3 +286,25 @@ class PixivRefererTests(unittest.TestCase):
         for host in ('pbs.twimg.com', 'pximg.net.example.com', 'evilpximg.net'):
             with self.subTest(host=host):
                 self.assertNotIn('Referer', store._request_headers(host, 'image/*'))
+
+
+class TwimgOriginalFallbackTests(unittest.TestCase):
+    def test_orig_5xx_retries_the_4096_variant_once(self):
+        calls = []
+
+        def fake(url, key, media_type, source):
+            calls.append(url)
+            if "name=orig" in url:
+                raise store.CaptureDownloadError("Media returned HTTP 503")
+            return ("image/jpeg", 10)
+
+        with mock.patch.object(store, "_fetch_media_to_r2", side_effect=fake):
+            result = store.fetch_media_to_r2("https://pbs.twimg.com/media/A?format=jpg&name=orig", "k", "image")
+        self.assertEqual(result, ("image/jpeg", 10))
+        self.assertEqual(calls[1], "https://pbs.twimg.com/media/A?format=jpg&name=4096x4096")
+
+    def test_other_failures_are_not_retried(self):
+        with mock.patch.object(store, "_fetch_media_to_r2", side_effect=store.CaptureDownloadError("Media returned HTTP 404")) as fetch:
+            with self.assertRaises(store.CaptureDownloadError):
+                store.fetch_media_to_r2("https://pbs.twimg.com/media/A?format=jpg&name=orig", "k", "image")
+        self.assertEqual(fetch.call_count, 1)

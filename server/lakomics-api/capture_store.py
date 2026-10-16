@@ -7,7 +7,7 @@ import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -120,9 +120,29 @@ def fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: 
     if not _DOWNLOAD_SLOTS.acquire(blocking=False):
         raise CaptureBusyError("Capture downloads busy; retry shortly")
     try:
-        return _fetch_media_to_r2(media_url, object_key, media_type, source)
+        try:
+            return _fetch_media_to_r2(media_url, object_key, media_type, source)
+        except CaptureDownloadError as exc:
+            fallback = _twimg_large_original(media_url, media_type, str(exc))
+            if fallback is None:
+                raise
+            return _fetch_media_to_r2(fallback, object_key, media_type, source)
     finally:
         _DOWNLOAD_SLOTS.release()
+
+
+def _twimg_large_original(media_url: str, media_type: str, error: str) -> str | None:
+    """X's CDN sometimes answers 5xx for name=orig while serving the same file at
+    name=4096x4096 (the original whenever it is at most 4096 px). Retry that once."""
+    if media_type != "image" or not error.startswith("Media returned HTTP 5"):
+        return None
+    parsed = urlparse(media_url)
+    if (parsed.hostname or "").lower() != "pbs.twimg.com":
+        return None
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if ("name", "orig") not in query:
+        return None
+    return urlunparse(parsed._replace(query=urlencode([(k, "4096x4096" if k == "name" else v) for k, v in query])))
 
 
 def _fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: str) -> tuple[str, int]:
