@@ -1555,3 +1555,13 @@
 
 }
 }
+
+/* The Home result is the card itself, shared by PC and tablet. */
+.daily-card-result { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-2); }
+.daily-card-result__art { width:112px; aspect-ratio:63 / 88; }
+.daily-card-result__button { display:block; appearance:none; width:100%; min-height:var(--touch-target); padding:0; border:0; background:transparent; color:inherit; cursor:pointer; animation:daily-card-result-enter var(--motion-screen) var(--ease-standard); }
+.daily-card-result__button .trading-card, .daily-card-result__button .card { width:100%; }
+.daily-card-result__button:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--space-1); }
+.daily-card-result small { color:var(--color-muted); font-size:var(--type-meta); }
+@keyframes daily-card-result-enter { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .daily-card-result__button { animation:none; } }

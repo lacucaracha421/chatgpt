@@ -1,7 +1,8 @@
 /* 오늘의 카드 and the card album on the tablet (CARD-GACHA-001). The card, pack and opening pieces are the PC's own (src/cards); this file only sizes them for touch. */
 
 /* ---- Home slot ---- */
-.tablet-daily-card { display:grid; justify-items:center; align-content:center; gap:var(--space-4); padding:var(--space-4) 0; min-height:300px; }
+.tablet-daily-card { display:grid; justify-items:center; align-content:center; gap:var(--space-4); padding:var(--space-4) 0; height:480px; min-height:300px; }
+.tablet-daily-card .daily-card-result__art { width:128px; }
 .tablet-daily-card__art { display:block; width:128px; flex:none; }
 .tablet-daily-card__art .trading-card, .tablet-daily-card__art .card { width:100%; }
 button.tablet-daily-card__pack { appearance:none; border:0; background:transparent; padding:0; color:inherit; font:inherit; cursor:pointer; min-height:var(--touch-target); }

@@ -122,13 +122,18 @@ it('keeps the keep step open with an error and the same key after a failed keep'
 });
 
 it('shows the stored result of the newest pack without any open request and replays it as results', async () => {
-  saveResult('tablet', result()); const api = apiFixture(state({unopened: []}));
+  saveResult('tablet', {...result(), packId: 'b-20261015'}); const api = apiFixture(state({unopened: [], bonusGranted: true, nextResetAt: new Date(2026, 9, 16, 7, 35).toISOString()}));
   show(api); await settle();
-  expect(screen.getByText('남은 팩 없음')).toBeTruthy();
+  expect(screen.queryByText('남은 팩 없음')).toBeNull();
   expect(screen.getByRole('img', {name: /LR 서버 카드 4/})).toBeTruthy();
-  expect(screen.getByText('LR · 서버 카드 4')).toBeTruthy();
+  expect(screen.queryByText('LR · 서버 카드 4')).toBeNull();
+  expect(screen.getByText('07:35 새 팩 증정')).toBeTruthy();
+  expect(screen.queryByText('오늘 50장 저장 · 보너스 팩')).toBeNull();
+  expect(screen.queryByText('05:00에 새 팩')).toBeNull();
+  expect(screen.queryByRole('button', {name: '결과 보기'})).toBeNull();
+  expect(within(screen.getByRole('region', {name: '오늘의 카드'})).getAllByRole('button')).toHaveLength(2);
   expect(api.open).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', {name: '결과 보기'})); await settle();
+  fireEvent.click(screen.getByRole('button', {name: '오늘의 결과 보기'})); await settle();
   expect(document.querySelector('.pack-opening')?.getAttribute('data-phase')).toBe('results');
   expect(api.open).not.toHaveBeenCalled();
   expect(screen.queryByText('NEW')).toBeNull();
@@ -140,14 +145,14 @@ it('recovers a pack opened on another device and shows it as already opened', as
   show(api); await settle();
   expect(screen.getByRole('img', {name: /LR 서버 카드 4/})).toBeTruthy();
   expect(api.open).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', {name: '결과 보기'})); await settle();
+  fireEvent.click(screen.getByRole('button', {name: '오늘의 결과 보기'})); await settle();
   expect(document.querySelector('.pack-opening')?.getAttribute('data-phase')).toBe('results');
   expect(screen.queryByRole('button', {name: '카드 뒤집기'})).toBeNull();
 });
 
 it('lists packs waiting for a decision and reopens one at the keep step', async () => {
   const waiting = [{packId: 'd-20261014', openedAt: '2026-10-14T01:00:00Z', expiresAt: '2026-10-21T01:00:00Z'}];
-  const api = apiFixture(state({unopened: [], pendingKeep: waiting}));
+  const api = apiFixture(state({pendingKeep: waiting}));
   vi.mocked(api.open).mockResolvedValue(result(true));
   show(api); await settle();
   fireEvent.click(screen.getByRole('button', {name: '정리 안 한 팩 1'})); await settle();
@@ -156,9 +161,21 @@ it('lists packs waiting for a decision and reopens one at the keep step', async 
   expect((screen.getByRole('button', {name: '앨범에 넣기 (0장)'}) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it('opens today’s undecided result by tapping the card when no packs remain', async () => {
+  saveResult('tablet', result());
+  const pendingKeep = [{packId: 'd-20261015', openedAt: '2026-10-15T01:00:00Z', expiresAt: '2026-10-22T01:00:00Z'}];
+  const api = apiFixture(state({unopened: [], pendingKeep}));
+  show(api); await settle();
+  expect(screen.queryByRole('button', {name: '정리 안 한 팩 1'})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '오늘의 결과 보기'})); await settle();
+  expect(screen.getAllByRole('checkbox')).toHaveLength(5);
+  expect((screen.getByRole('button', {name: '앨범에 넣기 (0장)'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.open).not.toHaveBeenCalled();
+});
+
 it('says so when a waiting pack cannot be loaded, and retries', async () => {
   const waiting = [{packId: 'd-20261014', openedAt: '2026-10-14T01:00:00Z', expiresAt: '2026-10-21T01:00:00Z'}];
-  const api = apiFixture(state({unopened: [], pendingKeep: waiting}));
+  const api = apiFixture(state({pendingKeep: waiting}));
   vi.mocked(api.open).mockResolvedValue(result(true));
   vi.mocked(api.pack).mockRejectedValueOnce(new Error('offline'));
   show(api); await settle();

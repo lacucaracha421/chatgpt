@@ -52,24 +52,37 @@ it("shows the server pack, cover, bonus and album totals; restores focus on clos
 });
 
 it("shows the stored result of the newest pack without any open request", async () => {
-  saveResult("library", result()); const { api } = apiFixture(state({ unopened: [] }));
+  saveResult("library", {...result(), packId: "b-20261015"}); const { api } = apiFixture(state({ unopened: [], bonusGranted: true, nextResetAt: new Date(2026, 9, 16, 7, 35).toISOString() }));
   render(<HomeDailyCard api={api} root="library" />); await settle();
-  expect(screen.getByText("남은 팩 없음")).toBeInTheDocument();
+  expect(screen.queryByText("남은 팩 없음")).toBeNull();
   expect(screen.getByRole("img", { name: /LR 서버 카드 4/ })).toBeInTheDocument();
+  expect(screen.getByText("07:35 새 팩 증정")).toBeInTheDocument();
+  expect(screen.queryByText("LR · 서버 카드 4")).toBeNull();
+  expect(screen.queryByText("오늘 50장 저장 · 보너스 팩")).toBeNull();
+  expect(screen.queryByText("05:00에 새 팩")).toBeNull();
+  expect(screen.queryByRole("button", { name: "결과 보기" })).toBeNull();
+  expect(screen.getAllByRole("button")).toHaveLength(1);
   expect(api.open).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "결과 보기" })); await settle();
+  const opener = screen.getByRole("button", { name: "오늘의 결과 보기" });
+  opener.focus();
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  await user.keyboard("{Enter}");
+  vi.useFakeTimers();
   expect(document.querySelector(".pack-opening")).toHaveAttribute("data-phase", "results"); expect(api.open).not.toHaveBeenCalled();
   expect(screen.queryByText("NEW")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "닫기" })); await settle(500);
+  expect(opener).toHaveFocus();
 });
 
 it("recovers a pack opened on another device and replays it without the reveal", async () => {
   const { api } = apiFixture(state({ unopened: [] }));
   vi.mocked(api.open).mockResolvedValue(result(true));
   render(<HomeDailyCard api={api} root="library" />); await settle();
-  expect(screen.getByText("남은 팩 없음")).toBeInTheDocument();
+  expect(screen.queryByText("남은 팩 없음")).toBeNull();
   expect(screen.getByRole("img", { name: /LR 서버 카드 4/ })).toBeInTheDocument();
   expect(api.open).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "결과 보기" })); await settle();
+  fireEvent.click(screen.getByRole("button", { name: "오늘의 결과 보기" })); await settle();
   expect(document.querySelector(".pack-opening")).toHaveAttribute("data-phase", "results"); expect(api.open).toHaveBeenCalledOnce();
 });
 
@@ -313,14 +326,13 @@ it("leaves the pack waiting on 나중에 and reopens it from the Home slot", asy
   await tearToResults(api);
   fireEvent.click(slots()[0]); fireEvent.click(screen.getByRole("button", { name: "나중에" })); await settle(500);
   expect(api.keep).not.toHaveBeenCalled(); expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  act(() => { fireEvent.click(screen.getByRole("button", { name: "정리 안 한 팩 1" })); }); await settle(500);
-  expect(api.pack).toHaveBeenCalledWith("d-20261015");
+  act(() => { fireEvent.click(screen.getByRole("button", { name: "오늘의 결과 보기" })); }); await settle(500);
   expect(boxes()).toHaveLength(5); expect(slots().every(slot => slot.dataset.selected === "false")).toBe(true);  // a fresh, empty selection
   expect(document.querySelector(".pack-opening")).toHaveAttribute("data-phase", "results");
 });
 
 it("shows a pack another device already decided without the keep step", async () => {
-  const { api } = apiFixture(state({ unopened: [], pendingKeep: [waitingPack] }));
+  const { api } = apiFixture(state({ pendingKeep: [waitingPack] }));
   vi.mocked(api.pack).mockResolvedValue(decided([0, 2]));
   saveResult("library", result(true));
   render(<HomeDailyCard api={api} root="library" />); await settle();
@@ -333,7 +345,7 @@ it("does not offer the keep step for a stored result that is no longer waiting",
   saveResult("library", result()); const { api } = apiFixture(state({ unopened: [], pendingKeep: [] }));
   render(<HomeDailyCard api={api} root="library" />); await settle();
   expect(screen.queryByRole("button", { name: /정리 안 한 팩/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "결과 보기" })); await settle();
+  fireEvent.click(screen.getByRole("button", { name: "오늘의 결과 보기" })); await settle();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 });
 

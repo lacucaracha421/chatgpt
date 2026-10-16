@@ -1,3 +1,4 @@
+import {displayTime} from '../../src/shared/displayDate';
 import {useEffect, useRef, useState} from 'react';
 import {Button, Dialog, Skeleton} from '../ui';
 import {BusyLabel} from '../../src/shared/ui/BusyLabel';
@@ -109,14 +110,17 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
   const start = () => { if (pack) setSession({packId: pack.id, cover}); };
   return <HomeSection title="오늘의 카드" actions={<Button variant="ghost" size="sm" className="tablet-cards__album" onClick={goAlbum}>{albumLabel}</Button>}>
     <div className="tablet-daily-card">
-      {!snapshot ? <div className="tablet-daily-card__loading"><BusyLabel busy={pending} delay={400}>{'불러오는 중'}</BusyLabel>{pending && <Skeleton className="tablet-daily-card__skeleton" label="오늘의 카드"/>}</div> : <>
-        {pack ? <button type="button" className="tablet-daily-card__art tablet-daily-card__pack" aria-label="오늘의 카드 팩 열기" onClick={start}><span aria-hidden="true" inert><BoosterPack cover={cover} disabled/></span></button>
-          : best && <div className="tablet-daily-card__art"><TradingCard card={best}/></div>}
+      {!snapshot ? <div className="tablet-daily-card__loading"><BusyLabel busy={pending} delay={400}>{'불러오는 중'}</BusyLabel>{pending && <Skeleton className="tablet-daily-card__skeleton" label="오늘의 카드"/>}</div> : !pack ? <div className="daily-card-result">
+        <div className="daily-card-result__art">{best && last && <button type="button" className="daily-card-result__button" aria-label="오늘의 결과 보기" onClick={() => setSession({packId: last.result.packId, cover, cards: last.cards, undecided: waiting.some(item => item.packId === last.result.packId)})}>
+          <TradingCard card={best}/>
+        </button>}</div>
+        <small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>
+      </div> : <>
+        <button type="button" className="tablet-daily-card__art tablet-daily-card__pack" aria-label="오늘의 카드 팩 열기" onClick={start}><span aria-hidden="true" inert><BoosterPack cover={cover} disabled/></span></button>
         <div className="tablet-daily-card__copy">
-          <p>{pack ? `남은 팩 ${state!.unopened.length}` : '남은 팩 없음'}</p>
-          {pack ? <Button variant="primary" onClick={start}>뜯기</Button> : last && <Button onClick={() => setSession({packId: last.result.packId, cover, cards: last.cards, undecided: waiting.some(item => item.packId === last.result.packId)})}>결과 보기</Button>}
+          <p>{`남은 팩 ${state!.unopened.length}`}</p>
+          <Button variant="primary" onClick={start}>뜯기</Button>
           {waiting.length > 0 && <Button variant="ghost" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>}
-          {!pack && best && <small>{best.tier.toUpperCase()} · {best.characterName}</small>}
           {state?.bonusGranted && <small>오늘 50장 저장 · 보너스 팩</small>}
           <small>05:00에 새 팩</small>
         </div>
