@@ -12,6 +12,7 @@ export function FindEntryContent({entry,query,privacy,media}:{entry:NavigationEn
       {entry.detail}
     </span>
     {entry.activity&&<span className="find-entry__meta">{entry.activity}</span>}
-    {entry.count!==undefined&&<span className="find-entry__meta">{entry.count.toLocaleString('ko-KR')}</span>}
+    {/* A Collections work's image count is mostly 0 and means nothing in the list (user, 2026-10-17). */}
+    {entry.count!==undefined&&!entry.workType&&<span className="find-entry__meta">{entry.count.toLocaleString('ko-KR')}</span>}
   </>;
 }
