@@ -113,12 +113,15 @@
 .manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); }
 /* Keep the snapshot outside the preserve-3d book, with object-sized bounds. */
 .manga-book-object { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); scale: var(--book-scale); perspective: calc(1800px / var(--book-scale)); }
-.manga-bigbook { position: relative; width: var(--bw); height: var(--bh); transform-style: preserve-3d; transform: rotateY(var(--manga-turn-angle)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
+/* The cover sits at z = 0 and the rest of the book behind it, turning about the book's centre.
+   WebView2's GPU drew a face whose transform is only translateZ() shifted near side-on angles
+   (~76°), opening a gap between the cover and the spine; every face now carries a rotation or none. */
+.manga-bigbook { position: relative; width: var(--bw); height: var(--bh); transform-style: preserve-3d; transform-origin: 50% 50% calc(var(--bd) / -2); transform: rotateY(var(--manga-turn-angle)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
 .manga-bigbook.is-dragging { transition: none; cursor: grabbing; }
 .manga-bigbook > span { position: absolute; display: block; backface-visibility: hidden; overflow: hidden; }
-.manga-bb-front { inset: 0; transform: translateZ(calc(var(--bd) / 2)); border-radius: var(--radius-mark); background: var(--color-surface); }
+.manga-bb-front { inset: 0; border-radius: var(--radius-mark); background: var(--color-surface); }
 .manga-bb-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(270deg, rgba(0,0,0,.32), transparent 3%, rgba(0,0,0,.18) 4.6%, rgba(255,255,255,.1) 5.6%, transparent 8%), linear-gradient(115deg, rgba(255,255,255,.14), transparent 40%); }
-.manga-bb-back { inset: 0; transform: rotateY(180deg) translateZ(calc(var(--bd) / 2)); background: var(--color-surface); }
+.manga-bb-back { inset: 0; transform: translateZ(calc(var(--bd) * -1)) rotateY(180deg); background: var(--color-surface); }
 /* Printed cover material follows the approved paperback reference. */
 .manga-back-print { --u: calc(var(--bh) / 560); position: absolute; inset: 0; display: flex; flex-direction: column; color: #fff; font-family: var(--font-ui); }
 .manga-back-picture { position: relative; flex: none; align-self: center; width: 44%; aspect-ratio: 4 / 5; margin-top: 10%; overflow: hidden; box-shadow: 0 0 0 3px var(--book-paper), 0 4px 12px rgba(0,0,0,.4); }
@@ -131,11 +134,11 @@
 .manga-back-code { box-sizing: border-box; flex: none; width: 50%; background: #fff; color: #111; padding: calc(4 * var(--u)); border-radius: 1px; font-size: calc(6.5 * var(--u)); font-weight: 600; line-height: 1.3; text-align: center; }
 .manga-back-code svg { display: block; width: 100%; height: 28px; }
 .manga-back-price { display: block; text-align: right; font-weight: 800; font-size: calc(7 * var(--u)); margin-top: calc(1 * var(--u)); }
-.manga-bb-spine { top: 0; bottom: 0; left: calc(50% - var(--bd) / 2); width: var(--bd); transform: rotateY(90deg) translateZ(calc(var(--bw) / 2)); }
+.manga-bb-spine { top: 0; bottom: 0; left: calc(50% - var(--bd) / 2); width: var(--bd); transform: translateZ(calc(var(--bd) / -2)) rotateY(90deg) translateZ(calc(var(--bw) / 2)); }
 /* Paper and ink are case-material colours, like the cases' plastic. Volume data has no colour, so ink is neutral. */
 .manga-work-book { --book-paper: #f3f0e8; --book-ink: #15171a; --book-page: #e9e3d3; --book-page-edge: #cfc8b6; }
-.manga-bb-pages { top: 3px; bottom: 3px; left: calc(50% - var(--bd) / 2 + 1px); width: calc(var(--bd) - 2px); transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2 - 3px)); background: repeating-linear-gradient(90deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
-.manga-bb-top { left: 3px; right: 0; top: calc(50% - var(--bd) / 2 + 1px); height: calc(var(--bd) - 2px); transform: rotateX(90deg) translateZ(calc(var(--bh) / 2 - 3px)); background: repeating-linear-gradient(180deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bb-pages { top: 3px; bottom: 3px; left: calc(50% - var(--bd) / 2 + 1px); width: calc(var(--bd) - 2px); transform: translateZ(calc(var(--bd) / -2)) rotateY(-90deg) translateZ(calc(var(--bw) / 2 - 3px)); background: repeating-linear-gradient(90deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bb-top { left: 3px; right: 0; top: calc(50% - var(--bd) / 2 + 1px); height: calc(var(--bd) - 2px); transform: translateZ(calc(var(--bd) / -2)) rotateX(90deg) translateZ(calc(var(--bh) / 2 - 3px)); background: repeating-linear-gradient(180deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
 .manga-bigbook img, .manga-bigbook .privacy-mask { display: block; width: 100%; height: 100%; object-fit: fill; }
 .manga-book-shadow { position: absolute; left: 50%; top: calc(50% + var(--bh) * var(--book-scale) / 2 - 6px); width: calc(var(--bw) * var(--book-scale) * 1.2); height: 26px; transform: translateX(-50%); background: rgba(0,0,0,.65); filter: blur(14px); border-radius: 50%; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .manga-bigbook { transition: none; } }
