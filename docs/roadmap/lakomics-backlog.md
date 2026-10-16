@@ -34,6 +34,14 @@ Status: `PARTIAL` — slices 1 and 1b are committed in `310b37b4`, slice 2 in `3
 - **Related cleanup (low):** retire the tablet 캐릭터 확인 screen and review-feed publication when the tablet is next touched; character recognition remains PC-only. A server deployment is required for retirement.
 
 <a id="collector-menu-scope-001"></a>
+## SIM-ORIGINAL-001 — Similar images: original author first, auto-resolve reposts (2026-10-17)
+
+Status: `TODO` (approved by the user 2026-10-17, scheduled after the current Rust diet/test round).
+- **Recommend the original:** replace `provenance_rank` (`src-tauri/src/library/similarity.rs`) with a rank that resolves each side through the artist scope: an artist account beats an account the user marked `reposter`; then earlier `source_published_at`; then larger resolution and bytes. Recommend for incoming pairs too, not only historical ones.
+- **Show the evidence:** PC and tablet review panels show each side's posting account and post time (`FeedSide` in `cloud/similarity_review.rs`, the server feed model, tablet `SimilarityReview.tsx`, PC `SimilarityReviewBrowser.tsx`).
+- **Auto-resolve (user decision):** only when one side is a non-reposter artist account and the other is an account marked `reposter` (no guessing from unknown handles), and the pair is near-identical. Applies at ingest and to historical/auto-compare pairs. The repost is handled exactly like 유지 안 함 (to Trash), and its classifications, albums and like move to the kept image — the user wants manual 유지 안 함 to carry them over the same way.
+- X handles are the posting account; pixiv/arca/dc have no handle today, so those pairs stay manual.
+
 ## COLLECTOR-MENU-SCOPE-001 — Show the custom right-click menu in more places (2026-10-13)
 
 Status: `PARTIAL` — 3.5.35 (`0f578b44`) delivered the menu on HTTP pages, in HTTP(S)/about:blank/srcdoc frames, on video/audio, and with a 500 ms touch hold on links or existing selections. Frame exclusions follow the top host; page save remains a whole-tab action and is hidden in frames. Shift+right-click reaches Chrome's menu; images keep the save picker and two-finger translation.
