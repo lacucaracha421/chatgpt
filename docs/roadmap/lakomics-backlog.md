@@ -6,7 +6,7 @@ Reconciled 2026-10-13 against `main` at `2e751573`, using current source, Git hi
 
 ## Current priority
 
-Updated 2026-10-13 against `main` at `2e751573`. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
+Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped outside this list: TRANSFER-001 S1–S6, SIM-ORIGINAL-001, diet batches A–F, test cleanup and split, card trash, text-only calendar, NL search paused. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
 
 0. **`CHAR-CLAUDE-001`** — slice 3: experiment on identifying series members in images without a character or recommendation; retiring the tablet 캐릭터 확인 screen and its review feed is low priority (see [section](#char-claude-001)).
 1. **`COLLECTOR-MENU-SCOPE-001`** — `PARTIAL`: 3.5.35 (`0f578b44`) delivered HTTP pages, frames, media and touch hold; inventory sites that still swallow the menu, investigate the PDF viewer, and retain the later save-X-post/link/page idea (see [section](#collector-menu-scope-001)).
@@ -36,7 +36,7 @@ Status: `PARTIAL` — slices 1 and 1b are committed in `310b37b4`, slice 2 in `3
 <a id="collector-menu-scope-001"></a>
 ## SIM-ORIGINAL-001 — Similar images: original author first, auto-resolve reposts (2026-10-17)
 
-Status: `TODO` (approved by the user 2026-10-17, scheduled after the current Rust diet/test round).
+Status: `DONE` 2026-10-17 (`c8b9cc64`, server deployed 01:20 KST, PC rebuilt, tablet 0.9.102). Real-app review of the clue table was confirmed by the user ("그 외 확인사항은 모두 정상").
 - **Recommend the original:** replace `provenance_rank` (`src-tauri/src/library/similarity.rs`) with a rank that resolves each side through the artist scope: an artist account beats an account the user marked `reposter`; then earlier `source_published_at`; then larger resolution and bytes. Recommend for incoming pairs too, not only historical ones.
 - **Show the evidence:** PC and tablet review panels show each side's posting account and post time (`FeedSide` in `cloud/similarity_review.rs`, the server feed model, tablet `SimilarityReview.tsx`, PC `SimilarityReviewBrowser.tsx`).
 - **Auto-resolve (user decision):** only when one side is a non-reposter artist account and the other is an account marked `reposter` (no guessing from unknown handles), and the pair is near-identical. Applies at ingest and to historical/auto-compare pairs. The repost is handled exactly like 유지 안 함 (to Trash), and its classifications, albums and like move to the kept image — the user wants manual 유지 안 함 to carry them over the same way.
