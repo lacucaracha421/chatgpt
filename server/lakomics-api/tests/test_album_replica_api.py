@@ -1,4 +1,4 @@
-"""Album additions/removals, readiness, scope and HTTP cache contract."""
+"""Album snapshot publish route: auth, staleness and validation."""
 import copy
 import unittest
 import sys
@@ -20,29 +20,16 @@ class AlbumReplicaTests(unittest.TestCase):
     def tearDown(self): self.fixture.tearDown()
     def publish(self,payload=None):
         return self.client.put('/v1/library/album-snapshot',headers=self.auth,json=payload or self.payload)
-    def get(self,etag=None):
-        return self.client.get('/v1/library/album-media?album_id=upload&album_id=temp',headers={**self.auth,**({'If-None-Match':etag} if etag else {})})
-    def test_auth_and_unpublished_do_not_look_like_an_empty_album(self):
-        self.assertEqual(self.client.get('/v1/library/album-media?album_id=upload').status_code,401)
+    def test_publish_requires_auth_and_rejects_stale_snapshots(self):
         self.assertEqual(self.client.put('/v1/library/album-snapshot',json=self.payload).status_code,401)
-        self.assertEqual(self.get().status_code,503)
-    def test_ready_media_arrives_without_republishing_membership_and_removal_clears_it(self):
         self.assertEqual(self.publish().status_code,200)
-        before=self.get();self.assertEqual(before.json()['media'],[])
-        self.fixture.commit_asset(self.asset)
-        current=self.get(before.headers['etag']);self.assertEqual(current.status_code,200)
-        self.assertEqual(current.json()['media'][0]['albums'],['temp','upload'])
-        self.assertEqual({a['id'] for a in current.json()['albums']},{'temp','upload'})
-        self.assertEqual(self.get(current.headers['etag']).status_code,304)
         changed=copy.deepcopy(self.payload);changed['media']=[];changed['published_at']='2026-09-07T00:01:00Z'
         self.assertEqual(self.publish(changed).status_code,200)
-        self.assertEqual(self.get(current.headers['etag']).json()['media'],[])
         self.assertEqual(self.publish().status_code,409)
-    def test_deleted_album_and_invalid_snapshot(self):
+    def test_invalid_snapshot(self):
         self.publish()
         invalid=copy.deepcopy(self.payload);invalid['media'][0]['albums']=['missing']
         self.assertEqual(self.publish(invalid).status_code,400)
         duplicate=copy.deepcopy(self.payload);duplicate['albums'].append(duplicate['albums'][0])
         self.assertEqual(self.publish(duplicate).status_code,400)
         self.assertEqual(self.publish({'published_at':'2026-09-07T00:02:00Z','albums':[],'media':[]}).status_code,200)
-        self.assertEqual(self.get().json()['albums'],[])

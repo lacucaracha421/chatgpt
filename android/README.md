@@ -12,7 +12,7 @@ Current source version: **0.8.27 (64)** (built, not installed; 0.8.10 was instal
 
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
-This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` Photo Picker PoC was removed on 2026-10-17 (it was not installed). Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
 ## Unreleased — foreground status long-poll (PERF-ALL-001 T1, not built)
 

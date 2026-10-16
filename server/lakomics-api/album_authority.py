@@ -1426,8 +1426,8 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
     async def album_baseline(request: Request, response: Response, libraryId: str, epoch: int,
                              authorization: str | None = Header(default=None)):
         require_client(authorization)
-        # This authority baseline has never emitted ETags or handled conditional reads
-        # (unlike the separate legacy /v1/library/album-media endpoint). Counts are a live
+        # This authority baseline has never emitted ETags or handled conditional reads.
+        # Counts are a live
         # Asset projection, so prevent caching by the Album snapshot cursor alone.
         response.headers["Cache-Control"] = "no-store"
         params = dict(request.query_params)

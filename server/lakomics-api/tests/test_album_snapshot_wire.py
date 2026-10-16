@@ -171,21 +171,6 @@ class AlbumSnapshotRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(response.json()["detail"]["code"], "missingAlbumMemberships")
 
-    def test_legacy_display_read_still_hides_trashed_assets(self):
-        """Canonical membership is richer, so the display route must not change."""
-        document = body(3)
-        # The display array deliberately omits the Asset while canonical membership
-        # includes it, which is the trash case this contract exists to express.
-        response = self.publish(document)
-        self.assertEqual(response.status_code, 200, response.text)
-        display = self.client.get("/v1/library/album-media",
-                                  params={"album_id": "root"}, headers=self.auth)
-        # The Asset has no committed object in this fixture, so the display replica
-        # reports no media for it; what matters is that it does not appear merely
-        # because canonical membership mentions it.
-        self.assertEqual(display.status_code, 200, display.text)
-        self.assertEqual(display.json()["media"], [])
-
     def test_the_staging_route_accepts_a_snapshot_at_the_documented_bound(self):
         """The upload bound must not reject a library the contract supports."""
         albums = [{"id": f"album-{index}", "name": f"A{index}", "parent_id": None,

@@ -19,7 +19,7 @@ Repository paths below are relative to the checkout root. Read applicable `AGENT
 | Cloud API | `server/lakomics-api/` | `docs/agents/cloud-capture.md`, relevant authority modules and tests |
 | Works / Collection | Owning desktop/mobile Collection modules | References below before substantial changes |
 
-Root `app/` is not the desktop package. Root `mobile/` is not the Android-bundled React client. The legacy `extension/` collector was removed on 2026-09-26; `extension-list/` is the only collector. `_tools/lakomics-cloudmedia-poc/` is a separate experiment. Do not redirect an active task to these paths based on an old document.
+Root `app/` is not the desktop package. Root `mobile/` is not the Android-bundled React client. The legacy `extension/` collector was removed on 2026-09-26; `extension-list/` is the only collector. The Photo Picker PoC `_tools/lakomics-cloudmedia-poc/` was removed on 2026-10-17. Do not redirect an active task to these paths based on an old document.
 
 ## Load only relevant context
 

@@ -1,4 +1,4 @@
-"""Publish and read the legacy Album display replica.
+"""Publish the legacy Album display replica.
 
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
@@ -6,10 +6,8 @@ compatibility hooks are resolved at call time, including test monkeypatches.
 import json
 from datetime import timezone
 from types import ModuleType
-from typing import Annotated
 
-from fastapi import HTTPException, Header, Query, Response
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Header
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 import album_authority
@@ -160,45 +158,7 @@ def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | No
     return {"ok": True, "snapshotVersion": version, "snapshotDigest": snapshot_digest}
 
 
-def read_album_replica(
-    album_id: Annotated[list[str], Query(min_length=1, max_length=20)],
-    authorization: str | None = Header(default=None),
-    if_none_match: str | None = Header(default=None),
-):
-    api.require_auth(authorization)
-    selected = set(album_id)
-    with api.get_db() as db:
-        row = db.execute("SELECT payload FROM album_replica WHERE singleton=1").fetchone()
-        if row is None:
-            raise HTTPException(503, "Album snapshot has not been published")
-        snapshot = json.loads(row["payload"])
-        albums = [a for a in snapshot["albums"] if a["id"] in selected]
-        members = [m for m in snapshot["media"] if selected.intersection(m["albums"])]
-        ready = {}
-        for offset in range(0, len(members), 500):
-            ids = [m["id"] for m in members[offset:offset + 500]]
-            placeholders = ",".join("?" for _ in ids)
-            for asset in db.execute(f"""SELECT id,content_type,size_bytes FROM visible_assets
-                WHERE committed=1 AND thumbnail_key IS NOT NULL AND content_type IS NOT NULL
-                AND size_bytes > 0 AND id IN ({placeholders})""", ids):
-                ready[asset["id"]] = dict(asset)
-        media = [{**m, "albums": sorted(selected.intersection(m["albums"])),
-                  "mime": ready[m["id"]]["content_type"], "size": ready[m["id"]]["size_bytes"]}
-                 for m in members if m["id"] in ready]
-    import hashlib
-    albums.sort(key=lambda a: a["id"])
-    media.sort(key=lambda m: (-m["date"], m["id"]))
-    payload = {"albums": albums, "media": media}
-    revision = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    etag = '"' + revision + '"'
-    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
-    if if_none_match == etag:
-        return Response(status_code=304, headers=headers)
-    return JSONResponse({**payload, "revision": revision, "generation": 1}, headers=headers)
-
-
 def register(app, services):
     global api
     api = services
     app.put("/v1/library/album-snapshot")(publish_album_replica)
-    app.get("/v1/library/album-media")(read_album_replica)
