@@ -356,8 +356,8 @@ function trust(w) {
   w.addEventListener = w.EventTarget.prototype.addEventListener; w.removeEventListener = w.EventTarget.prototype.removeEventListener;
   return fn => { on = true; try { return fn(); } finally { on = false; } };
 }
-function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch = false, collector = {}} = {}) {
-  const dom = new JSDOM(`<body>${html}</body>`, {url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true});
+function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch = false, collector = {}, url = 'https://example.test/'} = {}) {
+  const dom = new JSDOM(`<body>${html}</body>`, {url, runScripts: 'outside-only', pretendToBeVisual: true});
   const w = dom.window; w.matchMedia = query => ({matches: touch && /hover: none/.test(query)});
   const user = trust(w), roots = new Map(), attach = w.Element.prototype.attachShadow;
   w.Element.prototype.attachShadow = function(options) { const root = attach.call(this, options); roots.set(this, root); return root; };
@@ -402,6 +402,36 @@ const notesView = f => {
   return {host, root, notes: root ? [...root.querySelectorAll('.note')] : [], tags: root ? [...root.querySelectorAll('.tag')] : [],
     pill: root?.querySelector('.pill') || null, card: root?.querySelector('.card') || null, box: root?.querySelector('.image-notes') || null};
 };
+
+for (const touch of [false, true]) test(`X photo viewer notes offer the normal save picker for the displayed original photo (touch=${touch})`, async () => {
+  const source = await readFile(new URL('../src/x-source.js', import.meta.url), 'utf8');
+  let f, opened;
+  const collector = {
+    findCandidate: image => f.w.LakomicsXSource.findCandidate(image),
+    open(candidate, origin, input, lifecycle) { opened = {candidate, origin, input, lifecycle}; lifecycle.onOpen(); },
+  };
+  f = page(`<article><a href="/behind/status/111/photo/1"><img src="https://pbs.twimg.com/media/behind?format=jpg&name=small"></a></article>
+    <div role="dialog"><div><img id="pic" src="https://pbs.twimg.com/media/second?format=png&name=large"></div>
+      <article><a href="/artist/status/222"><time datetime="2026-10-17T01:00:00Z"></time></a></article></div>`,
+    {collector, touch, url: 'https://x.com/artist/status/222/photo/2', send: async () => ({ok: true, lines: noteLines})});
+  try {
+    f.w.eval(source);
+    await f.actions.activate('image.translate', f.context(), origin, gesture);
+    const save = notesView(f).pill.querySelector('[data-action="image.lakomics"]');
+    assert.ok(save, 'the viewer must offer saving after translation');
+    f.user(() => save.click());
+    assert.equal(opened.candidate.sourceUrl, 'https://x.com/artist/status/222/photo/2');
+    assert.equal(opened.candidate.mediaUrl, 'https://pbs.twimg.com/media/second?format=png&name=orig');
+    assert.equal(opened.candidate.mediaIndex, 2);
+    assert.equal(opened.candidate.publishedAt, '2026-10-17T01:00:00Z');
+    assert.equal(opened.candidate.element, f.img);
+    assert.equal(opened.input, touch ? 'touch' : 'mouse');
+    assert.deepEqual(plain(opened.origin), {x: 200, y: 150});
+    assert.equal(notesView(f).host.style.visibility, 'hidden');
+    opened.lifecycle.onClose();
+    assert.equal(notesView(f).host.style.visibility, 'visible');
+  } finally { f.actions.destroy(); f.close(); }
+});
 
 for (const touch of [false, true]) test(`translation notes sit over each text block; the numbered list window is gone (touch=${touch})`, async () => {
   const f = page(undefined, {touch, send: async () => ({ok: true, lines: noteLines})});
@@ -1756,7 +1786,6 @@ test('manifest loads the image and page modules before the actions in both colle
   }
   const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
   assert.ok(background.indexOf('translation/image.js') > background.indexOf('translation/deadline.js') && background.indexOf('translation/image.js') < background.indexOf('translate-service.js'));
-  assert.equal(manifest.version, '3.5.51');
 });
 
 

@@ -16,7 +16,7 @@
       image.getAttribute?.("data-lakomics-media-url") || imageSource(image),
     );
     if (!mediaUrl) return null;
-    const source = explicitImageSource(image) ?? findPostSource(image, mediaUrl, "photo");
+    const source = explicitImageSource(image) ?? findPostSource(image, mediaUrl, "photo") ?? findPhotoViewerSource(image);
     if (!source) return null;
     return {
       source: "x",
@@ -28,8 +28,25 @@
       author: source.author,
       postId: source.postId,
       mediaIndex: source.mediaIndex,
-      publishedAt: publishedAtFor(image),
+      publishedAt: source.publishedAt ?? publishedAtFor(image),
     };
+  }
+
+  function findPhotoViewerSource(image) {
+    // X mounts the full-size photo beside the tweet article, outside its scope.
+    // The route supplies the ordinal; DOM order would count only mounted slides.
+    if (postScope(image)) return null;
+    const dialog = image.closest?.('[role="dialog"]');
+    const source = parseStatusLink({ href: image.ownerDocument?.location?.href || "" });
+    if (!dialog || source?.mediaKind !== "photo" || !(source.mediaIndex > 0)) return null;
+    const links = [...dialog.querySelectorAll('a[href*="/status/"]')];
+    let publishedAt = null;
+    for (const link of links) {
+      if (parseStatusLink(link)?.postId !== source.postId) continue;
+      const time = link.querySelector('time[datetime]');
+      if (time) { publishedAt = time.getAttribute('datetime'); break; }
+    }
+    return { ...withMediaIndex(source, source.mediaIndex, "photo"), publishedAt };
   }
 
   function explicitImageSource(image) {

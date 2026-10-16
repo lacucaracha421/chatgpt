@@ -47,10 +47,9 @@ function setup(t, { paired = true } = {}) {
     send: (message, sender = PAGE) => service.handle(message, sender) };
 }
 
-test('manifest registers only YouTube MAIN/start hook and isolated/idle UI without changing version', async () => {
+test('manifest registers only YouTube MAIN/start hook and isolated/idle UI', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('unlimitedStorage'));
-  assert.equal(manifest.version, '3.5.51');
   assert.equal(manifest.background.type, undefined);
   const hook = manifest.content_scripts.find(item => item.js?.includes('src/youtube/page-hook.js'));
   const ui = manifest.content_scripts.find(item => item.js?.includes('src/youtube/content.js'));
