@@ -228,7 +228,7 @@ class GoldenStatusTests(unittest.TestCase):
         _, self.client_auth = self.database.token("client")
         device, self.device_auth = self.database.token("client")
         with self.database.get_db() as db:
-            db.execute("INSERT INTO exchange_devices VALUES(?,?,?,?,?,?,NULL,0)",
+            db.execute("INSERT INTO exchange_devices(id,name,kind,principal,created_at,last_seen_at,revoked_at,revision) VALUES(?,?,?,?,?,?,NULL,0)",
                        ["00000000-0000-4000-8000-000000000001", "tablet", "android", device,
                         "2026", "2026"])
             db.commit()

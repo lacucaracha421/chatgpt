@@ -206,6 +206,199 @@ class DeviceTests(ExchangeFixture):
         self.assert_code(self.client.get("/v1/exchange/inbox", headers=self.as_tab()), 404, "exchangeDeviceUnknown")
 
 
+CERT = "ab" * 32
+
+
+class LanEndpointTests(ExchangeFixture):
+    """Direct LAN transfer: a device reports its own certificate pin, port and addresses."""
+
+    def lan_body(self, **overrides):
+        body = {"certSha256": CERT, "port": 53318,
+                "addresses": [{"kind": "lan", "ip": "192.168.0.10"}, {"kind": "tailscale", "ip": "100.101.102.103"}]}
+        body.update(overrides)
+        return body
+
+    def put_lan(self, headers=None, device=None, **overrides):
+        return self.client.put(f"/v1/exchange/devices/{device or self.tab}/lan",
+                               headers=headers or self.as_tab(), json=self.lan_body(**overrides))
+
+    def lan_of(self, device, headers=None):
+        listed = self.client.get("/v1/exchange/devices", headers=headers or self.as_pc()).json()["devices"]
+        return {d["deviceId"]: d["lan"] for d in listed}[device]
+
+    def revision(self, principal):
+        return self.exchange_status(principal)["revision"]
+
+    def test_a_device_reports_its_endpoint_and_peers_read_it(self):
+        self.assertIsNone(self.lan_of(self.tab))
+        self.assertIsNone(self.lan_of(self.pc))
+        reported = self.put_lan()
+        self.assertEqual(reported.status_code, 200, reported.text)
+        expected = {"certSha256": CERT, "port": 53318, "updatedAt": fx.iso(T0),
+                    "addresses": [{"kind": "lan", "ip": "192.168.0.10"},
+                                  {"kind": "tailscale", "ip": "100.101.102.103"}]}
+        self.assertEqual(reported.json()["lan"], expected)
+        self.assertEqual((reported.json()["deviceId"], reported.json()["self"]), (self.tab, True))
+        self.assertEqual(self.lan_of(self.tab), expected)
+        self.assertIsNone(self.lan_of(self.pc))
+        # The tablet sees its own entry too, and a register call keeps the stored endpoint.
+        self.assertEqual(self.lan_of(self.tab, self.as_tab()), expected)
+        again = self.register(self.tab_token, self.tab, "Galaxy Tab S11", "android")
+        self.assertEqual(again.json()["lan"], expected)
+
+    def test_revision_moves_only_when_a_stored_value_changes(self):
+        self.assertEqual(self.put_lan().status_code, 200)
+        pc_before, tab_before = self.revision(self.pc_principal), self.revision(self.tab_principal)
+        self.now = T0 + 60
+        same = self.put_lan()
+        self.assertEqual(same.status_code, 200)
+        self.assertEqual(same.json()["lan"]["updatedAt"], fx.iso(T0))
+        self.assertEqual((self.revision(self.pc_principal), self.revision(self.tab_principal)),
+                         (pc_before, tab_before))
+        for step, change in enumerate((
+                {"port": 53319},
+                {"certSha256": "cd" * 32},
+                {"addresses": [{"kind": "lan", "ip": "10.0.0.7"}]},
+                {"addresses": []})):
+            self.now = T0 + 120 + step
+            before = self.revision(self.pc_principal)
+            changed = self.put_lan(**change)
+            self.assertEqual(changed.status_code, 200, changed.text)
+            self.assertGreater(self.revision(self.pc_principal), before, change)
+            self.assertEqual(changed.json()["lan"]["updatedAt"], fx.iso(self.now))
+            self.assertEqual(self.lan_of(self.tab)["updatedAt"], fx.iso(self.now))
+        self.assertEqual(self.lan_of(self.tab)["addresses"], [])
+
+    def test_only_the_calling_device_may_report_and_credentials_stay_bound(self):
+        # Another credential's device.
+        self.assert_code(self.put_lan(self.auth(self.pc_token, self.tab)), 403, "exchangeDeviceForbidden")
+        # Own credential and header, but the path names another device (even one it does not own).
+        self.assert_code(self.put_lan(self.as_pc(), self.tab), 403, "exchangeDeviceForbidden")
+        self.assert_code(self.put_lan(self.as_tab(), self.pc), 403, "exchangeDeviceForbidden")
+        self.assert_code(self.put_lan(self.as_tab(), new_id()), 403, "exchangeDeviceForbidden")
+        # Missing or unknown device header, bad credentials.
+        self.assert_code(self.put_lan(self.auth(self.tab_token)), 400, "exchangeDeviceRequired")
+        self.assert_code(self.put_lan(self.auth(self.tab_token, new_id())), 404, "exchangeDeviceUnknown")
+        self.assert_code(self.put_lan({"Authorization": f"Bearer {LEGACY}", "X-Lakomics-Device": self.tab}),
+                         403, "exchangeDeviceTokenRequired")
+        self.assertEqual(self.put_lan({"X-Lakomics-Device": self.tab}).status_code, 401)
+        self.assertEqual(self.client.put("/v1/exchange/devices/not-a-uuid/lan", headers=self.as_tab(),
+                                         json=self.lan_body()).status_code, 422)
+        self.assertIsNone(self.lan_of(self.tab))
+        # An unregistered device cannot report afterwards.
+        self.assertEqual(self.client.delete(f"/v1/exchange/devices/{self.tab}", headers=self.as_tab()).status_code, 200)
+        self.assert_code(self.put_lan(), 404, "exchangeDeviceUnknown")
+
+    def test_invalid_endpoints_are_refused_and_change_nothing(self):
+        lan = lambda ip: [{"kind": "lan", "ip": ip}]  # noqa: E731
+        tailscale = lambda ip: [{"kind": "tailscale", "ip": ip}]  # noqa: E731
+        bad = {
+            "public lan address": {"addresses": lan("8.8.8.8")},
+            "public tailscale address": {"addresses": tailscale("1.1.1.1")},
+            "loopback": {"addresses": lan("127.0.0.1")},
+            "link-local": {"addresses": lan("169.254.1.1")},
+            "tailscale address as lan": {"addresses": lan("100.64.0.1")},
+            "lan address as tailscale": {"addresses": tailscale("192.168.1.5")},
+            "below 172.16/12": {"addresses": lan("172.15.255.255")},
+            "above 172.16/12": {"addresses": lan("172.32.0.1")},
+            "below 100.64/10": {"addresses": tailscale("100.63.255.255")},
+            "above 100.64/10": {"addresses": tailscale("100.128.0.1")},
+            "ipv6 link-local": {"addresses": lan("fe80::1")},
+            "ipv6 loopback": {"addresses": lan("::1")},
+            "ipv6 mapped": {"addresses": lan("::ffff:10.0.0.1")},
+            "ipv6 unique local": {"addresses": lan("fd00::1")},
+            "leading zeros": {"addresses": lan("192.168.001.5")},
+            "short dotted": {"addresses": lan("192.168.1")},
+            "hostname": {"addresses": lan("printer.local")},
+            "empty ip": {"addresses": lan("")},
+            "unknown kind": {"addresses": [{"kind": "wifi", "ip": "192.168.0.5"}]},
+            "extra address field": {"addresses": [{"kind": "lan", "ip": "192.168.0.5", "port": 1}]},
+            "five addresses": {"addresses": [{"kind": "lan", "ip": f"10.0.0.{n}"} for n in range(5)]},
+            "addresses not a list": {"addresses": "192.168.0.5"},
+            "addresses missing": {"addresses": None},
+            "uppercase hash": {"certSha256": "AB" * 32},
+            "short hash": {"certSha256": "ab" * 31},
+            "long hash": {"certSha256": "ab" * 33},
+            "non-hex hash": {"certSha256": "zz" * 32},
+            "hash missing": {"certSha256": None},
+            "port below range": {"port": 1023},
+            "port above range": {"port": 65536},
+            "port zero": {"port": 0},
+            "port as text": {"port": "53318"},
+            "port as bool": {"port": True},
+            "port missing": {"port": None},
+        }
+        for label, overrides in bad.items():
+            body = {key: value for key, value in self.lan_body(**overrides).items() if value is not None}
+            response = self.client.put(f"/v1/exchange/devices/{self.tab}/lan", headers=self.as_tab(), json=body)
+            self.assert_code(response, 422, "invalidExchangeRequest")
+        extra = self.client.put(f"/v1/exchange/devices/{self.tab}/lan", headers=self.as_tab(),
+                                json={**self.lan_body(), "name": "x"})
+        self.assert_code(extra, 422, "invalidExchangeRequest")
+        huge = self.client.put(f"/v1/exchange/devices/{self.tab}/lan", headers=self.as_tab(),
+                               content=b'{"certSha256":"' + b"x" * fx.MAX_BODY_BYTES + b'"}')
+        self.assert_code(huge, 413, "exchangeRequestTooLarge")
+        self.assertIsNone(self.lan_of(self.tab))
+
+    def test_range_edges_and_four_addresses_are_accepted(self):
+        edges = [{"kind": "lan", "ip": "172.16.0.1"}, {"kind": "lan", "ip": "172.31.255.255"},
+                 {"kind": "tailscale", "ip": "100.64.0.1"}, {"kind": "tailscale", "ip": "100.127.255.255"}]
+        for port in (1024, 65535):
+            response = self.put_lan(port=port, addresses=edges)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["lan"]["port"], port)
+        self.assertEqual(self.lan_of(self.tab)["addresses"], edges)
+        for ip in ("10.0.0.1", "10.255.255.255", "192.168.255.254"):
+            self.assertEqual(self.put_lan(addresses=[{"kind": "lan", "ip": ip}]).status_code, 200, ip)
+
+    def test_an_old_schema_gains_the_lan_columns_and_keeps_its_devices(self):
+        path = Path(self.temp.name) / "old.sqlite"
+
+        @contextmanager
+        def get_db():
+            db = sqlite3.connect(path, timeout=10)
+            db.row_factory = sqlite3.Row
+            try:
+                yield db
+            finally:
+                db.close()
+
+        old = sqlite3.connect(path)
+        old.executescript(api_auth.DDL)
+        old.executescript("""
+            CREATE TABLE exchange_devices(
+             id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('pc','android')),
+             principal TEXT NOT NULL, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+             revoked_at TEXT, revision INTEGER NOT NULL DEFAULT 0);""")
+        principal, token = api_auth.provision_token(old, "client", "old tablet")
+        device = new_id()
+        old.execute("INSERT INTO exchange_devices VALUES(?,?,?,?,?,?,NULL,5)",
+                    [device, "Old tablet", "android", principal, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"])
+        old.commit()
+        old.close()
+
+        app = FastAPI()
+        startup = fx.register(app, get_db, api_auth.client_guard(get_db, LEGACY),
+                              lambda: self.storage, lambda: "test-bucket", lambda *a, **k: "u", clock=lambda: self.now)
+        startup()
+        startup()  # idempotent: the columns are added once
+        with get_db() as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(exchange_devices)")}
+        self.assertTrue({"lan_cert_sha256", "lan_port", "lan_addresses", "lan_updated_at"} <= columns)
+        headers = self.auth(token, device)
+        with TestClient(app) as client:
+            listed = client.get("/v1/exchange/devices", headers=headers).json()["devices"]
+            self.assertEqual([(d["deviceId"], d["name"], d["lan"]) for d in listed], [(device, "Old tablet", None)])
+            reported = client.put(f"/v1/exchange/devices/{device}/lan", headers=headers, json=self.lan_body())
+            self.assertEqual(reported.status_code, 200, reported.text)
+            self.assertEqual(reported.json()["lan"]["certSha256"], CERT)
+            # A brand-new device can still register on the migrated table.
+            fresh = client.put(f"/v1/exchange/devices/{new_id()}", headers=self.auth(token),
+                               json={"name": "New PC", "kind": "pc"})
+            self.assertEqual(fresh.status_code, 200, fresh.text)
+            self.assertIsNone(fresh.json()["lan"])
+
+
 class TransferTests(ExchangeFixture):
     def test_full_round_trip_from_upload_to_acknowledged_delete(self):
         tab_revision = self.exchange_status(self.tab_principal)["revision"]

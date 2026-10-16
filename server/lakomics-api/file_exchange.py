@@ -22,6 +22,7 @@ is therefore monotonic, and the maximum over a principal's devices changes
 whenever any of them changes (:func:`status`), which ``/v1/sync/status`` exposes.
 """
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -32,7 +33,7 @@ import unicodedata
 from typing import Annotated, Literal
 
 from fastapi import Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
 import api_auth
@@ -105,9 +106,22 @@ def fail(status, code, message, **extra):
     raise HTTPException(status, {"code": code, "message": message, **extra})
 
 
+LAN_COLUMNS = (("lan_cert_sha256", "TEXT"), ("lan_port", "INTEGER"),
+               ("lan_addresses", "TEXT"), ("lan_updated_at", "TEXT"))
+
+
+def _columns(db, table):
+    return {row[1] for row in db.execute("PRAGMA table_info(" + table + ")")}
+
+
 def startup_db(db):
     db.executescript(api_auth.DDL)
     db.executescript(DDL)
+    # Devices registered before direct LAN transfer lack the LAN endpoint columns.
+    present = _columns(db, "exchange_devices")
+    for name, sql_type in LAN_COLUMNS:
+        if name not in present:
+            db.execute(f"ALTER TABLE exchange_devices ADD COLUMN {name} {sql_type}")
     db.commit()
 
 
@@ -185,6 +199,40 @@ class Ack(BaseModel):
     sha256: SHA256
 
 
+LAN_MAX_ADDRESSES = 4
+LAN_MIN_PORT, LAN_MAX_PORT = 1024, 65535
+# Direct LAN transfer addresses: a private LAN address or a Tailscale (CGNAT) address.
+LAN_NETWORKS = {
+    "lan": tuple(ipaddress.IPv4Network(net) for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")),
+    "tailscale": (ipaddress.IPv4Network("100.64.0.0/10"),),
+}
+
+
+class LanAddress(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["lan", "tailscale"]
+    ip: str = Field(min_length=7, max_length=15)
+
+    @model_validator(mode="after")
+    def _in_range(self):
+        try:
+            address = ipaddress.IPv4Address(self.ip)
+        except ValueError:
+            raise ValueError("ip must be an IPv4 address") from None
+        if str(address) != self.ip:
+            raise ValueError("ip must be in canonical dotted form")
+        if not any(address in net for net in LAN_NETWORKS[self.kind]):
+            raise ValueError("ip is outside the range allowed for its kind")
+        return self
+
+
+class LanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    certSha256: SHA256
+    port: int = Field(ge=LAN_MIN_PORT, le=LAN_MAX_PORT)
+    addresses: list[LanAddress] = Field(max_length=LAN_MAX_ADDRESSES)
+
+
 async def _body(request, model):
     raw = bytearray()
     async for chunk in request.stream():
@@ -223,9 +271,21 @@ def status(db, principal):
 
 # --- views ------------------------------------------------------------------
 
+def _lan_view(row):
+    """The device's direct-transfer endpoint, or None until it has reported a certificate."""
+    if not row["lan_cert_sha256"]:
+        return None
+    try:
+        addresses = json.loads(row["lan_addresses"] or "[]")
+    except ValueError:
+        addresses = []
+    return {"certSha256": row["lan_cert_sha256"], "port": row["lan_port"],
+            "addresses": addresses, "updatedAt": row["lan_updated_at"]}
+
+
 def device_view(row, self_id=None):
     return {"deviceId": row["id"], "name": row["name"], "kind": row["kind"],
-            "lastSeenAt": row["last_seen_at"], "self": row["id"] == self_id}
+            "lastSeenAt": row["last_seen_at"], "self": row["id"] == self_id, "lan": _lan_view(row)}
 
 
 def transfer_view(row, names):
@@ -339,7 +399,8 @@ def register(app, get_db, require_client, storage, bucket, presign_put, *, clock
                 count = db.execute("SELECT COUNT(*) FROM exchange_devices WHERE revoked_at IS NULL").fetchone()[0]
                 if count >= MAX_DEVICES:
                     fail(409, "exchangeDeviceLimit", "등록할 수 있는 기기 수를 넘었습니다.")
-                db.execute("INSERT INTO exchange_devices VALUES(?,?,?,?,?,?,NULL,0)",
+                db.execute("INSERT INTO exchange_devices(id,name,kind,principal,created_at,last_seen_at,"
+                           "revoked_at,revision) VALUES(?,?,?,?,?,?,NULL,0)",
                            [device_id, name, body.kind, principal, now, now])
             else:
                 if row["principal"] != principal:
@@ -404,6 +465,34 @@ def register(app, get_db, require_client, storage, bucket, presign_put, *, clock
             db.commit()
         _delete_objects(get_db, storage, bucket, keys, clock)
         return {"deviceId": device_id, "unregistered": True}
+
+    def put_lan(device_id, body):
+        addresses = json.dumps([{"kind": a.kind, "ip": a.ip} for a in body.addresses], separators=(",", ":"))
+        with get_db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM exchange_devices WHERE id=?", [device_id]).fetchone()
+            if row is None or row["revoked_at"] is not None:
+                fail(404, "exchangeDeviceUnknown", "등록되지 않은 기기입니다.")
+            if (row["lan_cert_sha256"], row["lan_port"], row["lan_addresses"]) != (body.certSha256, body.port,
+                                                                                  addresses):
+                db.execute("UPDATE exchange_devices SET lan_cert_sha256=?,lan_port=?,lan_addresses=?,"
+                           "lan_updated_at=? WHERE id=?", [body.certSha256, body.port, addresses,
+                                                           iso(clock()), device_id])
+                bump(db)
+            result = db.execute("SELECT * FROM exchange_devices WHERE id=?", [device_id]).fetchone()
+            db.commit()
+        return device_view(result, device_id)
+
+    @app.put(PREFIX + "/devices/{device_id}/lan")
+    async def set_device_lan(device_id: UUID, request: Request,
+                             authorization: str | None = Header(default=None),
+                             x_lakomics_device: str | None = Header(default=None)):
+        # A device reports only its own endpoint: the path must name the calling device.
+        await run_in_threadpool(caller, authorization, x_lakomics_device)
+        if device_id != x_lakomics_device:
+            fail(403, "exchangeDeviceForbidden", "다른 기기의 정보는 바꿀 수 없습니다.")
+        body = await _body(request, LanBody)
+        return await run_in_threadpool(put_lan, device_id, body)
 
     # --- transfers ----------------------------------------------------------
 
