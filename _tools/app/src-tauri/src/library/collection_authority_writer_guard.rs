@@ -129,6 +129,24 @@ const ALLOWLIST: &[(&str, &str)] = &[
         "media_protocol.rs",
         "local-only (stays): embedded media protocol fixtures",
     ),
+    // Test modules moved out of db.rs and media_protocol.rs (2026-10-17) keep the
+    // exemption their fixtures had inline.
+    (
+        "library/db_tests.rs",
+        "local-only (stays): schema migration fixtures moved from db.rs",
+    ),
+    (
+        "library/db_collection_pc_migration_tests.rs",
+        "local-only (stays): migration fixtures moved from db.rs",
+    ),
+    (
+        "library/db_collection_publication_migration_tests.rs",
+        "local-only (stays): migration fixtures moved from db.rs",
+    ),
+    (
+        "media_protocol_tests.rs",
+        "local-only (stays): media protocol fixtures moved from media_protocol.rs",
+    ),
 ];
 
 // These files no longer have blanket writer exemptions. Only the named remaining
@@ -189,7 +207,7 @@ const ROUTED_FUNCTIONS: &[(&str, &str)] = &[
         "library/collection_updates.rs",
         "reconcile_mangadex_volumes",
     ),
-    ("library/similarity.rs", "resolve_replace_existing"),
+    ("library/similarity.rs", "merge_review_metadata"),
     ("library/collection.rs", "create_collection"),
     ("library/collection.rs", "update_collection"),
     ("library/collection.rs", "delete_collection"),
