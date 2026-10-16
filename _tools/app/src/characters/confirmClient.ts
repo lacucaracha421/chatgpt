@@ -51,11 +51,14 @@ export async function readShadowList(api: Pick<ShadowReviewApi, "page">, mode: S
 
 export type ConfirmRead = {
   items: ConfirmItem[];
-  /** 인식 추천 of characters far from 학습 인식 that nothing else brings up: left out of `items` (and the counts) unless the scope is one character. */
+  /** Learning suggestions separated for the overview's bottom group; review dialogs include both partitions. Empty for a single-character scope. */
   folded: ConfirmItem[];
   /** The kinds whose list could not be read this time. */
   failed: ConfirmKind[];
 };
+
+/** Review every pending item; the overview alone keeps learning suggestions in its bottom group. */
+export const confirmReviewItems = (read: ConfirmRead) => [...read.items, ...read.folded];
 
 // Reuse the overview's existing full read for continuation; opening a scoped dialog
 // must not trigger another library-wide scan just to offer the next character.
@@ -80,7 +83,7 @@ export async function readConfirmItems(sources: ConfirmSources, scope: ConfirmSc
   if (!isLive() || !candidates || !doubtful) return null;
   const inScope = <T extends { targetId: string }>(items: readonly T[]) => scope.target ? items.filter(item => item.targetId === scope.target!.id) : items;
   const tagItems = tagger.filter(item => (!seriesId || item.seriesId === seriesId));
-  // One character's own list shows everything it has; any wider list leaves out the folded ones.
+  // Separate learning suggestions for overview grouping; a single-character read needs no partition.
   const fold = !scope.target;
   const shown = inScope(candidates).filter(item => !(fold && item.folded));
   const items = mergeConfirmItems({ tagger: inScope(tagItems), candidates: shown, doubtful: inScope(doubtful), targets });

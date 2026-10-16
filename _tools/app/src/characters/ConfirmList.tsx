@@ -12,7 +12,7 @@ import { assetPreviewUrl, assetUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ClassificationEntry } from "../library/types";
 import type { CharacterTarget } from "./api";
-import { confirmSources, getConfirmOverviewRead, readConfirmItems, type ConfirmRead, type ConfirmScope, type ConfirmSources } from "./confirmClient";
+import { confirmReviewItems, confirmSources, getConfirmOverviewRead, readConfirmItems, type ConfirmRead, type ConfirmScope, type ConfirmSources } from "./confirmClient";
 import { CONFIRM_KINDS, confirmCounts, confirmGroups, confirmKindLabel, groupByCharacter, keyRange, needsSingleLook, reasonBadges, tallyConfirm, type ConfirmItem, type ConfirmKind } from "./confirmModel";
 import { ConfirmGrid } from "./ConfirmGrid";
 import { BATCH_MAX, decisionRequest, saveJudgments, type Decision, type Judgment } from "./confirmSave";
@@ -126,7 +126,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const activatedCache = useRef<Prefetched | null>(null);
 
   function activateScope(nextScope: ConfirmScope, read: ConfirmRead) {
-    setItems(read.items.filter(item => !judged.current.has(item.key)));
+    setItems(confirmReviewItems(read).filter(item => !judged.current.has(item.key)));
     setActiveScope(nextScope);
     setSwitchTo(null);
     setKind("all");
@@ -165,7 +165,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
         setSwitchTo(null);
         return;
       }
-      setItems(read.items.filter(item => !judged.current.has(item.key)));
+      setItems(confirmReviewItems(read).filter(item => !judged.current.has(item.key)));
       if (switchTo) {
         activateScope(switchTo, read);
       }
@@ -465,15 +465,16 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
   const accepted = scopedJudgments.filter(judgment => judgment.decision !== "rejected").length;
   const rejected = scopedJudgments.length - accepted;
   const overviewGroups = useMemo(() => overview ? confirmGroups(tallyConfirm(overview.items), targets,
-    id => classifications.find(entry => entry.id === id)?.name) : [], [overview, targets, classifications]);
+    id => classifications.find(entry => entry.id === id)?.name, tallyConfirm(overview.folded)) : [], [overview, targets, classifications]);
   const pendingCounts = new Map<string, number>();
-  for (const item of overview?.items ?? []) {
+  for (const item of overview ? confirmReviewItems(overview) : []) {
     if (!judged.current.has(item.key)) pendingCounts.set(item.targetId, (pendingCounts.get(item.targetId) ?? 0) + 1);
   }
   const prioritySeries = seriesId ?? targets.find(target => target.id === targetId)?.seriesClassificationId;
-  const nextCharacter = [...overviewGroups.filter(group => group.seriesId === prioritySeries), ...overviewGroups.filter(group => group.seriesId !== prioritySeries)]
-    .flatMap(group => group.characters.map(character => ({ group, character,
-      count: pendingCounts.get(character.targetId) ?? 0 })))
+  const prioritizedGroups = [...overviewGroups.filter(group => group.seriesId === prioritySeries), ...overviewGroups.filter(group => group.seriesId !== prioritySeries)];
+  const nextCharacter = [...prioritizedGroups.flatMap(group => group.characters.map(character => ({ group, character }))),
+    ...prioritizedGroups.flatMap(group => group.folded.map(character => ({ group, character })))]
+    .map(row => ({ ...row, count: pendingCounts.get(row.character.targetId) ?? 0 }))
     .find(row => row.character.targetId !== targetId && row.count > 0);
   const nextScope = useMemo<ConfirmScope | null>(() => nextCharacter ? {
     ...(nextCharacter.group.seriesId ? { series: { id: nextCharacter.group.seriesId, name: nextCharacter.group.seriesName } } : {}),

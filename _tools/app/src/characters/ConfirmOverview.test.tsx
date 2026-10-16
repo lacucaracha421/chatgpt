@@ -138,23 +138,28 @@ it("moves folded characters to one bottom section, keeps counted totals, and tog
   const folded = within(learning).getByRole("button", { name: "백합 › 키사키 확인 2건" });
   await user.click(folded);
   expect(onOpen).toHaveBeenLastCalledWith({ series: { id: "series", name: "백합" }, target: { id: "kisaki", name: "키사키" } });
-  // The series total and the whole list leave the folded ones out.
-  expect(screen.getByRole("button", { name: "백합 전체 확인 1건" })).toBeInTheDocument();
+  // Rows stay grouped at the bottom; wider review entry points include their items.
+  expect(screen.getAllByRole("button", { name: "백합 전체 확인 3건" })).toHaveLength(2);
   await user.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   expect(within(learning).queryByRole("button", { name: /키사키/ })).toBeNull();
   expect(learning.querySelector(".ui-fold")).toHaveAttribute("inert");
 });
 
-it("omits zero-count series from the main list and shows the empty notice above the folded section", async () => {
+it("offers whole-library and series review when only learning characters wait, keeping their rows at the bottom", async () => {
   const sources = confirmSourceFor({ candidates: [shadowItem("f1", "kisaki", "키사키", { folded: true })], doubtful: [] });
-  render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={vi.fn()} />);
+  const onOpen = vi.fn();
+  render(<ConfirmOverview sources={sources} targets={targets} seriesName={id => id === "series" ? "백합" : undefined} version={0} restricted={false} privacyMode={false} onBack={vi.fn()} onOpen={onOpen} />);
   const learning = await screen.findByRole("region", { name: "배우는 중인 캐릭터" });
-  expect(screen.getByText("확인할 항목이 없습니다.")).toBeInTheDocument();
+  expect(screen.queryByText("확인할 항목이 없습니다.")).toBeNull();
   expect(document.querySelector(".crv-groups .crv-group")).toBeNull();
   expect(screen.queryByRole("region", { name: "백합" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "전체 확인" })).toBeNull();
-  await userEvent.setup().click(within(learning).getByRole("button", { name: "배우는 중인 캐릭터 1명" }));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "전체 확인" }));
+  expect(onOpen).toHaveBeenLastCalledWith({});
+  await user.click(within(learning).getByRole("button", { name: "배우는 중인 캐릭터 1명" }));
+  await user.click(within(learning).getByRole("button", { name: "백합 전체 확인 1건" }));
+  expect(onOpen).toHaveBeenLastCalledWith({ series: { id: "series", name: "백합" } });
   expect(within(learning).getByRole("button", { name: "백합 › 키사키 확인 1건" })).toBeInTheDocument();
 });
 

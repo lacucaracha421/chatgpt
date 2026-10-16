@@ -95,6 +95,32 @@ it("keeps the old suggestion count and rows without a busy label throughout a sl
   expect(screen.queryByText("이졸데")).toBeNull();
 });
 
+it("keeps an empty suggestion section stable across overlapping return refreshes", async () => {
+  const client = api(), onCount = vi.fn();
+  vi.mocked(client.list).mockResolvedValue([]);
+  const tree = (version: number) => <CharacterSuggestionsOverview version={version} privacyMode={false} api={client} onCount={onCount} />;
+  const view = render(tree(0));
+  const empty = await screen.findByText("조건에 맞는 새 캐릭터 제안이 없습니다.");
+  vi.useFakeTimers();
+  let finishOld!: (rows: Suggestion[]) => void, finishNew!: (rows: Suggestion[]) => void;
+  vi.mocked(client.list)
+    .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
+  view.rerender(tree(1));
+  await act(async () => { vi.advanceTimersByTime(1200); });
+  expect(empty).toBeInTheDocument();
+  expect(screen.queryByText("제안 불러오는 중…")).toBeNull();
+  view.rerender(tree(2));
+  await act(async () => finishOld([suggestion]));
+  expect(empty).toBeInTheDocument();
+  expect(screen.queryByText("이졸데")).toBeNull();
+  expect(onCount).toHaveBeenLastCalledWith(0);
+  await act(async () => finishNew([suggestion]));
+  expect(empty).not.toBeInTheDocument();
+  expect(screen.getByText("이졸데")).toBeInTheDocument();
+  expect(onCount).toHaveBeenLastCalledWith(1);
+});
+
 it("keeps a dismissed suggestion dismissed after a remount at the same data revision", async () => {
   const client = api();
   const tree = () => <CharacterSuggestionsOverview version={0} privacyMode={false} api={client} />;

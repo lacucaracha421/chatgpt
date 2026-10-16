@@ -30,6 +30,7 @@ type Props = {
 
 const ALL = "\u0000all";
 const seriesKey = (group: ConfirmGroup) => group.seriesId ?? "";
+const reviewCount = (group: ConfirmGroup) => group.counts.total + group.folded.reduce((sum, character) => sum + character.counts.total, 0);
 
 /**
  * 확인 overview, opened from Home: every pending item counted per series and character with its kinds
@@ -68,8 +69,10 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
   const counted = useMemo(() => groups.filter(group => group.counts.total > 0), [groups]);
   const foldedGroups = useMemo(() => groups.filter(group => group.folded.length > 0), [groups]);
   const totals = useMemo(() => groups.reduce((sum, group) => {
-    for (const kind of CONFIRM_KINDS) sum[kind] += group.counts[kind];
-    sum.total += group.counts.total;
+    for (const counts of [group.counts, ...group.folded.map(character => character.counts)]) {
+      for (const kind of CONFIRM_KINDS) sum[kind] += counts[kind];
+      sum.total += counts.total;
+    }
     return sum;
   }, emptyConfirmCounts()), [groups]);
   const current = counted.find(group => seriesKey(group) === selected);
@@ -102,7 +105,7 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
   } else {
     body = <>
       {unread.length > 0 && <div className="crv-notice" role="status"><p>{unread.map(kind => confirmKindLabel[kind]).join(" · ")} 목록은 읽지 못해 세지 않았습니다.</p><Button size="sm" onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>}
-      {counted.length === 0 && <div className="crv-notice" role="status"><p>확인할 항목이 없습니다.</p></div>}
+      {totals.total === 0 && <div className="crv-notice" role="status"><p>확인할 항목이 없습니다.</p></div>}
       <div className="crv-groups" aria-busy={reading || undefined}>
         {shown.map(group => <section key={seriesKey(group)} className="crv-group" aria-label={group.seriesName}>
           <header className="crv-group__head">
@@ -110,7 +113,7 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
             <span className="crv-count numeric">{group.counts.total.toLocaleString()}<small>건</small></span>
             <Split counts={group.counts} />
             <span className="crv-space" />
-            {group.seriesId && group.counts.total > 0 && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${group.counts.total}건`}
+            {group.seriesId && group.counts.total > 0 && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${reviewCount(group)}건`}
               onClick={() => onOpen({ series: { id: group.seriesId!, name: group.seriesName } })}>시리즈 전체 확인<ChevronRightIcon aria-hidden="true" /></Button>}
           </header>
           <div className="crv-characters">
@@ -130,9 +133,9 @@ export function ConfirmOverview({ targets, seriesName, version, restricted, priv
     <div className="crv-scroll">
       <div className="crv-page">
         {!restricted && <CharacterSuggestionsOverview version={version} privacyMode={privacyMode} onCount={setSuggestionCount} onSaved={() => setRetry(value => value + 1)} />}
-        {tallies && !restricted && !error && counted.length > 0 && <div className="crv-summary">
+        {tallies && !restricted && !error && totals.total > 0 && <div className="crv-summary">
           <span className="crv-count crv-count--lg numeric">{totals.total.toLocaleString()}<small>건</small></span>
-          <span className="crv-summary__t">{counted.length.toLocaleString()}개 시리즈 · {counted.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명
+          <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {new Set(groups.flatMap(group => [...group.characters, ...group.folded].map(character => character.targetId))).size.toLocaleString()}명
             <Split counts={totals} /></span>
           <span className="crv-space" />
           <Button size="sm" onClick={() => onOpen({})}>전체 확인</Button>
@@ -173,8 +176,7 @@ function CharacterRow({ group, character, privacyMode, onOpen }: { group: Confir
 }
 
 /**
- * 인식 추천 of characters still far from switching to 학습 인식: kept out of the counts, one step away.
- * Opening a character here lists everything it has, folded items included.
+ * Learning suggestions stay grouped at the bottom, with the same review entry points.
  */
 function FoldedCharacters({ groups, privacyMode, open, onToggle, onOpen }: { groups: ConfirmGroup[]; privacyMode: boolean; open: boolean; onToggle: () => void; onOpen: (scope: ConfirmScope) => void }) {
   return <section className="crv-folded" aria-label="배우는 중인 캐릭터">
@@ -184,6 +186,8 @@ function FoldedCharacters({ groups, privacyMode, open, onToggle, onOpen }: { gro
       <div className="ui-fold__inner">
         {groups.map(group => <section key={seriesKey(group)} className="crv-folded__series" aria-label={group.seriesName}>
           <h3>{group.seriesName}</h3>
+          {group.seriesId && <Button size="sm" variant="ghost" className="crv-group__open" aria-label={`${group.seriesName} 전체 확인 ${reviewCount(group)}건`}
+            onClick={() => onOpen({ series: { id: group.seriesId!, name: group.seriesName } })}>시리즈 전체 확인<ChevronRightIcon aria-hidden="true" /></Button>}
           <div className="crv-characters">
             {group.folded.map(character => <CharacterRow key={character.targetId} group={group} character={character} privacyMode={privacyMode} onOpen={onOpen} />)}
           </div>

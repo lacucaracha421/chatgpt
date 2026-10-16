@@ -383,6 +383,13 @@ it("says 모두 맞음 for an unmarked grid and stores 맞음 for everything sho
   expect(await screen.findByText(/2장을 맞음으로 처리했습니다\. 한 번에 되돌릴 수는 없습니다/)).toBeInTheDocument();
 });
 
+it.each([undefined, { series: { id: "series", name: "백합" } }])("includes learning characters in bulk review for scope %j", async scope => {
+  const { decisions } = await fixture({ candidates: [shadowItem("c1", "hina", "히나"), shadowItem("f1", "kisaki", "키사키", { folded: true })] }, scope);
+  expect(await tile("키사키", "f1.png")).toBeInTheDocument();
+  await confirmApply(userEvent.setup(), "모두 맞음");
+  expect(decisions.decideBatch).toHaveBeenCalledWith([request("hina", "c1", "accepted"), request("kisaki", "f1", "accepted")]);
+});
+
 it("applies only the active kind tab, moving a tag item outside the series in and rejecting without a move", async () => {
   const { decisions } = await fixture({ tags: [tagItem("o1"), tagItem("t2"), tagItem("o3")], candidates: [shadowItem("c1", "hina", "히나")], folders: { o1: ["other"], o3: ["other"] } });
   const user = userEvent.setup();
@@ -688,6 +695,17 @@ it("shows the empty state, without an apply button, when nothing waits", async (
 });
 
 const hinaScope: ConfirmScope = { series: { id: "series", name: "백합" }, target: { id: "hina", name: "히나" } };
+
+it("continues to a learning character and saves its judgment in the background", async () => {
+  const { decisions } = await completionFixture([shadowItem("h1", "hina", "히나"), shadowItem("f1", "kisaki", "키사키", { folded: true })]);
+  await screen.findByLabelText("확인 정보");
+  const user = userEvent.setup();
+  await user.keyboard("d");
+  await user.click(await screen.findByRole("button", { name: /다음: 키사키/ }));
+  expect(screen.getByLabelText("확인 정보")).toHaveTextContent("f1.png");
+  await user.keyboard("d");
+  await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("kisaki", "f1", "accepted")));
+});
 
 /** The overview already made this full read before opening the scoped dialog. */
 async function completionFixture(candidates = [shadowItem("h1", "hina", "히나")], scope: ConfirmScope = hinaScope,

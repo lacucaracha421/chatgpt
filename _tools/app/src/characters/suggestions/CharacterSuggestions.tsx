@@ -130,7 +130,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
     {!collapsed && <>
       <BusyLabel busy={!!(state.firstLoad)} delay={400}><p role="status">제안 불러오는 중…</p></BusyLabel>
       {state.error && <p role="alert">{state.error} <Button size="sm" onClick={state.refresh}>다시 시도</Button></p>}
-      {!state.loading && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안이 없습니다.</p>}
+      {!state.firstLoad && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안이 없습니다.</p>}
       {[...groups].map(([key, rows]) => <section key={key} className="character-suggestions__group" aria-label={rows[0].seriesName ?? "시리즈 폴더 없음"}>
         <SectionLabel as="h3" title={rows[0].seriesName ?? "시리즈 폴더 없음"} count={rows.length} unit="명" actions={!key ? <small>등록할 때 폴더를 골라요</small> : undefined} />
         <div className="character-suggestion-cards">

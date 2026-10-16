@@ -126,13 +126,13 @@ export function tallyConfirm(items: readonly ConfirmItem[]): ConfirmTally[] {
 export type ConfirmCharacter = { targetId: string; name: string; counts: ConfirmCounts; thumbnailAssetId: string | null };
 export type ConfirmGroup = {
   seriesId: string | null; seriesName: string; counts: ConfirmCounts; characters: ConfirmCharacter[];
-  /** Characters whose 인식 추천 is folded behind "더 보기": not counted in `counts` or anywhere above the series. */
+  /** Learning suggestions grouped at the bottom; their counts are separate from the regular rows' `counts`. */
   folded: ConfirmCharacter[];
 };
 
 /**
  * 확인 split by series and character, busiest first; a character without a known series lands in "기타" (last).
- * `folded` are the 인식 추천 tallies of characters far from switching: they sit under their series, never in its counts.
+ * `folded` are the learning suggestion tallies, grouped separately from each series' regular rows and counts.
  */
 export function confirmGroups(
   tallies: readonly ConfirmTally[],
