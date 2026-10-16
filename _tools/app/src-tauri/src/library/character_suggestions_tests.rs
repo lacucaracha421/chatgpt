@@ -378,10 +378,10 @@ fn suggestion_registration_preselects_inside_and_queues_rest_without_decisions()
 }
 
 #[test]
-fn suggestion_registration_rejects_outside_references_and_rolls_back() {
+fn suggestion_registration_rejects_unsuggested_references_and_rolls_back() {
     let f = fixture();
     let mut draft = request(&f);
-    draft.reference_ids = vec!["asset-6".into()];
+    draft.reference_ids = vec!["not-a-suggested-image".into()];
     assert!(f.library.register_character_suggestion(draft).is_err());
     assert!(f.library.list_character_targets().unwrap().is_empty());
     let mut draft = request(&f);
@@ -389,6 +389,35 @@ fn suggestion_registration_rejects_outside_references_and_rolls_back() {
     assert!(f.library.register_character_suggestion(draft).is_err());
     assert!(f.library.list_character_targets().unwrap().is_empty());
     assert!(f.library.tagger_review_items().unwrap().is_empty());
+}
+
+#[test]
+fn suggestion_registration_fills_references_from_outside_the_series_folder() {
+    // A suggestion whose series folder holds fewer than five of its images (mercy: 3 of 20).
+    let f = fixture();
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id IN ('asset-2','asset-3','asset-4','asset-5')",
+            [&f.outside],
+        )
+        .unwrap();
+    let draft = request(&f);
+    assert_eq!(draft.reference_ids.len(), 5);
+    let result = f.library.register_character_suggestion(draft).unwrap();
+    assert!(!result.target.manual_only);
+    assert!(result.target.ready);
+    assert_eq!(result.target.references.len(), 5);
+    let c = f.library.connection().unwrap();
+    let outside_left: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM asset_classifications WHERE classification_id=?1 AND asset_id IN (SELECT asset_id FROM character_references WHERE target_id=?2)",
+            params![f.outside, result.target.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(outside_left, 0, "every reference sits in the series folder");
 }
 
 #[test]
