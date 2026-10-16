@@ -489,12 +489,9 @@ class ApiTests(Fixture):
                             {"left": evidence(left), "right": evidence(right)}, "now")
             db.commit()
         pending = dup.candidate_id("kHentai", "1", "2")
-        revision = self.listing()["revision"]
         self.assertEqual(self.publish([], generation="v2", final=False).json()["retired"], 0)
         self.assertEqual(self.publish([], generation="v2", final=True).json()["retired"], 1)
         self.assertEqual([i["leftWorkId"] for i in self.listing()["items"]], ["3"])
-        changes = self.client.get(PREFIX + "/changes", headers=self.auth, params={"after": revision}).json()
-        self.assertEqual([(i["candidateId"], i["removed"]) for i in changes["items"]], [(pending, True)])
         self.assertEqual(self.code(self.decide(pending)), "duplicateCandidateMissing")
 
     def test_final_upload_preserves_decided_server_sequel(self):
@@ -563,7 +560,7 @@ class ApiTests(Fixture):
         feed = self.client.get(PREFIX + "/decisions", headers=self.publisher).json()
         self.assertEqual(feed["lastSequence"], head())
 
-    def test_change_feed_and_list_paging(self):
+    def test_list_paging(self):
         works = [work(i, "Original Long Title") for i in range(1, 6)]
         self.publish([self.item(works[0], w) for w in works[1:]])
         page = self.listing(limit=3)
@@ -573,14 +570,6 @@ class ApiTests(Fixture):
         self.assertFalse(rest["hasMore"])
         cached = self.client.get(PREFIX, headers=self.auth)
         self.assertEqual(self.client.get(PREFIX, headers={**self.auth, "If-None-Match": cached.headers["ETag"]}).status_code, 304)
-        changes = self.client.get(PREFIX + "/changes", headers=self.auth, params={"limit": 3}).json()
-        self.assertEqual((len(changes["items"]), changes["hasMore"], changes["nextCursor"]), (3, True, 3))
-        self.decide(page["items"][0]["candidateId"])
-        tail = self.client.get(PREFIX + "/changes", headers=self.auth, params={"after": 3}).json()
-        self.assertEqual([i["revision"] for i in tail["items"]], [5])
-        self.assertIsNotNone(tail["items"][-1]["decision"])
-        self.assertEqual(self.code(self.client.get(PREFIX + "/changes", headers=self.auth, params={"after": 99})),
-                         "duplicateCursorRejected")
         self.assertEqual(self.code(self.client.get(PREFIX, headers=self.auth, params={"cursor": "!!"})),
                          "invalidDuplicateCursor")
 

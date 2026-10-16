@@ -153,29 +153,6 @@ def get_classification_snapshot(
             "revision": int(row["revision"])}
 
 
-def classification_snapshot_meta(
-    authorization: str | None = Header(default=None),
-):
-    api.require_admin_or_extension(authorization)
-
-    with api.get_db() as db:
-        row = db.execute(
-            "SELECT published_at, updated_at, revision, payload FROM classification_snapshots WHERE singleton = 1"
-        ).fetchone()
-
-    if row is None:
-        raise HTTPException(status_code=404, detail="No classification snapshot published yet")
-
-    # `snapshotVersion`/`snapshotDigest` are additive: an older reader that only knows
-    # published_at/updated_at/revision keeps working, and a publisher can observe which
-    # version the server currently holds before staging a new one.
-    payload = json.loads(row["payload"])
-    return {"published_at": row["published_at"], "updated_at": row["updated_at"],
-            "revision": row["revision"],
-            "snapshotVersion": payload.get("snapshotVersion", classification_snapshot.SNAPSHOT_VERSION),
-            "snapshotDigest": classification_snapshot.stored_digest(row["payload"])}
-
-
 # --- Saved X media snapshot (PC -> VPS publish, extension read) ------------
 
 MAX_SAVED_X_MEDIA_KEYS = 20_000
@@ -263,6 +240,5 @@ def register(app, services):
     api = services
     app.put("/v1/classifications")(publish_classification_snapshot)
     app.get("/v1/classifications")(get_classification_snapshot)
-    app.get("/v1/classifications/meta")(classification_snapshot_meta)
     app.put("/v1/saved-x-media")(publish_saved_x_media_snapshot)
     app.get("/v1/saved-x-media")(get_saved_x_media_snapshot)

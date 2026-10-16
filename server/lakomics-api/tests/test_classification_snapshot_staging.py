@@ -43,7 +43,6 @@ import classification_authority  # noqa: E402
 import classification_snapshot  # noqa: E402
 
 SNAPSHOT = "/v1/classifications"
-META = "/v1/classifications/meta"
 BASELINE = "/v1/classifications/authority/baseline"
 
 ROOT = "10000000-0000-4000-8000-000000000001"
@@ -741,21 +740,6 @@ class DigestTests(StagingFixture):
         second = self.publish(v2_body(published_at="2026-09-16T12:00:00+00:00"))
         self.assertEqual(first.json()["snapshotDigest"],
                          second.json()["snapshotDigest"])
-
-    def test_the_meta_route_reports_version_and_digest(self):
-        self.publish(v2_body())
-        meta = self.client.get(META, headers=self.auth)
-        self.assertEqual(meta.status_code, 200, meta.text)
-        body = meta.json()
-        self.assertEqual(body["snapshotVersion"], 2)
-        self.assertEqual(len(body["snapshotDigest"]), 64)
-        # The legacy fields remain, so existing consumers keep working.
-        self.assertEqual(body["published_at"], "2026-09-16T00:00:00+00:00")
-        self.assertIn("updated_at", body)
-        self.assertIn("revision", body)
-
-    def test_the_meta_route_still_404s_before_any_publish(self):
-        self.assertEqual(self.client.get(META, headers=self.auth).status_code, 404)
 
 
 class LegacyReadCompatibilityTests(StagingFixture):

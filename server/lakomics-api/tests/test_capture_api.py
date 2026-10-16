@@ -771,10 +771,6 @@ class ClassificationSnapshotApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/v1/classifications", headers=self.auth).status_code, 404
         )
-        self.assertEqual(
-            self.client.get("/v1/classifications/meta", headers=self.auth).status_code,
-            404,
-        )
 
     def test_oversized_snapshot_is_rejected(self):
         entries = [

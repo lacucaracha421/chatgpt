@@ -759,7 +759,6 @@ from library_snapshots import (
     MAX_LEGACY_SNAPSHOT_BYTES as MAX_LEGACY_SNAPSHOT_BYTES,
     publish_classification_snapshot as publish_classification_snapshot,
     get_classification_snapshot as get_classification_snapshot,
-    classification_snapshot_meta as classification_snapshot_meta,
     MAX_SAVED_X_MEDIA_KEYS as MAX_SAVED_X_MEDIA_KEYS,
     MAX_SAVED_X_MEDIA_KEY_BYTES as MAX_SAVED_X_MEDIA_KEY_BYTES,
     MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES as MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES,

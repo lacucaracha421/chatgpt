@@ -1107,8 +1107,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
 # ---------------------------------------------------------------------------
 
 # A dedicated prefix rather than bare ``/v1/classifications/...`` paths, because the
-# legacy PC-published snapshot surface already owns ``/v1/classifications`` and
-# ``/v1/classifications/meta``. Keeping every authority route under one prefix means
+# legacy PC-published snapshot surface already owns ``/v1/classifications``. Keeping every authority route under one prefix means
 # the authority contract can never be mistaken for, or shadow, that publication.
 PREFIX = "/v1/classifications/authority"
 

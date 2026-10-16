@@ -20,9 +20,6 @@ Routes (all JSON, `{"code","message"}` errors with Korean messages):
   server-found ones the PC's comparison now covers). Idempotent by `operationId`.
 * ``GET  /v1/mobile-catalog/duplicates`` (client) - the review list, newest first,
   undecided by default (``state=undecided|decided|all``), keyset pages, ETag.
-* ``GET  /v1/mobile-catalog/duplicates/changes`` (client) - candidate change feed:
-  every insert, content change, retirement and decision bumps the row to a new, unique
-  revision; ``after`` is exclusive; bounded pages; ETag.
 * ``POST /v1/mobile-catalog/duplicates/decisions`` (client) - record keep both / hide one
   edition / not duplicate / cleared against the pair's `expectedRevision` (409 on
   conflict). Idempotent by `operationId`.
@@ -950,24 +947,6 @@ def register(app, get_db, require_client, require_publisher):
             "counts": {"undecided": counts[0], "decided": counts[1]},
             "items": [_item(r) for r in rows],
             "nextCursor": _encode_cursor(rows[-1]["id"]) if more else None, "hasMore": more}, if_none_match)
-
-    @app.get(PREFIX + "/changes")
-    def changes(after: int = Query(default=0, ge=0, le=MAX_CURSOR), limit: int = Query(default=100, ge=1, le=200),
-                authorization: str | None = Header(default=None),
-                if_none_match: str | None = Header(default=None)):
-        require_client(authorization)
-        with get_db() as db:
-            db.execute("BEGIN")
-            revision = _state(db)["revision"]
-            if after > revision:
-                fail(409, "duplicateCursorRejected", "중복 판본 동기화 위치를 확인해 주세요.")
-            rows = db.execute(f"{JOINED} WHERE c.changed>? ORDER BY c.changed LIMIT ?", (after, limit + 1)).fetchall()
-        more = len(rows) > limit
-        rows = rows[:limit]
-        return conditional.json_response({
-            "version": 1, "after": after, "revision": revision,
-            "nextCursor": rows[-1]["changed"] if rows else after, "hasMore": more,
-            "items": [_item(r) for r in rows]}, if_none_match)
 
     def apply(body, command):
         _uuid(command.operationId, "invalidDuplicateDecision", "검토 요청 식별자가 올바르지 않습니다.")

@@ -15,7 +15,7 @@ fence the legacy writer by itself. The 2A.2 activation route consumes this store
 source explicitly and atomically; the PC replica and Android slices remain later work.
 
 The staging table is the shipped ``classification_snapshots`` singleton, so the legacy
-readers (``GET /v1/classifications``, ``/meta``, the extension bootstrap and the mobile
+readers (``GET /v1/classifications``, the extension bootstrap and the mobile
 Classification readers) keep working against the same row without being taught anything
 new.
 

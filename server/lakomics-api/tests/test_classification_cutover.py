@@ -98,9 +98,20 @@ class CutoverFixture(unittest.TestCase):
         return self.client.put("/v1/classifications", headers=self.admin,
                                json=body if body is not None else snapshot())
 
+    def stored_digest(self):
+        with api_app.get_db() as db:
+            payload = db.execute("SELECT payload FROM classification_snapshots WHERE singleton=1").fetchone()[0]
+        return classification_snapshot.stored_digest(payload)
+
+    def staging_row(self):
+        with api_app.get_db() as db:
+            return tuple(db.execute(
+                "SELECT published_at,updated_at,revision,payload FROM classification_snapshots WHERE singleton=1"
+            ).fetchone())
+
     def activate(self, digest=None, library_id=LIBRARY, headers=None):
         if digest is None:
-            digest = self.client.get("/v1/classifications/meta", headers=self.admin).json()["snapshotDigest"]
+            digest = self.stored_digest()
         return self.client.post(
             "/v1/classifications/authority/activate",
             headers=headers or self.publisher,
@@ -237,13 +248,13 @@ class ClassificationCutoverTests(CutoverFixture):
         staged = self.stage()
         digest = staged.json()["snapshotDigest"]
         self.assertEqual(self.activate(digest).status_code, 200)
-        before = self.client.get("/v1/classifications/meta", headers=self.admin).json()
+        before = self.staging_row()
         later = snapshot(published_at="2026-09-17T00:00:00+00:00")
         later["entries"][1]["name"] = "덮어쓰기"
         response = self.stage(later)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json()["detail"]["code"], authority.CODE_LEGACY_WRITER_FENCED)
-        self.assertEqual(self.client.get("/v1/classifications/meta", headers=self.admin).json(), before)
+        self.assertEqual(self.staging_row(), before)
 
     def test_replication_keeps_asset_metadata_but_cannot_overwrite_classification_after_activation(self):
         self.prepare_asset()
