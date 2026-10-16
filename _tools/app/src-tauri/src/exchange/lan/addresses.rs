@@ -1,7 +1,7 @@
 //! Route-selected IPv4 addresses; UDP connect chooses a route without sending data.
 use super::LanAddress;
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
-fn allowed(kind: &str, ip: Ipv4Addr) -> bool {
+pub(in crate::exchange) fn allowed(kind: &str, ip: Ipv4Addr) -> bool {
     let [a, b, _, _] = ip.octets();
     match kind {
         "lan" => a == 10 || (a == 172 && (16..=31).contains(&b)) || (a == 192 && b == 168),

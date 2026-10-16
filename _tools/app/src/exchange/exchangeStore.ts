@@ -11,6 +11,8 @@ export type ExchangeOutgoing = {
   done: number; message: string | null; note: string | null; retryable: boolean; cancellable: boolean; createdAt: string | null;
   /** Files sent together share it; the receiving device. */
   batchId?: string | null; toDevice?: string | null;
+  /** How a direct send travelled; absent for the server path. */
+  route?: "lan" | "tailscale";
 };
 export type ExchangeIncoming = {
   transferId: string; fileName: string; sizeBytes: number; fromName: string | null; state: "downloading" | "failed"; done: number; message: string | null;
@@ -19,6 +21,8 @@ export type ExchangeIncoming = {
 export type ExchangeReceived = {
   transferId: string; fileName: string; sizeBytes: number; fromName: string | null; receivedAt: string; exists: boolean;
   batchId?: string | null; fromDevice?: string | null;
+  /** How a direct transfer arrived; absent for the server path. */
+  route?: "lan" | "tailscale";
 };
 export type ExchangeSnapshot = {
   availability: ExchangeAvailability;

@@ -136,6 +136,20 @@ pub(super) fn server(
         })
 }
 
+/// TLS 1.3 client that presents our certificate and accepts exactly the certificate whose
+/// fingerprint is `pin`.
+pub(super) fn client(
+    certificate: &CertificateDer<'static>,
+    key: &rustls::pki_types::PrivateKeyDer<'static>,
+    pin: String,
+) -> Result<rustls::ClientConfig, Error> {
+    rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .dangerous()
+        .with_custom_certificate_verifier(Pinned::new(move |seen| seen == pin))
+        .with_client_auth_cert(vec![certificate.clone()], key.clone_key())
+}
+
 #[cfg(test)]
 pub(super) fn test_identity() -> Identity {
     let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();

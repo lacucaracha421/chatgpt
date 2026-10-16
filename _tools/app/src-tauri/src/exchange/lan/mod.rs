@@ -14,9 +14,10 @@
 //!   offsetMismatch 409 {offset}, digestMismatch 422 (delete part), cancelled 410.
 //! * POST /cancel {transferId}. Error JSON is {error:"<code>", ...}.
 //! One transferId spans LAN, Tailscale and server fallback for receipt deduplication.
-//! S2 receives directly using the shared durable publication pipeline.
+//! S2 receives directly using the shared durable publication pipeline; `client` sends.
 
 pub(super) mod addresses;
+pub(super) mod client;
 mod http;
 pub(super) mod identity;
 pub(super) mod server;

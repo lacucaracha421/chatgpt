@@ -175,7 +175,7 @@ fn connection<S: LanSink>(
 
 /// Accept connections on `listener`: one thread per connection, at most
 /// [`MAX_CONNECTIONS`] alive; further connections are closed at once.
-fn serve<S: LanSink>(
+pub(super) fn serve<S: LanSink>(
     listener: TcpListener,
     config: Arc<rustls::ServerConfig>,
     sink: Arc<S>,

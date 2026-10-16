@@ -17,6 +17,8 @@ export type ExchangeRow = {
   peerId?: string;
   /** Saved rows: when the file reached Download/Lakomics. */
   savedAt?: string;
+  /** Direct transfers: how the file travelled. Absent for the server path. */
+  route?: 'lan' | 'tailscale';
 };
 export type ExchangeDevice = {deviceId: string; name: string; kind: string; lastSeenAt: string};
 export type ExchangeSnapshot = {

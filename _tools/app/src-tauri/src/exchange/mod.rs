@@ -129,6 +129,29 @@ struct StoredSend {
     note: Option<String>,
 }
 
+/// A file sent directly to the other device (no server transfer exists for it), kept for
+/// the timeline like a delivered server transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct DirectSent {
+    transfer_id: String,
+    batch_id: String,
+    to_device: String,
+    #[serde(default)]
+    to_name: Option<String>,
+    file_name: String,
+    size_bytes: u64,
+    created_at: String,
+    sent_at: String,
+    /// `lan` or `tailscale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    route: Option<String>,
+    /// `delivered`, or `cancelled` when the receiving device declined it.
+    state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Stored {
@@ -139,9 +162,36 @@ struct Stored {
     sends: Vec<StoredSend>,
     #[serde(default)]
     peers: Vec<lan::LanPeer>,
+    #[serde(default)]
+    direct_sent: Vec<DirectSent>,
+}
+
+fn route_name(route: Option<&str>) -> Option<&'static str> {
+    match route {
+        Some("lan") => Some("lan"),
+        Some("tailscale") => Some("tailscale"),
+        _ => None,
+    }
 }
 
 impl Stored {
+    /// Newest first; same history window and size as the received rows.
+    fn record_direct(&mut self, entry: DirectSent, now: chrono::DateTime<chrono::Utc>) {
+        self.direct_sent
+            .retain(|row| row.transfer_id != entry.transfer_id);
+        self.direct_sent.push(entry);
+        self.prune_direct(now);
+    }
+
+    fn prune_direct(&mut self, now: chrono::DateTime<chrono::Utc>) {
+        let cutoff = now - chrono::Duration::days(HISTORY_DAYS);
+        self.direct_sent.retain(|row| {
+            chrono::DateTime::parse_from_rfc3339(&row.sent_at).is_ok_and(|at| at >= cutoff)
+        });
+        self.direct_sent.sort_by(|a, b| b.sent_at.cmp(&a.sent_at));
+        self.direct_sent.truncate(MAX_RECEIVED_ROWS);
+    }
+
     fn refresh_peers(&mut self, devices: &[Device]) -> bool {
         let peers = lan::peers(devices, &self.device_id);
         let changed = self.peers != peers;
@@ -178,6 +228,7 @@ impl Stored {
     /// Received rows older than the server's 7-day history go, newest 200 stay; an
     /// unacknowledged row is kept until its ack succeeds, since it is the ledger.
     fn prune(&mut self, now: chrono::DateTime<chrono::Utc>) {
+        self.prune_direct(now);
         let cutoff = now - chrono::Duration::days(HISTORY_DAYS);
         self.received.retain(|row| {
             !row.acked
@@ -424,6 +475,9 @@ pub(crate) struct OutgoingRow {
     retryable: bool,
     cancellable: bool,
     created_at: Option<String>,
+    /// How a direct send travelled (`lan` or `tailscale`); absent for the server path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -453,6 +507,9 @@ pub(crate) struct ReceivedRow {
     from_name: Option<String>,
     received_at: String,
     exists: bool,
+    /// How a direct transfer arrived (`lan` or `tailscale`); absent for the server path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    route: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -507,6 +564,7 @@ fn outbox_row(transfer: &Transfer, note: Option<&String>) -> OutgoingRow {
         retryable: false,
         cancellable,
         created_at: transfer.created_at.clone(),
+        route: None,
     }
 }
 
@@ -531,6 +589,27 @@ fn job_row(job: &SendJob) -> OutgoingRow {
         retryable: job.phase == Phase::Failed && job.retryable,
         cancellable: true,
         created_at: Some(job.stored.created_at.clone()),
+        route: None,
+    }
+}
+
+fn direct_row(row: &DirectSent) -> OutgoingRow {
+    let declined = row.state == "cancelled";
+    OutgoingRow {
+        transfer_id: row.transfer_id.clone(),
+        batch_id: Some(row.batch_id.clone()),
+        to_device: Some(row.to_device.clone()),
+        file_name: row.file_name.clone(),
+        size_bytes: row.size_bytes,
+        to_name: row.to_name.clone(),
+        state: if declined { "cancelled" } else { "delivered" },
+        done: 0,
+        message: declined.then(|| "받는 쪽에서 거절함".to_owned()),
+        note: row.note.clone(),
+        retryable: false,
+        cancellable: false,
+        created_at: Some(row.created_at.clone()),
+        route: route_name(row.route.as_deref()),
     }
 }
 
@@ -562,6 +641,16 @@ fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
                         .any(|job| job.stored.transfer_id == row.transfer_id)
             })
             .map(|row| outbox_row(row, state.notes.get(&row.transfer_id))),
+    );
+    // Direct sends have no server transfer; a row that also exists there is shown once.
+    let listed: HashSet<String> = outgoing.iter().map(|row| row.transfer_id.clone()).collect();
+    outgoing.extend(
+        state
+            .stored
+            .direct_sent
+            .iter()
+            .filter(|row| !listed.contains(&row.transfer_id))
+            .map(direct_row),
     );
     Snapshot {
         availability: state.availability.clone(),
@@ -609,6 +698,7 @@ fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
                 from_name: row.from_name.clone(),
                 received_at: row.received_at.clone(),
                 exists: false,
+                route: route_name(row.via.as_deref()),
             })
             .collect(),
         unseen: state.stored.unseen(),
@@ -2024,6 +2114,16 @@ fn run_send(context: &Context, transfer_id: &str) -> Result<(), ApiError> {
     if changed {
         current = renew_id(transfer_id);
     }
+    // Straight to the other device when it is reachable; the server takes over under the
+    // same id otherwise (the receiver's receipt ledger keeps a half-delivered file single).
+    with_job(&current, |job| {
+        job.phase = Phase::Uploading;
+        job.done = 0;
+    });
+    let direct = with_job(&current, |job| job.stored.clone()).ok_or(ApiError::Cancelled)?;
+    if try_direct(context, &direct, &sha256, &cancel)? {
+        return Ok(());
+    }
     for attempt in 0..2 {
         let stored = with_job(&current, |job| job.stored.clone()).ok_or(ApiError::Cancelled)?;
         with_job(&current, |job| {
@@ -2060,6 +2160,124 @@ fn run_send(context: &Context, transfer_id: &str) -> Result<(), ApiError> {
         }
     }
     Err(ApiError::Invalid)
+}
+
+static LAN_SENDER: OnceLock<lan::client::Sender> = OnceLock::new();
+
+/// The direct sender, once this device's LAN identity exists.
+fn lan_sender() -> Option<&'static lan::client::Sender> {
+    let identity = LAN_IDENTITY.get()?;
+    Some(LAN_SENDER.get_or_init(|| lan::client::Sender::new(lan::client::Tls::new(identity))))
+}
+
+/// Try the direct path for one send. `Ok(true)`: the send is over (delivered, or declined by
+/// the receiving device); `Ok(false)`: carry on with the server under the same id.
+fn try_direct(
+    context: &Context,
+    stored: &StoredSend,
+    sha256: &str,
+    cancel: &AtomicBool,
+) -> Result<bool, ApiError> {
+    use lan::client::Outcome;
+    let Some(sender) = lan_sender() else {
+        return Ok(false);
+    };
+    let (peer, device_id) = {
+        let state = lock();
+        (
+            state
+                .stored
+                .peers
+                .iter()
+                .find(|peer| peer.device_id == stored.to_device)
+                .cloned(),
+            state.stored.device_id.clone(),
+        )
+    };
+    let Some(peer) = peer else {
+        return Ok(false);
+    };
+    let _permit = context.client.gate.permit().map_err(|_| ApiError::Held)?;
+    let id = stored.transfer_id.as_str();
+    let job = lan::client::Job {
+        id,
+        batch: &stored.batch_id,
+        from: &device_id,
+        name: &stored.file_name,
+        size: stored.size_bytes,
+        sha256,
+    };
+    let path = stored.path.clone();
+    let source = move |offset: u64| -> io::Result<Box<dyn Read>> {
+        use io::{Seek, SeekFrom};
+        let mut file = File::open(&path)?;
+        file.seek(SeekFrom::Start(offset))?;
+        Ok(Box::new(file))
+    };
+    let mut progress = |done: u64| {
+        with_job(id, |job| job.done = done);
+        emit_progress();
+    };
+    match sender.send(&peer, &job, &source, &mut progress, cancel) {
+        Err(code) => Err(ApiError::Local(io::Error::other(code))),
+        Ok(Outcome::Saved { route }) => {
+            finish_direct(stored, Some(route), "delivered")?;
+            Ok(true)
+        }
+        Ok(Outcome::PeerCancelled { route }) => {
+            finish_direct(stored, route, "cancelled")?;
+            Ok(true)
+        }
+        Ok(Outcome::Cancelled) => {
+            sender.cancel(&peer, id);
+            Err(ApiError::Cancelled)
+        }
+        Ok(Outcome::Fallback {
+            reason, refresh, ..
+        }) => {
+            eprintln!("file exchange direct send not used ({reason}); sending through the server");
+            if refresh {
+                // The cached pin or addresses may be stale: re-read the device list.
+                wake_receiver();
+            }
+            Ok(false)
+        }
+    }
+}
+
+/// Record a finished direct send: it leaves the unfinished sends and joins the history.
+fn finish_direct(
+    send: &StoredSend,
+    route: Option<&'static str>,
+    state_name: &str,
+) -> Result<(), ApiError> {
+    {
+        let mut state = lock();
+        let to_name = state
+            .jobs
+            .iter()
+            .find(|job| job.stored.transfer_id == send.transfer_id)
+            .and_then(|job| job.stored.to_name.clone())
+            .or_else(|| send.to_name.clone());
+        let entry = DirectSent {
+            transfer_id: send.transfer_id.clone(),
+            batch_id: send.batch_id.clone(),
+            to_device: send.to_device.clone(),
+            to_name,
+            file_name: send.file_name.clone(),
+            size_bytes: send.size_bytes,
+            created_at: send.created_at.clone(),
+            sent_at: now_rfc3339(),
+            route: route.map(str::to_owned),
+            state: state_name.to_owned(),
+            note: send.note.clone(),
+        };
+        retire_send_with(&mut state, &send.transfer_id, |stored| {
+            stored.record_direct(entry, chrono::Utc::now())
+        })?;
+    }
+    emit();
+    Ok(())
 }
 
 fn renew_id(transfer_id: &str) -> String {
@@ -2145,8 +2363,18 @@ fn reconcile_outbox(state: &mut State, fetched: Vec<Transfer>) -> Result<(), Api
 }
 
 fn retire_send(state: &mut State, transfer_id: &str) -> Result<(), ApiError> {
+    retire_send_with(state, transfer_id, |_| {})
+}
+
+/// Retire a finished send; `also` changes the stored state in the same durable write.
+fn retire_send_with(
+    state: &mut State,
+    transfer_id: &str,
+    also: impl FnOnce(&mut Stored),
+) -> Result<(), ApiError> {
     commit(state.path.as_deref(), &mut state.stored, |stored| {
         stored.sends.retain(|send| send.transfer_id != transfer_id);
+        also(stored);
     })
     .map_err(ApiError::Local)?;
     if let Some(job) = state
@@ -2954,6 +3182,7 @@ mod tests {
             ],
             sends: Vec::new(),
             peers: Vec::new(),
+            direct_sent: Vec::new(),
         };
         stored.prune(chrono::Utc::now());
         let ids: Vec<_> = stored
@@ -3065,6 +3294,7 @@ mod tests {
                     received: vec![],
                     sends: vec![send("sent"), send("other")],
                     peers: Vec::new(),
+                    direct_sent: Vec::new(),
                 },
                 availability: Availability::unavailable("test"),
                 self_name: None,
@@ -3434,6 +3664,113 @@ mod tests {
         assert!(reloaded.ledger(&theirs.transfer_id).is_none());
         // The empty reservation went; someone else's file stayed.
         assert_eq!(names(&downloads), ["a.bin", "c.bin"]);
+    }
+
+    fn direct(id: &str, days_ago: i64, route: Option<&str>, state: &str) -> DirectSent {
+        DirectSent {
+            transfer_id: id.into(),
+            batch_id: "batch".into(),
+            to_device: "tablet".into(),
+            to_name: Some("Tab".into()),
+            file_name: format!("{id}.jpg"),
+            size_bytes: 5,
+            created_at: now_rfc3339(),
+            sent_at: (chrono::Utc::now() - chrono::Duration::days(days_ago))
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            route: route.map(str::to_owned),
+            state: state.into(),
+            note: None,
+        }
+    }
+
+    #[test]
+    fn direct_sends_show_as_delivered_rows_with_their_route_and_age_out_with_the_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        let mut state = State {
+            path: Some(path.clone()),
+            stored: Stored {
+                device_id: uuid::Uuid::new_v4().to_string(),
+                ..Stored::default()
+            },
+            availability: Availability::unavailable("test"),
+            self_name: None,
+            devices: vec![],
+            outbox: vec![],
+            jobs: vec![],
+            incoming: vec![],
+            declined: HashSet::new(),
+            cancels: vec![],
+            refresh: false,
+            token: TokenState::Unknown,
+            endpoint: None,
+            parts: None,
+            lan_parts: None,
+            lan_cancelled: HashSet::new(),
+            zips: None,
+            thumbs: None,
+            notes: Default::default(),
+            last_progress: Instant::now(),
+        };
+        let now = chrono::Utc::now();
+        state
+            .stored
+            .record_direct(direct("fresh", 0, Some("lan"), "delivered"), now);
+        state
+            .stored
+            .record_direct(direct("declined", 1, Some("tailscale"), "cancelled"), now);
+        state
+            .stored
+            .record_direct(direct("old", 8, Some("lan"), "delivered"), now);
+        // A resend under the same id replaces its row instead of doubling it.
+        state
+            .stored
+            .record_direct(direct("fresh", 0, Some("tailscale"), "delivered"), now);
+        let mut received = received("arrived", 0, true);
+        received.via = Some("tailscale".into());
+        state.stored.received.push(received);
+        state
+            .stored
+            .received
+            .push(self::received("by-server", 0, true));
+
+        let snapshot = snapshot(&state, None);
+        let rows: Vec<_> = snapshot
+            .outgoing
+            .iter()
+            .map(|row| (row.transfer_id.as_str(), row.state, row.route))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("fresh", "delivered", Some("tailscale")),
+                ("declined", "cancelled", Some("tailscale"))
+            ]
+        );
+        assert!(!snapshot.outgoing[0].cancellable && !snapshot.outgoing[0].retryable);
+        assert_eq!(
+            snapshot.outgoing[1].message.as_deref(),
+            Some("받는 쪽에서 거절함")
+        );
+        let routes: Vec<_> = snapshot
+            .received
+            .iter()
+            .map(|row| (row.transfer_id.as_str(), row.route))
+            .collect();
+        assert!(routes.contains(&("arrived", Some("tailscale"))));
+        assert!(routes.contains(&("by-server", None)));
+
+        // Survives a restart; the 200-row cap applies; an old file has no direct sends.
+        state.stored.save(&path).unwrap();
+        assert_eq!(Stored::load(&path).direct_sent, state.stored.direct_sent);
+        for index in 0..205 {
+            state
+                .stored
+                .record_direct(direct(&format!("bulk{index}"), 0, None, "delivered"), now);
+        }
+        assert_eq!(state.stored.direct_sent.len(), MAX_RECEIVED_ROWS);
+        fs::write(&path, br#"{"deviceId":"x"}"#).unwrap();
+        assert!(Stored::load(&path).direct_sent.is_empty());
     }
 }
 
