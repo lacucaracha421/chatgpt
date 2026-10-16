@@ -170,7 +170,6 @@ impl Library {
         super::collection_authority::enqueue_stored_person_portrait(&tx, &status, person)?;
         let result = portrait(&tx, person)?.ok_or(AvError::Invalid)?;
         tx.commit()?;
-        self.publication_inputs.signal(&[9]);
         Ok(result)
     }
     pub fn clear_av_portrait(&self, person: &str) -> Result<(), AvError> {
@@ -184,7 +183,6 @@ impl Library {
             [person],
         )?;
         tx.commit()?;
-        self.publication_inputs.signal(&[9]);
         Ok(())
     }
     pub(crate) fn preview_av_commons_portrait_with(
@@ -272,7 +270,6 @@ impl Library {
             preview: image.preview.clone(),
         };
         tx.commit()?;
-        self.publication_inputs.signal(&[9]);
         pending.remove(&key);
         Ok(result)
     }
@@ -424,7 +421,6 @@ impl Library {
             preview: image.preview.clone(),
         };
         tx.commit()?;
-        self.publication_inputs.signal(&[9]);
         pending.remove(&key);
         Ok(result)
     }
@@ -726,7 +722,6 @@ impl Library {
         )?;
         tx.commit()?;
         pending.remove(&key);
-        self.publication_inputs.signal(&[9]);
         Ok(AvPortrait::Stashdb {
             preview: image.preview,
         })

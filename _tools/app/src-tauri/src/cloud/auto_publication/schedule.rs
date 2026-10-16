@@ -224,7 +224,7 @@ impl Library {
         drop(db);
         // In-memory input changes cover lanes without generation columns. A
         // clean startup/safety probe alone is not pending content.
-        for (slot, kind) in [(1,"characters"),(2,"visibility"),(3,"similarity"),(4,"catalogDuplicates"),(5,"releases"),(6,"bindings"),(7,"metadata"),(8,"upcoming"),(9,"avPick"),(10,"artists"),(11,"autoTags")] {
+        for (slot, kind) in [(1,"characters"),(2,"visibility"),(3,"similarity"),(4,"catalogDuplicates"),(5,"releases"),(6,"bindings"),(7,"metadata"),(8,"upcoming"),(10,"artists"),(11,"autoTags")] {
             if active && matches!(slot, 5 | 6) { continue; }
             if self.publication_inputs.observed_generation(slot, &normalized)
                 .is_some_and(|seen| seen != self.publication_inputs.generation(slot)) {
@@ -352,7 +352,7 @@ impl Library {
             |r| r.get(0),
         )?;
         due[7] |= crate::cloud::picker_display::due(&db, endpoint, now)?;
-        for (slot, kind) in [(8, "upcoming"), (9, "avPick"), (10, "artists")] {
+        for (slot, kind) in [(8, "upcoming"), (10, "artists")] {
             // A damaged checkpoint belongs to this lane, never to all twelve workers.
             due[slot] = self
                 .home_publication_due_on(&db, endpoint, kind, now)
@@ -473,13 +473,13 @@ mod tests {
             )
             .unwrap();
         }
-        for kind in ["upcoming", "avPick", "artists"] {
+        for kind in ["upcoming", "artists"] {
             db.execute(
                 "INSERT INTO home_publication_state(endpoint,kind,state_json) VALUES(?1,?2,?3)",
                 rusqlite::params![
                     normalized_endpoint,
                     kind,
-                    json!({"next_build":now+300,"last_poll":now,"last_day":chrono::Local::now().date_naive()}).to_string()
+                    json!({"next_build":now+300,"last_poll":now}).to_string()
                 ],
             )
             .unwrap();

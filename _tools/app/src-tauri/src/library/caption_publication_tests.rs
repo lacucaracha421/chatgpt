@@ -31,14 +31,6 @@ impl HomeTransport for Fake {
     fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> {
         panic!("no intents")
     }
-    fn artwork(
-        &self,
-        _: &crate::cloud::collections::ArtworkBlob,
-        _: &[u8],
-        _: &str,
-    ) -> Result<(), LibraryError> {
-        panic!("no artwork")
-    }
 }
 impl Fake {
     fn captions(&self) -> Vec<Value> {
@@ -373,14 +365,6 @@ fn a_bad_reply_is_a_failure() {
             Ok(json!({"version":1,"revision":1,"changed":true,"captions":0,"names":0}))
         }
         fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> {
-            panic!()
-        }
-        fn artwork(
-            &self,
-            _: &crate::cloud::collections::ArtworkBlob,
-            _: &[u8],
-            _: &str,
-        ) -> Result<(), LibraryError> {
             panic!()
         }
     }

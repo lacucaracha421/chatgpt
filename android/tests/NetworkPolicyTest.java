@@ -264,19 +264,17 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/summary?tzOffsetMinutes=540","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/summary",method));
  for(String path:new String[]{"/v1/library/summary/","/v1/library/summaryx","/v1/library/summary/extra","/v1/library/summary%2f.."})reject(()->NetworkPolicy.api(path,"GET"));
- // HOME-DASH-001: 발매 예정 and 오늘의 AV 배우 reads, the wishlist intent command and the Home cover ticket.
- for(String path:new String[]{"/v1/home/upcoming","/v1/home/av-pick"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ // Home release calendar reads, the wishlist intent command and the Home cover ticket.
+ for(String path:new String[]{"/v1/home/upcoming"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  pass(()->NetworkPolicy.api("/v1/home/upcoming/wishlist","POST"));
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/home/upcoming/wishlist",method));
  String homeCover="/v1/home/covers/"+"a".repeat(64)+"/media-ticket";
  pass(()->NetworkPolicy.api(homeCover,"POST"));
  for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api(homeCover,method));
  for(String path:new String[]{"/v1/home/covers/"+"A".repeat(64)+"/media-ticket","/v1/home/covers/"+"a".repeat(63)+"/media-ticket","/v1/home/covers/../media-ticket","/v1/home/covers","/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/"})reject(()->NetworkPolicy.api(path,"POST"));
- // Publisher-only Home routes stay unreachable: the intent log, the snapshot PUTs and the AV-pick DELETE.
- for(String path:new String[]{"/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/intents?after=0","/v1/home/upcoming/","/v1/home/upcomingx","/v1/home/av-pick/","/v1/home","/v1/home/covers/"+"a".repeat(64)})reject(()->NetworkPolicy.api(path,"GET"));
+ // Publisher-only Home routes stay unreachable: the intent log, the snapshot PUTs.
+ for(String path:new String[]{"/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/intents?after=0","/v1/home/upcoming/","/v1/home/upcomingx","/v1/home","/v1/home/covers/"+"a".repeat(64)})reject(()->NetworkPolicy.api(path,"GET"));
  reject(()->NetworkPolicy.api("/v1/home/upcoming","PUT"));
- reject(()->NetworkPolicy.api("/v1/home/av-pick","PUT"));
- reject(()->NetworkPolicy.api("/v1/home/av-pick","DELETE"));
  // Artist reads and the one client intent write; publisher log reads stay refused.
  pass(()->NetworkPolicy.api("/v1/library/artists/intents","POST"));
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/artists/intents",method));

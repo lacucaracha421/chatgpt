@@ -7,7 +7,6 @@ mod wishlist_authority_gates {
     impl HomeTransport for NoTransport {
         fn publish(&self, _: &str, _: Option<&Value>, _: &str) -> Result<Value, LibraryError> { panic!("stale upcoming PUT") }
         fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> { panic!("local tablet intent polling") }
-        fn artwork(&self, _: &ArtworkBlob, _: &[u8], _: &str) -> Result<(), LibraryError> { panic!("unexpected artwork") }
     }
 
     #[test]
@@ -34,15 +33,12 @@ use super::{
     release_wishlist, Library,
 };
 use crate::cloud::{
-    client::CloudClient,
-    collections::ArtworkBlob,
     status_watch::{self, LogKind, LogPosition},
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::io::Read;
 
 // home_upcoming.py accepts anime (`tmdb:tv:<show>:s<season>`) from the 2026-09-27 server deploy on.
 const PUBLISH_ANIME: bool = true;
@@ -50,42 +46,12 @@ const BUILD_INTERVAL: i64 = 10 * 60;
 fn lane(kind: &str) -> Result<usize, LibraryError> {
     match kind {
         "upcoming" => Ok(8),
-        "avPick" => Ok(9),
         "artists" => Ok(10),
         _ => Err(LibraryError::InvalidCloudResponse),
     }
 }
 fn supported(kind: ReleaseKind) -> bool {
     PUBLISH_ANIME || kind != ReleaseKind::Anime
-}
-
-struct ApiArtwork<'a> {
-    client: &'a CloudClient,
-    api: &'a str,
-}
-impl HomeTransport for ApiArtwork<'_> {
-    fn publish(
-        &self,
-        path: &str,
-        body: Option<&Value>,
-        token: &str,
-    ) -> Result<Value, LibraryError> {
-        self.client.publish(path, body, token)
-    }
-    fn intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
-        self.client.intents(after, token)
-    }
-    fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
-        self.client.artist_intents(after, token)
-    }
-    fn artwork(
-        &self,
-        blob: &ArtworkBlob,
-        bytes: &[u8],
-        _publisher: &str,
-    ) -> Result<(), LibraryError> {
-        self.client.artwork(blob, bytes, self.api)
-    }
 }
 
 pub(crate) trait HomeTransport {
@@ -95,7 +61,6 @@ pub(crate) trait HomeTransport {
     fn artist_intents(&self, _after: i64, _token: &str) -> Result<Value, LibraryError> {
         Err(LibraryError::InvalidCloudResponse)
     }
-    fn artwork(&self, blob: &ArtworkBlob, bytes: &[u8], token: &str) -> Result<(), LibraryError>;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -108,7 +73,6 @@ struct State {
     cursor: i64,
     last_poll: Option<i64>,
     next_build: i64,
-    last_day: Option<NaiveDate>,
     retry_after: i64,
     failures: u32,
 }
@@ -206,7 +170,6 @@ impl Library {
             && (self
                 .publication_inputs
                 .inputs_changed(lane(kind)?, &endpoint)
-                || (kind == "avPick" && state.last_day != Some(chrono::Local::now().date_naive()))
                 || state.next_build <= clock
                 || (kind == "upcoming"
                     && status_watch::log_pending(
@@ -265,15 +228,9 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        // Cover uploads go through the Collections artwork route, which takes the device API
-        // token (as the Collections replica does); the home PUT/intent routes take the publisher.
-        let api = super::credential::read_cloud_api_token_os()?;
         let client = self.cloud_client(endpoint)?;
         self.run_home_with(
-            &ApiArtwork {
-                client: &client,
-                api: api.expose(),
-            },
+            &client,
             token.expose(),
             endpoint,
             kind,
@@ -308,8 +265,7 @@ impl Library {
         let build_due = state.next_build <= clock
             || self
                 .publication_inputs
-                .inputs_changed(lane(kind)?, &endpoint)
-            || (kind == "avPick" && state.last_day != Some(today));
+                .inputs_changed(lane(kind)?, &endpoint);
         let poll = kind == "upcoming"
             && status_watch::log_due(
                 &endpoint,
@@ -383,11 +339,10 @@ impl Library {
                 // reclaiming the server document with a full calendar upload.
                 return Ok(());
             }
-            let (path, mut body, artwork) = match kind {
+            let (path, mut body) = match kind {
                 "upcoming" => (
                     "/v1/home/upcoming",
                     self.upcoming_body(now, today, state.cursor)?,
-                    None,
                 ),
                 "artists" => {
                     let mut db = self.connection()?;
@@ -395,11 +350,7 @@ impl Library {
                     let mut body = super::artists::home_publication(&tx, now)?;
                     body["intentCursor"] = json!(state.cursor);
                     tx.commit()?;
-                    ("/v1/library/artists", body, None)
-                }
-                "avPick" => {
-                    let (body, artwork) = self.av_pick_body(today)?;
-                    ("/v1/home/av-pick", body, artwork)
+                    ("/v1/library/artists", body)
                 }
                 _ => return Err(LibraryError::InvalidCloudResponse),
             };
@@ -410,14 +361,10 @@ impl Library {
                     state.generated_at = now.to_rfc3339();
                 }
                 state.save(&*self.connection()?, &endpoint, kind)?;
-                if kind != "avPick" && body["wishlistOnly"] != true {
+                if body["wishlistOnly"] != true {
                     body["generatedAt"] = json!(state.generated_at);
                 }
-                if let Some((blob, bytes)) = artwork {
-                    client.artwork(&blob, &bytes, token)?;
-                }
-                let reply =
-                    client.publish(path, if body.is_null() { None } else { Some(&body) }, token)?;
+                let reply = client.publish(path, Some(&body), token)?;
                 if reply["version"] != 1
                     || reply["changed"].as_bool().is_none()
                     || reply["revision"].as_i64().is_none_or(|n| n < 0)
@@ -425,7 +372,6 @@ impl Library {
                         && reply["acknowledgedThrough"]
                             .as_i64()
                             .is_none_or(|n| n < state.cursor))
-                    || (kind == "avPick" && reply["active"].as_bool() != Some(!body.is_null()))
                 {
                     return Err(LibraryError::InvalidCloudResponse);
                 }
@@ -436,9 +382,6 @@ impl Library {
                 }
             }
             state.next_build = clock + BUILD_INTERVAL;
-            if kind == "avPick" {
-                state.last_day = Some(today);
-            }
             built = true;
             Ok(())
         })();
@@ -493,54 +436,6 @@ impl Library {
             "sources":calendar.sources.iter().filter(|s|s.provider=="igdb"||s.provider=="tmdb")
                 .map(|s|json!({"provider":s.provider,"fetchedAt":s.fetched_at,"errorCode":s.error_code})).collect::<Vec<_>>()}),
         )
-    }
-
-    fn av_pick_body(
-        &self,
-        today: NaiveDate,
-    ) -> Result<(Value, Option<(ArtworkBlob, Vec<u8>)>), LibraryError> {
-        let Some(pick) = self
-            .home_av_performer(today)
-            .map_err(|_| LibraryError::InvalidCloudResponse)?
-        else {
-            return Ok((Value::Null, None));
-        };
-        let mut artwork = None;
-        if let Some(id) = &pick.latest_work.front_artwork_id {
-            match self.resolve_work_artwork(id) {
-                Ok(media) => {
-                    let limit = 16 * 1024 * 1024;
-                    if media.length > limit {
-                        return Err(LibraryError::InvalidWorkArtwork);
-                    }
-                    let mut bytes = Vec::new();
-                    media
-                        .file
-                        .take(limit + 1)
-                        .read_to_end(&mut bytes)
-                        .map_err(|_| LibraryError::InvalidWorkArtwork)?;
-                    if bytes.len() as u64 != media.length {
-                        return Err(LibraryError::InvalidWorkArtwork);
-                    }
-                    artwork = Some((crate::cloud::collections::blob_for(&bytes)?, bytes));
-                }
-                Err(LibraryError::MediaNotFound) => {}
-                Err(error) => return Err(error),
-            }
-        }
-        let front = artwork.as_ref().map(|(blob,_)|json!({"sha256":blob.sha256,"sizeBytes":blob.size_bytes,"contentType":blob.content_type}));
-        let latest = &pick.latest_work;
-        Ok((
-            json!({"version":1,"pick":{
-                "date":today.to_string(),"personId":pick.id,"name":text(&pick.display_name,200),
-                "aliases":optional(pick.original_name.as_deref(),200).into_iter().collect::<Vec<_>>(),
-                "workCount":pick.owned_works,"latestWork":{"code":optional(latest.product_code.as_deref(),100),
-                    "label":null,"series":null,"title":optional(Some(&latest.title),500),
-                    "date":latest.release_date.as_deref().filter(|s|NaiveDate::parse_from_str(s,"%Y-%m-%d").is_ok()),
-                    "collectionId":latest.collection_id},"cover":front
-            }}),
-            artwork,
-        ))
     }
 
     fn apply_home_intents(

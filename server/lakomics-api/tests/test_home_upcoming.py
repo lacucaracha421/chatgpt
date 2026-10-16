@@ -1,7 +1,7 @@
 """Home 발매 예정: PC snapshot upload, tablet read with ETag, wishlist intents and their log.
 
 Route logic runs on a bare FastAPI app with a temporary control database (``HomeFixture``,
-shared with the artist and AV-pick tests); ``AppWiring`` proves the real application registers
+shared with the artist tests); ``AppWiring`` proves the real application registers
 the routes and exposes the signals.
 """
 import sqlite3
@@ -328,14 +328,13 @@ class AppWiring(unittest.TestCase):
     def test_routes_and_signals(self):
         auth = self.fixtures.AUTH
         status = self.client.get("/v1/sync/status?signals=1", headers=self.publisher).json()
-        self.assertEqual({key: status["signals"][key] for key in ("upcoming", "avPick", "artists")},
-                         {"upcoming": 0, "avPick": 0, "artists": 0})
+        self.assertEqual({key: status["signals"][key] for key in ("upcoming", "artists")},
+                         {"upcoming": 0, "artists": 0})
         self.assertEqual(status["publisherLogs"]["upcomingIntents"],
                          {"last": 0, "acknowledgedThrough": 0, "prunedThrough": 0})
         self.assertEqual(self.client.put(PREFIX, headers=self.publisher, json=snapshot()).status_code, 200)
         self.assertEqual(self.client.put(PREFIX, headers=auth, json=snapshot()).status_code, 401)
         self.assertEqual(self.client.get(PREFIX, headers=auth).json()["entries"][0]["id"], "igdb:1942")
-        self.assertEqual(self.client.get("/v1/home/av-pick", headers=auth).status_code, 404)
         self.assertEqual(self.client.get("/v1/library/artists", headers=auth).status_code, 200)
         signals = self.client.get("/v1/sync/status?signals=1", headers=self.publisher).json()["signals"]
         self.assertEqual(signals["upcoming"], 1)

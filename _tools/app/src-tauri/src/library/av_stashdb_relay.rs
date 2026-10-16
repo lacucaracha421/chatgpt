@@ -319,7 +319,6 @@ impl Library {
                 .get_av_performer_profile(person)?
                 .unwrap_or_else(|| empty(person, "none"));
             old.pending = true;
-            self.publication_inputs.signal(&[9]);
             Ok(old)
         })
     }

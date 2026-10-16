@@ -48,7 +48,6 @@ class ReplicationStartupTests(unittest.TestCase):
             "mobile_catalog_refresh.RefreshWorker.startup",
             "catalog_duplicates.register.<locals>.startup",
             "home_upcoming.register.<locals>.startup",
-            "home_av_pick.register.<locals>.startup",
             "library_artists.register.<locals>.startup",
             "cards.register.<locals>.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",

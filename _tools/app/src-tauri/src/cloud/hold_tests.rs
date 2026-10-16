@@ -64,7 +64,7 @@ fn hold_fences_publications_signed_uploads_acknowledgements_and_commands() {
         Some(&json!({})),
         api,
     ));
-    held(client.publish("/v1/home/av-pick", None, publisher));
+    held(client.publish("/v1/home/upcoming", Some(&json!({"version":1})), publisher));
     held(client.publish("/v1/home/upcoming", Some(&json!({})), publisher));
     held(client.publish("/v1/library/artists", Some(&json!({})), publisher));
     held(client.publish("/v1/library/auto-tags", Some(&json!({})), publisher));
@@ -277,14 +277,14 @@ fn hold_receives_tablet_pages_without_publishing_and_restart_restores_sends() {
     drop(requests);
     let status = library.set_cloud_sync_hold(endpoint, false).unwrap();
     assert!(status.held && status.release_after_restart);
-    held(client.publish("/v1/home/av-pick", None, "publisher"));
+    held(client.publish("/v1/home/upcoming", Some(&json!({"version":1})), "publisher"));
     // A fresh session reads the persisted release, as a fresh process would.
     let mut reopened = library.clone();
     reopened.simulate_sync_hold_restart();
     let (mut normal, requests) = CloudClient::home_test_client(vec![json!({"version":1})]);
     normal.gate = reopened.sync_gate(endpoint).unwrap();
     normal
-        .publish("/v1/home/av-pick", None, "publisher")
+        .publish("/v1/home/upcoming", Some(&json!({"version":1})), "publisher")
         .unwrap();
     assert_eq!(requests.lock().unwrap().len(), 1);
 }

@@ -716,13 +716,13 @@ class MobileCollectionsTests(unittest.TestCase):
         self.assertIn("work-artwork/mobile/" + image["sha256"], ticket.json()["url"])
         self.assertEqual(self.client.post(f"/v1/home/covers/{image['sha256']}/media-ticket").status_code, 401)
         # Another owner's Home cover refs survive every Collections publication.
-        other = blob(b"av-pick")
-        fake_s3.objects[other["objectKey"]] = {"body": b"av-pick", "content_type": "image/webp"}
+        other = blob(b"other-home")
+        fake_s3.objects[other["objectKey"]] = {"body": b"other-home", "content_type": "image/webp"}
         upload = {k: v for k, v in other.items() if k != "objectKey"}
         self.client.post("/v1/collections/artworks/prepare", headers=AUTH, json=upload)
         with api_app.get_db() as db:
             mobile_collections.home_publications.replace_cover_refs(
-                db, "avPick", [mobile_collections.home_publications.BlobCover(**upload)])
+                db, "otherHome", [mobile_collections.home_publications.BlobCover(**upload)])
             db.commit()
         cleared = self.publish([self.av_work("a", None)], reply.json()["revision"])
         self.assertEqual(cleared.status_code, 200, cleared.text)
@@ -730,7 +730,7 @@ class MobileCollectionsTests(unittest.TestCase):
         self.assertEqual(self.cover_ticket(other["sha256"]).status_code, 200)
         with api_app.get_db() as db:
             refs = db.execute("SELECT owner,sha256 FROM home_cover_refs ORDER BY owner").fetchall()
-        self.assertEqual([tuple(row) for row in refs], [("avPick", other["sha256"])])
+        self.assertEqual([tuple(row) for row in refs], [("otherHome", other["sha256"])])
 
     def test_portrait_image_absent_keeps_payload_and_revision(self):
         explicit = self.publish([self.av_work("a", None)])

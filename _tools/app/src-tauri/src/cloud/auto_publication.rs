@@ -19,7 +19,6 @@ fn lane_label(kind: &str) -> &'static str {
         "metadata" => "폴더 정보",
         "autoTags" => "자동 태그 · 설명",
         "upcoming" => "발매 캘린더",
-        "avPick" => "AV 추천",
         "artists" => "작가",
         _ => "홈",
     }
@@ -174,28 +173,26 @@ impl Library {
             self.publication_inputs
                 .lanes_to_dispatch(&endpoint, due, std::time::Instant::now());
         let mut dispatched = 0;
+        // Slot 9 is retired. Preserve the remaining lanes' input-signal indices.
         for (slot, kind) in [
-            "collections",
-            "characters",
-            "visibility",
-            "similarity",
-            "catalogDuplicates",
-            "releases",
-            "bindings",
-            "metadata",
-            "upcoming",
-            "avPick",
-            "artists",
-            "autoTags",
+            (0, "collections"),
+            (1, "characters"),
+            (2, "visibility"),
+            (3, "similarity"),
+            (4, "catalogDuplicates"),
+            (5, "releases"),
+            (6, "bindings"),
+            (7, "metadata"),
+            (8, "upcoming"),
+            (10, "artists"),
+            (11, "autoTags"),
         ]
-        .into_iter()
-        .enumerate()
         {
             if !due[slot]
                 || (self.sync_held(&endpoint)
                     && matches!(
                         kind,
-                        "visibility" | "bindings" | "metadata" | "avPick" | "autoTags"
+                        "visibility" | "bindings" | "metadata" | "autoTags"
                     ))
             {
                 continue;
@@ -248,7 +245,7 @@ impl Library {
             return Ok(());
         }
         match kind {
-            "upcoming" | "avPick" | "artists" => self
+            "upcoming" | "artists" => self
                 .run_due_home_publication(kind, endpoint)
                 .map_err(|error| {
                     eprintln!("home publication {kind}: {error}");

@@ -270,9 +270,6 @@ impl Library {
         }
         let summary = collection_by_id(&transaction, &id)?;
         transaction.commit()?;
-        if !authority.active {
-            self.publication_inputs.signal(&[9]);
-        }
         Ok(summary)
     }
 
@@ -384,9 +381,6 @@ impl Library {
         enqueue_work_changes(&transaction, &authority, id, &before)?;
         let summary = collection_by_id(&transaction, id)?;
         transaction.commit()?;
-        if !authority.active {
-            self.publication_inputs.signal(&[9]);
-        }
         Ok(summary)
     }
 
@@ -418,7 +412,6 @@ impl Library {
         }
         transaction.commit()?;
         drop(connection);
-        self.publication_inputs.signal(&[9]);
         self.cleanup_collection_thumbnail_cache(id)?;
         // The delete is committed; a file that cannot be removed now is retried on the
         // next library open instead of reporting a failed delete.

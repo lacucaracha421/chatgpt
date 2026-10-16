@@ -1,5 +1,5 @@
 use super::*;
-use sha2::{Digest, Sha256};
+use crate::cloud::client::CloudClient;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
@@ -7,7 +7,6 @@ use std::collections::VecDeque;
 struct Fake {
     requests: RefCell<Vec<(String, Option<Value>)>>,
     pages: RefCell<VecDeque<Value>>,
-    uploads: RefCell<Vec<ArtworkBlob>>,
     fail: std::cell::Cell<bool>,
     artist_pulls: RefCell<Vec<i64>>,
 }
@@ -19,12 +18,6 @@ impl HomeTransport for Fake {
         token: &str,
     ) -> Result<Value, LibraryError> {
         assert_eq!(token, "publisher");
-        if let Some(sha) = body.and_then(|v| v["pick"]["cover"]["sha256"].as_str()) {
-            assert!(
-                self.uploads.borrow().iter().any(|blob| blob.sha256 == sha),
-                "cover must be confirmed before publishing"
-            );
-        }
         self.requests
             .borrow_mut()
             .push((path.into(), body.cloned()));
@@ -47,19 +40,6 @@ impl HomeTransport for Fake {
     fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
         self.artist_pulls.borrow_mut().push(after);
         self.intents(after, token)
-    }
-    fn artwork(&self, blob: &ArtworkBlob, bytes: &[u8], token: &str) -> Result<(), LibraryError> {
-        assert_eq!(token, "publisher");
-        assert_eq!(blob.size_bytes, bytes.len() as u64);
-        assert_eq!(
-            blob.sha256,
-            Sha256::digest(bytes)
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-        );
-        self.uploads.borrow_mut().push(blob.clone());
-        Ok(())
     }
 }
 fn now() -> DateTime<Utc> {
@@ -406,80 +386,6 @@ fn malformed_page_rolls_back_and_unknown_add_is_acknowledged() {
     );
 }
 
-#[test]
-fn av_absence_deletes_once_and_lightweight_mode_spaces_builds() {
-    let (_dir, lib) = setup();
-    let fake = Fake::default();
-    lib.run_home_with(
-        &fake,
-        "publisher",
-        "https://fake.invalid",
-        "avPick",
-        now(),
-        now().date_naive(),
-        true,
-    )
-    .unwrap();
-    run(&lib, &fake, "avPick", 61);
-    assert_eq!(
-        fake.requests.borrow().as_slice(),
-        &[("/v1/home/av-pick".into(), None)]
-    );
-    let state = State::load(
-        &*lib.connection().unwrap(),
-        "https://fake.invalid/",
-        "avPick",
-    )
-    .unwrap();
-    assert_eq!(state.next_build, now().timestamp() + BUILD_INTERVAL);
-    run(&lib, &fake, "avPick", 301);
-    assert_eq!(fake.requests.borrow().len(), 1);
-}
-
-fn av_fixture(lib: &Library) {
-    lib.connection().unwrap().execute_batch("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES('person-1','배우','別名','2026-09-26T00:00:00Z','2026-09-26T00:00:00Z');
-        INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('col-1','Latest','av','2026-09-26T00:00:00Z','2026-09-26T00:00:00Z');
-        INSERT INTO collection_av_details(collection_id,product_code,label,release_date) VALUES('col-1','ABC-123','ABC','2026-08-01');
-        INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order) VALUES('col-1','person-1','performer',0);").unwrap();
-}
-
-#[test]
-fn av_schema_front_cover_receipt_change_detection_and_delete() {
-    let (_dir, lib) = setup();
-    av_fixture(&lib);
-    let fake = Fake::default();
-    let path = lib.root().join("front.png");
-    image::RgbImage::from_pixel(12, 18, image::Rgb([200, 20, 40]))
-        .save(&path)
-        .unwrap();
-    lib.connection().unwrap().execute_batch("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('front','col-1','local','front','cover','front.png','image/png',12,18,1,'2026-09-26','2026-09-26');").unwrap();
-    run(&lib, &fake, "avPick", 0);
-    let body = fake.requests.borrow()[0].1.clone().unwrap();
-    // test_home_av_pick.py:pick(), adapted to this one-work PC fixture.
-    let mut expected = json!({"version":1,"pick":{"date":"2026-09-26","personId":"person-1","name":"배우",
-        "aliases":["別名"],"workCount":1,"latestWork":{"code":"ABC-123","label":null,"series":null,
-            "title":"Latest","date":"2026-08-01","collectionId":"col-1"},"cover":null}});
-    expected["pick"]["cover"] = body["pick"]["cover"].clone();
-    assert_eq!(body, expected);
-    assert_eq!(fake.uploads.borrow().len(), 1);
-    assert_eq!(
-        body["pick"]["cover"]["sha256"],
-        fake.uploads.borrow()[0].sha256
-    );
-    assert!(body["pick"].get("portrait").is_none());
-    assert!(body["pick"].get("recentOwnedWorks").is_none());
-    run(&lib, &fake, "avPick", 61);
-    assert_eq!(fake.requests.borrow().len(), 1);
-    assert_eq!(fake.uploads.borrow().len(), 1);
-    lib.connection()
-        .unwrap()
-        .execute("DELETE FROM collection_person_relations", [])
-        .unwrap();
-    lib.publication_inputs.signal(&[9]);
-    run(&lib, &fake, "avPick", 122);
-    assert!(fake.requests.borrow()[1].1.is_none());
-}
-
 fn asset(lib: &Library, id: &str, key: Option<&str>) {
     lib.connection().unwrap().execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,creator_name,creator_handle) VALUES(?1,?1,'image',?1,'assets/'||?1,'thumbnails/'||?1,1,10,10,'2026-09-01T00:00:00Z',?2,?2)",params![id,key]).unwrap();
 }
@@ -589,7 +495,6 @@ fn provider_cover_urls_are_bounded_and_do_not_allow_foreign_urls() {
 fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
     let (_dir, lib) = setup();
     cache(&lib, &[game()]);
-    av_fixture(&lib);
     let endpoint = "http://127.0.0.1";
     let reply = |active| json!({"version":1,"revision":1,"changed":true,"acknowledgedThrough":0,"active":active});
     let (client, requests) = CloudClient::home_test_client(vec![
@@ -597,10 +502,8 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
         reply(true),
         page(0, vec![]),
         reply(true),
-        reply(true),
-        reply(false),
     ]);
-    for kind in ["upcoming", "artists", "avPick"] {
+    for kind in ["upcoming", "artists"] {
         lib.run_home_with(
             &client,
             "publisher",
@@ -612,21 +515,6 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
         )
         .unwrap();
     }
-    lib.connection()
-        .unwrap()
-        .execute("DELETE FROM collection_person_relations", [])
-        .unwrap();
-    lib.publication_inputs.signal(&[9]);
-    lib.run_home_with(
-        &client,
-        "publisher",
-        endpoint,
-        "avPick",
-        now() + chrono::Duration::seconds(61),
-        now().date_naive(),
-        false,
-    )
-    .unwrap();
     let requests = requests.lock().unwrap();
     for (raw, (method, path)) in requests.iter().zip([
         (
@@ -636,8 +524,6 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
         ("PUT", "/v1/home/upcoming"),
         ("GET", "/v1/library/artists/intents?after=0&limit=200"),
         ("PUT", "/v1/library/artists"),
-        ("PUT", "/v1/home/av-pick"),
-        ("DELETE", "/v1/home/av-pick"),
     ]) {
         let raw = std::str::from_utf8(raw).unwrap();
         let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
@@ -655,51 +541,9 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
                 assert_eq!(body["artists"], json!([]));
                 assert_eq!(body["intentCursor"], 0);
             }
-            if path.ends_with("av-pick") {
-                assert_eq!(body["pick"]["personId"], "person-1");
-            }
         }
     }
-    assert_eq!(requests.len(), 6);
-}
-
-#[test]
-fn fake_http_confirms_av_front_blob_before_publishing_the_reference() {
-    let (_dir, lib) = setup();
-    av_fixture(&lib);
-    image::RgbImage::from_pixel(2, 3, image::Rgb([1, 2, 3]))
-        .save(lib.root().join("front.png"))
-        .unwrap();
-    lib.connection().unwrap().execute_batch("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('front','col-1','local','front','cover','front.png','image/png',2,3,1,'2026-09-26','2026-09-26');").unwrap();
-    let (body, artwork) = lib.av_pick_body(now().date_naive()).unwrap();
-    let (blob, _) = artwork.unwrap();
-    let (client, requests) = CloudClient::home_test_client(vec![
-        json!({"objectKey":blob.object_key,"uploadUrl":null,"requiredHeaders":{}}),
-        json!({"version":1,"revision":1,"changed":true,"active":true}),
-    ]);
-    lib.run_home_with(
-        &client,
-        "publisher",
-        "http://127.0.0.1",
-        "avPick",
-        now(),
-        now().date_naive(),
-        false,
-    )
-    .unwrap();
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    let parse = |bytes: &Vec<u8>| -> (String, Value) {
-        let raw = std::str::from_utf8(bytes).unwrap();
-        let (head, body) = raw.split_once("\r\n\r\n").unwrap();
-        (head.into(), serde_json::from_str(body).unwrap())
-    };
-    let (head, prepared) = parse(&requests[0]);
-    assert!(head.starts_with("POST /v1/collections/artworks/prepare HTTP/1.1"));
-    assert_eq!(prepared, body["pick"]["cover"]);
-    let (head, published) = parse(&requests[1]);
-    assert!(head.starts_with("PUT /v1/home/av-pick HTTP/1.1"));
-    assert_eq!(published, body);
+    assert_eq!(requests.len(), 4);
 }
 
 #[test]
@@ -784,7 +628,7 @@ fn home_idle_signal_and_safety_deadlines_bound_body_builds() {
     let fake = Fake::default();
     let checkpoint =
         |kind| State::load(&*lib.connection().unwrap(), "https://fake.invalid/", kind).unwrap();
-    for kind in ["artists", "avPick", "upcoming"] {
+    for kind in ["artists", "upcoming"] {
         run(&lib, &fake, kind, 0);
         for seconds in [1, 59, 60, 300, BUILD_INTERVAL - 1] {
             run(&lib, &fake, kind, seconds);
@@ -819,30 +663,6 @@ fn home_idle_signal_and_safety_deadlines_bound_body_builds() {
     run(&lib, &fake, "artists", BUILD_INTERVAL + 2);
     assert_eq!(fake.requests.borrow().len(), count + 2);
     lib.set_release_watch_muted("invalid", true).unwrap_err(); // A failed write sends no signal.
-}
-
-#[test]
-fn av_day_rollover_builds_before_the_ten_minute_deadline() {
-    let (_dir, lib) = setup();
-    av_fixture(&lib);
-    let fake = Fake::default();
-    run(&lib, &fake, "avPick", 0);
-    let tomorrow = now().date_naive().succ_opt().unwrap();
-    lib.run_home_with(
-        &fake,
-        "publisher",
-        "https://fake.invalid",
-        "avPick",
-        now() + chrono::Duration::seconds(1),
-        tomorrow,
-        false,
-    )
-    .unwrap();
-    assert_eq!(fake.requests.borrow().len(), 2);
-    assert_eq!(
-        fake.requests.borrow()[1].1.as_ref().unwrap()["pick"]["date"],
-        tomorrow.to_string()
-    );
 }
 
 #[test]
@@ -926,7 +746,6 @@ fn held_upcoming_receives_intents_without_publishing_or_marking_inputs_observed(
         1
     );
     assert!(fake.requests.borrow().is_empty());
-    assert!(fake.uploads.borrow().is_empty());
     assert!(lib
         .publication_inputs
         .inputs_changed(8, "https://fake.invalid/"));
@@ -1347,7 +1166,6 @@ fn artist_status_head_gates_prompt_pulls_even_during_receive_only_hold() {
             3
         );
         assert_eq!(fake.requests.borrow().len(), usize::from(!held));
-        assert!(fake.uploads.borrow().is_empty());
         // Even a periodic build must not pull a trusted head at or behind the cursor.
         for last in [2, 3] {
             let mut state = State::load(&*lib.connection().unwrap(), &endpoint, "artists").unwrap();

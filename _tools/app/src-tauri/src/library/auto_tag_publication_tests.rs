@@ -38,14 +38,6 @@ impl HomeTransport for Fake {
     fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> {
         panic!("no intents")
     }
-    fn artwork(
-        &self,
-        _: &crate::cloud::collections::ArtworkBlob,
-        _: &[u8],
-        _: &str,
-    ) -> Result<(), LibraryError> {
-        panic!("no artwork")
-    }
 }
 fn fixture(count: usize) -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();

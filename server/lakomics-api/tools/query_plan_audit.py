@@ -65,7 +65,6 @@ def populate(root):
                             (1, 'trashAsset', '2026-09-22T00:00:00Z'),
                             (2, 'restoreAsset', '2026-09-23T00:00:00Z'),
                             (3, 'trashAsset', '2026-09-21T00:00:00Z'))])
-        db.execute("UPDATE home_av_pick SET pick='{}'")
         db.executemany('INSERT INTO catalog_duplicate_candidates VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        [(i+1, f'candidate-{i}', 'kHentai', str(100000+i), str(100001+i), 'pc', 'fixture',
                          'exactTitle', 0, 'fixture', '{}', 0, i+1, bench.STAMP, bench.STAMP) for i in range(500)])
@@ -143,7 +142,7 @@ def cases(tokens):
         ('/v1/albums/assets', [dict(libraryId=bench.LIBRARY, epoch=1, albumId='album-001', **q)
                               for q in ({}, {'toc': 1})]),
         ('/v1/collections', [{}]), ('/v1/collections/status', [{}]),
-        ('/v1/home/upcoming', [{}]), ('/v1/home/av-pick', [{}]),
+        ('/v1/home/upcoming', [{}]),
         ('/v1/library/artists', [{}]),
         ('/v1/mobile-catalog/search', [{}, {'text': 'artist:artist-1'}, {'text': 'Work'}, {'scope': 'bookmarked'}]),
         ('/v1/library/revisit', [{}]), ('/v1/library/revisit/date', [{}]),

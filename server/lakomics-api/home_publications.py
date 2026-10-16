@@ -1,8 +1,7 @@
 """Shared pieces of the PC-published Home and Artist documents (HOME-DASH-001, ARTIST-001).
 
-Used by ``home_upcoming`` (게임/영화 발매 예정 + wishlist), ``library_artists`` (작가) and
-``home_av_pick`` (오늘의 AV 배우). Each of those is a PC snapshot the server stores as is and
-serves to the tablet with an ETag; nothing is computed on the server.
+Used by ``home_upcoming`` (release calendar and wishlist) and ``library_artists`` (artists).
+The shared helpers validate publication payloads and cover references served to clients.
 
 Cover reference
 ---------------
@@ -23,7 +22,7 @@ Where a document carries a cover it is one of two JSON objects (or null):
   ``POST /v1/home/covers/{sha256}/media-ticket`` (client), which answers only for a blob a
   current Home publication references; reply ``{"url", "expires_in", "sha256",
   "content_type", "size_bytes"}`` like the Collection artwork ticket. Use this for covers
-  that exist only on the PC (AV front covers).
+  that exist only on the PC.
 
 No new blob storage and no background work: the referenced blobs are recorded per owner
 (``home_cover_refs``) and replaced with each publication.

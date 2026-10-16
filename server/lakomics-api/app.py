@@ -897,11 +897,9 @@ import catalog_duplicates
 
 startup_catalog_duplicates = catalog_duplicates.register(app, get_db, require_client, require_publisher)
 
-# HOME-DASH-001 / ARTIST-001: PC-published Home documents (발매 예정 + wishlist intents,
-# 오늘의 AV 배우) and the artist list, plus the ticket for the Home covers they reference.
+# Home release calendar, wishlist intents and artist documents, plus their cover tickets.
 # Home publication startup creates empty tables; the optional calendar worker
 # is registered below after the shared provider relay exists (default OFF).
-import home_av_pick
 import cards
 import home_publications
 import home_upcoming
@@ -914,7 +912,6 @@ def _home_client(authorization):
 
 
 lifecycle(app).on_startup(home_upcoming.register(app, get_db, _home_client, require_publisher))
-lifecycle(app).on_startup(home_av_pick.register(app, get_db, _home_client, require_publisher))
 lifecycle(app).on_startup(library_artists.register(app, get_db, _home_client, require_publisher))
 home_publications.register_cover_tickets(app, get_db, _home_client, presign_get)
 
@@ -1023,7 +1020,6 @@ def status_signals(db):
             "bindingRequests": collection_bindings.status_signal(db),
             "notes": notes.status_signal(db),
             "upcoming": home_upcoming.status_signal(db),
-            "avPick": home_av_pick.status_signal(db),
             "cards": cards.status_signal(db),
             "artists": library_artists.status_signal(db)}
 

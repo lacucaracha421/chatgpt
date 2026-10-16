@@ -1,6 +1,5 @@
 //! HTTP boundary for the PC-owned Home snapshots. Uses only publisher credentials.
 use super::{bearer, map_registration_error, read_json_bounded, CloudClient};
-use crate::cloud::collections::ArtworkBlob;
 use crate::library::{error::LibraryError, home_publications::HomeTransport};
 use serde_json::Value;
 
@@ -19,7 +18,6 @@ impl HomeTransport for CloudClient {
                 "/v1/library/artists" => 16 * 1024 * 1024,
                 "/v1/library/auto-tags" => 1024 * 1024,
                 "/v1/library/captions" => 8 * 1024 * 1024,
-                "/v1/home/av-pick" => 64 * 1024,
                 "/v1/picker/display" => 3 * 1024 * 1024,
                 _ => return Err(LibraryError::InvalidCloudResponse),
             };
@@ -33,14 +31,7 @@ impl HomeTransport for CloudClient {
                 .send(&bytes)
                 .map_err(map_registration_error)?
         } else {
-            if path != "/v1/home/av-pick" {
-                return Err(LibraryError::InvalidCloudResponse);
-            }
-            self.agent
-                .delete(self.endpoint(path)?)
-                .header("Authorization", bearer(token)?)
-                .call()
-                .map_err(map_registration_error)?
+            return Err(LibraryError::InvalidCloudResponse);
         };
         read_json_bounded(&mut response, 64 * 1024)
     }
@@ -54,12 +45,6 @@ impl HomeTransport for CloudClient {
             .call()
             .map_err(map_registration_error)?;
         read_json_bounded(&mut response, 4 * 1024 * 1024)
-    }
-
-    fn artwork(&self, blob: &ArtworkBlob, bytes: &[u8], token: &str) -> Result<(), LibraryError> {
-        // This includes the second prepare/HEAD receipt after a signed upload.
-        self.upload_collection_artwork(blob, bytes, token)
-            .map(|_| ())
     }
 
     fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
