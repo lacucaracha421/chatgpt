@@ -71,9 +71,9 @@ final class NetworkPolicy {
   // Classification authority reads. Exactly the two read routes.
   get=get || p.equals("/v1/classifications/authority/baseline") || p.equals("/v1/classifications/authority/changes");
   // Classification authority commands: per-Asset assignment plus, since 2026-10-10, folder
-  // create and rename from the tablet. The server still requires the publisher role for
-  // move, delete and appearance, so those structural mutations stay PC-only. Activate stays
-  // absent from every allowlist.
+  // create, rename and (since 2026-10-17) icon/colour changes from the tablet. The server still
+  // requires the publisher role for move and delete, so those structural mutations stay PC-only.
+  // Activate stays absent from every allowlist.
   boolean classificationPut=p.equals("/v1/classifications/authority/commands") || p.equals("/v1/classifications/authority/commands/batch");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   post=post || p.equals("/v1/providers/apply") || p.equals("/v1/providers/artwork") || p.equals("/v1/providers/stashdb/portrait");

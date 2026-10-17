@@ -1,0 +1,53 @@
+/* The folder drawer (TABLET-STRUCT-001 B). It reuses the left full-height editor panel
+   (.ui-dialog:has(.classification-index) in mobile.css, slide in library.css); the rows take the PC tree
+   look at tablet sizes. */
+.folder-drawer { gap: 0; }
+.folder-drawer .dialog-header { min-height: var(--touch-target); font-size: var(--type-title); font-weight: 600; }
+.folder-drawer__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(var(--space-6) * -1); padding: 0 var(--space-4) var(--space-6); scrollbar-width: none; }
+.folder-drawer .ui-section-label { margin: var(--space-6) var(--space-2) var(--space-2); }
+.folder-drawer__scroll > .ui-section-label:first-child { margin-top: var(--space-2); }
+/* 빠른 보기: one-line rows (48), icon 20, the count only on the current row. */
+.folder-drawer__quick { display: flex; flex-direction: column; }
+.folder-drawer__link { position: relative; display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-height); padding: 0 var(--space-3); border: 0; border-radius: 0; background: transparent; color: var(--color-text); font: inherit; text-align: left; }
+.folder-drawer__link > svg { width: 20px; height: 20px; color: var(--color-muted); }
+.folder-drawer__link > span { flex: 1; min-width: 0; }
+.folder-drawer__link small { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.folder-drawer__link:active { background: var(--color-surface-pressed); }
+/* Pins keep the PC's bordered chip; 36 high with a 44 hit area. */
+.folder-drawer__pins { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-2); }
+.folder-drawer__pin { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: var(--control-height-compact); padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-tile); background: transparent; color: var(--color-text); font: inherit; }
+.folder-drawer__pin::before { content: ""; position: absolute; inset: -4px 0; }
+.folder-drawer__pin > svg { width: 14px; height: 14px; color: var(--color-muted); }
+.folder-drawer__pin > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-drawer .recent-row { padding: 0 var(--space-2); }
+/* Tree: the tablet's .tree-row idiom at body size and 48 rows; one open path (FOLDER-NAV-001). */
+.folder-drawer .classification-tree { overflow: visible; min-height: 0; }
+.folder-drawer .tree-row { min-height: var(--row-height); }
+.folder-drawer .tree-expander, .folder-drawer .tree-leaf { width: var(--touch-target); min-width: var(--touch-target); height: var(--row-height); }
+.folder-drawer .tree-expander svg { width: 16px; height: 16px; color: var(--color-muted); transition: transform var(--motion-medium) var(--ease-standard); }
+.folder-drawer .tree-expander[aria-expanded="true"] svg { transform: rotate(90deg); }
+.folder-drawer .tree-leaf::before { left: calc(var(--touch-target) / 2 - 1px); }
+.folder-drawer .tree-select { gap: var(--space-3); min-height: 40px; padding: 0 var(--space-3); font-size: var(--type-body); border-radius: 0; }
+.folder-drawer .tree-select > svg { width: 20px; height: 20px; opacity: 1; color: var(--folder-color, var(--color-muted)); }
+.folder-drawer .tree-select > .numeric { display: none; color: var(--color-muted); font-size: var(--type-meta); opacity: 1; }
+/* The current place: the PC slab with its dark mark at the right end and the 3px echo (DESIGN §6). */
+.folder-drawer .tree-row.selected .tree-select, .folder-drawer__link[aria-current="page"] { position: relative; padding-right: calc(var(--space-3) + var(--selection-mark-size) + var(--space-2)); background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.folder-drawer .tree-row.selected .tree-select::after, .folder-drawer__link[aria-current="page"]::after { content: ""; position: absolute; top: 50%; right: var(--space-3); width: var(--selection-mark-size); height: var(--selection-mark-size); margin-top: calc(var(--selection-mark-size) / -2); background: var(--color-on-accent); }
+.folder-drawer .tree-row.selected .tree-select > svg, .folder-drawer__link[aria-current="page"] > svg { color: inherit; }
+.folder-drawer .tree-row.selected .tree-select > .numeric, .folder-drawer__link[aria-current="page"] small { display: inline; color: inherit; opacity: .7; }
+/* Branches fold with the PC's reveal: height via grid rows, no fade of the text. */
+.folder-drawer__branch { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--motion-medium) var(--ease-standard); }
+.folder-drawer__branch[data-open="false"] { grid-template-rows: 0fr; }
+.folder-drawer__branch > div { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .folder-drawer__branch, .folder-drawer .tree-expander svg { transition: none; } }
+.folder-drawer .tree-select:active { background: var(--color-surface-pressed); }
+.folder-drawer .tree-row.selected .tree-select:active { background: var(--color-sidebar-selection); }
+.folder-drawer .tree-select > .character-glyph { width: 20px; height: 20px; opacity: 1; }
+.folder-drawer .recent-row { display: flex; align-items: center; gap: var(--space-1); min-height: var(--touch-target); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.folder-drawer .recent-row::-webkit-scrollbar { display: none; }
+.folder-drawer .recent-folders__chip { min-height: var(--touch-target); }
+.folder-drawer .hint { margin: 0 var(--space-2); }
+/* A section that arrives after the drawer is open (pins, the album tree) eases in. */
+.folder-drawer__late { animation: folder-drawer-in var(--motion-medium) var(--ease-standard) both; }
+@keyframes folder-drawer-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .folder-drawer__late { animation: none; } }

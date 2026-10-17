@@ -61,21 +61,31 @@ it('opens a plain folder card\'s sheet on a long press without opening the folde
 });
 
 it('names the folder in its sheet and offers only what the tablet can do',()=>{
-  const onManage=vi.fn(),onClose=vi.fn();
+  const onManage=vi.fn(),onClose=vi.fn(),onPin=vi.fn();
   const entries=[folder('p','부모'),folder('c','자식','p')];
-  render(<FolderActionSheet folder={entries[0]!} entries={entries} onClose={onClose} onManage={onManage}/>);
+  render(<FolderActionSheet folder={entries[0]!} entries={entries} onClose={onClose} onManage={onManage} onPin={onPin}/>);
   const dialog=screen.getByRole('dialog',{name:'부모'});
   expect(within(dialog).getByText('분류 · 30장 · 하위 폴더 1')).toBeTruthy();
-  expect(sheetItems(dialog)).toEqual(['하위 폴더 만들기','이름 바꾸기','닫기']);
-  fireEvent.click(within(dialog).getByRole('button',{name:'이름 바꾸기'}));
-  expect(onManage).toHaveBeenCalledWith('rename');
+  expect(sheetItems(dialog)).toEqual(['고정','하위 폴더 만들기','이름 바꾸기','아이콘 및 색상','닫기']);
+  fireEvent.click(within(dialog).getByRole('button',{name:'아이콘 및 색상'}));
+  expect(onManage).toHaveBeenCalledWith('look');
   expect(onClose).toHaveBeenCalledOnce();
+});
+
+it('pins and unpins from the folder sheet',()=>{
+  const onPin=vi.fn();
+  const entries=[folder('p','부모')];
+  const {rerender}=render(<FolderActionSheet folder={entries[0]!} entries={entries} onClose={()=>{}} onManage={()=>{}} onPin={onPin}/>);
+  fireEvent.click(screen.getByRole('button',{name:'고정'}));
+  expect(onPin).toHaveBeenCalledOnce();
+  rerender(<FolderActionSheet folder={entries[0]!} entries={entries} pinned onClose={()=>{}} onManage={()=>{}} onPin={onPin}/>);
+  expect(screen.getByRole('button',{name:'고정 해제'})).toBeTruthy();
 });
 
 it('does not offer renaming the protected 오리지널 root',()=>{
   const root=folder('lakomics-originals','오리지널');
   render(<FolderActionSheet folder={root} entries={[root]} onClose={()=>{}} onManage={()=>{}}/>);
-  expect(sheetItems(screen.getByRole('dialog',{name:'오리지널'}))).toEqual(['하위 폴더 만들기','닫기']);
+  expect(sheetItems(screen.getByRole('dialog',{name:'오리지널'}))).toEqual(['하위 폴더 만들기','아이콘 및 색상','닫기']);
 });
 
 it('lists the album actions with 삭제 last and blocks it while the album has sub-albums',()=>{

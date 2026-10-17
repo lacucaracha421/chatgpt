@@ -69,7 +69,7 @@ import {characterPath} from './characterModel';
 import {FolderCards} from './FolderCards';
 import {Albums,useAlbumTree} from './Albums';
 import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumModel';
-import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView,type Entry} from './libraryModel';
+import {ALL_ASSETS,LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView,type Entry} from './libraryModel';
 import './library.css';
 import {Gallery} from './Gallery';
 import {displayCount} from '../src/shared/displayDate';
@@ -81,7 +81,10 @@ import {FolderManagement,type FolderChange} from './FolderManagement';
 import {FolderScope} from './FolderScope';
 import {FolderActionSheet} from './FolderActions';
 import {ImageActionSheet} from './ImageActions';
-import {useTabletRecentFolders} from './recentFolders';
+import {tabletRecentFolderId,useTabletRecentFolders} from './recentFolders';
+import {FolderDrawer,type DrawerQuick} from './FolderDrawer';
+import {useTabletFolderPins} from './useTabletFolderPins';
+import {useAndroidBack} from './cards/useAndroidBack';
 import type {FolderAuthority} from './folderCommands';
 import {useSelectionActions} from './useSelectionActions';
 import {FolderArrowDownIcon,InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
@@ -230,8 +233,12 @@ export function App() {
   // the classification authority identity a folder command presents (absent before cutover).
   const [listVersion, setListVersion] = useState(0);
   const [folderAuthority, setFolderAuthority] = useState<FolderAuthority|null>(null);
-  const [folderManagement, setFolderManagement] = useState<{folder:Classification;mode?:'create'|'rename'}|null>(null);
+  const [folderManagement, setFolderManagement] = useState<{folder:Classification;mode?:'create'|'rename'|'look'}|null>(null);
+  // The folder drawer (☰): opened only from the top bar, closed by Back, the scrim, ✕ or any tap that opens a place.
+  const [drawerOpen,setDrawerOpen]=useState(false);
   const [folderSheet, setFolderSheet] = useState<Entry|null>(null);
+  // Back closes the folder form first, also when it was opened from the drawer.
+  useAndroidBack(()=>setFolderManagement(null),!!folderManagement);
   const [indexReady,setIndexReady]=useState(false);
   // Recent folder visits are still recorded per connection (no screen shows them at the moment).
   const [,setRecentFolders] = useState<string[]>([]);
@@ -307,6 +314,12 @@ export function App() {
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
   // Committed classification or root to restore after leaving character browsing.
   const beforeCharacter = useRef<SavedPosition | undefined>(undefined);
+  // The Library places visited before the shown one (TABLET-STRUCT-001 F), each with its scroll position and,
+  // for the root, the segment it showed. Back (the system press and the bar's ←) returns along it; with
+  // nothing left it steps up to the parent folder as before. Jumps through 찾기, 최근, the drawer and pins are
+  // recorded like folder taps, so Back returns to where the jump started. Tab changes are not recorded.
+  const visits = useRef<{position:SavedPosition; segment:LibrarySegment}[]>([]);
+  const segmentRef = useRef(librarySegment); segmentRef.current = librarySegment;
   const observedGeneration = useRef<string|null>(null);
   // Whether this server's pages carry their own list generation: `null` until a page
   // answers, so an older server keeps the generation-bracketed fetch it always had.
@@ -348,6 +361,7 @@ export function App() {
   }, []);
 
   const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS, generationHint?: string):Promise<boolean|void> => {
+    if (view.tab === 'home') visits.current = [];
     const visible = latest.current.page;
     const placeChanged=visible.version>0&&viewKey(visible.view,visible.filters)!==viewKey(view,nextFilters);
     if(placeChanged){clearSelection();if(latest.current.albumBatchOpen)closeAlbumBatch();}
@@ -677,6 +691,33 @@ export function App() {
     if (saved) void load(saved.view, saved.cursor, saved.previous, saved.scroll, false, saved.filters);
     else void load(LIBRARY, null, [], 0, false, EMPTY_FILTERS);
   }, [load]);
+  /** Notes the shown Library place before the user moves away from it to `next`. */
+  const rememberVisit = useCallback((next:View) => {
+    const state = latest.current, shown = state.page;
+    // Home, other tabs, character browsing, searches and 내용 검색 keep their own way back.
+    if (state.area !== 'assets' || !shown.version || shown.view.tab !== 'library' || shown.view.characters || shown.view.description || shown.view.search?.length || next.characters) return;
+    if (viewKey(next) === viewKey(shown.view)) return;
+    const list = visits.current;
+    if (list.length && viewKey(list[list.length - 1]!.position.view) === viewKey(shown.view)) list.pop();
+    list.push({position:{view:shown.view,cursor:shown.cursor,previous:shown.previous,scroll:scroll.current,filters:shown.filters},segment:segmentRef.current});
+    if (list.length > 60) list.shift();
+  }, []);
+  /** Back along the visit history; places that no longer exist are skipped. False when there is nothing to return to. */
+  const goVisit = useCallback(() => {
+    const list = visits.current;
+    while (list.length) {
+      const visit = list.pop()!, {view} = visit.position;
+      if (viewKey(view) === viewKey(latest.current.page.view)) continue;
+      if (view.classification && entriesRef.current.length && !entriesRef.current.some(entry => entry.id === view.classification)) continue;
+      const tree = albumTreeRef.current;
+      if (view.album && tree && !tree.albums.some(album => album.id === view.album!.id)) continue;
+      beginScreenTiming(view.album ? 'album' : view.classification ? 'folder' : 'assets', 'back');
+      if (view.album) setLibrarySegment('albums'); else if (view.root) setLibrarySegment(visit.segment);
+      void load(view, visit.position.cursor, visit.position.previous, visit.position.scroll, false, visit.position.filters);
+      return true;
+    }
+    return false;
+  }, [load]);
   const goParent=useCallback(()=>{
     beginScreenTiming(latest.current.page.view.album?'album':'folder','back');
     const current=latest.current.page.view;
@@ -778,13 +819,15 @@ export function App() {
       else if (state.page.view.description) exitDescription();
       // Clear a committed or failed narrowing before stepping up the hierarchy.
       else if (hasActiveFilters(state.page.filters)||hasActiveFilters(lastIntent.current.filters)) void load(state.page.view, null, [], scroll.current, true, EMPTY_FILTERS);
+      // Back along the places visited in this tab; the parent folder stays on the breadcrumb.
+      else if (goVisit()) { /* Returned to the previous place. */ }
       else if (libraryHome()) { /* The Library entry opened from Home returned there. */ }
       else if (!state.page.view.root) goParent();
       else void native('finish').catch(() => {});
     };
     const removeVisible=onVisible(visible); window.addEventListener('lakomics-list-generation', listChanged); window.addEventListener('lakomics-back', back);
     return () => {removeVisible(); window.removeEventListener('lakomics-list-generation', listChanged); window.removeEventListener('lakomics-back', back);};
-  }, [refreshSecondary, load, restoreBeforeCharacter,goParent,returnHome,libraryHome,closeArtists,clearSelection,closeClassificationBatch,exitDescription]);
+  }, [refreshSecondary, load, restoreBeforeCharacter,goParent,goVisit,returnHome,libraryHome,closeArtists,clearSelection,closeClassificationBatch,exitDescription]);
   useEffect(() => {
     const folderId=page.view.classification??(page.view.characterNode?entries.find(entry=>entry.characterNode===page.view.characterNode)?.id:undefined);
     if (!page.version || !folderId) return;
@@ -795,6 +838,7 @@ export function App() {
     setSearchChips([]);
     const entry=entries.find(item=>item.id===requested.classification);
     const view=entry?.characterNode?entryView(entry):requested;
+    rememberVisit(view);
     if(view.album)setLibrarySegment('albums');
     // Remember the real browsing context only when entering the character boundary, and only
     // from a non-character view. Re-selecting another folder inside it keeps the original
@@ -877,7 +921,8 @@ export function App() {
     // Committed, or the load ended without the page (failure): show the assets area either way.
     if(page.view.tab===entry.tab||!busy){assetsEntry.current=null;setArea('assets');}
   },[area,busy,page.view.tab,page.version]);
-  const openRoot=()=>{setSearchChips([]);setArea('assets');void load(LIBRARY,null,[],0,false,EMPTY_FILTERS);};
+  const showRoot=()=>{setSearchChips([]);setArea('assets');void load(LIBRARY,null,[],0,false,EMPTY_FILTERS);};
+  const openRoot=()=>{rememberVisit(LIBRARY);showRoot();};
   const retainAssets = () => {
     const state = latest.current, current = state.page, intent = lastIntent.current;
     // A retained tab is also a navigation intent: a delayed replacement must not win later.
@@ -902,7 +947,7 @@ export function App() {
   useEffect(()=>{window.addEventListener('lakomics-pause',persistRoute);return()=>window.removeEventListener('lakomics-pause',persistRoute);},[persistRoute]);
   // Reselecting Library goes to its root; returning from another tab keeps its position.
   const openLibrary = () => {
-    if(latest.current.page.view.tab === 'library') {setArea('assets');if(latest.current.area==='assets')openRoot();else retainAssets();return;}
+    if(latest.current.page.view.tab === 'library') {setArea('assets');if(latest.current.area==='assets'){visits.current=[];showRoot();}else retainAssets();return;}
     const saved=lastLibrary.current;
     // The retained assets page is Home: coming from another tab, that tab stays on screen until Library's page commits.
     deferAssetsEntry('library');
@@ -917,7 +962,7 @@ export function App() {
   const openCalendar = useCallback((kind?: 'game'|'movie') => { beginScreenTiming('releaseCalendar','open'); setCalendarKind(kind); setCalendarOpen(true); }, []);
   const closeCalendar = useCallback(() => { const state=latest.current;beginScreenTiming(state.area==='assets'?(state.page.view.tab==='home'?'home':'assets'):state.area,'back');setCalendarKind(undefined); setCalendarOpen(false); }, []);
   const openHome = () => {
-    setHomeOrigin(null); homeRestore.current = null;
+    setHomeOrigin(null); homeRestore.current = null; visits.current = [];
     if (latest.current.page.view.tab === 'home') {setArea('assets');retainAssets();return;}
     const cached = viewCache.current.get(HOME_PAGE_KEY);
     if (cached && Date.now() - homePageAt.current < 60_000) {
@@ -951,7 +996,7 @@ export function App() {
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
     setViewer(null); setClassificationBatchIds(null); setClassificationNotice(''); clearSelection(); closeAlbumBatch(); setSimilarity(false); setReview(null); setReviewOverview(false); setExchangeOpen(false); closeArtists(); setViewSettings(false);   setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setListVersion(0); setFolderAuthority(null); setFolderManagement(null); setIndexReady(false); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
-    lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
+    lastLibrary.current = undefined; beforeCharacter.current = undefined; visits.current = []; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
     forgetRoute();
@@ -976,7 +1021,9 @@ export function App() {
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
   const assetTools=<SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}}/>;
   // 최근 folders: the tablet's own history of folders the user stayed in, opened an image in or filed images into.
-  const recent = useTabletRecentFolders({scope:status.endpoint,view:page.view,focusedNode:focusedCharacter,entries,ready:status.configured&&area==='assets'&&!settings&&indexReady&&page.version>0,onOpen:view=>select(view)});
+  // 고정: the folder pins shared with the PC. Pinned folders are not repeated under 최근.
+  const pins = useTabletFolderPins(status.configured, status.endpoint);
+  const recent = useTabletRecentFolders({scope:status.endpoint,view:page.view,focusedNode:focusedCharacter,entries,ready:status.configured&&area==='assets'&&!settings&&indexReady&&page.version>0,pinnedIds:pins.ids,onOpen:view=>select(view)});
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia,trailing:assetTools},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable || (area==='assets' && !!page.view.description);
   // Character galleries select like the plain gallery (user, 2026-10-05).
@@ -998,7 +1045,9 @@ export function App() {
     const {folder}=change;
     setClassifications(previous=>change.type==='create'
       ?[...previous.filter(item=>item.id!==folder.id),{id:folder.id,name:folder.name,parent_id:folder.parentId,asset_count:0,total_asset_count:0,kind:folder.kind,...(folder.iconKey?{icon_key:folder.iconKey}:{}),...(folder.colorKey?{color_key:folder.colorKey}:{})}]
-      :previous.map(item=>item.id===folder.id?{...item,name:folder.name}:item));
+      :change.type==='look'
+        ?previous.map(item=>{if(item.id!==folder.id)return item;const {icon_key:_icon,color_key:_color,...rest}=item;return {...rest,...(folder.iconKey?{icon_key:folder.iconKey}:{}),...(folder.colorKey?{color_key:folder.colorKey}:{})};})
+        :previous.map(item=>item.id===folder.id?{...item,name:folder.name}:item));
     // The server's own list (order, counts) replaces the local patch as soon as it is read again.
     setIndexRevision(value=>value+1);
   };
@@ -1039,6 +1088,13 @@ export function App() {
   const recentAlbums=useTabletRecentAlbums(status.endpoint);
   const recentDestinations=useMemo(()=>({folders:recent.folders.map(folder=>folder.id),albums:recentAlbums}),[recent.folders,recentAlbums]);
   const crumbs=page.view.album ? [{id:'root',name:'에셋',onSelect:albumRoot},{id:'albums',name:'앨범',onSelect:albumRoot},...(albumTree?albumAncestors(albumTree.albums,page.view.album.id).map(album=>({id:`album:${album.id}`,name:album.name,onSelect:()=>select(albumView(albumTree,album))})):[])] : [{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,currentEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
+  // The folder drawer: where the user is now, and the PC quick views the tablet can open.
+  const drawerFolderId=tabletRecentFolderId(page.view,focusedCharacter,entries);
+  const quickCurrent:DrawerQuick|null=area!=='assets'||page.view.tab!=='library'?null:page.view.root?(librarySegment==='artists'?'artists':librarySegment==='albums'?'albums':null)
+    :!page.view.classification&&!page.view.album&&!page.view.characters&&!page.view.revisit&&!page.view.description&&!page.view.search?.length?'all':null;
+  const openDrawer=()=>setDrawerOpen(true);
+  /** A drawer row that opens a place also closes the drawer. */
+  const fromDrawer=<A extends unknown[]>(run:(...args:A)=>void)=>(...args:A)=>{setDrawerOpen(false);run(...args);};
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
@@ -1109,7 +1165,7 @@ export function App() {
     setSearchChips(chips);setSearchListsRequested(true);setAssetSearchOpen(true);
   };
   const scopeChips=<AssetScopeChips chips={page.view.search??[]} onRemove={removeSearchScope} onClear={()=>commitSearch([])}/>;
-  const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&!page.view.description&&<TopBar barRef={kindShade.barRef} className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={kindShade.title(currentAlbum?.name??(currentEntry&&!currentEntry.characterNode?currentEntry.name:page.view.title))} count={libraryCount} titleAccessory={hasActiveFilters(page.filters)&&<ActiveFilterChip label={viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)!} onClear={clearFilters}/>}
+  const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&!page.view.description&&<TopBar barRef={kindShade.barRef} className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} drawer={{onClick:openDrawer}} crumbs={libraryCrumbNode} title={kindShade.title(currentAlbum?.name??(currentEntry&&!currentEntry.characterNode?currentEntry.name:page.view.title))} count={libraryCount} titleAccessory={hasActiveFilters(page.filters)&&<ActiveFilterChip label={viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)!} onClear={clearFilters}/>}
     search={{scope:'에셋',run:query=>{openAssetSearch();setAssetSearchDraft(query);}}}
     menu={{title:currentAlbum?.name??currentEntry?.name??'에셋',entries:[
       ...(currentAlbum?[{id:'album-manage',group:'action' as const,label:'앨범 관리',icon:<RectangleStackIcon/>,run:()=>setAlbumManagementOpen(true)}]:[]),
@@ -1153,7 +1209,7 @@ export function App() {
         {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}{descriptionToolbar}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot onFolderActions={folderAuthority?setFolderSheet:undefined} endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot onDrawer={openDrawer} onFolderActions={folderAuthority?setFolderSheet:undefined} endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
         <Gallery arrivalScope={viewKey(page.view,page.filters)} hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onReplaceSelection={selectionGallery?replaceSelection:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&selectionBar}
@@ -1252,8 +1308,11 @@ export function App() {
     </div></BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
     {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection} onPartial={failedIds=>setSelectedIds(new Set(failedIds))}/>}
+    {drawerOpen&&status.configured&&<FolderDrawer entries={entries} currentFolderId={drawerFolderId} quickCurrent={quickCurrent} pinnedIds={pins.ids} recent={recent.folders}
+      onClose={()=>setDrawerOpen(false)} onQuick={fromDrawer(kind=>{if(kind==='all')select(ALL_ASSETS);else if(kind==='albums')albumRoot();else{closeArtists();setLibrarySegment('artists');openRoot();}})}
+      onOpenView={fromDrawer(select)} onOpenRecent={fromDrawer(recent.open)} onRemoveRecent={recent.remove} onFolderActions={folderAuthority?setFolderSheet:undefined}/>}
     {folderManagement&&folderAuthority&&<FolderManagement authority={folderAuthority} folders={classifications} folder={folderManagement.folder} initialMode={folderManagement.mode} onClose={()=>setFolderManagement(null)} onChanged={folderChange}/>}
-    {folderSheet&&folderAuthority&&<FolderActionSheet folder={folderSheet} entries={entries} onClose={()=>setFolderSheet(null)} onManage={mode=>setFolderManagement({folder:folderSheet,mode})}/>}
+    {folderSheet&&folderAuthority&&<FolderActionSheet folder={folderSheet} entries={entries} pinned={pins.ids.includes(folderSheet.id)} onPin={()=>{void pins.toggle(folderSheet.id).then(failure=>{if(failure)setClassificationNotice(failure);});}} onClose={()=>setFolderSheet(null)} onManage={mode=>setFolderManagement({folder:folderSheet,mode})}/>}
     {albumManagementOpen&&albumTree&&currentAlbum&&<AlbumManagement tree={albumTree} album={currentAlbum} onClose={()=>setAlbumManagementOpen(false)} onDeleted={albumRoot}/>}
     {selectionActions.notice&&!selectedIds.size&&<div className="trash-snackbar" role="alert">{selectionActions.notice}</div>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}

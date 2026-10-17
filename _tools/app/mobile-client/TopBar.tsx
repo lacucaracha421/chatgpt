@@ -1,6 +1,6 @@
 import {FindButton,type ScreenFind} from './FindContext';
 import {MoreButton,MoreContext,MoreSheet,type ScreenMenu} from './MoreSheet';
-import {ArrowLeftIcon,MagnifyingGlassIcon,PlusIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon,Bars3BottomLeftIcon,MagnifyingGlassIcon,PlusIcon} from '@heroicons/react/24/outline';
 import {useContext,useEffect,useRef,useState,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
@@ -28,9 +28,10 @@ export function TopBarActions({itemAction,search,menu,onMenu,menuCount=0}:{itemA
   const more=useContext(MoreContext),[open,setOpen]=useState(false);
   return <><div className="top-bar__slots">{itemAction}<FindButton search={search}/><MoreButton count={menuCount||more?.options.reviewCount||0} onOpen={()=>{if(onMenu)onMenu();else if(more)more.open(menu);else setOpen(true);}}/></div>{open&&<MoreSheet screenTitle={menu?.title} screenEntries={menu?.entries} onClose={()=>setOpen(false)}/>}</>;
 }
-export function TopBar({title,titleAccessory,count,crumbs,back,itemAction,search,menu,onMenu,menuCount,className='',loading,barRef}:{title?:ReactNode;titleAccessory?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};itemAction?:ReactNode;search?:ScreenFind;menu?:ScreenMenu;onMenu?():void;menuCount?:number;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
+export function TopBar({title,titleAccessory,count,crumbs,back,drawer,itemAction,search,menu,onMenu,menuCount,className='',loading,barRef}:{title?:ReactNode;titleAccessory?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};/** The ☰ button of the folder drawer: after ← (or in the logo's place on the first screen). */drawer?:{onClick():void};itemAction?:ReactNode;search?:ScreenFind;menu?:ScreenMenu;onMenu?():void;menuCount?:number;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
   return <header ref={barRef} className={`top-bar${className?` ${className}`:''}`}>
-    {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
+    {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:!drawer&&<span className="top-bar__brand"><Mark/></span>}
+    {drawer&&<IconButton label="폴더 서랍" icon={Bars3BottomLeftIcon} onClick={drawer.onClick}/>}
     <div className="top-bar__titles">{crumbs&&<div className="top-bar__parent">{crumbs}</div>}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{titleAccessory}{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{typeof count==='number'?displayCount(count):count}</span>}</div>}</div>
     <span className="top-bar__space"/><TopBarActions itemAction={itemAction} search={search} menu={menu} onMenu={onMenu} menuCount={menuCount}/><BarProgress label={loading}/>
   </header>;

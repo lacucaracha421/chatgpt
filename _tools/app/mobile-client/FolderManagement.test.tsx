@@ -3,6 +3,7 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>reason instanceof Error?reason.message:String(reason)}));
 import {FolderManagement,isOriginalsRoot} from './FolderManagement';
+import {CLASSIFICATION_COLORS,CLASSIFICATION_ICONS} from '../src/classification/classificationAppearance';
 import type {Classification} from './types';
 
 const authority={libraryId:'a'.repeat(32),epoch:2,contractVersion:1};
@@ -93,6 +94,17 @@ describe('tablet folder create and rename',()=>{
     expect(save.disabled).toBe(true);expect(screen.getByRole('status').textContent).toContain('같은 이름');
     expect(commands()).toHaveLength(0);
   });
+  it('restyles a folder with the revision it read, and saves only a real change',async()=>{
+    const {onClose,onChanged}=open({folder:folders[1],initialMode:'look'});
+    await waitEnabled('기본값으로 초기화');
+    expect((screen.getByRole('button',{name:'저장'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:CLASSIFICATION_COLORS[1].label}));
+    fireEvent.click(screen.getByRole('button',{name:CLASSIFICATION_ICONS[1].label}));
+    fireEvent.click(screen.getByRole('button',{name:'저장'}));
+    await waitFor(()=>expect(onClose).toHaveBeenCalledOnce());
+    expect(commands()[0][2]).toMatchObject({commandType:'updateClassificationAppearance',classificationId:'c',iconKey:CLASSIFICATION_ICONS[1].key,colorKey:CLASSIFICATION_COLORS[1].key,expectedRevision:7});
+    expect(onChanged).toHaveBeenCalledWith({type:'look',folder:expect.objectContaining({id:'c'})});
+  });
   it('does not rename to the same name',async()=>{
     open({folder:folders[1]});
     await waitEnabled('이름 바꾸기');
@@ -106,7 +118,7 @@ describe('tablet folder create and rename',()=>{
     await waitEnabled('하위 폴더 만들기');
     expect((screen.getByRole('button',{name:'이름 바꾸기'}) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('오리지널 기본 영역의 이름은 유지됩니다.')).toBeTruthy();
-    for(const forbidden of [/이동/,/삭제/,/아이콘/])expect(screen.queryByRole('button',{name:forbidden})).toBeNull();
+    for(const forbidden of [/이동/,/삭제/])expect(screen.queryByRole('button',{name:forbidden})).toBeNull();
     expect(screen.getByText('폴더 이동과 삭제는 PC에서 할 수 있습니다.')).toBeTruthy();
   });
   it('says so when the folder is gone and offers no action',async()=>{

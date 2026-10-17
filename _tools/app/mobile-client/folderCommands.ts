@@ -6,7 +6,7 @@ export type AuthorityFolder = {id: string; kind: 'root'|'work'|'tag'; name: stri
 type Baseline = {libraryId: string; epoch: number; snapshotCursor: number; section: string; items: AuthorityFolder[]; hasMore: boolean; nextAfter: string|null};
 type CommandReply = {classification: AuthorityFolder|null};
 
-/** The tablet may create and rename folders; move and delete stay with the PC. */
+/** The tablet may create, rename and restyle folders (icon and colour); move and delete stay with the PC. */
 export const FOLDER_NAME_LIMIT = 200;
 
 /**
@@ -35,7 +35,7 @@ export async function readFolderSnapshot(authority: FolderAuthority, signal?: Ab
  * One create or rename command. `operationId` identifies the user's intent: sending the same
  * id again after a lost reply applies the command exactly once and returns the first result.
  */
-export function folderCommand(authority: FolderAuthority, operationId: string, commandType: 'createClassification'|'renameClassification', fields: Record<string, unknown>): Promise<CommandReply> {
+export function folderCommand(authority: FolderAuthority, operationId: string, commandType: 'createClassification'|'renameClassification'|'updateClassificationAppearance', fields: Record<string, unknown>): Promise<CommandReply> {
   return api<CommandReply>('/v1/classifications/authority/commands', undefined,
     {libraryId: authority.libraryId, epoch: authority.epoch, contractVersion: authority.contractVersion, operationId, commandType, ...fields}, 'PUT');
 }

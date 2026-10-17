@@ -60,14 +60,14 @@ export function tabletRecentFolderId(view:View,focusedNode:string|null|undefined
   return inGroup(entry,new Map(entries.map(item=>[item.id,item])))?entry.parent_id!:entry.id;
 }
 
-export function useTabletRecentFolders({scope,view,focusedNode,entries,ready,onOpen}:{scope:string;view:View;focusedNode:string|null|undefined;entries:Entry[];ready:boolean;onOpen(view:View):void}):TabletRecentFolders{
+export function useTabletRecentFolders({scope,view,focusedNode,entries,ready,pinnedIds=NO_PINS,onOpen}:{scope:string;view:View;focusedNode:string|null|undefined;entries:Entry[];ready:boolean;/** Pinned folders have their own place in the drawer and are not repeated here. */pinnedIds?:string[];onOpen(view:View):void}):TabletRecentFolders{
   const catalog=useMemo(()=>tabletRecentCatalog(entries),[entries]);
   const currentId=useMemo(()=>tabletRecentFolderId(view,focusedNode,entries),[view,focusedNode,entries]);
   // The character index can arrive after the folder list: saved character rows wait for it.
   const charactersLoaded=useRef(false);
   if(!charactersLoaded.current&&entries.some(entry=>entry.characterKind))charactersLoaded.current=true;
   const core=useRecentFolderCore({
-    libraryRoot:scope,storageKey:recentFoldersKey,currentId,catalog,pinnedIds:NO_PINS,ready,
+    libraryRoot:scope,storageKey:recentFoldersKey,currentId,catalog,pinnedIds,ready,
     isLateId:id=>!charactersLoaded.current&&(id.startsWith(GROUP_PREFIX)||id.startsWith('character:')),
     onOpen:folder=>onOpen(folder.view),
   });

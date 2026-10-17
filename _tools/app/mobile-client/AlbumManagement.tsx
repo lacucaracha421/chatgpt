@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {Button,Dialog,DialogDescription,Field,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
-import {CLASSIFICATION_COLORS,CLASSIFICATION_ICONS,ClassificationIcon,classificationColor} from '../src/classification/classificationAppearance';
+import {AppearanceChoices} from './AppearanceChoices';
 import {albumCommand,publishAlbumTree,readAlbumSnapshot,type AlbumSnapshot} from './albumCommands';
 import type {AlbumTree,NativeAlbum} from './albumModel';
 import {errorText} from './transport';
@@ -55,12 +55,7 @@ export function AlbumManagement({tree,album,parentId=null,initialMode,onClose,on
       {hasChildren&&<p className="hint">하위 앨범이 있는 앨범은 삭제할 수 없습니다.</p>}
     </div>:<>
       {(mode==='create'||mode==='rename')&&<Field label="앨범 이름"><TextInput value={name} disabled={busy} onChange={event=>setName(event.target.value)} autoFocus/></Field>}
-      {mode==='look'&&<>
-        <div className="album-look-preview"><ClassificationIcon kind="root" iconKey={iconKey} style={{color:classificationColor(colorKey)}}/><span>{album?.name}</span></div>
-        <fieldset disabled={busy}><legend>아이콘</legend><div className="album-look-choices">{CLASSIFICATION_ICONS.map(choice=><Button key={choice.key} aria-label={choice.label} aria-pressed={iconKey===choice.key} onClick={()=>setIcon(choice.key)}><ClassificationIcon kind="root" iconKey={choice.key}/>{choice.label}</Button>)}</div></fieldset>
-        <fieldset disabled={busy}><legend>색상</legend><div className="album-look-choices">{CLASSIFICATION_COLORS.map(choice=><Button key={choice.key} aria-label={choice.label} aria-pressed={colorKey===choice.key} onClick={()=>setColor(choice.key)}><span aria-hidden="true" style={{color:choice.value}}>■</span>{choice.label}</Button>)}</div></fieldset>
-        <Button disabled={busy} onClick={()=>{setIcon(null);setColor(null);}}>기본값으로 초기화</Button>
-      </>}
+      {mode==='look'&&<AppearanceChoices name={album?.name} kind="root" iconKey={iconKey} colorKey={colorKey} busy={busy} onIcon={setIcon} onColor={setColor} onReset={()=>{setIcon(null);setColor(null);}}/>}
       {mode==='delete'&&<DialogDescription>{album?.name} 앨범을 삭제할까요?<br/>앨범 연결만 제거되며 원본 파일과 일반 폴더는 유지됩니다.</DialogDescription>}
       {mode==='delete'&&snapshot&&deleteBlocked&&<p className="hint">{snapshot.likesAlbumId===album?.id?'마음에 들어요 앨범은 삭제할 수 없습니다.':'하위 앨범이 있는 앨범은 삭제할 수 없습니다.'}</p>}
       <div className="ui-dialog__actions"><Button disabled={busy} onClick={close}>취소</Button><Button variant={mode==='delete'?'danger':'primary'} disabled={busy||!snapshot||!!(album&&!current)||!name.trim()||(mode==='delete'&&deleteBlocked)} onClick={()=>void save()}><BusyLabel delay={400} busy={busy} idle={mode==='delete'?'삭제':mode==='create'?'만들기':'저장'}>저장 중</BusyLabel></Button></div>

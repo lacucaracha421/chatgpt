@@ -92,21 +92,21 @@ is never part of the change log. It is delivered with every baseline page instea
 a fresh PC rebuilds the protected id from server authority alone. v1 has exactly one
 role, so it is carried whole rather than paginated.
 
-# Structural commands: client create/rename, publisher move/delete/appearance
+# Structural commands: client create/rename/appearance, publisher move/delete
 
 R2 deliberately leaves the character-series-subtree-into-originals rule as a PC-derived
 constraint, so the server cannot yet enforce every structural invariant a non-PC client
-could violate. That rule belongs to *move* alone, so ``moveClassification``,
-``deleteClassification`` and ``updateClassificationAppearance`` still require the publisher
-role.
+could violate. That rule belongs to *move* alone, so ``moveClassification`` and
+``deleteClassification`` still require the publisher role.
 
-``setAssetClassification``, ``createClassification`` and ``renameClassification`` accept an
-ordinary client credential (user decision 2026-10-10, tablet folder management). Neither
-create nor rename needs PC-only data, and the server enforces every rule the PC applies to
-them itself: trimmed non-empty name, parent/kind combination (``validate_parent``), sibling
-name uniqueness, the protected ``originals`` node refusing rename, and compare-and-set on the
-entity revision. A client-originated create additionally has to carry a UUID classification
-id, the id shape the PC mints, so a client cannot invent reserved-looking ids. The legacy
+``setAssetClassification``, ``createClassification``, ``renameClassification`` and
+``updateClassificationAppearance`` accept an ordinary client credential (user decisions
+2026-10-10 and 2026-10-17, tablet folder management and 아이콘 및 색상). None of
+them needs PC-only data, and the server enforces every rule the PC applies to them itself:
+trimmed non-empty name, parent/kind combination (``validate_parent``), sibling name
+uniqueness, the protected ``originals`` node refusing rename, valid icon and colour keys for
+an appearance change, and compare-and-set on the entity revision. A client-originated create
+additionally has to carry a UUID classification id, the id shape the PC mints, so a client cannot invent reserved-looking ids. The legacy
 shared credential is a client and never gains publisher capability. Authorization
 deliberately precedes command validation, so an under-privileged caller cannot probe the
 contract of a publisher command.
@@ -216,9 +216,9 @@ APPEARANCE = "updateClassificationAppearance"
 DELETE = "deleteClassification"
 ASSIGNMENT = "setAssetClassification"
 COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, ASSIGNMENT)
-#: Commands an ordinary client credential may issue. Move, delete and appearance stay
-#: publisher-only (see "Structural commands" in the module docstring).
-CLIENT_COMMANDS = (ASSIGNMENT, CREATE, RENAME)
+#: Commands an ordinary client credential may issue. Move and delete stay publisher-only
+#: (see "Structural commands" in the module docstring).
+CLIENT_COMMANDS = (ASSIGNMENT, CREATE, RENAME, APPEARANCE)
 #: The batch route carries tablet multi-select assignment only.
 BATCH_COMMAND_TYPES = (ASSIGNMENT,)
 
@@ -1376,11 +1376,11 @@ def register_classification_authority(app, get_db, require_client, require_publi
 
     Authorization separates the two write classes, using the shipped role guards rather
     than a new role system. ``setAssetClassification`` is an ordinary client operation,
-    because assignment is the product's normal organization action, and so are create and
-    rename (``CLIENT_COMMANDS``): neither depends on the PC-derived character-series rule,
-    and the server enforces their structural rules itself. Move, delete and appearance
-    require ``publisher``, because R2 leaves the character-series-into-originals rule as a
-    PC-derived constraint on move. The legacy shared credential is accepted only as a client
+    because assignment is the product's normal organization action, and so are create,
+    rename and appearance (``CLIENT_COMMANDS``): none depends on the PC-derived
+    character-series rule, and the server enforces their structural rules itself. Move and
+    delete require ``publisher``, because R2 leaves the character-series-into-originals rule
+    as a PC-derived constraint on move. The legacy shared credential is accepted only as a client
     by ``client_guard`` and is never a publisher, so it cannot acquire that capability
     through this route.
     """

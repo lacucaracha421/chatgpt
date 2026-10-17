@@ -1705,8 +1705,7 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
     def test_an_ordinary_client_cannot_issue_publisher_only_commands(self):
         self.assertEqual(
             [command_type for command_type, _ in self.publisher_only_bodies()],
-            [classification_authority.MOVE, classification_authority.DELETE,
-             classification_authority.APPEARANCE])
+            [classification_authority.MOVE, classification_authority.DELETE])
         for command_type, fields in self.publisher_only_bodies():
             with self.subTest(command=command_type):
                 response = self.issue(command_type, fields, self.auth)
@@ -1716,6 +1715,17 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
         self.assertEqual(self.cursor(), 0)
         self.assertEqual([row[0] for row in self.classification_rows()],
                          sorted([ROOT, WORK, TAG, OTHER, ORIGINALS]))
+
+    def test_an_ordinary_client_can_change_a_folder_look(self):
+        response = self.issue(classification_authority.APPEARANCE,
+                              {"classificationId": TAG, "iconKey": "star", "colorKey": "pink",
+                               "expectedRevision": 1}, self.auth)
+        self.assertEqual(response.status_code, 200, response.text)
+        # A bad key is still refused for a client, with the same code the publisher gets.
+        refused = self.issue(classification_authority.APPEARANCE,
+                             {"classificationId": TAG, "iconKey": "nope", "colorKey": None,
+                              "expectedRevision": 2}, self.auth, operation_id=R2)
+        self.assert_coded(refused, 422, "invalidClassificationAppearance")
 
     def test_a_client_gets_the_same_auth_failure_before_structural_body_validation(self):
         command_type, fields = self.publisher_only_bodies()[0]
