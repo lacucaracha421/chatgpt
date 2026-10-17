@@ -31,9 +31,12 @@
 .pack-opening__footer { min-height: 70px; color: var(--color-muted); font-size: 13px; }
 .pack-opening__footer p { margin: 0; }
 .pack-opening__results { display: flex; flex-wrap: wrap; gap: 12px; font-variant-numeric: tabular-nums; }
-.pack-opening__stage { position: relative; flex: 1; min-height: 380px; display: grid; place-items: center; padding: 64px 32px; overflow: clip; isolation: isolate; background: radial-gradient(60% 55% at 50% 45%,#1a1c26,#0c0d12 60%,#060709); }
+/* The stage is a size container: the two-row layouts below size their cards by its height (cqh). */
+.pack-opening__stage { position: relative; flex: 1; min-height: 380px; display: grid; place-items: center; padding: 64px 32px; overflow: clip; isolation: isolate; container-type: size; background: radial-gradient(60% 55% at 50% 45%,#1a1c26,#0c0d12 60%,#060709); }
 .pack-opening__wrapper { grid-area: 1 / 1; width: min(190px,32%); z-index: 5; }
-.pack-opening__grid { grid-area: 1 / 1; display: grid; grid-template-columns: repeat(auto-fit,minmax(100px,1fr)); gap: 24px; width: min(1100px,100%); z-index: 10; }
+.pack-opening__grid { grid-area: 1 / 1; display: grid; grid-template-columns: repeat(auto-fit,minmax(100px,1fr)); gap: var(--pk-row-gap, 24px) var(--pk-col-gap, 24px); width: min(1100px,100%); z-index: 10;
+  /* Three columns, two rows: the widest grid whose two card rows (63:88, plus the 12px lift of a picked card) fit the stage height. */
+  --pk-fit: calc(3 * (100cqh - var(--pk-row-gap, 24px) - 24px) / 2 * 63 / 88 + 2 * var(--pk-col-gap, 24px)); }
 .pack-opening__slot { position: relative; min-width: 0; }
 .pack-opening__slot .trading-card { position: relative; z-index: 2; }
 .pack-opening__slot .card { width: 100%; }
@@ -78,7 +81,9 @@
 .card-demo-preview__pack { display: block; width: 90px; pointer-events: none; transition: transform .2s ease; }
 .card-demo-preview__button:hover .card-demo-preview__pack { transform: translateY(-3px); }
 .card-demo-preview__label { font-size: 11px; color: var(--color-faint); }
-@media (max-width: 700px) { .pack-opening__grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 28px 16px; max-width: 580px; } .pack-opening__stage { padding: 40px 20px; } .pack-opening__toolbar, .pack-opening__footer { padding: 12px 16px; } }
+@media (max-width: 700px) { .pack-opening__grid { grid-template-columns: repeat(3,minmax(0,1fr)); --pk-row-gap: 28px; --pk-col-gap: 16px; width: min(580px, 100%, var(--pk-fit)); } .pack-opening__stage { padding: 40px 20px; } .pack-opening__toolbar, .pack-opening__footer { padding: 12px 16px; } }
+/* Portrait (a tablet held upright): three and two larger cards instead of five small ones in a row. */
+@media (min-width: 701px) and (max-aspect-ratio: 4/5) { .pack-opening__grid { grid-template-columns: repeat(3,minmax(0,1fr)); --pk-row-gap: 28px; --pk-col-gap: 16px; width: min(760px, 100%, var(--pk-fit)); } }
 @media (prefers-reduced-motion: reduce) {
   .lkm-cards *, .card-demo-preview__pack { animation: none !important; }
   .lkm-cards .card__tilt { transform: none; scale: none; }

@@ -24,7 +24,7 @@ button.tablet-daily-card__pack { appearance:none; border:0; background:transpare
 .tablet-cards .pack-opening__footer { font-size:var(--type-meta); }
 .tablet-cards .pack-opening__stage { padding:var(--space-6) var(--space-4); min-height:0; }
 .tablet-cards .pack-opening__wrapper { width:min(200px, 44%); }
-.tablet-cards .pack-opening__grid { gap:var(--space-3, 12px); }
+.tablet-cards .pack-opening__grid { --pk-row-gap:var(--space-3, 12px); --pk-col-gap:var(--space-3, 12px); }
 /* A drag over a card tilts it instead of scrolling the page (the opening stage never scrolls). */
 .tablet-cards .pack-opening__stage .card { touch-action:none; }
 .tablet-cards .pack-opening__slot[data-pickable] { -webkit-tap-highlight-color:transparent; }

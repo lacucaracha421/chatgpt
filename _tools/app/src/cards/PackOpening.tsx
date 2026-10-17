@@ -156,7 +156,9 @@ export function PackOpening({ cards: suppliedCards = noCards, cover, onClose, lo
         const w = slot.width, h = slot.height, scale = Math.min(1, pr.width * .84 / w), mouth = pr.top - area.top + pr.height * .054;
         const x = pr.left - area.left + pr.width / 2 - area.width / 2;
         const inside = `translate(${x}px, ${mouth + h * scale / 2 + 6 - area.height / 2}px) scale(${scale})`;
-        const rise = `translate(${x}px, ${mouth - h * scale * .12 - area.height / 2}px) scale(${scale})`;
+        // On a short stage the card rises less, so its top never passes the stage edge (the stage clips).
+        const riseY = Math.max(mouth - h * scale * .12, h * scale / 2 + 8);
+        const rise = `translate(${x}px, ${riseY - area.height / 2}px) scale(${scale})`;
         Object.assign(pile.style, { width: `${w}px`, height: `${h}px`, left: `${(area.width - w) / 2}px`, top: `${(area.height - h) / 2}px`, transform: inside, visibility: "visible" });
         await sequence.animate(pile, [{ transform: inside }, { transform: rise }], 520);
         if (sequence.stopped) return;

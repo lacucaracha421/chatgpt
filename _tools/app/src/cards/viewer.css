@@ -34,6 +34,8 @@
 .card-viewer__info dd { margin:0; font-size:var(--type-body); }
 .card-viewer__actions { display:flex; gap:var(--space-2); }
 
+/* Upright or square windows: the card is nearly as wide as the window, so it starts below the top bar's buttons. */
+@media (max-aspect-ratio:1/1) { .card-viewer__layer { padding-top:max(4vh, calc(var(--space-8) * 2)); } }
 @media (max-width:700px) { .card-viewer__nav { width:44px; height:56px; } .card-viewer__nav--prev { left:var(--space-2); } .card-viewer__nav--next { right:var(--space-2); } }
 @keyframes card-viewer-fade { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .card-viewer, .card-viewer__layer--in, .card-viewer__layer--out { animation:none; } .card-viewer__info { transition:none; } }
