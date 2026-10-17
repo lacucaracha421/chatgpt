@@ -17,3 +17,5 @@
   .asset-selection-bar__character kbd { display: none; }
   .asset-selection-bar .ui-button:has(> .asset-selection-bar__label) { width: var(--control-height-icon); min-height: var(--control-height-icon); padding: 0; }
 }
+/* 전체 선택 sits right after the count; pressed (all selected) it reads like a selected tab. */
+.asset-selection-bar__all[aria-pressed="true"] { color: var(--color-text); font-weight: 600; }

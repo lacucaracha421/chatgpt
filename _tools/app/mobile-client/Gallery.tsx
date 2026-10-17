@@ -8,7 +8,8 @@ import {Badge} from '../src/shared/ui/Badge';
 import {FolderMove} from '../src/assets/FolderWave';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
-import {useLongPress} from '../src/shared/useLongPress';
+import {useLongPress,type LongPressStart} from '../src/shared/useLongPress';
+import {applySelectionGesture} from '../src/assets/selection';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,type CSSProperties,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
@@ -30,12 +31,12 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({arrivals, asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {arrivals?: ArrivalTracker; asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
-  selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
+function Tile({arrivals, asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onRangeStart, onToggle, onPressStart, onPressEnd}: {arrivals?: ArrivalTracker; asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+  selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onRangeStart?: (id:string, start:LongPressStart)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const privacy=useTabletAssetMask(asset,requestedPrivacy);
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
   // Long press enters selection mode; the shared hook swallows the click that follows the hold.
-  const press=useLongPress({enabled:!!onSelect,onLongPress:()=>onSelect?.(asset.id),onStart:onPressStart,onEnd:onPressEnd});
+  const press=useLongPress({enabled:!!onSelect,onLongPress:start=>{if(onRangeStart)onRangeStart(asset.id,start);else onSelect?.(asset.id);},onStart:onPressStart,onEnd:onPressEnd});
   useEffect(()=>{
     const element=host.current;if(paused||privacy||vault||!element||!window.IntersectionObserver)return;
     let visible:AbortController|undefined;
@@ -95,6 +96,8 @@ const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callba
 export const GALLERY_ROW_OVERSCAN = 8;
 const GALLERY_TILE_GAP = 10;
 const GALLERY_ROW_GAP = GALLERY_TILE_GAP;
+/** Range selection scrolls the list while the finger is this close to its top or bottom edge, up to this many px per frame at the edge. */
+const RANGE_EDGE = 96, RANGE_SPEED = 14;
 /** A typical tile is about three-quarters as wide as it is tall; the static placeholder pattern uses it for its column count. */
 const GALLERY_PLACEHOLDER_ASPECT = .75;
 
@@ -115,7 +118,7 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({arrivalScope, items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
+export function Gallery({arrivalScope, items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onReplaceSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
   /** The place, filters and sort these tiles belong to, without the load generation: items that join the same scope after a refresh fade in. Defaults to `identity`, where every identity change restarts without animation. */arrivalScope?:string;
   /** Cursor-paged lists keep their reserved tail neutral only while more items can arrive. */hasMore?:boolean;
   /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
@@ -123,6 +126,7 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Tablet Library and character selection; absent for Revisit and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
+  /** Long press then drag selects (or, from a selected tile, deselects) the run of tiles under the finger; without this a long press only selects its tile. */onReplaceSelection?(ids:ReadonlySet<string>):void;
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
@@ -138,7 +142,8 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
   const releasePress=(cancel:()=>void)=>{if(activePress.current===cancel)activePress.current=null;};
   const cancelActivePress=()=>{activePress.current?.();activePress.current=null;};
-  const pull=usePullToRefresh(parent,onRefresh,busy,paused);
+  const rangeActive=useRef(false);
+  const pull=usePullToRefresh(parent,onRefresh,busy,paused,rangeActive);
   const introduction=useRef<HTMLDivElement>(null);
   const [introHeight,setIntroHeight]=useState(0);
   useLayoutEffect(()=>{
@@ -323,6 +328,53 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
     void sparse.load(gapIndex,screenCount(),controller.signal);
     return()=>controller.abort();
   },[gapIndex,sparse?.toc,gapRow?.key,paused,busy,destination,gapRetry]);
+  // Range selection (Google Photos style): after the hold, the finger keeps selecting the tiles between
+  // its start and the tile under it, in list order; the list does not scroll under it, and near the top
+  // or bottom edge it scrolls itself.
+  const rangeLatest=useRef({items,selectedIds,onReplaceSelection});rangeLatest.current={items,selectedIds,onReplaceSelection};
+  const rangeEnd=useRef<(()=>void)|null>(null);
+  useEffect(()=>()=>rangeEnd.current?.(),[]);
+  const startRange=useCallback((id:string,start:LongPressStart)=>{
+    const scroller=parent.current;
+    rangeEnd.current?.();
+    const base=new Set(rangeLatest.current.selectedIds??[]);
+    const mode:'add'|'remove'=base.has(id)?'remove':'add';
+    let current='',x=start.x,y=start.y,frame=0;
+    const show=(to:string)=>{
+      if(to===current)return;
+      current=to;
+      const order=rangeLatest.current.items.map(asset=>asset.id);
+      const run=new Set(applySelectionGesture({ids:new Set(),anchorId:id,focusId:id},order,to,{toggle:false,range:true}).ids);
+      if(!run.size)run.add(id);
+      rangeLatest.current.onReplaceSelection?.(mode==='add'?new Set([...base,...run]):new Set([...base].filter(item=>!run.has(item))));
+    };
+    show(id);
+    // A keyboard-started press has no finger to follow.
+    if(!scroller||start.pointerId===undefined)return;
+    const probe=()=>{
+      const tile=document.elementFromPoint(x,y)?.closest<HTMLElement>('[data-asset-id]');
+      if(tile&&scroller.contains(tile)&&tile.dataset.assetId)show(tile.dataset.assetId);
+    };
+    const mine=(event:globalThis.PointerEvent)=>event.pointerId===start.pointerId;
+    const move=(event:globalThis.PointerEvent)=>{if(!mine(event))return;x=event.clientX;y=event.clientY;probe();};
+    const lock=(event:TouchEvent)=>{if(event.cancelable)event.preventDefault();};
+    const tick=()=>{
+      frame=window.requestAnimationFrame(tick);
+      const box=scroller.getBoundingClientRect();
+      const speed=y<box.top+RANGE_EDGE?-RANGE_SPEED*Math.min(1,(box.top+RANGE_EDGE-y)/RANGE_EDGE):y>box.bottom-RANGE_EDGE?RANGE_SPEED*Math.min(1,(y-(box.bottom-RANGE_EDGE))/RANGE_EDGE):0;
+      if(speed){scroller.scrollTop+=speed;probe();}
+    };
+    const finish=(event?:globalThis.PointerEvent)=>{
+      if(event&&!mine(event))return;
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',finish);window.removeEventListener('touchmove',lock);
+      rangeActive.current=false;rangeEnd.current=null;
+    };
+    rangeActive.current=true;rangeEnd.current=finish;
+    window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);window.addEventListener('pointercancel',finish);
+    window.addEventListener('touchmove',lock,{passive:false});
+    frame=window.requestAnimationFrame(tick);
+  },[]);
   const lastBackgroundTap = useRef<{at:number;x:number;y:number}|null>(null);
   const backgroundTap = (event: PointerEvent<HTMLDivElement>) => {
     if (!onClearSelection || !selectedIds?.size) return;
@@ -343,7 +395,7 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
         if(row.spacer)return null;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} arrivals={arrivals} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} arrivals={arrivals} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onRangeStart={onReplaceSelection?startRange:undefined} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {

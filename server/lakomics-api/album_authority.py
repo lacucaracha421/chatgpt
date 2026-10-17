@@ -1487,7 +1487,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
     @app.get(PREFIX + "/assets")
     async def album_assets(request: Request, libraryId: str, epoch: int, albumId: str,
                            cursor: str | None = None, limit: int = DEFAULT_ALBUM_ASSET_PAGE,
-                           sort: str = "newest", toc: int = 0,
+                           sort: str = "newest", toc: int = 0, ids: int = 0,
                            utcOffsetMinutes: str = "0",
                            authorization: str | None = Header(default=None),
                            if_none_match: str | None = Header(default=None)):
@@ -1505,17 +1505,21 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
         `toc=1` returns the full month index at `utcOffsetMinutes` (default UTC) in the
         requested date/id order instead of a page; it accepts no cursor and is
         independent of the page limit. Pages ignore `utcOffsetMinutes`.
+        `ids=1` returns `{listGeneration, totalCount, ids}` for the whole Album in that
+        order instead of a page, for selecting everything; it accepts no cursor and no TOC.
         """
         require_client(authorization)
         if toc == 1 and cursor is not None:
             fail(400, "invalidAlbumAssets", "toc and cursor are mutually exclusive")
+        if ids == 1 and (toc == 1 or cursor is not None):
+            fail(400, "invalidAlbumAssets", "ids cannot be combined with toc or cursor")
         if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit",
-                                             "sort", "toc", "utcOffsetMinutes", "media_kind", "aspect_ratio", "tag", "artist",
+                                             "sort", "toc", "ids", "utcOffsetMinutes", "media_kind", "aspect_ratio", "tag", "artist",
                                              "duration_ms_min", "duration_ms_max"}:
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
                 or not ALBUM_ID_PATTERN.fullmatch(albumId)
-                or sort not in ("newest", "oldest") or toc not in (0, 1)
+                or sort not in ("newest", "oldest") or toc not in (0, 1) or ids not in (0, 1)
                 or not 1 <= limit <= MAX_ALBUM_ASSET_PAGE):
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         applied_offset = 0
@@ -1551,6 +1555,8 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     "member.library_id = ? AND member.album_id = ?"
                     f" AND member.desired_state = 1 AND asset.committed = 1 {filter_clause}",
                     clause_params, sort, prefer_id_lookup=filters.artist is not None)
+                if ids:
+                    return query.ids(db, generation)
                 if toc:
                     payload = query.toc(db, generation, lambda previous: encode_asset_cursor(
                         albumId, previous, filters, sort), applied_offset)

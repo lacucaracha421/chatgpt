@@ -2,13 +2,15 @@ import {LoadingLine} from './TopBar';
 import {visibleInterval} from './useVisibleInterval';
 import {viewerEditEvent} from './listGeneration';
 import {announceFolderFilled} from './recentFolders';
-import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,EmptyState,IconButton} from './ui';
 import {errorText,native} from './transport';
 import {treeBreadcrumb} from './homeModel';
 import {ClassificationIcon,classificationColor} from '../src/classification/classificationAppearance';
 import {createKoreanMatcher} from '../src/shared/koreanSearch';
+import {RecentDestinations,folderDestinationChips} from './RecentDestinations';
+import {useFrozenIds,useRecentDestinationIds} from './recentDestinationHistory';
 
 /**
  * One live Classification from the native replica.
@@ -40,11 +42,6 @@ export interface FlatAssignmentRow {classification:AssignmentClassification;dept
 
 /**
  * The Classification hierarchy ordered parent-first, with each node's depth.
- *
- * Only real Classification nodes are projected. The Library navigation tree additionally
- * carries Character series, groups, characters and synthetic `character-group:*` ids, and
- * those are deliberately absent here: none of them is an assignable Classification, so
- * reusing that projection would offer targets the authority cannot accept.
  *
  * A node whose parent the replica does not hold is shown at the top level rather than
  * dropped. The server refuses parent cycles, and `seen` keeps the walk finite regardless.
@@ -112,7 +109,7 @@ export function collapsedForAssignment(rows:AssignmentClassification[],classific
 }
 
 /** The viewer and batch sheet share the same single-choice tree and local search. */
-export function ClassificationAssignmentChoices({classifications,selectedId,disabled,onSelect}:{classifications:AssignmentClassification[];selectedId:string|null|undefined;disabled:boolean;onSelect(id:string|null):void}) {
+export function ClassificationAssignmentChoices({classifications,selectedId,disabled,onSelect,top}:{classifications:AssignmentClassification[];selectedId:string|null|undefined;disabled:boolean;onSelect(id:string|null):void;/** Above the search field, e.g. the 최근 row. */top?:ReactNode}) {
   const [query,setQuery]=useState('');
   const [collapsed,setCollapsed]=useState(()=>collapsedForAssignment(classifications,selectedId??null));
   // Apply the replica's expansion before paint so its reset cannot undo the first tap.
@@ -122,16 +119,19 @@ export function ClassificationAssignmentChoices({classifications,selectedId,disa
   const toggle=(id:string)=>setCollapsed(current=>{const next=new Set(current);next.has(id)?next.delete(id):next.add(id);return next;});
   // The native layer validates the destination against the same replica this tree renders
   // from, so a row can only ever name a live Classification.
-  const row=(classification:AssignmentClassification,depth:number,hasChildren:boolean,label?:string)=><div key={classification.id} className={`tree-row${selectedId===classification.id?' is-current':''}`} style={depth?{paddingLeft:depth*16}:undefined}>
-    {hasChildren?<button type="button" className="tree-expander" aria-label={`${classification.name} ${collapsed.has(classification.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.has(classification.id)} onClick={()=>toggle(classification.id)}>{collapsed.has(classification.id)?<ChevronRightIcon/>:<ChevronDownIcon/>}</button>:<span className="tree-leaf"/>}
-    <button type="button" className="tree-select" role="radio" aria-checked={selectedId===classification.id} aria-label={classification.name} disabled={disabled} onClick={()=>onSelect(classification.id)}>
-      <span className="classification-assignment-mark" aria-hidden="true">{selectedId===classification.id?'●':'○'}</span>
-      <ClassificationIcon kind={classification.kind} iconKey={classification.iconKey} style={{color:classificationColor(classification.colorKey)}}/>
-      <span className="classification-assignment-name">{classification.name}</span>
-      {label?<span className="classification-assignment-breadcrumb">{label}</span>:null}
-    </button>
-  </div>;
+  const row=(classification:AssignmentClassification,depth:number,hasChildren:boolean,label?:string)=>{
+    const current=selectedId===classification.id;
+    return <div key={classification.id} className={`tree-row${current?' is-current':''}`} style={depth?{paddingLeft:depth*16}:undefined}>
+      {hasChildren?<button type="button" className="tree-expander" aria-label={`${classification.name} ${collapsed.has(classification.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.has(classification.id)} onClick={()=>toggle(classification.id)}>{collapsed.has(classification.id)?<ChevronRightIcon/>:<ChevronDownIcon/>}</button>:<span className="tree-leaf"/>}
+      <button type="button" className="tree-select" role="radio" aria-checked={current} aria-label={classification.name} disabled={disabled} onClick={()=>onSelect(classification.id)}>
+        <ClassificationIcon kind={classification.kind} iconKey={classification.iconKey} style={{color:classificationColor(classification.colorKey)}}/>
+        <span className="classification-assignment-name">{classification.name}</span>
+        {label?<span className="classification-assignment-breadcrumb">{label}</span>:null}
+      </button>
+    </div>;
+  };
   return <>
+      {top}
       <label className="classification-search"><MagnifyingGlassIcon/><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="분류 검색" aria-label="분류 검색"/></label>
       <div className="classification-tree" role="radiogroup" aria-label="분류 선택">
         {query.trim()
@@ -142,7 +142,6 @@ export function ClassificationAssignmentChoices({classifications,selectedId,disa
             <div className={`tree-row${selectedId===null?' is-current':''}`}>
               <span className="tree-leaf"/>
               <button type="button" className="tree-select" role="radio" aria-checked={selectedId===null} aria-label="미분류" disabled={disabled} onClick={()=>onSelect(null)}>
-                <span className="classification-assignment-mark" aria-hidden="true">{selectedId===null?'●':'○'}</span>
                 <FolderIcon/>
                 <span className="classification-assignment-name">미분류</span>
               </button>
@@ -167,10 +166,17 @@ export function ClassificationAssignmentChoices({classifications,selectedId,disa
  * canonical unassigned state. There is no confirm button: a tap is the whole operation, and
  * the picker closes as soon as the native layer has durably recorded the intent.
  */
+/** How long a 최근 chip shows its done state before the sheet closes itself. */
+export const RECENT_DONE_MS=900;
+
 export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:string;open:boolean;onClose():void}) {
   const [state,setState]=useState<ClassificationAssignmentState|null>(null);
   const [error,setError]=useState('');
   const [saving,setSaving]=useState(false);
+  // A tap on a 최근 chip shows its done state, then the picker closes by itself.
+  const [doneId,setDoneId]=useState<string|null>(null);
+  const closeTimer=useRef<number|undefined>(undefined);
+  const recentIds=useFrozenIds(useRecentDestinationIds().folders,open);
   const alive=useRef(0);
   const load=useCallback(async(signal?:AbortSignal)=>{
     const generation=alive.current;
@@ -184,6 +190,7 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
   useEffect(()=>{
     if(!open)return;
     alive.current++;
+    setDoneId(null);
     // A reopened picker must not show the previous Asset's tree or selection while the new
     // read is in flight — including its expansion, which is derived from that Asset.
     setState(null);
@@ -192,10 +199,10 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     // The replica converges on its own cadence, so re-reading while open is what turns a
     // still-pending choice into a confirmed one.
     const timer=visibleInterval(()=>void load(),5000);
-    return()=>{alive.current++;controller.abort();timer();};
+    return()=>{alive.current++;controller.abort();timer();window.clearTimeout(closeTimer.current);};
   },[open,assetId,load]);
-  const select=async(classificationId:string|null)=>{
-    if(saving||!state?.adopted||state.blocked)return;
+  const select=async(classificationId:string|null,viaChip=false)=>{
+    if(saving||doneId||!state?.adopted||state.blocked)return;
     setSaving(true);setError('');
     try{
       // The write returns the durably-queued state. Closing only after it resolves is what
@@ -204,7 +211,10 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
       window.dispatchEvent(viewerEditEvent());
       if(classificationId)announceFolderFilled(classificationId);
       setState(next);
-      onClose();
+      if(viaChip&&classificationId){
+        setDoneId(classificationId);
+        closeTimer.current=window.setTimeout(onClose,RECENT_DONE_MS);
+      }else onClose();
     }catch(reason){setError(errorText(reason));}
     finally{setSaving(false);}
   };
@@ -215,7 +225,9 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
       <LoadingLine label={(!state&&!error)&&'분류 상태를 불러오는 중'}/>
       {error&&<p className="error-message" role="alert">{error}</p>}
       {state&&!state.adopted&&<p className="hint">분류 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
-      {state?.adopted&&<ClassificationAssignmentChoices classifications={state.classifications} selectedId={state.classificationId??null} disabled={saving||state.blocked===true} onSelect={id=>void select(id)}/>}
+      {state?.adopted&&<ClassificationAssignmentChoices classifications={state.classifications} selectedId={state.classificationId??null} disabled={saving||!!doneId||state.blocked===true} onSelect={id=>void select(id)}
+        top={!state.blocked&&<RecentDestinations chips={folderDestinationChips(recentIds,state.classifications)} label="최근 분류" doneId={doneId} disabledIds={new Set(state.classificationId?[state.classificationId]:[])}
+          status={doneId?`분류 변경 · ${state.classifications.find(row=>row.id===doneId)?.name??''}`:''} onPick={chip=>void select(chip.id,true)}/>}/>}
       {state?.blocked&&<p className="classification-assignment-status is-blocked" role="status">{state.conflictMessage||'분류 변경을 적용할 수 없습니다.'}</p>}
       {state?.pending&&!state.blocked&&<p className="classification-assignment-status" role="status">저장 대기</p>}
     </div>

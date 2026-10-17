@@ -24,6 +24,20 @@ export function assetTocPath(view:View, filters:AssetFiltersValue, offset=-new D
   params.delete('limit'); params.set('toc','1'); params.set('utcOffsetMinutes',String(offset));
   return `${path}?${params}`;
 }
+/** The same listing as the pages, asked for every id in page order (select-all). */
+export function assetIdsPath(view:View, filters:AssetFiltersValue) {
+  const [path, query]=pagePath(view,null,filters).split('?');
+  const params=new URLSearchParams(query);
+  params.delete('limit'); params.set('ids','1');
+  return `${path}?${params}`;
+}
+/** Every id of the current library or album listing, including pages not loaded yet. */
+export async function readAssetIds(view:View, filters:AssetFiltersValue, signal:AbortSignal):Promise<string[]> {
+  const value=await api<{ids?:unknown}>(assetIdsPath(view,filters),signal);
+  // An older server ignores `ids` and answers an ordinary page, which has no id list.
+  if(!Array.isArray(value?.ids)||value.ids.some(id=>typeof id!=='string'))throw new Error('서버를 업데이트하면 전체 선택을 쓸 수 있습니다.');
+  return value.ids as string[];
+}
 /** Refuse malformed tables rather than assigning items to an incorrect global position. */
 export function validAssetToc(value:unknown):value is AssetToc {
   if(!value || typeof value!=='object')return false;

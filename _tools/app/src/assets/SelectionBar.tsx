@@ -18,11 +18,18 @@ type SelectionBarProps = {
   onCharacterToggle?: () => void;
   characterPicker?: ReactNode;
   characterLabel?: string;
+  /** The tablet's 분류 action files images into folders, so it shows a folder instead of a person. */
+  characterIcon?: typeof UserIcon;
   extraActions?: ReactNode;
   onTrash?: () => void;
   onClearSelection: () => void;
   /** Tablet: opens the image menu for the selection (the PC uses its right-click menu). */
   onMore?: () => void;
+  /** Tablet: 전체 선택 after the count. Pressed while the whole list is selected; pressing it then lets go of everything. */
+  onSelectAll?: () => void;
+  allSelected?: boolean;
+  /** The list of ids is still on its way. */
+  selectAllBusy?: boolean;
   /** Deterministic compact mode for constrained hosts and component tests. */
   compact?: boolean;
 };
@@ -30,17 +37,18 @@ type SelectionBarProps = {
 // 자산 선택 시 갤러리 위에 떠오르는 고정 선택 바. 상단바는 선택과 무관하게
 // 제목·보기 설정·창 제어 위치를 유지하고, 선택 명령은 여기에만 나타난다.
 export function SelectionBar({
-  view, selectedCount, batchPending, onAddToAlbum, onRemoveFromCollection, onSetCover, onAssignArtist, characterOpen = false, onCharacterToggle, characterPicker, characterLabel = "캐릭터", extraActions, onTrash, onClearSelection, onMore, compact = false,
+  view, selectedCount, batchPending, onAddToAlbum, onRemoveFromCollection, onSetCover, onAssignArtist, characterOpen = false, onCharacterToggle, characterPicker, characterLabel = "캐릭터", characterIcon: CharacterIcon = UserIcon, extraActions, onTrash, onClearSelection, onMore, onSelectAll, allSelected = false, selectAllBusy = false, compact = false,
 }: SelectionBarProps) {
   const inCollection = view?.kind === "collection";
   return (
     <MotionPresence open={selectedCount > 0}>
     <div className={`asset-selection-bar${compact ? " asset-selection-bar--compact" : ""}`} role="toolbar" aria-label="선택 작업">
       <strong>{selectedCount}개 선택</strong>
+      {onSelectAll && <Button size="sm" variant="ghost" className="asset-selection-bar__all" aria-pressed={allSelected} aria-busy={selectAllBusy || undefined} disabled={batchPending || selectAllBusy} onClick={onSelectAll}>전체 선택</Button>}
       <span className="view-toolbar__divider" aria-hidden="true" />
       {onAddToAlbum && <Button size="sm" variant="ghost" aria-label="앨범에 추가" disabled={batchPending} onClick={onAddToAlbum}><RectangleStackIcon aria-hidden="true" /><span className="asset-selection-bar__label">앨범에 추가</span></Button>}
       {onCharacterToggle && <div className="asset-selection-bar__character">
-        <Button size="sm" variant={characterOpen ? "secondary" : "ghost"} aria-label={`${characterLabel} 지정`} aria-expanded={characterOpen} disabled={batchPending} onClick={onCharacterToggle}><UserIcon aria-hidden="true" />{!compact && <span className="asset-selection-bar__label">{characterLabel}</span>}</Button>
+        <Button size="sm" variant={characterOpen ? "secondary" : "ghost"} aria-label={`${characterLabel} 지정`} aria-expanded={characterOpen} disabled={batchPending} onClick={onCharacterToggle}><CharacterIcon aria-hidden="true" />{!compact && <span className="asset-selection-bar__label">{characterLabel}</span>}</Button>
         {characterOpen && characterPicker}
       </div>}
       {extraActions}

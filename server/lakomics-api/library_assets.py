@@ -291,6 +291,8 @@ def list_mobile_classification_assets(
     authorization: str | None = Header(default=None),
     cursor: str | None = None,
     toc: int = Query(default=0, ge=0, le=1),
+    # 1 returns every id of the listing in page order instead of a page (select-all on a client).
+    ids_only: int = Query(default=0, ge=0, le=1, alias="ids"),
     # Read raw text so pages can ignore even an invalid TOC-only offset.
     utc_offset_minutes: str = Query(default="0", alias="utcOffsetMinutes"),
     if_none_match: str | None = Header(default=None),
@@ -323,10 +325,14 @@ def list_mobile_classification_assets(
     `toc=1` returns the full month index at `utcOffsetMinutes` (default UTC) for that
     same listing instead of a page; it accepts no cursor and is independent of the
     page limit. Pages ignore `utcOffsetMinutes`.
+    `ids=1` returns `{listGeneration, totalCount, ids}`: every id of that same listing in
+    page order, for selecting the whole list; it accepts no cursor and no TOC.
     """
     api.require_auth(authorization)
     if toc and cursor is not None:
         raise HTTPException(status_code=400, detail="toc and cursor are mutually exclusive")
+    if ids_only and (toc or cursor is not None):
+        raise HTTPException(status_code=400, detail="ids cannot be combined with toc or cursor")
     ranked = sort in asset_list_query.RANKED_SORTS
     if (sort == "random") != (seed is not None):
         raise HTTPException(status_code=422, detail="seed is required with, and only valid with, sort=random")
@@ -466,6 +472,10 @@ def list_mobile_classification_assets(
             query = asset_list_query.AssetListQuery(
                 "visible_assets AS asset", where_clause, clause_params + filter_params, sort,
                 prefer_id_lookup=filters.artist is not None)
+        if ids_only:
+            return asset_filters.search_response(
+                query.ids(db, generation), filters, if_none_match,
+                [scope_identity if unclassified or subtree else list(classifications), "ids"])
         if toc:
             payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
                 "library-assets", filters, [sort, scope_identity, *previous]), applied_offset)

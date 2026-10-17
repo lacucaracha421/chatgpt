@@ -17,7 +17,7 @@ export function ImageActionSheet({assets,count,scopeName,busy,albumCount,inAlbum
 }) {
   const [status,setStatus]=useState(''),[error,setError]=useState('');
   const sources=uniqueSources(assets.map(asset=>asset.source_url));
-  const items=bindSheetItems(imageActionDefs({count,busy,sourceCount:sources.length,albumCount,inAlbum}),{
+  const items=bindSheetItems(imageActionDefs({count,busy,sourceCount:assets.length===count?sources.length:0,albumCount,inAlbum}),{
     'copy-source':()=>{
       setStatus('');setError('');
       void navigator.clipboard.writeText(sources.join('\n')).then(()=>setStatus(sources.length===1?'출처를 복사했습니다.':`출처 ${sources.length}개를 복사했습니다.`),reason=>setError(errorText(reason)));

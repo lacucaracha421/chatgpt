@@ -58,6 +58,15 @@ class AssetListQuery:
                                  after=after, limit=limit)
         return db.execute(sql, params).fetchall()
 
+    def ids(self, db, generation):
+        """Every Asset id of the listing in page order, for select-all on a client.
+
+        Same scope, filters, ordering and snapshot as the pages; no row data is read.
+        """
+        sql, params = self.select("asset.id")
+        ids = [row["id"] for row in db.execute(sql, params)]
+        return {"listGeneration": generation, "totalCount": len(ids), "ids": ids}
+
     def toc(self, db, generation, encode_cursor, utc_offset_minutes=0):
         """Count ordered month runs and mint their preceding-row cursors.
 
@@ -184,6 +193,14 @@ class RankedAssetListQuery:
             db.create_function("shuffle_rank", 2, shuffle_rank, deterministic=True)
         sql, params = self.select(after=after, limit=limit)
         return db.execute(sql, params).fetchall()
+
+    def ids(self, db, generation):
+        """Every Asset id of the ranked listing in order (see :meth:`AssetListQuery.ids`)."""
+        if self.sort == "random":
+            db.create_function("shuffle_rank", 2, shuffle_rank, deterministic=True)
+        sql, params = self.select()
+        ids = [row["id"] for row in db.execute(sql, params)]
+        return {"listGeneration": generation, "totalCount": len(ids), "ids": ids}
 
     @staticmethod
     def cursor_key(sort: str, row) -> str:

@@ -4,6 +4,7 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {RectangleStackIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {errorText,native} from './transport';
+import {announceAlbumFilled} from './recentDestinationHistory';
 
 export interface MembershipAlbum {
   id:string;
@@ -63,6 +64,7 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     try{
       const next=await native<AlbumMembershipState>('albumMembershipSet',{assetId,albumId:album.id,desiredState:desired});
       setState(next);
+      if(desired)announceAlbumFilled(album.id);
     }catch(reason){setState(previous);setError(errorText(reason));}
     finally{setSaving(current=>{const next=new Set(current);next.delete(album.id);return next;});}
   };

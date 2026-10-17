@@ -73,8 +73,9 @@ import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView,type Entry} from 
 import './library.css';
 import {Gallery} from './Gallery';
 import {displayCount} from '../src/shared/displayDate';
-import {readAssetToc, supportsAssetToc, useAssetToc, type AssetTocPage} from './assetToc';
+import {readAssetIds, readAssetToc, supportsAssetToc, useAssetToc, type AssetTocPage} from './assetToc';
 import {AlbumBatchSheet} from './AlbumBatchSheet';
+import {RecentDestinationsContext,useTabletRecentAlbums} from './recentDestinationHistory';
 import {AlbumManagement} from './AlbumManagement';
 import {FolderManagement,type FolderChange} from './FolderManagement';
 import {FolderScope} from './FolderScope';
@@ -83,7 +84,7 @@ import {ImageActionSheet} from './ImageActions';
 import {useTabletRecentFolders} from './recentFolders';
 import type {FolderAuthority} from './folderCommands';
 import {useSelectionActions} from './useSelectionActions';
-import {InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
+import {FolderArrowDownIcon,InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
 import {SelectionBar} from '../src/assets/SelectionBar';
 import {Home} from './Home';
 import {Collections, type CollectionsPlace, type CollectionsRequest} from './Collections';
@@ -250,6 +251,11 @@ export function App() {
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'|'character'; character?:ViewerCharacterContext|null} | null>(null);
   const [assetInfo,setAssetInfo]=useState<Asset|null>(null);
   const [selectedIds,setSelectedIds]=useState<Set<string>>(new Set());
+  // 전체 선택 asks the server for every id of the list; a new selection or place drops the answer.
+  const selectAllRequest=useRef<AbortController|null>(null);
+  const [selectAllBusy,setSelectAllBusy]=useState(false),[selectAllNotice,setSelectAllNotice]=useState('');
+  /** How many images the server said the list holds when 전체 선택 last ran: what "everything" means for a list that is not fully loaded. */
+  const [selectAllTotal,setSelectAllTotal]=useState<number|null>(null);
   // A character gallery's loaded items and its next-page loader, for its selection bar and the viewer opened from it.
   const characterItems=useRef<Asset[]>([]);
   const characterMore=useRef<(()=>void)|null>(null);
@@ -289,7 +295,9 @@ export function App() {
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
   const latest = useRef({moreOpen, findOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, cardAlbumOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo}); latest.current = {moreOpen, findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, filterVersion, fault, similarity, review, reviewOverview, vaultOpen, exchangeOpen, cardAlbumOpen, artistsOpen, selectionSize:selectedIds.size, classificationBatchOpen:!!classificationBatchIds, albumBatchOpen, assetInfo};
-  const clearSelection=useCallback(()=>{setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
+  const clearSelection=useCallback(()=>{selectAllRequest.current?.abort();selectAllRequest.current=null;setSelectAllBusy(false);setSelectAllNotice('');setSelectAllTotal(null);setClassificationBatchIds(null);setAssetInfo(null);setSelectedIds(new Set());},[]);
+  useEffect(()=>{if(!selectedIds.size)setSelectAllTotal(null);},[selectedIds.size]);
+  const replaceSelection=useCallback((ids:ReadonlySet<string>)=>setSelectedIds(new Set(ids)),[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
   const openAlbumBatch=useCallback(()=>{if(!selectedIds.size)return;setAlbumBatchAssetIds([...selectedIds]);setAlbumBatchOpen(true);},[selectedIds]);
@@ -999,14 +1007,37 @@ export function App() {
   const selectionActions=useSelectionActions({scope:`${status.endpoint}:${viewKey(page.view)}:${focusedCharacter}`,selectedIds,tree:albumTree,albumId:page.view.album?.id,
     onTrash:async id=>{
       const asset=characterItems.current.find(item=>item.id===id)??page.items.find(item=>item.id===id)??sparse?.ranges.flatMap(range=>range.items).find(item=>item.id===id);
-      if(!asset)throw new Error('선택한 자산을 다시 불러와 주세요.');
-      await trash.trashSelected(asset);
+      // An image that was never loaded is trashed by its id alone.
+      await trash.trashSelected(asset??{id});
     },onComplete:(ids,action)=>{
       const done=new Set(ids);setSelectedIds(current=>new Set([...current].filter(id=>!done.has(id))));
       if(action==='trash'&&ids.length)trash.offerBatchUndo(ids);
     }});
   const albumRoot=()=>{setLibrarySegment('albums');openRoot();};
   const selectionVisibleItems=selectionActions.hiddenIds?.size?visibleItems.filter(item=>!selectionActions.hiddenIds!.has(item.id)):visibleItems;
+  // 전체 선택: the whole list, loaded or not. A fully loaded list needs no server; otherwise the server lists every id.
+  const listedTotal=sparse?sparse.toc.totalCount:page.has_more&&!page.view.description?undefined:selectionVisibleItems.length;
+  const everything=listedTotal??selectAllTotal??undefined;
+  const allSelected=everything!==undefined&&everything>0&&selectedIds.size>=everything;
+  const selectAll=()=>{
+    if(allSelected){clearSelection();return;}
+    selectAllRequest.current?.abort();setSelectAllNotice('');
+    const loaded=()=>setSelectedIds(new Set(selectionVisibleItems.map(item=>item.id)));
+    if(!sparse&&(!page.has_more||page.view.description)){loaded();return;}
+    const controller=new AbortController();selectAllRequest.current=controller;setSelectAllBusy(true);
+    const hidden=new Set([...trash.hidden,...(selectionActions.hiddenIds??[])]);
+    void readAssetIds(page.view,page.filters,controller.signal).then(ids=>{
+      if(controller.signal.aborted)return;
+      const wanted=ids.filter(id=>!hidden.has(id));
+      setSelectedIds(new Set(wanted));setSelectAllTotal(wanted.length);
+    },reason=>{
+      if(controller.signal.aborted)return;
+      loaded();setSelectAllNotice(`불러온 ${selectionVisibleItems.length.toLocaleString('ko-KR')}개만 선택했습니다. ${errorText(reason)}`);
+    }).finally(()=>{if(!controller.signal.aborted){selectAllRequest.current=null;setSelectAllBusy(false);}});
+  };
+  // 최근 destinations for the 분류 and 앨범 sheets: folders from the recent-folder history, albums from their own.
+  const recentAlbums=useTabletRecentAlbums(status.endpoint);
+  const recentDestinations=useMemo(()=>({folders:recent.folders.map(folder=>folder.id),albums:recentAlbums}),[recent.folders,recentAlbums]);
   const crumbs=page.view.album ? [{id:'root',name:'에셋',onSelect:albumRoot},{id:'albums',name:'앨범',onSelect:albumRoot},...(albumTree?albumAncestors(albumTree.albums,page.view.album.id).map(album=>({id:`album:${album.id}`,name:album.name,onSelect:()=>select(albumView(albumTree,album))})):[])] : [{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,currentEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
@@ -1116,7 +1147,7 @@ export function App() {
   const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),reviewOverviewLayer=useMotionSurface('layer'),reviewLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer'),cardAlbumLayer=useMotionSurface('layer');
   const classificationToast=useMotionSurface('toast'),exchangeToast=useMotionSurface('toast');
   const artistsCovered=useLayerCovered(artistsOpen);
-  const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button size="sm" variant="ghost" aria-label="정보" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}><InformationCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">정보</span></Button>}{page.view.album&&<Button size="sm" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">앨범에서 빼기</span></Button>}<span className="selection-action-notice" role={selectionActions.notice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onMore={()=>setImageSheet(true)} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
+  const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterIcon={FolderArrowDownIcon} characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button size="sm" variant="ghost" aria-label="정보" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}><InformationCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">정보</span></Button>}{page.view.album&&<Button size="sm" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">앨범에서 빼기</span></Button>}<span className="selection-action-notice" role={selectionActions.notice||selectAllNotice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice||selectAllNotice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onMore={()=>setImageSheet(true)} onSelectAll={selectionGallery?selectAll:undefined} allSelected={allSelected} selectAllBusy={selectAllBusy} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
   const assetAreaNode=(
       <main className="library-main" ref={mainRef} style={{display:artistsCovered?'none':undefined}}>
         {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}{descriptionToolbar}
@@ -1124,12 +1155,12 @@ export function App() {
             covers and position at once instead of rebuilding them. */}
         <LibraryRoot onFolderActions={folderAuthority?setFolderSheet:undefined} endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
-        <Gallery arrivalScope={viewKey(page.view,page.filters)} hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
+        <Gallery arrivalScope={viewKey(page.view,page.filters)} hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onReplaceSelection={selectionGallery?replaceSelection:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&selectionBar}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
         {charactersVisited && <CharacterBrowser classifications={entries} onOpenFolder={classification=>select({tab:'library',classification,title:entries.find(entry=>entry.id===classification)?.name??''})} hiddenIds={trash.hidden} search={page.view.search} onSearch={query=>{openAssetSearch();setAssetSearchDraft(query??'');}} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();if(items[index]?.kind==='image')recent.recordCurrent();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
-          selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}
+          selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection,onReplace:replaceSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}
           review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:setReview}:undefined}/>}
         {characterSelection&&selectionBar}
         <div className="floating-notices">
@@ -1201,7 +1232,7 @@ export function App() {
     else if(motionTab==='home'||motionTab==='collections'||motionTab==='catalog'||motionTab==='notes')screenReady(motionTab,host,error&&motionTab==='home'?'error':'ok');
   });
 
-  return <FindContext.Provider value={search=>{setFindSearch(search);setFindOpen(true);}}><MoreContext.Provider value={{options:moreOptions,open:menu=>{setScreenMenu(menu);beginScreenTiming('more','open');setMoreOpen(true);}}}><MotionScope key={status.endpoint}><div className="mobile-app" ref={appRef}>
+  return <RecentDestinationsContext.Provider value={recentDestinations}><FindContext.Provider value={search=>{setFindSearch(search);setFindOpen(true);}}><MoreContext.Provider value={{options:moreOptions,open:menu=>{setScreenMenu(menu);beginScreenTiming('more','open');setMoreOpen(true);}}}><MotionScope key={status.endpoint}><div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
     {!status.configured&&appHeader}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area} data-layer-covered={artistsCovered||undefined}>
@@ -1241,5 +1272,5 @@ export function App() {
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}
     {cardAlbumOpen && status.configured && <div className="tablet-layer" ref={cardAlbumLayer}><TabletCardAlbum backRef={cardAlbumBack} onClose={()=>setCardAlbumOpen(false)}/></div>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key} ref={exchangeToast} data-state="open"><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}
-  </div></MotionScope></MoreContext.Provider></FindContext.Provider>;
+  </div></MotionScope></MoreContext.Provider></FindContext.Provider></RecentDestinationsContext.Provider>;
 }

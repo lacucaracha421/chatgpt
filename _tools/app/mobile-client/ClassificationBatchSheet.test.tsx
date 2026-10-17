@@ -4,9 +4,10 @@ import type {ReactNode} from 'react';
 import {ClassificationBatchSheet} from './ClassificationBatchSheet';
 import type {ClassificationAssignmentState} from './ClassificationAssignmentEditor';
 import {ASSET_LIST_CHANGED_EVENT} from './listGeneration';
+import {RecentDestinationsContext} from './recentDestinationHistory';
 const mocks=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mocks.native,errorText:(e:unknown)=>e instanceof Error?e.message:String(e)}));
-vi.mock('./BottomSheet',()=>({BottomSheet:({title,onClose,children}:{title:string;onClose():void;children:ReactNode})=><section><h2>{title}</h2>{children}<button onClick={onClose}>닫기</button></section>}));
+vi.mock('./BottomSheet',()=>({BottomSheet:({title,onClose,children,actions}:{title:string;onClose():void;children:ReactNode;actions?:ReactNode})=><section><h2>{title}</h2>{children}<div><button onClick={onClose}>닫기</button>{actions}</div></section>}));
 const state=(assetId='a',classificationId:string|null='old',overrides:Partial<ClassificationAssignmentState>={}):ClassificationAssignmentState=>({adopted:true,assetId,classificationId,classifications:[
   {id:'old',name:'이전',kind:'root',parentId:null,iconKey:null,colorKey:null},
   {id:'new',name:'게임',kind:'root',parentId:null,iconKey:null,colorKey:null},
@@ -81,5 +82,15 @@ describe('ClassificationBatchSheet',()=>{
     render(<ClassificationBatchSheet {...props()}/>);await screen.findByRole('radio',{name:'게임'});
     fireEvent.change(screen.getByRole('searchbox',{name:'분류 검색'}),{target:{value:'ㅇㅅ'}});
     expect(screen.getByRole('radio',{name:'원신'})).toBeTruthy();expect(screen.getByText('게임 › 원신')).toBeTruthy();expect(screen.queryByRole('radio',{name:'미분류'})).toBeNull();
+  });
+});
+describe('ClassificationBatchSheet choice marks',()=>{
+  it('marks the chosen folder by state, not by a circle',async()=>{
+    render(<ClassificationBatchSheet {...props(['a'])}/>);
+    const folder=await screen.findByRole('radio',{name:'게임'});
+    fireEvent.click(folder);
+    expect(folder.getAttribute('aria-checked')).toBe('true');
+    expect(document.body.textContent).not.toMatch(/[○●]/);
+    expect((screen.getByRole('button',{name:'적용'}) as HTMLButtonElement).disabled).toBe(false);
   });
 });

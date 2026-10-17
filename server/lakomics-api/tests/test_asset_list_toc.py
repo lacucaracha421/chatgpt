@@ -233,6 +233,34 @@ class AssetListTocTests(unittest.TestCase):
                     with self.subTest(scope=scope, sort=sort, filters=filters):
                         self.assert_toc(scope, sort, **filters)
 
+    def test_ids_list_the_whole_listing_in_page_order_for_every_scope(self):
+        for scope in ("library", "classification", "album"):
+            for sort in ("newest", "oldest"):
+                for filters in ({}, {"media_kind": "images"}, {"aspect_ratio": "portrait"}):
+                    with self.subTest(scope=scope, sort=sort, filters=filters):
+                        response = self.read(scope, ids=1, sort=sort, **filters)
+                        self.assertEqual(response.status_code, 200, response.text)
+                        body = response.json()
+                        self.assertEqual(body["ids"], self.expected(scope, sort, filters))
+                        self.assertEqual(body["totalCount"], len(body["ids"]))
+                        # Same generation as the pages, so a client can tell a stale list.
+                        _, generation = self.walk(scope, sort=sort, **filters)
+                        self.assertEqual(body["listGeneration"], generation)
+        unclassified = self.read("library", ids=1, unclassified=1).json()["ids"]
+        self.assertEqual(unclassified, self.expected("library", "newest", {"unclassified": 1}))
+
+    def test_ids_refuse_a_cursor_and_the_toc(self):
+        cursor = self.read("library", limit=2).json()["next_cursor"]
+        for scope in ("library", "album"):
+            self.assertEqual(self.read(scope, ids=1, toc=1).status_code, 400)
+        self.assertEqual(self.read("library", ids=1, cursor=cursor).status_code, 400)
+        self.assertEqual(self.read("album", ids=1, cursor=cursor).status_code, 400)
+
+    def test_ids_of_a_shuffle_hold_every_asset_once(self):
+        response = self.read("library", ids=1, sort="random", seed="abcdefgh12")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(sorted(response.json()["ids"]), sorted(self.expected("library", "newest", {})))
+
     def test_month_uses_utc_and_created_at_fallback(self):
         asset_id = list(self.assets)[-1]
         # Stored offset crosses the local calendar boundary, but stays April in UTC.

@@ -62,6 +62,9 @@
 .radio-dot { width:18px; height:18px; border:1px solid var(--color-muted); border-radius:50%; }
 .sheet-option[aria-checked="true"] .radio-dot { border:5px solid var(--color-text); }
 .library-sheet>.ui-button { margin-top:12px; }
+/* A sheet whose action shares the row with 닫기: a hairline, then two equal 44 px buttons (same recipe as the collection forms' action row). */
+.library-sheet__actions { display:flex; gap:var(--space-2); margin-top:var(--space-3); padding-top:var(--space-4); border-top:1px solid var(--color-border); }
+.library-sheet__actions .ui-button { flex:1; min-height:var(--touch-target); }
 /* Pull to refresh: a zero-height sticky anchor with a floating pill, so the list never moves. */
 .pull-refresh { position:sticky; top:0; z-index:6; height:0; overflow:visible; pointer-events:none; }
 .pull-refresh__pill { position:absolute; left:50%; top:0; display:flex; align-items:center; gap:8px; min-height:36px; padding:0 14px 0 12px; white-space:nowrap; color:var(--color-text); font-size:12px; background:var(--color-sidebar); border:1px solid var(--color-border); border-radius:18px; box-shadow:0 4px 14px #0007; }

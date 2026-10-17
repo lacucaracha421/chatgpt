@@ -10,7 +10,8 @@ function tick() {
 }
 
 /** Where the hold began: a host that wraps many targets resolves which one from this. */
-export type LongPressStart = {target: EventTarget | null; x: number; y: number};
+/** `pointerId` is the finger (or mouse) that holds, so a host can follow the same pointer afterwards; keyboard starts have none. */
+export type LongPressStart = {target: EventTarget | null; x: number; y: number; pointerId?: number};
 
 export type LongPressOptions = {
   onLongPress(start: LongPressStart): void;
@@ -42,7 +43,7 @@ export function useLongPress({onLongPress, enabled = true, onStart, onEnd}: Long
     onPointerDown(event: PointerEvent<HTMLElement>) {
       if (!enabled || (event.pointerType === 'mouse' && event.button !== 0)) return;
       clear();
-      origin.current = {target: event.target, x: event.clientX, y: event.clientY};
+      origin.current = {target: event.target, x: event.clientX, y: event.clientY, pointerId: event.pointerId};
       swallow.current = false;
       latest.current.onStart?.(cancel);
       timer.current = window.setTimeout(() => {

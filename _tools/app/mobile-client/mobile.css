@@ -8,6 +8,8 @@ button, input { font:inherit; }
 button { cursor:pointer; color:inherit; }
 button:disabled { opacity:.4; cursor:default; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--color-focus); outline-offset:3px; }
+/* Touch use never draws focus rings (see main.tsx); a hardware keyboard brings them back. */
+:root:not([data-input="keyboard"]) :focus-visible { outline:none !important; }
 button, a { touch-action:manipulation; }
 svg { width:24px; height:24px; stroke-width:1.5; flex-shrink:0; }
 h1,h2,h3,p { margin:0; }
@@ -281,6 +283,7 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 :is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character,.mobile-app .asset-selection-bar__end)>.ui-button:active:not(:disabled),
 .mobile-app .asset-selection-bar__character>.ui-button--secondary{color:var(--color-text)}
 .mobile-app .asset-selection-bar__end>.ui-button--danger{color:var(--color-danger)}
+.mobile-app .asset-selection-bar>.asset-selection-bar__all[aria-pressed="true"]{color:var(--color-text);font-weight:600}
 /* Narrow portrait: the labels fold away and every action becomes a 44 icon button. */
 @media (max-width:719px){
   .mobile-app .asset-selection-bar__label{display:none}
@@ -292,14 +295,14 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
    left-side full-height drawer treatment above) and renders `.tree-row` rows, so only the
    selection mark, the current row and the status line are new. */
 .classification-assignment-editor .dialog-header { display:flex; align-items:center; justify-content:space-between; }
-.classification-assignment-mark { width:12px; min-width:12px; color:var(--color-accent); font-size:12px; line-height:1; }
-/* The shared tree rule gives `span:first-of-type` the flexible width, which here is the
-   selection mark rather than the name. The mark keeps its fixed width and the name takes the
-   flexible slot, so the row behaves like every other tree row. */
-.classification-assignment-editor .tree-select>span:first-of-type { flex:none; overflow:visible; text-overflow:clip; }
+/* The chosen destination is the shared selection slab (DESIGN §6): ivory face, echo and a small dark mark at the right end. No radio circle, no edge stripe. */
 .classification-assignment-editor .tree-select>.classification-assignment-name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.classification-assignment-editor .classification-tree { padding:0 4px 4px 0; }
 .tree-row.is-current .classification-assignment-name { font-weight:600; }
-.tree-row.is-current .tree-select { color:var(--color-accent); }
+.tree-row.is-current .tree-select { background:var(--color-sidebar-selection); color:var(--color-on-accent); border-radius:0; box-shadow:var(--selection-echo); }
+.tree-row.is-current .tree-select>svg { color:inherit!important; opacity:1; }
+.tree-row.is-current .tree-select::after { content:""; flex:none; width:var(--selection-mark-size); height:var(--selection-mark-size); background:currentColor; }
+/* 그룹 and 캐릭터 rows are shown for orientation only: quieter text, no press feedback. */
 .tree-select:disabled { opacity:.55; }
 .classification-assignment-breadcrumb { font-size:11px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:45%; }
 .classification-assignment-status { padding:10px 12px; color:var(--color-muted); font-size:12px; }

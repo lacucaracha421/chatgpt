@@ -95,13 +95,14 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
   }, [setViewer]);
 
   /** Batch writes report refusals to the selection bar; they never become permanent deletion. */
-  const trashSelected = useCallback(async (asset: Asset) => {
+  /** A batch row whose image was never loaded here passes only its id. */
+  const trashSelected = useCallback(async (asset: Asset | {id: string}) => {
     const state = await setLifecycle(asset.id, 'trash');
     const row = state.items.find(item => item.assetId === asset.id);
     if (!state.available || state.tombstoned || row?.state === 'blocked' || row?.state === 'dropped') {
       throw new Error('휴지통으로 옮기지 못했습니다. 다시 시도해 주세요.');
     }
-    known.current.set(asset.id, asset); setKnownVersion(value => value + 1);
+    if ('kind' in asset) { known.current.set(asset.id, asset); setKnownVersion(value => value + 1); }
     changedAt.current = Date.now();
     setHidden(current => new Set(current).add(asset.id));
   }, []);

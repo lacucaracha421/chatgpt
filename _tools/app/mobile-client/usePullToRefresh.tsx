@@ -9,7 +9,7 @@ import {ArrowPathIcon} from '@heroicons/react/24/outline';
  * a refresh this gesture started; other loads (opening a folder, a background re-read) keep the
  * previous content in place and use the screen's thin progress line instead.
  */
-export function usePullToRefresh(host:RefObject<HTMLElement|null>,refresh:(()=>void)|undefined,busy:boolean,paused=false) {
+export function usePullToRefresh(host:RefObject<HTMLElement|null>,refresh:(()=>void)|undefined,busy:boolean,paused=false,/** True while another gesture (a range drag) owns the finger. */owned?:RefObject<boolean>) {
   const [distance,setDistance]=useState(0);
   const [pulled,setPulled]=useState(false);
   const current=useRef({refresh,busy,paused});current.current={refresh,busy,paused};
@@ -29,7 +29,7 @@ export function usePullToRefresh(host:RefObject<HTMLElement|null>,refresh:(()=>v
     const reset=()=>{start=null;dy=0;setDistance(0);};
     const begin=(event:TouchEvent)=>{reset();if(!current.current.refresh||current.current.busy||current.current.paused||element.scrollTop>0||event.touches.length!==1)return;start={x:event.touches[0].clientX,y:event.touches[0].clientY};};
     const move=(event:TouchEvent)=>{
-      if(!start)return;if(event.touches.length!==1||element.scrollTop>0){reset();return;}
+      if(!start)return;if(owned?.current){reset();return;}if(event.touches.length!==1||element.scrollTop>0){reset();return;}
       const touch=event.touches[0],y=touch.clientY-start.y,x=Math.abs(touch.clientX-start.x);
       if(y<0||x>Math.max(10,y)){reset();return;}
       if(y<8)return;
@@ -38,7 +38,7 @@ export function usePullToRefresh(host:RefObject<HTMLElement|null>,refresh:(()=>v
     const end=()=>{const ready=dy>=60;reset();if(ready&&!current.current.busy&&!current.current.paused&&current.current.refresh){sawBusy.current=false;setPulled(true);current.current.refresh();}};
     element.addEventListener('touchstart',begin,{passive:true});element.addEventListener('touchmove',move,{passive:false});element.addEventListener('touchend',end);element.addEventListener('touchcancel',reset);
     return()=>{element.removeEventListener('touchstart',begin);element.removeEventListener('touchmove',move);element.removeEventListener('touchend',end);element.removeEventListener('touchcancel',reset);};
-  },[host]);
+  },[host,owned]);
   const refreshing=useDelayedBusy(pulled&&busy&&!!refresh);
   const shown=!!refresh&&(refreshing||distance>0);
   // The pill follows the finger while pulling and rests just below the top edge while refreshing.
