@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
-import { Select } from "../shared/ui/Select";
 import { avError } from "./avClient";
 import limits from "./avLimits.json";
 import type { AvDetails, AvGateway, AvPerson, AvPersonInput, AvPersonRole } from "./avTypes";
@@ -14,7 +13,8 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
 }) {
   const [code, setCode] = useState(details.productCode ?? ""), [label, setLabel] = useState(details.label ?? ""), [series, setSeries] = useState(details.series ?? "");
   const [people, setPeople] = useState<CreditDraft[]>(() => details.people.map(person => ({ key: `${person.role}/${person.id}`, displayName: person.displayName, nameSource: person, person: { kind: "existing", id: person.id }, role: person.role, creditName: person.creditName })));
-  const [query, setQuery] = useState(""), [role, setRole] = useState<AvPersonRole>("performer");
+  // Directors are no longer kept for AV (user, 2026-10-18): people are added as performers only.
+  const [query, setQuery] = useState(""), role: AvPersonRole = "performer";
   const [results, setResults] = useState<AvPerson[]>([]), [error, setError] = useState<string | null>(null), [saving, setSaving] = useState(false);
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -50,12 +50,12 @@ export function AvEditPanel({ details, api, onClose, onSaved }: {
       <TextField label="품번" maxLength={limits.productCode} value={code} onChange={event => setCode(event.target.value)} />
       <TextField label="레이블" maxLength={limits.label} value={label} onChange={event => setLabel(event.target.value)} />
       <TextField label="시리즈" maxLength={limits.series} value={series} onChange={event => setSeries(event.target.value)} />
-      <div className="av-people-add"><Select label="역할" value={role} onChange={event => setRole(event.target.value as AvPersonRole)}><option value="performer">출연</option><option value="director">감독</option></Select>
+      <div className="av-people-add">
         <TextField label="인물 이름 검색" maxLength={limits.personName} value={query} onChange={event => setQuery(event.target.value)} />
         {query.trim() && <Button disabled={saving || people.length >= limits.credits} onClick={() => add()}>새 인물로 추가</Button>}
         {results.length > 0 && <ul aria-label="기존 인물">{results.map(person => <li key={person.id}><Button disabled={saving} onClick={() => add(person)}>{performerName(person).primary}{performerName(person).secondary && <small lang="ja">{performerName(person).secondary}</small>} · {person.id.slice(0, 8)}</Button></li>)}</ul>}
       </div>
-      {(["performer", "director"] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === "performer" ? "출연자" : "감독"}>
+      {(people.some(person => person.role === "director") ? ["performer", "director"] as const : ["performer"] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === "performer" ? "출연자" : "감독"}>
         <h3>{creditRole === "performer" ? "출연자" : "감독"}</h3>
         {people.map((person, index) => person.role !== creditRole ? null : <div key={person.key} className="av-person-row">
           <span>{performerName(person.nameSource ?? person).primary}{performerName(person.nameSource ?? person).secondary && <small lang="ja">{performerName(person.nameSource ?? person).secondary}</small>}</span>

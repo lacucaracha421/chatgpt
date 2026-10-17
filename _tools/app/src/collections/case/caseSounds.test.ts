@@ -10,7 +10,7 @@ class FakeAudio {
   constructor(public src: string) { FakeAudio.made.push(this); }
   play() { FakeAudio.played.push(this.src); return FakeAudio.play(); }
 }
-const name = (url: string) => /([a-z]+-[a-z]+-\d+)\.mp3/.exec(url)?.[1];
+const name = (url: string) => /([a-z]+-[a-z]+-\d+)\.(?:mp3|wav)/.exec(url)?.[1];
 
 beforeEach(() => {
   FakeAudio.made = []; FakeAudio.played = []; FakeAudio.play = () => Promise.resolve();
@@ -27,6 +27,8 @@ describe("case sounds", () => {
       "steel-open": ["steel-open-1", "steel-open-2", "steel-open-3"],
       "steel-close": ["steel-close-1", "steel-close-2"],
       "book-open": ["book-open-1", "book-open-2"],
+      "shelf-out": ["shelf-out-1", "shelf-out-2", "shelf-out-3"],
+      "shelf-in": ["shelf-in-1", "shelf-in-2", "shelf-in-3"],
     });
   });
   it("maps Switch and AV cases to the switch set, the rest to steelbooks, and books to an open only", () => {

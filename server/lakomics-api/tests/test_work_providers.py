@@ -1023,5 +1023,88 @@ class WorkProviderTests(unittest.TestCase):
         self.open.assert_not_called()
 
 
+class FakeSocket:
+    def settimeout(self, value):
+        self.timeout = value
+
+
+class FakeHttpResponse:
+    def __init__(self, body, status=200, will_close=False):
+        self.body, self.status, self.will_close, self.msg = body, status, will_close, {}
+
+    def read1(self, size):
+        chunk, self.body = self.body[:size], self.body[size:]
+        return chunk
+
+    def isclosed(self):
+        return not self.body
+
+
+class FakeConnection:
+    def __init__(self, replies):
+        self.replies, self.sock, self.closed, self.requests = replies, None, False, []
+
+    def request(self, method, target, headers=None):
+        if self.dropped:
+            raise ConnectionResetError()
+        self.sock = FakeSocket()
+        self.requests.append((method, target, headers))
+
+    dropped = False
+
+    def getresponse(self):
+        return self.replies.pop(0)
+
+    def close(self):
+        self.closed, self.sock = True, None
+
+
+class KeepAlivePoolTests(unittest.TestCase):
+    def pool(self, **options):
+        self.made = []
+        def make(host, timeout):
+            self.made.append(FakeConnection([FakeHttpResponse(b"image") for _ in range(8)]))
+            return self.made[-1]
+        return wp.KeepAlivePool(("img.example",), factory=make, **options)
+
+    def fetch(self, pool, url="https://img.example/a.png"):
+        return wp.outbound(url, deadline=wp.time.monotonic() + 5, limit=100, pool=pool,
+                           headers={"ApiKey": "k"})
+
+    def test_sequential_downloads_reuse_one_connection(self):
+        pool = self.pool()
+        self.assertEqual(self.fetch(pool)[0], b"image")
+        self.assertEqual(self.fetch(pool)[0], b"image")
+        self.assertEqual(len(self.made), 1)
+        self.assertEqual([r[1] for r in self.made[0].requests], ["/a.png", "/a.png"])
+        self.assertEqual(self.made[0].requests[0][2]["Apikey"], "k")
+
+    def test_dropped_idle_connection_is_replaced_once(self):
+        pool = self.pool()
+        self.fetch(pool)
+        self.made[0].dropped = True
+        self.assertEqual(self.fetch(pool)[0], b"image")
+        self.assertEqual(len(self.made), 2)
+        self.assertTrue(self.made[0].closed)
+
+    def test_unread_error_and_closing_responses_are_not_reused(self):
+        pool = self.pool()
+        self.fetch(pool)
+        self.made[0].replies = [FakeHttpResponse(b"gone", status=404)]
+        with self.assertRaises(wp.UpstreamStatus) as caught:
+            self.fetch(pool)
+        self.assertEqual(caught.exception.status, 404)
+        self.assertTrue(self.made[0].closed)
+        self.fetch(pool)
+        self.assertEqual(len(self.made), 2)
+
+    def test_unlisted_hosts_and_plain_http_are_refused(self):
+        pool = self.pool()
+        for url in ("https://other.example/a.png", "http://img.example/a.png", "https://img.example:8443/a.png"):
+            with self.assertRaises(ValueError):
+                pool.open(wp.HTTPRequest(url), timeout=1)
+        self.assertEqual(self.made, [])
+
+
 if __name__ == "__main__":
     unittest.main()

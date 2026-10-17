@@ -4,6 +4,7 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CASE_PLASTIC, CollectionCase, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
 import { handOffCaseAngle } from "./case/caseHandoff";
+import { playShelfSound, preloadShelfSounds } from "./case/caseSounds";
 import { stageForCaseHeight } from "./case/fitCaseStage";
 import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
 import { isSpineWarm } from "./spineShelfWarm";
@@ -110,6 +111,7 @@ type Props<W extends SpineWork> = {
 
 export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, restorePick = false, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
   const hostRef = useRef<HTMLDivElement>(null);
+  useEffect(preloadShelfSounds, []);
   const [width, setWidth] = useState(960);
   const [focusId, setFocusId] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null);
@@ -525,6 +527,9 @@ function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, sti
   const [pulled, setPulled] = useState(still);
   const [wasLeaving, setWasLeaving] = useState(leaving);
   if (wasLeaving !== leaving) { setWasLeaving(leaving); if (!leaving) setPulled(false); }
+  // 빼기 as the pull starts, 넣기 as the put-back starts; a case put back before it painted never left, so it is silent.
+  const sounding = !painted ? null : leaving ? "in" : pulled ? null : "out";
+  useEffect(() => { if (sounding) playShelfSound(sounding); }, [sounding]);
   const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back, privacy };
   if (leaving && !painted) return null;
   return <div ref={host} className={`spine-shelf__out${!painted ? " is-preparing" : leaving ? " is-leaving" : pulled ? "" : " is-pulling"}`} data-id={id}

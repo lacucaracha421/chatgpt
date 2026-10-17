@@ -53,6 +53,10 @@ class StashDBTests(unittest.TestCase):
         http = mock.patch.object(wp._opener, "open", side_effect=AssertionError("Unmocked outbound HTTP"))
         self.open = http.start()
         self.addCleanup(http.stop)
+        # Image downloads use the keep-alive pool; route them through the same fake.
+        pooled = mock.patch.object(av.image_pool, "open", lambda request, timeout: self.open(request, timeout=timeout))
+        pooled.start()
+        self.addCleanup(pooled.stop)
         app = FastAPI()
         for module in (wp, av):
             module.register(app, fixtures.api_app.get_db, fixtures.api_app._home_client,
@@ -331,9 +335,9 @@ class StashDBTests(unittest.TestCase):
                 av.cache_performer(av.normalize(performer(id_)))
             self.assertEqual(list(av.detail_cache), ["two", "three"])
 
-    def test_four_image_downloads_overlap_without_graphql_lock_and_fifth_is_busy(self):
+    def test_image_downloads_overlap_without_graphql_lock_and_extra_is_busy(self):
         av.cache_performer(av.normalize(performer()))
-        started = threading.Barrier(5)
+        started = threading.Barrier(av.IMAGE_SLOTS + 1)
         release = threading.Event()
         def download(*args, **kwargs):
             started.wait(timeout=5)
@@ -342,14 +346,14 @@ class StashDBTests(unittest.TestCase):
             return png(), "image/png"
         av.relay.locks["stashdb"].acquire()
         try:
-            with mock.patch.object(wp, "outbound", side_effect=download), ThreadPoolExecutor(4) as pool:
-                pending = [pool.submit(self.get, "/image", stashdbId="one", imageId="photo") for _ in range(4)]
+            with mock.patch.object(wp, "outbound", side_effect=download), ThreadPoolExecutor(av.IMAGE_SLOTS) as pool:
+                pending = [pool.submit(self.get, "/image", stashdbId="one", imageId="photo") for _ in range(av.IMAGE_SLOTS)]
                 try:
                     started.wait(timeout=5)
                     self.code(self.get("/image", stashdbId="one", imageId="photo"), 429, "providerBusy")
                 finally:
                     release.set()
-                self.assertEqual([future.result().status_code for future in pending], [200] * 4)
+                self.assertEqual([future.result().status_code for future in pending], [200] * av.IMAGE_SLOTS)
         finally:
             av.relay.locks["stashdb"].release()
         self.open.assert_not_called()

@@ -502,6 +502,12 @@ const AV_GENRES: Record<string, string> = {
   "リマスター": "리마스터",
   "HD": "HD",
   "SD": "SD",
+  // Seen on real candidates (2026-10-18)
+  "アクメ・オーガズム": "절정·오르가즘",
+  ギリモザ: "아슬아슬 모자이크",
+  "デカチン・巨根": "대물·거근",
+  原作コラボ: "원작 콜라보",
+  早漏: "조루",
 };
 
 /** Case, width and surrounding space do not change a tag. */
@@ -531,6 +537,11 @@ const HIDDEN_AV_GENRES: RegExp[] = [
   /^8K$/i,
   /^60fps$/i,
   /^ハイクオリティVR$/,
+  // Package and listing facts, not what the title is about.
+  /^Blu-ray/i,
+  /^特典付き・セット商品$/,
+  /^\d{4}年代(?:前半|後半)?（DOD）$/,
+  /^デジモ$/,
 ];
 
 export function isHiddenAvGenre(genre: string): boolean {

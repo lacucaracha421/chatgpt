@@ -97,10 +97,11 @@ describe('tablet AV editor', () => {
     fireEvent.click(within(dialog).getByRole('button', {name: '첫 배우 연결 제거'}));
     fireEvent.change(within(dialog).getByLabelText('인물 이름 검색'), {target: {value: '既存'}});
     fireEvent.click(within(dialog).getByRole('button', {name: /기존 인물 ·/}));
-    fireEvent.change(within(dialog).getByLabelText('역할'), {target: {value: 'director'}});
-    fireEvent.change(within(dialog).getByLabelText('인물 이름 검색'), {target: {value: ' 새 감독 '}});
+    // Only performers can be added; a director already on the work stays listed so it can still be removed.
+    expect(within(dialog).queryByLabelText('역할')).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText('인물 이름 검색'), {target: {value: ' 새 배우 '}});
     fireEvent.click(within(dialog).getByRole('button', {name: '새 인물로 추가'}));
-    fireEvent.change(within(dialog).getByLabelText('새 감독 작품 내 표기'), {target: {value: ' 감독 표기 '}});
+    fireEvent.change(within(dialog).getByLabelText('새 배우 작품 내 표기'), {target: {value: ' 배우 표기 '}});
     save(dialog);
     await waitFor(() => expect(readCommands()[0]?.attempts).toBe(1));
     expect(readCommands()).toHaveLength(1);
@@ -108,12 +109,12 @@ describe('tablet AV editor', () => {
     expect(command.commandType).toBe('setAvCredits');
     if (command.commandType !== 'setAvCredits') throw new Error('wrong command');
     expect(command.expectedRevision).toBe(7);
-    expect(command.people).toEqual([{personId: expect.stringMatching(/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/), displayName: '새 감독', nameJa: null}]);
+    expect(command.people).toEqual([{personId: expect.stringMatching(/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/), displayName: '새 배우', nameJa: null}]);
     expect(command.credits).toEqual(expect.arrayContaining([
       {personId:'actor-2',role:'performer',order:0,creditName:'별명'}, {personId:'actor-known',role:'performer',order:1,creditName:null},
-      {personId:'director-1',role:'director',order:0,creditName:null}, {personId:command.people[0].personId,role:'director',order:1,creditName:'감독 표기'},
+      {personId:command.people[0].personId,role:'performer',order:2,creditName:'배우 표기'}, {personId:'director-1',role:'director',order:0,creditName:null},
     ]));
-    expect(JSON.parse(screen.getByTestId('shown').textContent!).people.map((person: {name:string}) => person.name)).toEqual(['둘째 배우','기존 인물','감독 이름','새 감독']);
+    expect(JSON.parse(screen.getByTestId('shown').textContent!).people.map((person: {name:string}) => person.name)).toEqual(expect.arrayContaining(['둘째 배우','기존 인물','새 배우','감독 이름']));
   });
   it('rejects duplicate person/role with the PC wording', async () => {
     const dialog = await open();

@@ -154,14 +154,50 @@ pub(super) fn relay_image_path(path: &str) -> Result<String, AvError> {
         stash.1, image.1
     ))
 }
-pub(crate) fn relay_image(relay: &impl StashdbRelay, path: &str) -> Result<Vec<u8>, AvError> {
-    // All PC relay consumers, including selected previews, share this lane.
-    static LANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _lane = LANE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let response =
-        relay_response(relay.request(&relay_image_path(path)?, None, 15 * 1024 * 1024)?)?;
+/// Image downloads run side by side because the server needs several round trips per
+/// photo; this stays below the server's image slots so a grid never gets "busy".
+const IMAGE_PERMITS: usize = 3;
+struct ImagePermit;
+static IMAGE_LANE: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+impl ImagePermit {
+    fn acquire() -> Self {
+        let mut taken = IMAGE_LANE
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *taken >= IMAGE_PERMITS {
+            taken = IMAGE_LANE
+                .1
+                .wait(taken)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *taken += 1;
+        ImagePermit
+    }
+}
+impl Drop for ImagePermit {
+    fn drop(&mut self) {
+        *IMAGE_LANE
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) -= 1;
+        IMAGE_LANE.1.notify_one();
+    }
+}
+/// `preview` asks the server for its small cached JPEG (grids); otherwise the full photo.
+pub(crate) fn relay_image(
+    relay: &impl StashdbRelay,
+    path: &str,
+    preview: bool,
+) -> Result<Vec<u8>, AvError> {
+    let mut path = relay_image_path(path)?;
+    if preview {
+        path.push_str("&size=preview");
+    }
+    // All PC relay consumers, including selected previews, share these permits.
+    let _permit = ImagePermit::acquire();
+    let response = relay_response(relay.request(&path, None, 15 * 1024 * 1024)?)?;
     let format = image::guess_format(&response.bytes).map_err(|_| AvError::Image)?;
     if !matches!(
         format,

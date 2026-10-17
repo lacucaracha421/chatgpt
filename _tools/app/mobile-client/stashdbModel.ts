@@ -48,10 +48,11 @@ function serial<T>(run: () => Promise<T>, signal: AbortSignal, connection: strin
   const result = lane.catch(() => {}).then(() => retry(run, signal, connection));
   lane = result; return result;
 }
-// Hold a slot during 429 back-off so retries never exceed the preview limit.
+// Hold a slot during 429 back-off so retries never exceed the preview limit (the server serves six at once).
+const PREVIEW_LANES = 4;
 const previews = new Set<Promise<void>>();
 async function preview<T>(run: () => Promise<T>, signal: AbortSignal, connection: string | null): Promise<T> {
-  while (previews.size >= 3) await Promise.race(previews);
+  while (previews.size >= PREVIEW_LANES) await Promise.race(previews);
   const result = Promise.resolve().then(() => retry(run, signal, connection));
   const settled = result.then(() => {}, () => {}).then(() => { previews.delete(settled); });
   previews.add(settled);

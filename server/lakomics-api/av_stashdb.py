@@ -31,8 +31,12 @@ PREFIX = "/v1/providers/stashdb"
 relay = wp.Relay()
 # Reuse Relay's nonblocking admission, error mapping and deadline without changing
 # the GraphQL/TMDB/IGDB lanes. Images have no inter-request pacing.
+IMAGE_SLOTS = 6
 image_relay = wp.Relay()
-image_relay.locks["stashdb"] = threading.BoundedSemaphore(4)
+image_relay.locks["stashdb"] = threading.BoundedSemaphore(IMAGE_SLOTS)
+# Each image costs three round trips on a fresh connection to the distant provider
+# and one on a reused one, so image downloads keep their connections open.
+image_pool = wp.KeepAlivePool(("stashdb.org", "cdn.stashdb.org"), max_idle=IMAGE_SLOTS)
 DETAIL_TTL = 10 * 60
 MAX_DETAIL_ENTRIES = 128
 MAX_PREVIEW_BYTES = 64 * 1024 * 1024
@@ -273,7 +277,8 @@ def resolve_image(id_, image_id, deadline):
 def download_image(chosen, deadline):
     # Same-origin image routes may require auth. Never forward the key to the public CDN.
     headers = {"ApiKey": wp.credential(KEY_ENV)} if urlsplit(chosen["url"]).netloc == "stashdb.org" else {}
-    data, mime = wp.outbound(chosen["url"], deadline=deadline, limit=MAX_IMAGE_BYTES, headers=headers, image=True)
+    data, mime = wp.outbound(chosen["url"], deadline=deadline, limit=MAX_IMAGE_BYTES, headers=headers, image=True,
+                              pool=image_pool)
     wp.image_dimensions(data, mime, max_pixels=MAX_IMAGE_PIXELS)
     return data, mime, chosen["url"]
 

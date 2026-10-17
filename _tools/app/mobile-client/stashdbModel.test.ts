@@ -21,7 +21,7 @@ it('accepts exactly unique identity parameters and optional size=preview', () =>
     expect(() => stashdbImagePath(value)).toThrow();
   }
 });
-it('keeps at most three previews in flight and fills each freed slot', async () => {
+it('keeps at most four previews in flight and fills each freed slot', async () => {
   const pending = Array.from({length: 5}, () => deferred<typeof image>());
   let active = 0, peak = 0, calls = 0;
   mocks.native.mockImplementation(() => {
@@ -30,12 +30,11 @@ it('keeps at most three previews in flight and fills each freed slot', async () 
   });
   const signal = new AbortController().signal;
   const replies = pending.map((_, index) => stashdbPreview(path.replace('i1', `i${index}`), signal));
-  await flush(); expect(calls).toBe(3);
+  await flush(); expect(calls).toBe(4);
   expect(mocks.native.mock.calls[0][1]).toEqual({path: path.replace('i1', 'i0') + '&size=preview', connection: 'https://test.example'});
-  pending[1].resolve(image); await flush(); expect(calls).toBe(4);
-  pending[0].resolve(image); await flush(); expect(calls).toBe(5);
+  pending[1].resolve(image); await flush(); expect(calls).toBe(5);
   pending.forEach(entry => entry.resolve(image));
-  await Promise.all(replies); expect(peak).toBe(3);
+  await Promise.all(replies); expect(peak).toBe(4);
 });
 it('serializes reads and preparation independently of previews', async () => {
   const first = deferred<unknown>(), photo = deferred<typeof image>();
@@ -67,12 +66,12 @@ it('holds its slot through 429 back-off and caps retries', async () => {
 it('does not start aborted or stale queued previews', async () => {
   const gate = deferred<typeof image>(); mocks.native.mockReturnValue(gate.promise);
   const live = new AbortController(), aborted = new AbortController();
-  const replies = Array.from({length: 3}, () => stashdbPreview(path, live.signal));
+  const replies = Array.from({length: 4}, () => stashdbPreview(path, live.signal));
   const cancelled = stashdbPreview(path, aborted.signal);
   const cancelledCheck = expect(cancelled).rejects.toMatchObject({name: 'AbortError'});
   const stale = stashdbPreview(path, live.signal);
   const staleCheck = expect(stale).rejects.toThrow('서버 연결이 바뀌었습니다.');
   const liveChecks = replies.map(reply => expect(reply).rejects.toThrow('서버 연결이 바뀌었습니다.'));
   await flush(); aborted.abort(); setOutboxConnection('https://other.example'); gate.resolve(image);
-  await Promise.all([...liveChecks, cancelledCheck, staleCheck]); expect(mocks.native).toHaveBeenCalledTimes(3);
+  await Promise.all([...liveChecks, cancelledCheck, staleCheck]); expect(mocks.native).toHaveBeenCalledTimes(4);
 });

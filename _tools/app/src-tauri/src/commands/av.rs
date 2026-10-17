@@ -461,7 +461,7 @@ pub async fn preview_av_stashdb_image(
         if !library.stashdb_routed()? {
             return Err(AvError::Invalid);
         }
-        let bytes = crate::library::av_stashdb::relay_image(&library.stashdb_relay()?, &url)?;
+        let bytes = crate::library::av_stashdb::relay_image(&library.stashdb_relay()?, &url, true)?;
         let mime = match image::guess_format(&bytes).map_err(|_| AvError::Image)? {
             image::ImageFormat::Jpeg => "image/jpeg",
             image::ImageFormat::Png => "image/png",

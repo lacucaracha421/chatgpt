@@ -1,5 +1,4 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Select} from '../src/shared/ui/Select';
 import limits from '../src/collections/avLimits.json';
 import {Badge, Button, Dialog, DialogDescription, Field, TextInput} from './ui';
 import {AV_DETAIL_FIELDS, AV_EDIT_TITLE, AV_INPUT_ERROR, avCredits, avValue, canonicalAvCredits, orderedPeople, sameAvValue, sameCreditList, validateAvCredits, validateAvDetails, type AvDetailFields, type AvDetailKey} from './avEditModel';
@@ -20,7 +19,8 @@ export function AvWorkEditSheet({item, confirmed, items, entityRevision, refresh
     key === 'genres' ? (item.av?.genres ?? []).join(', ') : item.av?.[key] ?? ''])) as Record<AvDetailKey, string>);
   const [people, setPeople] = useState(() => (item.av?.people ?? []).slice().sort((a,b) => a.role === b.role ? a.order-b.order : a.role === 'performer' ? -1 : 1));
   const [newIds, setNewIds] = useState(() => new Set(retry?.command.commandType === 'setAvCredits' ? retry.command.people.map(person => person.personId) : []));
-  const [query, setQuery] = useState(''), [role, setRole] = useState<AvPerson['role']>('performer'), [error, setError] = useState('');
+  // Directors are no longer kept for AV (user, 2026-10-18): people are added as performers only.
+  const [query, setQuery] = useState(''), role: AvPerson['role'] = 'performer', [error, setError] = useState('');
   const [operations, setOperations] = useState<string[]>([]);
   const ownRows = operations.flatMap(id => { const row = authority.rows.find(row => row.command.operationId === id) ?? authority.acknowledgements.find(row => row.command.operationId === id); return row ? [row] : []; });
   const pending = authority.rows.some(row => row.command.workId === item.id && row.state === 'pending');
@@ -91,17 +91,17 @@ export function AvWorkEditSheet({item, confirmed, items, entityRevision, refresh
       setError('');
     } catch (reason) { setError(errorText(reason)); }
   };
-  return <Dialog open title={AV_EDIT_TITLE} onClose={onClose}><DialogDescription className="sr-only">작품 정보와 출연 · 감독을 저장합니다.</DialogDescription>
+  return <Dialog open title={AV_EDIT_TITLE} onClose={onClose}><DialogDescription className="sr-only">작품 정보와 출연자를 저장합니다.</DialogDescription>
     <form className="library-sheet collection-authority-form av-work-edit" onSubmit={event => { event.preventDefault(); save(); }}>
       {AV_DETAIL_FIELDS.map(field => <Field key={field.key} label={field.label}><TextInput value={draft[field.key]} maxLength={field.maxLength} disabled={locked || !!retry && (retry.command.commandType !== 'setAvDetails' || !(field.key in retry.command.changes))}
         placeholder={field.key === 'genres' ? '쉼표로 구분' : field.key === 'releaseDate' ? 'YYYY-MM-DD' : undefined}
         onChange={event => { setDraft(current => ({...current, [field.key]: event.target.value})); setError(''); }}/></Field>)}
-      <div className="av-work-edit__add"><Select label="역할" value={role} disabled={locked || !!retry && retry.command.commandType !== 'setAvCredits'} onChange={event => setRole(event.target.value as AvPerson['role'])}><option value="performer">출연</option><option value="director">감독</option></Select>
+      <div className="av-work-edit__add">
         <Field label="인물 이름 검색"><TextInput value={query} maxLength={limits.personName} disabled={locked || !!retry && retry.command.commandType !== 'setAvCredits'} onChange={event => { setQuery(event.target.value); setError(''); }}/></Field>
         {query.trim() && <Button type="button" disabled={locked || people.length >= limits.credits} onClick={() => add()}>새 인물로 추가</Button>}
         {!!results.length && <ul aria-label="기존 인물">{results.map(person => <li key={person.id}><Button type="button" disabled={locked || people.length >= limits.credits} onClick={() => add(person)}>{person.name} · {person.id.slice(0, 8)}</Button></li>)}</ul>}
       </div>
-      {(['performer', 'director'] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === 'performer' ? '출연자' : '감독'}><h3>{creditRole === 'performer' ? '출연자' : '감독'}</h3>
+      {(people.some(person => person.role === 'director') ? ['performer', 'director'] as const : ['performer'] as const).map(creditRole => <section key={creditRole} aria-label={creditRole === 'performer' ? '출연자' : '감독'}><h3>{creditRole === 'performer' ? '출연자' : '감독'}</h3>
         {people.map((person, index) => person.role !== creditRole ? null : <div key={`${person.role}/${person.id}`} className="av-work-edit__person"><strong>{person.name}</strong>
           <Field label={`${person.name} 작품 내 표기`}><TextInput maxLength={limits.creditName} value={person.creditName ?? ''} disabled={locked || !!retry && retry.command.commandType !== 'setAvCredits'} onChange={event => setPeople(current => current.map((entry, at) => at === index ? {...entry, creditName: event.target.value} : entry))}/></Field>
           <div className="av-work-edit__actions"><Button type="button" aria-label={`${person.name} 위로`} disabled={locked || !!retry && retry.command.commandType !== 'setAvCredits' || !people.slice(0,index).some(entry => entry.role === creditRole)} onClick={() => move(index, -1)}>위</Button>

@@ -656,3 +656,35 @@ fn av_stashdb_relay_refresh_uses_saved_identity_and_clear_works_without_server_k
         Some("one")
     );
 }
+
+#[test]
+fn av_stashdb_grid_previews_ask_the_server_for_its_small_image() {
+    struct Paths(RefCell<Vec<String>>, Vec<u8>);
+    impl StashdbRelay for Paths {
+        fn request(
+            &self,
+            path: &str,
+            _: Option<&Value>,
+            _: usize,
+        ) -> Result<HttpResponse, AvError> {
+            self.0.borrow_mut().push(path.into());
+            Ok(HttpResponse {
+                status: 200,
+                bytes: self.1.clone(),
+                content_type: Some("image/png".into()),
+            })
+        }
+    }
+    let mut png = Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 3)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let relay = Paths(RefCell::new(vec![]), png.into_inner());
+    let path = "/v1/providers/stashdb/image?stashdbId=one&imageId=photo";
+    relay_image(&relay, path, true).unwrap();
+    relay_image(&relay, path, false).unwrap();
+    assert_eq!(
+        *relay.0.borrow(),
+        [format!("{path}&size=preview"), path.to_string()]
+    );
+}

@@ -13,9 +13,11 @@ import warnings
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from contextlib import contextmanager
-from http.client import HTTPException as HTTPClientError
+import ssl
+import sys
+from http.client import BadStatusLine, HTTPException as HTTPClientError, HTTPSConnection
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as HTTPRequest, build_opener
 
 from botocore.config import Config
@@ -95,16 +97,129 @@ class UpstreamStatus(Exception):
         self.retry_after = retry_after
 
 
+def _retry_after(value):
+    try:
+        return min(86400, max(0, int(value)))
+    except (TypeError, ValueError):
+        # HTTP-date Retry-After is also valid; never retain headers or URLs.
+        from email.utils import parsedate_to_datetime
+        try:
+            return min(86400, max(0, (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+class KeepAlivePool:
+    """Reused HTTPS connections to a fixed set of hosts for image downloads.
+
+    A fresh connection to a distant host costs three round trips (TCP, TLS, request)
+    before the first byte; a reused one costs one. The pool has the same security
+    properties as the urllib opener above: HTTPS port 443 on listed hosts only, GET
+    only, no redirects followed (a 3xx is returned as a status), no environment
+    proxies, and the caller keeps the size/time limits. Each connection is used by one
+    thread at a time; a connection whose body was not read to its end is closed.
+    """
+
+    def __init__(self, hosts, *, max_idle=6, idle_seconds=20, factory=None):
+        self.hosts = frozenset(hosts)
+        self.max_idle = max_idle
+        self.idle_seconds = idle_seconds
+        self.context = ssl.create_default_context()
+        self.factory = factory or (lambda host, timeout: HTTPSConnection(
+            host, 443, timeout=timeout, context=self.context))
+        self.lock = threading.Lock()
+        self.idle = {}  # host -> [(connection, returned_at)], newest last
+        self.created = 0
+
+    def _take(self, host):
+        now = time.monotonic()
+        with self.lock:
+            entries = self.idle.get(host, [])
+            while entries:
+                connection, returned = entries.pop()
+                if now - returned <= self.idle_seconds:
+                    return connection
+                connection.close()
+        return None
+
+    def _give(self, host, connection):
+        with self.lock:
+            entries = self.idle.setdefault(host, [])
+            if len(entries) < self.max_idle:
+                entries.append((connection, time.monotonic()))
+                return
+        connection.close()
+
+    def open(self, request, timeout):
+        parts = urlsplit(request.full_url)
+        if (parts.scheme != "https" or parts.hostname not in self.hosts or parts.port not in (None, 443)
+                or parts.username or parts.password or request.data is not None
+                or request.get_method() != "GET"):
+            raise ValueError("pool refuses this request")
+        target = parts.path + ("?" + parts.query if parts.query else "")
+        headers = {"User-Agent": "Python-urllib/%d.%d" % sys.version_info[:2], **request.headers}
+        for attempt in (0, 1):
+            connection = self._take(parts.hostname)
+            reused = connection is not None
+            if reused:
+                connection.timeout = timeout
+                if connection.sock is not None:
+                    connection.sock.settimeout(timeout)
+            else:
+                connection = self.factory(parts.hostname, timeout)
+                with self.lock:
+                    self.created += 1
+            try:
+                connection.request("GET", target, headers=headers)
+                response = connection.getresponse()
+            except (ConnectionError, BadStatusLine, ssl.SSLError):
+                connection.close()
+                if reused and attempt == 0:
+                    continue  # The server closed an idle connection; GET is safe to repeat.
+                raise
+            except BaseException:
+                connection.close()
+                raise
+            return _PooledResponse(self, parts.hostname, connection, response)
+
+
+class _PooledResponse:
+    def __init__(self, pool, host, connection, response):
+        self.pool, self.host, self.connection, self.response = pool, host, connection, response
+        self.status = response.status
+        self.headers = response.msg
+        self.done = False
+
+    def read1(self, size):
+        return self.response.read1(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        if self.done:
+            return
+        self.done = True
+        if self.response.isclosed() and not self.response.will_close and self.connection.sock is not None:
+            self.pool._give(self.host, self.connection)
+        else:
+            self.connection.close()
+
+
 def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, image=False,
-             socket_seconds=5):
+             socket_seconds=5, pool=None):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         fail(504, "providerTimeout", "외부 정보 조회 시간이 초과되었습니다.")
     request = HTTPRequest(url, data=body, headers=headers or {})
+    opener = _opener.open if pool is None else pool.open
     try:
-        with _opener.open(request, timeout=min(socket_seconds, remaining)) as response:
+        with opener(request, timeout=min(socket_seconds, remaining)) as response:
             if response.status != 200:
-                raise UpstreamStatus(response.status)
+                raise UpstreamStatus(response.status, _retry_after(response.headers.get("Retry-After")))
             mime = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
             if image and mime not in ca.IMAGE_MIMES:
                 fail(422, "providerImageInvalid", "이미지 형식의 응답만 저장할 수 있습니다.")
@@ -128,16 +243,7 @@ def outbound(url, *, deadline, limit=MAX_JSON_BYTES, headers=None, body=None, im
             return bytes(chunks), mime
     except HTTPError as exc:
         status = exc.code
-        retry_after = exc.headers.get("Retry-After") if exc.headers else None
-        try:
-            retry_after = min(86400, max(0, int(retry_after)))
-        except (TypeError, ValueError):
-            # HTTP-date Retry-After is also valid; never retain headers or URLs.
-            from email.utils import parsedate_to_datetime
-            try:
-                retry_after = min(86400, max(0, (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds()))
-            except (TypeError, ValueError, OverflowError):
-                retry_after = None
+        retry_after = _retry_after(exc.headers.get("Retry-After") if exc.headers else None)
         exc.close()
         raise UpstreamStatus(status, retry_after) from None
     except TimeoutError:

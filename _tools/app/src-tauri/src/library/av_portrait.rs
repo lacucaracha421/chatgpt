@@ -597,7 +597,7 @@ impl Library {
                 .into_iter()
                 .find(|i| i.id == image_id)
                 .ok_or(AvError::Invalid)?;
-            let raw = super::av_stashdb::relay_image(relay, &image.url)?;
+            let raw = super::av_stashdb::relay_image(relay, &image.url, false)?;
             let decoded = image::load_from_memory(&raw).map_err(|_| AvError::Image)?;
             let decoded = if decoded.width() > 1600 || decoded.height() > 1600 {
                 decoded.resize(1600, 1600, image::imageops::FilterType::Lanczos3)
