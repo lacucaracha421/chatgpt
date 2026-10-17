@@ -26,7 +26,6 @@ it("supports a narrow album-only selection bar without desktop actions", async (
   render(<SelectionBar selectedCount={2} batchPending={false} onAddToAlbum={onAddToAlbum} onClearSelection={vi.fn()} />);
 
   expect(screen.getByRole("button", { name: "앨범에 추가" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "휴지통으로" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
   expect(onAddToAlbum).toHaveBeenCalledOnce();
@@ -34,16 +33,11 @@ it("supports a narrow album-only selection bar without desktop actions", async (
 
 it("shows the selection size and keeps browsing commands keyboard reachable", async () => {
   const user = userEvent.setup();
-  const onFavorite = vi.fn();
   const onClearSelection = vi.fn();
-  render(<SelectionBar {...baseProps} onFavorite={onFavorite} onClearSelection={onClearSelection} />);
+  render(<SelectionBar {...baseProps} onClearSelection={onClearSelection} />);
 
   expect(screen.getByRole("toolbar", { name: "선택 작업" })).toBeVisible();
   expect(screen.getByText("3개 선택")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
-  expect(onFavorite).toHaveBeenCalledWith(true);
-  await user.click(screen.getByRole("button", { name: "좋아요 끄기" }));
-  expect(onFavorite).toHaveBeenCalledWith(false);
   await user.click(screen.getByRole("button", { name: "선택 해제" }));
   expect(onClearSelection).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "휴지통으로" })).toBeVisible();
@@ -136,4 +130,17 @@ it.each([1, 3])("offers classification next to album assignment for %i selected 
   expect(screen.queryByText("C")).not.toBeInTheDocument();
   await user.click(classification);
   expect(onCharacterToggle).toHaveBeenCalledOnce();
+});
+
+it("adds the image menu button only where a host asks for it, before the clear button", async () => {
+  const user = userEvent.setup();
+  const onMore = vi.fn();
+  const { rerender } = render(<SelectionBar {...baseProps} />);
+  expect(screen.queryByRole("button", { name: "선택 항목 메뉴" })).not.toBeInTheDocument();
+  rerender(<SelectionBar {...baseProps} onMore={onMore} />);
+  const buttons = screen.getAllByRole("button");
+  expect(buttons[buttons.length - 1]).toHaveAccessibleName("선택 해제");
+  expect(buttons[buttons.length - 2]).toHaveAccessibleName("선택 항목 메뉴");
+  await user.click(screen.getByRole("button", { name: "선택 항목 메뉴" }));
+  expect(onMore).toHaveBeenCalledOnce();
 });

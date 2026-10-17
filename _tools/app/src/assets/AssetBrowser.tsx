@@ -1,7 +1,8 @@
 import { useAssetContextTarget } from "./useAssetContextTarget";
 import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { libraryContextItems } from "./libraryContextItems";
+import { libraryContextHandlers } from "./libraryContextItems";
+import { bindMenuItems, imageActionDefs, uniqueSources } from "../shared/contextActions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FolderIcon, FunnelIcon } from "@heroicons/react/24/outline";
 import { ASSET_PAGE_SIZE } from "../library/constants";
@@ -606,21 +607,24 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     const first = visibleItems[0];
     if (first) { viewerViewKeyRef.current = viewKey; setViewerAssetId(first.id); }
   } });
-  const contextItems: ContextMenuItem[] = [
-    ...(onReviewVideos && contextTarget.targetAssets.length >= 2 && contextTarget.targetAssets.length <= 100 && contextTarget.targetAssets.every(asset => asset.media.kind === "video")
-      ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: batchPending, onSelect: () => onReviewVideos([...contextTarget.targetIds]) }]
-      : []),
-    ...libraryContextItems({ count: contextTarget.targetIds.length, targetsSelection: contextTarget.targetsSelection, busy: batchPending, albums,
-      sourceUrls: contextTarget.targetAssets.map(asset => asset.sourceUrl),
-      onMessage: message => { setUndoAssetIds(null); setMessage(message); },
-      onAlbum: id => changeMembership(() => gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [id], removeAlbumIds: [] }), contextTarget.targetIds),
-    }),
-    ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 빼기", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [], removeAlbumIds: [view.albumId] }), contextTarget.targetIds) }] : []),
-    ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 빼기", disabled: batchPending, onSelect: () => removeFromCollection(contextTarget.targetIds) }] : []),
-    ...(view.kind === "collection" && contextTarget.targetIds.length === 1 ? [{ id: "cover", label: "대표 이미지로 지정", disabled: batchPending, onSelect: () => setCover(contextTarget.targetIds[0]!) }] : []),
-    { id: "info", label: "정보 열기", onSelect: () => { contextTarget.showInfo(); setInspectorOpen(true); } },
-    { id: "trash", label: "휴지통으로", destructive: true, disabled: batchPending, onSelect: () => trashAssets(contextTarget.targetIds) },
-  ];
+  const videoCompare = !!onReviewVideos && contextTarget.targetAssets.length >= 2 && contextTarget.targetAssets.length <= 100 && contextTarget.targetAssets.every(asset => asset.media.kind === "video");
+  const contextItems: ContextMenuItem[] = bindMenuItems(
+    imageActionDefs({ count: contextTarget.targetIds.length, targetsSelection: contextTarget.targetsSelection, busy: batchPending,
+      sourceCount: uniqueSources(contextTarget.targetAssets.map(asset => asset.sourceUrl)).length, albumCount: albums.length,
+      inAlbum: view.kind === "album", inCollection: view.kind === "collection", videoCompare }),
+    {
+      ...(videoCompare ? { "video-similarity": () => onReviewVideos([...contextTarget.targetIds]) } : {}),
+      ...libraryContextHandlers({ disabled: batchPending || contextTarget.targetIds.length === 0, albums,
+        sourceUrls: contextTarget.targetAssets.map(asset => asset.sourceUrl),
+        onMessage: message => { setUndoAssetIds(null); setMessage(message); },
+        onAlbum: id => changeMembership(() => gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [id], removeAlbumIds: [] }), contextTarget.targetIds) }),
+      "remove-album": () => view.kind === "album" && changeMembership(() => gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [], removeAlbumIds: [view.albumId] }), contextTarget.targetIds),
+      remove: () => removeFromCollection(contextTarget.targetIds),
+      cover: () => setCover(contextTarget.targetIds[0]!),
+      info: () => { contextTarget.showInfo(); setInspectorOpen(true); },
+      trash: () => trashAssets(contextTarget.targetIds),
+    },
+  );
   const descriptionCount = visiblePage?.queryKey === queryKey ? visiblePage.totalCount : null;
   const descriptionAccessory = <span className="auto-tag-filters">
     {descriptionCount ? <span className="auto-tag-filters__note" role="status">관련도순 · 상위 {descriptionCount.toLocaleString("ko-KR")}장</span> : null}
@@ -697,7 +701,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     {newCharacter && creationFolder && <NewManualCharacter {...newCharacter} series={classifications.find(entry => entry.id === scopeSeriesId) ?? creationFolder} entries={classifications} onClose={() => setNewCharacter(null)} onSaved={target => { setNewCharacter(null); setCharacterOpen(false); clearSelection(); onCharactersChanged(); onMembershipChanged(); refresh(); onViewChange?.({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
     {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{folderEntry?.isContainer && <Badge>분류함</Badge>}{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
-    {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
+    {message && <Toast actionLabel={undoAssetIds ? "되돌리기" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <CharacterAssignToast notice={characterNotice} privacyMode={privacyMode} busy={batchPending} onDismiss={() => setCharacterNotice(null)} onOpen={() => {
       const target = characterNotice.target;
       if (target.seriesClassificationId) onViewChange?.({ kind: "classification", classificationId: target.seriesClassificationId, characterId: target.id });

@@ -17,7 +17,8 @@ import { characterExtrasApi } from "./extrasApi";
 import { useExtrasPreviews } from "./ExtrasCard";
 import type { CharacterHubApi } from "./hubApi";
 import { NO_OVER, ShelfDrag, type DragOver, type DropIntent, type ShelfDragHost } from "./shelfDrag";
-import { SHELF_MOVE_ITEMS as MOVE_ITEMS, SHELF_KEY_MOVES as KEY_MOVES, canMove, movedIds, orderAnnouncement, type OrderKind, type OrderMove } from "./shelfOrder";
+import { SHELF_KEY_MOVES as KEY_MOVES, movedIds, orderAnnouncement, shelfMoveActionDefs, shelfMoveHandlers, type OrderKind, type OrderMove } from "./shelfOrder";
+import { bindMenuItems } from "../shared/contextActions";
 
 type Group = { id: string; name: string; revision: number; targetIds: string[]; extrasTargetId?: string | null };
 type Props = {
@@ -268,7 +269,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   const shelfApi: CharacterShelfApi = {
     cardProps: targetId => ({ "data-order-id": targetId, "data-order-kind": "character" }),
     menuItems: (target, disabled) => [
-      ...MOVE_ITEMS.map(item => ({ id: `move-${item.move}`, label: item.label, shortcut: item.shortcut, disabled: disabled || !canMove(characterIds, target.id, item.move), onSelect: () => moveCard("character", target.id, item.move) })),
+      ...bindMenuItems(shelfMoveActionDefs(characterIds, target.id, disabled), shelfMoveHandlers(move => moveCard("character", target.id, move))),
       ...(current
         ? [{ id: "take-out", label: `${current.name}에서 빼기`, separatorBefore: true, disabled, onSelect: () => void takeOut(target.id) }]
         : [{ id: "put-in", label: "그룹에 넣기", separatorBefore: true, disabled: disabled || groups.length === 0, onSelect: () => undefined,
@@ -286,14 +287,14 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     ...(lift?.kind === "character" && current ? [<article key="take-out" className="series-character folder-shelf__card shelf-take-out" data-take-out data-over={over.takeOut || undefined} aria-hidden="true">
       <div className="shelf-take-out__face"><ArrowUturnLeftIcon aria-hidden="true" /><span>그룹에서 빼기</span></div>
     </article>] : []),
-    ...rootGroups.map(group => <CharacterGroupCard key={group.id} seriesId={seriesId} group={group} members={members} extrasPreviewApi={extrasPreviewApi} extrasPreviewVersion={extrasPreviewVersion} memberCounts={memberCounts} privacyMode={privacyMode} intoFace={over.groupId === group.id} orderItems={MOVE_ITEMS.map(item => ({ id: `move-${item.move}`, label: item.label, shortcut: item.shortcut, disabled: !canMove(groupIds, group.id, item.move), onSelect: () => moveCard("group", group.id, item.move) }))} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />),
+    ...rootGroups.map(group => <CharacterGroupCard key={group.id} seriesId={seriesId} group={group} members={members} extrasPreviewApi={extrasPreviewApi} extrasPreviewVersion={extrasPreviewVersion} memberCounts={memberCounts} privacyMode={privacyMode} intoFace={over.groupId === group.id} orderItems={bindMenuItems(shelfMoveActionDefs(groupIds, group.id), shelfMoveHandlers(move => moveCard("group", group.id, move)))} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />),
     ...(visibleMembers.length > 0 ? [<Fragment key="members">{children(visibleMembers, shelfApi)}</Fragment>] : []),
     ...(extrasCard ? [<Fragment key="extras">{extrasCard}</Fragment>] : []),
     ...suggestionCards,
     ...rootFolders.map((card, index) => {
       const id = folderIds[index];
       if (id === undefined) return card;
-      return <ContextMenu key={id} items={MOVE_ITEMS.map(item => ({ id: `move-${item.move}`, label: item.label, shortcut: item.shortcut, disabled: !canMove(folderIds, id, item.move), onSelect: () => moveCard("folder", id, item.move) }))}>{card as ReactElement}</ContextMenu>;
+      return <ContextMenu key={id} items={bindMenuItems(shelfMoveActionDefs(folderIds, id), shelfMoveHandlers(move => moveCard("folder", id, move)))}>{card as ReactElement}</ContextMenu>;
     }),
   ];
 

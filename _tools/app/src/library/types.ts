@@ -1531,6 +1531,9 @@ export interface LibraryGateway {
   restoreCollectionWork?(workId: string, expectedRevision: number, libraryId: string, epoch: number): Promise<void>;
   openCollectionAuthorityReport?(path: string): Promise<void>;
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
+  /** Shared folder pins (PC sidebar and tablet); the server owns the list. */
+  folderPins?(): Promise<import("../app/useFolderPins").FolderPinsReply>;
+  changeFolderPins?(commands: import("../app/useFolderPins").FolderPinCommand[]): Promise<import("../app/useFolderPins").FolderPinsReply>;
   /** Native signal that Collections changed in the background (mobile personal edits). */
   subscribeCollectionsChanged?(handler: () => void): () => void;
   /** Native signal that tablet artist edits were applied in the background. */

@@ -33,9 +33,10 @@ function ticketArt(revision: string, active: boolean): SpineArt<TabletSpineWork>
  * 책장 for games and AV on the tablet: the shared spine shelf at the tablet's scale. A tap anywhere in a row
  * turns the nearest case to its front; a tap on the turned case opens the work.
  */
-export function TabletSpineShelf({items, grouping, size, label, revision, active, privacy, picked, onPick, onOpen}: {
+export function TabletSpineShelf({items, grouping, size, label, revision, active, privacy, picked, onPick, onOpen, onActions}: {
   items: CollectionSummary[]; grouping: CollectionViewSettings['grouping']; size: SpineSize; label: string; revision: string; active: boolean; privacy: boolean;
   picked: string | null; onPick(id: string | null): void; onOpen(id: string): void;
+  /** Long press on a spine (or the nearest one in its row) opens the work's action sheet. */onActions?(id: string): void;
 }) {
   const groups = useMemo(() => shelfGroups(items, grouping).map(group => ({label: group.label, works: group.items.map(spineWork)})), [items, grouping]);
   const art = useMemo(() => ticketArt(revision, active && !privacy), [revision, active, privacy]);
@@ -54,5 +55,5 @@ export function TabletSpineShelf({items, grouping, size, label, revision, active
     return Promise.all(wanted.map(({item, artworkId}) => memory.request(item, artworkId, revision, false, signal).then(ticket => {markSpineWarm(ticket.url);}, () => undefined))).then(() => undefined);
   }, [byId, memory, revision]);
   const hold = active && !privacy && !!memory;
-  return <SpineShelf groups={groups} scale={SPINE_SCALE.tablet[size]} label={label} pickedId={picked} onPick={onPick} onOpen={onOpen} privacy={privacy} touchTargets art={art} prepare={hold ? prepare : undefined}/>;
+  return <SpineShelf groups={groups} scale={SPINE_SCALE.tablet[size]} label={label} pickedId={picked} onPick={onPick} onOpen={onOpen} onLongPress={onActions} privacy={privacy} touchTargets art={art} prepare={hold ? prepare : undefined}/>;
 }

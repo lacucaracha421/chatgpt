@@ -143,7 +143,7 @@ describe('Viewer trash and undo',()=>{
     expect(viewer?.items.map(item=>item.id)).toEqual(['x','z']);
     expect(viewer?.index).toBe(1);
     expect(screen.getByText('휴지통으로 이동함')).toBeTruthy();
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:/실행 취소/}));});
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:/되돌리기/}));});
     await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('assetLifecycleSet',{assetId:'y',command:'restore',seenRevision:0}));
     await waitFor(()=>expect(screen.getByTestId('hidden').textContent).toBe(''));
     expect(viewer?.items.map(item=>item.id)).toEqual(['x','y','z']);

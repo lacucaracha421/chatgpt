@@ -8,6 +8,7 @@ import { useLibrary } from "../library/LibraryContext";
 import type { AlbumEntry, AssetView, CharacterSidebarCounts, ClassificationEntry, CollectionType } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
+import { bindMenuItems, treeActionDefs } from "../shared/contextActions";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
@@ -284,7 +285,7 @@ export function ClassificationSidebar({
     const scroll = scroller();
     const row = rowRefs.current.get(motion.id);
     if (!sidebar || !scroll || !row) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const from = scroll.scrollTop;
     let to = from;
     if (motion.top === undefined) {
@@ -922,15 +923,19 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const originalsRoot = isOriginalsRoot(node.entry);
-  const actions: MenuItem[] = [
-    ...(!originalsRoot && node.entry.treeKind === "classification" && !node.entry.parentId && onContainer ? [{ id: "container", label: "분류함으로 쓰기", checked: !!node.entry.isContainer, onSelect: () => onContainer(node.entry) }] : []),
-    ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "고정 해제" : "고정", onSelect: () => onTogglePin(node.entry) }] : []),
-    { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
-    ...(!originalsRoot ? [{ id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) }] : []),
-    { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
-    ...(!originalsRoot ? [{ id: "move", label: node.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동", onSelect: () => onMove(node.entry) }] : []),
-    ...(!originalsRoot && !node.entry.isLikesAlbum ? [{ id: "delete", label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제", destructive: true, disabled: hasChildren, onSelect: () => onDelete(node.entry) }] : []),
-  ];
+  const actions: MenuItem[] = bindMenuItems(
+    treeActionDefs({ kind: node.entry.treeKind === "album" ? "album" : "folder", originalsRoot, likesAlbum: !!node.entry.isLikesAlbum, hasChildren, topLevel: !node.entry.parentId,
+      pinned: pinnedIds.includes(node.entry.id), container: !!node.entry.isContainer }),
+    {
+      container: onContainer && node.entry.treeKind === "classification" ? () => onContainer(node.entry) : undefined,
+      pin: onTogglePin && node.entry.treeKind === "classification" ? () => onTogglePin(node.entry) : undefined,
+      "create-child": () => onCreateChild(node.entry),
+      rename: () => onRename(node.entry),
+      appearance: () => onAppearance(node.entry),
+      move: () => onMove(node.entry),
+      delete: () => onDelete(node.entry),
+    },
+  );
 
   return (
     <li className="classification-sidebar__tree-item" data-has-next-sibling={hasNextSibling ? "true" : undefined}>

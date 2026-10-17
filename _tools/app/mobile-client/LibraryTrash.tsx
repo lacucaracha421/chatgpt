@@ -189,10 +189,10 @@ export function LibraryTrash({onClose, backRef, known, onRestored, embedded = fa
   </div>;
 }
 
-/** "휴지통으로 이동함 · 실행 취소": shown for ~6 s after a trash, in the viewer or the library. */
+/** "휴지통으로 이동함 · 되돌리기": shown for ~6 s after a trash, in the viewer or the library. */
 export function TrashSnackbar({onUndo, message = '휴지통으로 이동함'}: {onUndo(): void; message?: string}) {
   return <div className="trash-snackbar" role="status">
     <span>{message}</span>
-    <Button variant="ghost" onClick={onUndo}><ArrowUturnLeftIcon aria-hidden="true"/>실행 취소</Button>
+    <Button variant="ghost" onClick={onUndo}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
   </div>;
 }

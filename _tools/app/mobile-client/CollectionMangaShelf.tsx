@@ -27,9 +27,10 @@ function queued<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
 /** Test seam: forget the read works between tests. */
 export function resetMangaShelfDetails() { details.clear(); waiting.length = 0; running = 0; }
 
-function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, onOpen}: {
+function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, onOpen, onActions}: {
   work: CollectionSummary; revision: string; active: boolean; privacy: boolean; owned(edition: number): number | null;
   pick: MangaShelfPick; onPick(pick: MangaShelfPick): void; onOpen(id: string, at: {volumeId: string; edition: number} | null): void;
+  onActions?(work: CollectionSummary): void;
 }) {
   const [near, setNear] = useState(false);
   const key = JSON.stringify([work.id, revision]);
@@ -55,19 +56,20 @@ function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, o
   const picked = pick?.id === work.id ? pick.volumeId : null;
   const manga = shown ? mangaShelfData(volumes, shown.item ? coverFocuses(shown.item.volumes) : [], count, picked) : null;
   // A first tap picks the volume (its cover turns forward); a tap on the picked volume opens the work there.
-  return <MangaShelfRow id={work.id} title={work.name} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets
+  return <MangaShelfRow id={work.id} title={work.name} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets onLongPress={onActions ? () => onActions(work) : undefined}
     onNear={() => setNear(true)} onPick={volumeId => volumeId === picked ? onOpen(work.id, {volumeId, edition}) : onPick({id: work.id, volumeId})}
     onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
 }
 
 /** The tablet 만화 list as the PC's bookcase rows (shared `MangaShelfRow`), one per work in list order. */
-export function TabletMangaShelf({items, label, revision, active, privacy, owned, pick, onPick, onOpen}: {
+export function TabletMangaShelf({items, label, revision, active, privacy, owned, pick, onPick, onOpen, onActions}: {
   items: CollectionSummary[]; label: string; revision: string; active: boolean; privacy: boolean;
   owned(work: CollectionSummary, edition: number): number | null;
   pick: MangaShelfPick; onPick(pick: MangaShelfPick): void;
   onOpen(id: string, at: {volumeId: string; edition: number} | null): void;
+  /** Long press on a work's row opens its action sheet. */onActions?(work: CollectionSummary): void;
 }) {
   return <div className="manga-shelf-list" role="group" aria-label={label}>
-    {items.map(work => <TabletMangaRow key={work.id} work={work} revision={revision} active={active} privacy={privacy} owned={edition => owned(work, edition)} pick={pick} onPick={onPick} onOpen={onOpen}/>)}
+    {items.map(work => <TabletMangaRow key={work.id} work={work} revision={revision} active={active} privacy={privacy} owned={edition => owned(work, edition)} pick={pick} onPick={onPick} onOpen={onOpen} onActions={onActions}/>)}
   </div>;
 }

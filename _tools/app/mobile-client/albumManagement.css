@@ -11,5 +11,5 @@
 .album-card-management > .ui-button { position:absolute; top:var(--space-1); right:var(--space-1); min-width:44px; min-height:44px; background:var(--color-surface-raised); }
 .album-management-create { margin-block:var(--space-2); }
 .mobile-app .asset-selection-bar { flex-wrap:wrap; }
-.selection-action-notice { width:100%; padding:var(--space-1); font-size:var(--type-meta); }
+.selection-action-notice { order:1; width:100%; padding:var(--space-1); font-size:var(--type-meta); }
 .selection-action-notice:empty { display:none; }

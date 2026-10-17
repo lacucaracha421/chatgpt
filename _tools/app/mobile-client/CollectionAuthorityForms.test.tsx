@@ -394,17 +394,17 @@ describe('delete and 휴지통', () => {
   const openDelete = async () => {
     fireEvent.click(await screen.findByText(item.name));
     fireEvent.click(await screen.findByRole('button', {name: '더보기'}));
-    const remove = within(screen.getByRole('dialog')).getByRole('button', {name: /^컬렉션 삭제/});
+    const remove = within(screen.getByRole('dialog')).getByRole('button', {name: /^휴지통으로/});
     await waitFor(() => expect(remove).toBeEnabled()); fireEvent.click(remove);
-    return screen.findByRole('dialog', {name: '컬렉션 삭제'});
+    return screen.findByRole('dialog', {name: '휴지통으로'});
   };
   it('confirms with the PC wording, queues deleteWork at the shown revision, closes the detail and hides the work while it is sent', async () => {
     hold = true;
     render(<Collections active paused={false} backRef={{current: null}}/>);
     const dialog = await openDelete();
-    expect(within(dialog).getByText(`${item.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.`)).toBeTruthy();
-    expect(within(dialog).getByRole('button', {name: '삭제'})).toHaveClass('ui-button--danger');
-    fireEvent.click(within(dialog).getByRole('button', {name: '삭제'}));
+    expect(within(dialog).getByText(`${item.name} 컬렉션을 휴지통으로 옮기시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.`)).toBeTruthy();
+    expect(within(dialog).getByRole('button', {name: '휴지통으로'})).toHaveClass('ui-button--danger');
+    fireEvent.click(within(dialog).getByRole('button', {name: '휴지통으로'}));
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'deleteWork', workId: item.id, expectedRevision: 4});
     await waitFor(() => expect(screen.queryByRole('group',{name:'작품 동작'})).toBeNull());
@@ -414,10 +414,43 @@ describe('delete and 휴지통', () => {
     expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
     expect(screen.queryByRole('button', {name: '다시 시도'})).toBeNull();
   });
+  /** Long press on the work's card, with the clock faked only for the hold. */
+  const holdCard = async () => {
+    const card = await screen.findByRole('button', {name: new RegExp(item.name)});
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    fireEvent.pointerDown(card, {button: 0, clientX: 30, clientY: 30});
+    await act(async () => { vi.advanceTimersByTime(450); });
+    fireEvent.pointerUp(card, {button: 0});
+    vi.useRealTimers();
+    return card;
+  };
+  it('opens the same confirmation from the long-press sheet, queuing the delete at the shown revision', async () => {
+    hold = true;
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    await holdCard();
+    const sheet = await screen.findByRole('dialog', {name: item.name});
+    expect(within(sheet).getAllByRole('button').map(button => button.textContent)).toEqual(['편집', '쇼케이스에 추가', '휴지통으로', '닫기']);
+    fireEvent.click(within(sheet).getByRole('button', {name: '휴지통으로'}));
+    const dialog = await screen.findByRole('dialog', {name: '휴지통으로'});
+    fireEvent.click(within(dialog).getByRole('button', {name: '휴지통으로'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'deleteWork', workId: item.id, expectedRevision: 4});
+  });
+  it('edits the showcase from the long-press sheet without opening the work', async () => {
+    hold = true;
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    const card = await holdCard();
+    fireEvent.click(card);
+    expect(screen.queryByRole('article')).toBeNull();
+    fireEvent.click(within(await screen.findByRole('dialog', {name: item.name})).getByRole('button', {name: '쇼케이스에 추가'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toMatchObject({commandType: 'updateWork', workId: item.id, changes: {showcase: true}, expected: {showcase: false}});
+    expect(screen.queryByRole('article')).toBeNull();
+  });
   it('never hides a delete that could not be sent: the work returns with the reason, 다시 시도 delivers it', async () => {
     command = () => new Error('서버에 연결하지 못했습니다.');
     render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '휴지통으로'}));
     await screen.findByText('서버에 연결하지 못했습니다.');
     expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, label: item.name});
     expect(screen.getByRole('button', {name: new RegExp(item.name)})).toBeTruthy();
@@ -452,7 +485,7 @@ describe('delete and 휴지통', () => {
   });
   it('keeps a confirmed delete off the shelf and lets the queue go', async () => {
     render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '휴지통으로'}));
     await waitFor(() => expect(sent()).toHaveLength(1));
     await waitFor(() => expect(readCommands()).toHaveLength(0));
     await act(async () => {});
@@ -469,7 +502,7 @@ describe('delete and 휴지통', () => {
   it('brings a rejected delete back to the shelf with its conflict in the queue', async () => {
     command = body => body.commandType === 'deleteWork' ? new ApiError('충돌', 409, {detail: {code: 'revisionConflict'}}) : {};
     render(<Collections active paused={false} backRef={{current: null}}/>);
-    fireEvent.click(within(await openDelete()).getByRole('button', {name: '삭제'}));
+    fireEvent.click(within(await openDelete()).getByRole('button', {name: '휴지통으로'}));
     await screen.findByText('충돌');
     expect(screen.getByText(`${item.name} 삭제`)).toBeTruthy();
     expect(screen.getByRole('button', {name: new RegExp(item.name)})).toBeTruthy();

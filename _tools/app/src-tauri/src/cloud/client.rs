@@ -4447,6 +4447,9 @@ mod home_publications;
 #[path = "cards.rs"]
 pub(crate) mod cards;
 
+#[path = "folder_pins.rs"]
+pub(crate) mod folder_pins;
+
 #[path = "card_cutouts.rs"]
 pub(crate) mod card_cutouts;
 

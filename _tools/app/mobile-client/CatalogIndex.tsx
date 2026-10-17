@@ -1,21 +1,14 @@
-import {useEffect,useRef} from 'react';
 import type {MangaFrequentIndex,MangaIndexIdentity} from '../src/library/types';
 import {mangaIndexKey} from '../src/manga/mangaIndexModel';
 import {PinSolidIcon} from '../src/shared/ui/PinIcon';
 import type {useMangaIndex} from './useMangaIndex';
 import {SectionLabel} from './ui';
+import {useLongPress} from '../src/shared/useLongPress';
 
 function IndexChip({row,count,pinned,pending,active,onPick,onPin}:{row:MangaIndexIdentity;count:number;pinned:boolean;pending:boolean;active:boolean;onPick():void;onPin():void}){
-  const press=useRef<{timer:ReturnType<typeof setTimeout>;x:number;y:number}|null>(null),held=useRef(false);
-  function cancel(){if(press.current)clearTimeout(press.current.timer);press.current=null;}
-  useEffect(()=>cancel,[]);
+  const press=useLongPress({onLongPress:onPin});
   return <button type="button" className={`catalog-index-chip${active?' is-active':''}`} aria-label={`${row.label} ${count}`} aria-pressed={active}
-    onPointerDown={event=>{if(event.button!==0)return;cancel();held.current=false;press.current={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{press.current=null;held.current=true;onPin();},500)};}}
-    onPointerMove={event=>{if(press.current&&Math.hypot(event.clientX-press.current.x,event.clientY-press.current.y)>10)cancel();}}
-    onPointerUp={cancel} onPointerCancel={()=>{cancel();held.current=true;}} onPointerLeave={cancel}
-    onContextMenu={event=>event.preventDefault()}
-    onKeyDown={event=>{if(event.key==='F10'&&event.shiftKey){event.preventDefault();onPin();}}}
-    onClick={()=>{if(held.current){held.current=false;return;}onPick();}}>
+    {...press.bind} onClick={press.click(onPick)}>
     {pinned&&<PinSolidIcon/>}<span>{row.label}</span><small className="numeric">{count}</small>{pending&&<span className="catalog-index-pending" aria-label="고정 저장 대기">·</span>}
   </button>;
 }

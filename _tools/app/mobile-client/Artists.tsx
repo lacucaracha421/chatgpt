@@ -1,8 +1,10 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
 import {ArrowTopRightOnSquareIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
-import {Button, EmptyState, Field, IconButton, SectionLabel, Skeleton, TextInput} from './ui';
+import {Button, EmptyState, IconButton, SectionLabel, Skeleton} from './ui';
 import {BottomSheet} from './BottomSheet';
+import {ArtistActionSheet,ArtistRenameSheet} from './ArtistActions';
+import {useLongPress} from '../src/shared/useLongPress';
 import {useLibraryArtists} from './useLibraryArtists';
 import {commitArtistEdit, resolveArtist, type ArtistEditAction} from './artistEditOutbox';
 import {TopBar, TopBarSearch} from './TopBar';
@@ -51,7 +53,6 @@ export function HiddenArtists({endpoint, artists, onOpen, pending = 0, syncError
 
 function ArtistEditMenu({artist, onEdit,onBack,profile}: {artist: LibraryArtist; onEdit: EditArtist;onBack():void;profile:string|null}) {
   const [sheet, setSheet] = useState<'menu' | 'rename' | null>(null);
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const save = (action: ArtistEditAction, displayName?: string | null) => {
     try { onEdit(artist, action, displayName); setSheet(null); setError(''); }
@@ -60,22 +61,12 @@ function ArtistEditMenu({artist, onEdit,onBack,profile}: {artist: LibraryArtist;
   return <>
     <TopBar back={{label:'작가 목록으로',onClick:onBack}} crumbs={<button className="top-bar__crumbs" onClick={onBack}>작가 ›</button>} title={artistName(artist)} itemAction={profile?<IconButton label="작가 프로필 열기" icon={ArrowTopRightOnSquareIcon} onClick={()=>{void native('openExternal',{url:profile}).catch(()=>{});}}/>:undefined} onMenu={()=>{setError('');setSheet('menu');}}/>
     {sheet==='menu'&&<MoreSheet screenHint="합치기는 PC 앱에서" screenTitle={artistName(artist)} onClose={()=>setSheet(null)} screenEntries={[
-      {id:'rename',group:'action',label:'이름 바꾸기',icon:<EllipsisHorizontalIcon/>,run:()=>{setName(artist.displayName??'');setSheet('rename');}},
+      {id:'rename',group:'action',label:'이름 바꾸기',icon:<EllipsisHorizontalIcon/>,run:()=>setSheet('rename')},
       {id:'hide',group:'action',label:artist.hidden?'숨김 해제':'숨기기',icon:<PhotoIcon/>,run:()=>save(artist.hidden?'unhide':'hide')},
       {id:'pin',group:'action',label:artist.pinned?'고정 해제':'고정',icon:<ArrowsUpDownIcon/>,run:()=>save(artist.pinned?'unpin':'pin')},
     ]}/>}
     {error&&<p className="error-message" role="alert">{error}</p>}
-    {sheet==='rename' && <BottomSheet title="이름 바꾸기" onClose={() => setSheet(null)}>
-      <form className="artist-rename" onSubmit={event => { event.preventDefault(); save('rename', name); }}>
-        <Field label="작가 이름"><TextInput autoFocus value={name} placeholder={artist.sourceName ?? artist.label}
-          onChange={event => setName(event.target.value)} onKeyDown={event => {
-            if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
-          }} /></Field>
-        <p className="hint">비워 두면 원래 이름을 사용합니다. 최대 120자</p>
-        <Button type="submit">저장</Button>
-      </form>
-      {error && <p className="error-message" role="alert">{error}</p>}
-    </BottomSheet>}
+    {sheet==='rename' && <ArtistRenameSheet artist={artist} onSave={name => { onEdit(artist, 'rename', name); setSheet(null); setError(''); }} onClose={() => setSheet(null)} />}
   </>;
 }
 
@@ -111,11 +102,12 @@ function Handles({artist}: {artist: LibraryArtist}) {
   return <span className="artist-handle">{handles.length ? handles.join(' · ') : artist.sourceName || '핸들 없음'}</span>;
 }
 
-function ArtistTile({artist, privateMode, query, onOpen}: {artist: LibraryArtist; privateMode: boolean; query: string; onOpen(): void}) {
+function ArtistTile({artist, privateMode, query, onOpen, onActions}: {artist: LibraryArtist; privateMode: boolean; query: string; onOpen(): void; onActions?(): void}) {
+  const press = useLongPress({enabled: !!onActions, onLongPress: () => onActions?.()});
   const assets = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings);
   const plus = Math.max(0, artist.assetCount - Math.max(1, Math.min(4, assets.length)));
   const recent = `최근 30일 ${artist.recentCount.toLocaleString('ko-KR')}장 · `;
-  return <button className="artist-tile" onClick={onOpen} aria-label={`${artistName(artist)}, ${artist.assetCount.toLocaleString('ko-KR')}장`}>
+  return <button className="artist-tile" {...press.bind} onClick={press.click(onOpen)} aria-label={`${artistName(artist)}, ${artist.assetCount.toLocaleString('ko-KR')}장`}>
     <Collage assets={assets} privateMode={privateMode} plus={plus} />
     <span className="artist-tile-info"><strong className="artist-tile-name"><Highlight value={artistName(artist)} query={query} /></strong><span className="artist-tile-count">{artist.assetCount.toLocaleString('ko-KR')}</span><Handles artist={artist} /><small className="artist-tile-recent">{recent}저장 {displayDate(artist.lastSavedAt) || '—'}</small></span>
   </button>;
@@ -145,7 +137,7 @@ function ArtistToday({artist, privateMode, onOpen}: {artist: LibraryArtist; priv
   </button>;
 }
 
-function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {artists: LibraryArtist[]; assignments: ArtistAssignment[]; query: string; privateMode: boolean; paused:boolean; onOpen(artist: LibraryArtist): void}) {
+function ArtistHub({artists, assignments, query, privateMode, paused, onOpen, onActions}: {artists: LibraryArtist[]; assignments: ArtistAssignment[]; query: string; privateMode: boolean; paused:boolean; onOpen(artist: LibraryArtist): void; onActions(artist: LibraryArtist): void}) {
   const scroller=useRef<HTMLDivElement>(null);
   const major = useMemo(() => artists.some(artist => artist.main || artist.pinned) ? artists.filter(artist => artist.main || artist.pinned) : artists, [artists]);
   const visible = useMemo(() => query.trim() ? artists.filter(artist => matchesArtist(artist, query)) : orderedArtists(major), [artists, major, query]);
@@ -164,7 +156,7 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
     {query.trim() ? <div className="artist-search-hint"><strong>결과 {visible.length.toLocaleString('ko-KR')}명</strong><span>이름 · 핸들 · 초성으로 찾기</span></div> : <div className="artist-content">
       {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${displayDate(new Date())} · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
     </div>}
-    <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <EmptyState icon={PhotoIcon} title="검색 결과 없음" />}</section>
+    <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} onActions={() => onActions(artist)} />)}</div>{visible.length === 0 && <EmptyState icon={PhotoIcon} title="검색 결과 없음" />}</section>
     <Scrubber scrollRef={scroller} total={visible.length} sort={scrubberSort} hidden={paused}/>
   </div></PreparedCovers.Provider>;
 }
@@ -269,6 +261,7 @@ export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=fals
   const detail = selection.endpoint === endpoint ? selection.artist : null;
   const setDetail = (artist: LibraryArtist | null) => setSelection({endpoint, artist});
   const entry=useArtistEntry(paused,setDetail);
+  const [sheetArtist,setSheetArtist]=useState<LibraryArtist|null>(null);
   useEffect(()=>entry.cancel(),[endpoint]);
   useEffect(() => {
     backRef.current = () => {
@@ -288,6 +281,6 @@ export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=fals
   const header = searchOpen ? <TopBarSearch title="작가" search={{scope:'작가',run:setQuery}} onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<button className="top-bar__crumbs" onClick={()=>window.dispatchEvent(new Event('lakomics-back'))}>홈 ›</button>} title="작가" count={artists.length ? artists.length : undefined} search={state==='ready'?{scope:'작가',run:value=>{setQuery(value);setSearchOpen(true);}}:undefined} />;
   return <><div className="artist-screen" inert={entry.pending} aria-busy={entry.pending}>{header}{notice}
     <HiddenArtists endpoint={endpoint} artists={allArtists} onOpen={artist=>void entry.open(artist)} pending={pending} syncError={error} onRetry={retry} />
-    {showLoading || (!allArtists.length && (state === 'loading' || state === 'idle')) ? <div className="artist-empty">{showLoading&&<Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : !allArtists.length ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={artist=>void entry.open(artist)} />}
-  </div>{entry.error&&<div className="inline-error" role="alert">{entry.error}</div>}</>;
+    {showLoading || (!allArtists.length && (state === 'loading' || state === 'idle')) ? <div className="artist-empty">{showLoading&&<Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : !allArtists.length ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={artist=>void entry.open(artist)} onActions={setSheetArtist} />}
+  </div>{entry.error&&<div className="inline-error" role="alert">{entry.error}</div>}{sheetArtist&&<ArtistActionSheet artist={sheetArtist} endpoint={endpoint} onClose={() => setSheetArtist(null)} />}</>;
 }

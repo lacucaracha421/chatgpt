@@ -241,7 +241,7 @@ it("selects several items and moves them to the vault trash, with undo", async (
   expect(onContentChanged).toHaveBeenCalled();
   expect(await screen.findByText("2개를 휴지통으로 옮겼습니다.")).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+  await userEvent.click(screen.getByRole("button", { name: "되돌리기" }));
   await waitFor(() => expect(gateway.restoreEncryptedVaultItems).toHaveBeenCalledWith(["a", "v"]));
   expect(await screen.findByRole("button", { name: "secret.png" })).toBeInTheDocument();
 });

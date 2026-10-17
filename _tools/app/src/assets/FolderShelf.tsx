@@ -8,7 +8,8 @@ import { ShelfBridgeContext, ShelfScroller, type ShelfBridge } from "../shared/u
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Toast } from "../shared/ui/Toast";
 import { ShelfDrag, type ShelfDragHost } from "../shared/shelfDrag";
-import { SHELF_MOVE_ITEMS as MOVE_ITEMS, SHELF_KEY_MOVES as KEY_MOVES, canMove, movedIds, orderAnnouncement, type OrderMove } from "../shared/shelfOrder";
+import { SHELF_KEY_MOVES as KEY_MOVES, movedIds, orderAnnouncement, shelfMoveActionDefs, shelfMoveHandlers, type OrderMove } from "../shared/shelfOrder";
+import { bindMenuItems } from "../shared/contextActions";
 
 type FolderReorder = {
   ids: string[];
@@ -108,10 +109,8 @@ function FolderShelfReorder({ reorder, cards }: { reorder: FolderReorder; cards:
     <ShelfBridgeContext.Provider value={bridge}>
       <ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards.map((card, index) => {
         const id = reorder.ids[index];
-        return <ContextMenu key={id} items={MOVE_ITEMS.map(item => ({
-          id: item.move, label: item.label, shortcut: item.shortcut,
-          disabled: busy || !canMove(reorder.ids, id, item.move), onSelect: () => move(id, item.move),
-        }))}>{card as ReactElement}</ContextMenu>;
+        return <ContextMenu key={id} items={bindMenuItems(shelfMoveActionDefs(reorder.ids, id, busy),
+          shelfMoveHandlers(direction => move(id, direction)))}>{card as ReactElement}</ContextMenu>;
       })}</ShelfScroller>
     </ShelfBridgeContext.Provider>
     <span className="shelf-order-live" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>

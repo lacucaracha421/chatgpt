@@ -3,6 +3,8 @@
 .asset-selection-bar,
 .asset-selection-bar .ui-button { flex-wrap: nowrap; white-space: nowrap; }
 .asset-selection-bar { max-width: calc(100% - var(--space-4)); }
+/* The end group (trash, menu, clear) is laid out as plain bar items; the tablet places it as a group. */
+.asset-selection-bar__end { display: contents; }
 
 .asset-browser__gallery { container: asset-selection-host / inline-size; }
 

@@ -377,7 +377,7 @@ describe("ClassificationSidebar", () => {
     const labels = screen.getAllByRole("menuitem").map(item => item.textContent);
     expect(labels).toContain("하위 폴더 만들기");
     expect(labels).toContain("아이콘 및 색상");
-    expect(labels).not.toContain("이름 변경");
+    expect(labels).not.toContain("이름 바꾸기");
     expect(labels).not.toContain("폴더 이동");
     expect(labels).not.toContain("삭제");
   });
@@ -742,7 +742,7 @@ describe("ClassificationSidebar", () => {
     renderSidebar(fixtureGateway);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Blue Archive" }), { clientX: 20, clientY: 20 });
-    await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
+    await user.click(screen.getByRole("menuitem", { name: "이름 바꾸기" }));
     const input = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(input);
     await user.type(input, "Archive{Enter}");
@@ -776,8 +776,8 @@ describe("ClassificationSidebar", () => {
 
     expect(screen.queryByRole("button", { name: /추가 작업/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["고정", "하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
-    await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["고정", "하위 폴더 만들기", "이름 바꾸기", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
+    await user.click(screen.getByRole("menuitem", { name: "이름 바꾸기" }));
     const rename = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(rename);
     await user.type(rename, "Archive{Escape}");

@@ -1,24 +1,24 @@
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AlbumEntry } from "../library/types";
-import type { ContextMenuItem } from "../shared/ui/ContextMenu";
+import { uniqueSources, type ActionHandlers } from "../shared/contextActions";
 import { breadcrumbPath } from "../shared/breadcrumb";
 
 function destinationLabel(entry: AlbumEntry, entries: AlbumEntry[]) {
   return breadcrumbPath(entry, entries);
 }
 
-/** Ordinary asset actions use the same menu in folder and character galleries. */
-export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage, onAlbum, targetsSelection = true }: {
-  targetsSelection?: boolean;
-  count: number; busy: boolean; albums: AlbumEntry[];
+/**
+ * What the ordinary asset actions do in the folder and character galleries: 출처 복사 and 앨범에 추가.
+ * The names, order and enabled conditions come from `imageActionDefs` (shared with the tablet).
+ */
+export function libraryContextHandlers({ disabled, albums, sourceUrls, onMessage, onAlbum }: {
+  disabled: boolean; albums: AlbumEntry[];
   sourceUrls: (string | null)[]; onMessage: (message: string) => void;
   onAlbum: (id: string) => void;
-}): ContextMenuItem[] {
-  const disabled = busy || count === 0;
-  const sources = [...new Set(sourceUrls.map(url => url?.trim()).filter((url): url is string => Boolean(url)))];
-  return [
-    { id: "count", label: targetsSelection ? `${count}개 선택` : `${count}개`, disabled: true, onSelect: () => undefined },
-    { id: "copy-source", label: "출처 복사", disabled: disabled || sources.length === 0, onSelect: async () => {
+}): ActionHandlers {
+  const sources = uniqueSources(sourceUrls);
+  return {
+    "copy-source": async () => {
       if (disabled || !sources.length) return;
       try {
         await navigator.clipboard.writeText(sources.join("\n"));
@@ -26,8 +26,7 @@ export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage
       } catch (error) {
         onMessage(commandErrorMessage(error, "출처를 복사하지 못했습니다."));
       }
-    } },
-    { id: "album", label: "앨범에 추가", disabled: disabled || !albums.length, onSelect: () => undefined,
-      children: albums.map(entry => ({ id: entry.id, label: destinationLabel(entry, albums), onSelect: () => onAlbum(entry.id) })) },
-  ];
+    },
+    album: { choices: albums.map(entry => ({ id: entry.id, label: destinationLabel(entry, albums), run: () => onAlbum(entry.id) })) },
+  };
 }

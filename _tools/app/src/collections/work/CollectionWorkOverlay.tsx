@@ -166,7 +166,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
         { id: "av", label: "AV 정보 편집", disabled: !data.av, onSelect: () => setPanel({ kind: "av", data }) },
         { id: "artwork", label: "표지 앞면·책등·뒷면", onSelect: () => setPanel({ kind: "artwork", data }) },
       ]),
-      { id: "delete", label: "컬렉션 삭제", destructive: true, onSelect: () => setPanel({ kind: "delete", data }) },
+      { id: "delete", label: "휴지통으로", destructive: true, onSelect: () => setPanel({ kind: "delete", data }) },
     ],
   };
   // Editors retain their exact target even if a route request changes behind them.
@@ -178,7 +178,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     {panel?.kind === "igdb" && <IgdbImportDialog open target={{ kind: panel.data.providerConnected ? "existing" : "connect", collectionId: panel.data.collection.id }} onClose={() => setPanel(null)} onOpenSettings={() => { setPanel(null); onOpenSettings(); }} onApplied={async () => { setPanel(null); await mutate(async () => undefined); }} />}
     {panel?.kind === "av" && panel.data.av && <AvEditPanel details={panel.data.av} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
     {panel?.kind === "artwork" && panel.data.covers && <AvArtworkDialog collectionId={panel.data.collection.id} covers={panel.data.covers} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
-    {panel?.kind === "delete" && <Dialog open title="컬렉션 삭제" onClose={() => setPanel(null)}><p>{panel.data.collection.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다.</p><div className="ui-dialog__actions"><Button onClick={() => setPanel(null)}>취소</Button><Button variant="danger" onClick={() => void (async () => { try { await gateway.deleteCollection(panel.data.collection.id); await onChanged(); setPanel(null); onExit(); } catch (reason) { setError(avError(reason)); } })()}>삭제</Button></div></Dialog>}
+    {panel?.kind === "delete" && <Dialog open title="휴지통으로" onClose={() => setPanel(null)}><p>{panel.data.collection.name} 컬렉션을 휴지통으로 옮기시겠습니까? 원본 에셋은 삭제하지 않습니다.</p><div className="ui-dialog__actions"><Button onClick={() => setPanel(null)}>취소</Button><Button variant="danger" onClick={() => void (async () => { try { await gateway.deleteCollection(panel.data.collection.id); await onChanged(); setPanel(null); onExit(); } catch (reason) { setError(avError(reason)); } })()}>휴지통으로</Button></div></Dialog>}
     {performer && loaded && <div className="work-person-page"><AvPerformerPage personId={performer} currentCollectionId={loaded.collection.id} api={api} onBack={() => setPerformer(null)} onOpenCollection={id => { setPerformer(null); onOpenCollection?.(id); }} onOpenPerformer={setPerformer} onOpenSettings={onOpenSettings} /></div>}
   </>;
 }

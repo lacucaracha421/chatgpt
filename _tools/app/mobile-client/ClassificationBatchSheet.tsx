@@ -6,6 +6,7 @@ import {ClassificationAssignmentChoices,type ClassificationAssignmentState} from
 import {errorText,native} from './transport';
 import {batches,manyFailures,type ManyReply} from './batchCommands';
 import {viewerEditEvent} from './listGeneration';
+import {announceFolderFilled} from './recentFolders';
 import './ClassificationBatchSheet.css';
 
 // Both replica reads and durable intent writes use at most four native requests at once.
@@ -63,6 +64,7 @@ export function ClassificationBatchSheet({assetIds,onClose,onBusyChange,onComple
       done+=chunk.length;if(alive.current)setProgress(done);
     }
     if(success)window.dispatchEvent(viewerEditEvent());
+    if(success&&selectedId)announceFolderFilled(selectedId);
     saving.current=false;
     if(!alive.current)return;
     setBusy(false);onBusyChange(false);

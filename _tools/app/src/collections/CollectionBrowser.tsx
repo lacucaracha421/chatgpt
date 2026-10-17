@@ -27,6 +27,7 @@ import { MangaShelfList } from "./MangaShelfList";
 import type { MangaShelfPick } from "./MangaShelfRow";
 import { requestMangaVolume } from "./work/mangaVolumeRequest";
 import { TextInput } from "../shared/ui/TextInput";
+import { bindMenuItems, collectionActionDefs } from "../shared/contextActions";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -262,11 +263,11 @@ export function CollectionBrowser({
   // title on a type switch, the AV inbox, a toast) cost about a frame each.
   const latest = useRef({ openCollection, toggleShowcase });
   useLayoutEffect(() => { latest.current = { openCollection, toggleShowcase }; });
-  const collectionMenu = useCallback((collection: CollectionSummary) => [
-    { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
-    { id: "showcase", label: collection.showcase ? "쇼케이스에서 빼기" : "쇼케이스에 추가", onSelect: () => void latest.current.toggleShowcase(collection) },
-    { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
-  ], []);
+  const collectionMenu = useCallback((collection: CollectionSummary) => bindMenuItems(collectionActionDefs({ showcase: collection.showcase }), {
+    edit: () => setEditMode({ kind: "edit", collection }),
+    showcase: () => void latest.current.toggleShowcase(collection),
+    delete: () => setDeleteTarget(collection),
+  }), []);
   // 책장 keeps the per-work volume rows; 선반 uses the shared work cases.
   const mangaBookcase = typeFilter === "manga" && viewSettings.layout === "bookcase";
   const openMangaAt = (collection: CollectionSummary, volumeId: string | null) => {
@@ -525,12 +526,12 @@ export function CollectionBrowser({
         />
       )}
       {deleteTarget && (
-        <Dialog open title="컬렉션 삭제" onClose={() => setDeleteTarget(null)}>
+        <Dialog open title="휴지통으로" onClose={() => setDeleteTarget(null)}>
           <div className="collection-browser__delete">
-            <p>컬렉션 '{deleteTarget.name}'을 삭제합니다. 속한 자산은 라이브러리에 보존됩니다.</p>
+            <p>컬렉션 '{deleteTarget.name}'을 휴지통으로 옮깁니다. 속한 자산은 라이브러리에 보존됩니다.</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={() => setDeleteTarget(null)}>취소</Button>
-              <Button type="button" variant="danger" onClick={() => void removeCollection()}>삭제</Button>
+              <Button type="button" variant="danger" onClick={() => void removeCollection()}>휴지통으로</Button>
             </div>
           </div>
         </Dialog>

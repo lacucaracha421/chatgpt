@@ -14,6 +14,7 @@ import app as api
 import authority
 import classification_authority
 import library_search
+import folder_pins
 import head_cache
 from tests.test_classification_authority import activate_asset_lifecycle
 from fastapi.testclient import TestClient
@@ -125,6 +126,18 @@ class PickerTests(unittest.TestCase):
         data['pinnedClassificationIds'] = []
         self.client.put('/v1/picker/display', headers=self.headers(self.publisher), json=data)
         self.assertFalse(any(row['pinned'] for row in self.folders()['entries']))
+
+    def test_pins_made_on_any_device_replace_the_published_pins(self):
+        with api.get_db() as db:
+            db.executescript(folder_pins.DDL)
+            db.commit()
+        self.client.put('/v1/picker/display', headers=self.headers(self.publisher), json={
+            'classificationOrderIds': [], 'pinnedClassificationIds': ['other']})
+        self.assertEqual([row['id'] for row in self.folders()['entries'] if row['pinned']], ['other'])
+        reply = self.client.post('/v1/library/folder-pins', headers=self.headers(self.reader),
+                                 json={'commands': [{'op': 'add', 'ids': ['f']}]})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual([row['id'] for row in self.folders()['entries'] if row['pinned']], ['f'])
 
     def test_eligibility_no_rating_filter_exclusion_remaining_and_random(self):
         self.asset('pending', committed=0)

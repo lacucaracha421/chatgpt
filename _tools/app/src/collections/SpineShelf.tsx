@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { useLongPress } from "../shared/useLongPress";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CASE_PLASTIC, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
@@ -66,6 +67,8 @@ type Props<W extends SpineWork> = {
   gutter?: number;
   restoredFocusId?: string | null;
   menu?(id: string): ContextMenuItem[];
+  /** Tablet: a long press on a work (or, with `touchTargets`, the nearest one in the row) asks for its action sheet. */
+  onLongPress?(id: string): void;
   art?: SpineArt<W>;
   /** The works near the viewport (the mounted rows and the ones just beyond), when that set changes: a client may read their artwork lazily. */
   onWindow?(ids: string[]): void;
@@ -82,7 +85,7 @@ type Props<W extends SpineWork> = {
   controlRef?: { current: SpineShelfControl | null };
 };
 
-export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, menu, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
+export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -247,6 +250,19 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     if (pickedId === id) { onOpen(id); return; }
     setFocusId(id); onPick(id);
   };
+  /** The work under a press: its spine or pulled-out case, else (on touch) the nearest one in the row. */
+  const workAt = (target: HTMLElement, clientX: number) => {
+    const out = target.closest<HTMLElement>(".spine-shelf__out");
+    if (out) return out.dataset.id ?? null;
+    const spine = target.closest<HTMLElement>(".spine");
+    if (spine) return spine.dataset.collectionId ?? null;
+    const rowElement = touchTargets ? target.closest<HTMLElement>("[data-shelf-row]") : null;
+    return rowElement ? nearestCell(rows[Number(rowElement.dataset.shelfRow)], clientX - rowElement.getBoundingClientRect().left)?.work.id ?? null : null;
+  };
+  const press = useLongPress({ enabled: Boolean(onLongPress), onLongPress: ({ target, x }) => {
+    const id = target instanceof HTMLElement ? workAt(target, x) : null;
+    if (id) onLongPress?.(id);
+  } });
   const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const out = target.closest<HTMLElement>(".spine-shelf__out");
@@ -290,7 +306,8 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
   const entranceOf = (row: PackedRow<W>) => entering.current?.get(row.index);
   return <div ref={hostRef} className="spine-shelf" role="group" aria-label={label}
     style={{ height: packed.height, "--spine-scale": scale, "--spine-gutter": `${gutter}px` } as CSSProperties}
-    onClick={onClick} onKeyDown={onKeyDown}
+    onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}
+    onClick={press.click(onClick)} onKeyDown={onKeyDown}
     onFocus={event => { const spine = (event.target as HTMLElement).closest<HTMLElement>(".spine"); if (spine?.dataset.collectionId) setFocusId(spine.dataset.collectionId); }}>
     {mounted.map(entry => entry.kind === "label"
       ? <div key={`label:${entry.top}`} className="spine-shelf__label" style={{ top: entry.top, height: entry.height }}><SectionLabel title={entry.label} count={entry.count} /></div>

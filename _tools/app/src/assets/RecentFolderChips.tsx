@@ -7,18 +7,18 @@ import { Badge } from "../shared/ui/Badge";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Menu } from "../shared/ui/Menu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
-import { useRecentFolders, type RecentFolder, type RecentFoldersState } from "./recentFolders";
+import { hasDuplicateRecentName, useRecentFolders, type RecentChipFolder, type RecentFolder, type RecentFoldersState } from "./recentFolders";
 import "./recentFolders.css";
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-function FolderGlyph({ folder }: { folder: RecentFolder }) {
+function FolderGlyph({ folder }: { folder: RecentChipFolder }) {
   return folder.group ? <UserGroupIcon aria-hidden="true" /> : <ClassificationIcon kind={folder.folder.kind} iconKey={folder.folder.iconKey} testId={false} />;
 }
 
 /** Shared quiet chip; the desktop bar owns fitting, while another surface can scroll it. */
 export function RecentFolderChip({ folder, duplicate, current, onOpen, onRemove, leaving = false, style }: {
-  folder: RecentFolder; duplicate: boolean; current: boolean; onOpen: () => void; onRemove: () => void;
+  folder: RecentChipFolder; duplicate: boolean; current: boolean; onOpen: () => void; onRemove: () => void;
   leaving?: boolean; style?: CSSProperties;
 }) {
   return <ContextMenu items={[{ id: "remove", label: "최근에서 빼기", onSelect: onRemove }]}>
@@ -126,7 +126,7 @@ function RecentFoldersBar({ history }: { history: RecentFoldersState }) {
         <DropdownMenu.Item className="ui-menu__item" onSelect={clear}>최근 목록 비우기</DropdownMenu.Item>
       </>} />}
     <div className="recent-folders__list" ref={list}>
-      {first.map(folder => <RecentFolderChip key={folder.id} folder={folder} duplicate={folders.some(other => other.id !== folder.id && other.name === folder.name)}
+      {first.map(folder => <RecentFolderChip key={folder.id} folder={folder} duplicate={hasDuplicateRecentName(folders, folder)}
         current={folder.id === currentId} onOpen={() => open(folder)} onRemove={() => remove(folder.id)} />)}
       {!reducedMotion() && departing.filter(({ folder }) => !first.some(next => next.id === folder.id)).map(({ folder, style }) => <RecentFolderChip key={folder.id} folder={folder} duplicate={false}
         current={false} onOpen={() => undefined} onRemove={() => undefined} style={style} leaving />)}

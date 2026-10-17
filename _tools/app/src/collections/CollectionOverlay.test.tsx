@@ -496,14 +496,14 @@ describe("CollectionOverlay MangaDex flow", () => {
 
   it.each([
     ["편집", "컬렉션 편집"],
-    ["삭제", "컬렉션 삭제"],
+    ["삭제", "휴지통으로"],
   ])("lets the %s dialog handle Escape without exiting detail", async (action, title) => {
     const user = userEvent.setup();
     const { onExit } = renderOverlay();
 
     await screen.findByRole("article", { name: "만화 작품 화면" });
     if (action !== "편집") await openProviderMenu(user);
-    await user.click(screen.getByRole(action === "편집" ? "button" : "menuitem", { name: action === "편집" ? "편집" : "컬렉션 삭제" }));
+    await user.click(screen.getByRole(action === "편집" ? "button" : "menuitem", { name: action === "편집" ? "편집" : "휴지통으로" }));
     expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -523,7 +523,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(screen.getByRole("button",{name:"쇼케이스"}));
     await waitFor(()=>expect(gateway.setCollectionShowcase).toHaveBeenCalledWith("collection-1",true));
     await openProviderMenu(user);
-    for(const name of ["권별 표지 · 소장","MangaDex 연결 · 가져오기","MangaDex 새로고침","Kakao 연결","국내 발매 정보 새로고침","책등 초점 다시 찾기","컬렉션 삭제"]) expect(screen.getByRole("menuitem",{name})).toBeInTheDocument();
+    for(const name of ["권별 표지 · 소장","MangaDex 연결 · 가져오기","MangaDex 새로고침","Kakao 연결","국내 발매 정보 새로고침","책등 초점 다시 찾기","휴지통으로"]) expect(screen.getByRole("menuitem",{name})).toBeInTheDocument();
     expect(onChanged).toHaveBeenCalledTimes(2);
   });
 
@@ -534,11 +534,11 @@ describe("CollectionOverlay MangaDex flow", () => {
     const { gateway, onExit } = renderOverlay({}, onChanged);
 
     await openProviderMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "컬렉션 삭제" }));
-    expect(screen.getByRole("dialog", { name: "컬렉션 삭제" })).toHaveTextContent("던전밥");
+    await user.click(screen.getByRole("menuitem", { name: "휴지통으로" }));
+    expect(screen.getByRole("dialog", { name: "휴지통으로" })).toHaveTextContent("던전밥");
     expect(gateway.deleteCollection).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로" }));
     await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("collection-1"));
     expect(onChanged).toHaveBeenCalledOnce();
     expect(onExit).toHaveBeenCalledOnce();
@@ -666,7 +666,7 @@ describe("CollectionOverlay game detail flow", () => {
     await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     expect(screen.getByRole("menuitem", { name: "컬렉션 편집" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "쇼케이스에 추가" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "컬렉션 삭제" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "휴지통으로" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeInTheDocument();
   });
@@ -886,10 +886,10 @@ it("keeps film editing, Showcase and confirmed delete reachable in the work scre
   await waitFor(() => expect(gateway.setCollectionShowcase).toHaveBeenCalledWith(movieCollection.id, true));
   await user.click(screen.getByRole("button", { name: "작품 관리" }));
   expect(screen.getByRole("menuitem", { name: "컬렉션 편집" })).toBeInTheDocument();
-  await user.click(screen.getByRole("menuitem", { name: "컬렉션 삭제" }));
-  const dialog = screen.getByRole("dialog", { name: "컬렉션 삭제" });
+  await user.click(screen.getByRole("menuitem", { name: "휴지통으로" }));
+  const dialog = screen.getByRole("dialog", { name: "휴지통으로" });
   expect(gateway.deleteCollection).not.toHaveBeenCalled();
-  await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+  await user.click(within(dialog).getByRole("button", { name: "휴지통으로" }));
   await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith(movieCollection.id));
   expect(onExit).toHaveBeenCalledOnce();
 });

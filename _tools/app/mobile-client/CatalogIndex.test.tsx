@@ -20,7 +20,7 @@ const page={ready:true,publicationRevision:'p1',publishedAt:null,items:[],nextCu
 const reads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/mobile-catalog/search?'));
 const commands=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith(`${INDEX_PATH}/pins/`));
 async function openSheet(){render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과 없음');fireEvent.click(screen.getByRole('button',{name:'필터'}));return screen.findByRole('button',{name:'태그 9'});}
-async function hold(button:HTMLElement){vi.useFakeTimers();fireEvent.pointerDown(button,{button:0,clientX:10,clientY:10});await act(async()=>{vi.advanceTimersByTime(500);});fireEvent.pointerUp(button,{button:0});fireEvent.click(button);vi.useRealTimers();}
+async function hold(button:HTMLElement){vi.useFakeTimers();fireEvent.pointerDown(button,{button:0,clientX:10,clientY:10});await act(async()=>{vi.advanceTimersByTime(450);});fireEvent.pointerUp(button,{button:0});fireEvent.click(button);vi.useRealTimers();}
 beforeEach(()=>{
   setOutboxConnection(connection);localStorage.clear();vi.stubGlobal('PointerEvent',MouseEvent);
   snapshot={...authority,revision:0,items:[]};offline=false;

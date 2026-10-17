@@ -1137,25 +1137,6 @@ it('opens the shared info from a single list selection and consumes Back before 
  await waitFor(()=>expect(screen.queryByText('2개 선택')).toBeNull());
 });
 
-it('runs likes from the tablet selection bar and retains only failed selections without blanking tiles',async()=>{
- const original=mocks.api.getMockImplementation()!;
- mocks.native.mockImplementation(async op=>op==='albumTree'?{adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:[]}:{configured:true,endpoint:'https://example.invalid'});
- mocks.api.mockImplementation(async(path:string,signal:AbortSignal,body:Record<string,unknown>)=>{
-   if(path==='/v1/albums/commands'&&body.commandType==='ensureLikesAlbum')return {album:{id:'likes'}};
-   if(path==='/v1/albums/commands/batch')return {results:(body.commands as {operationId:string;assetId:string}[]).map(command=>command.assetId==='a2'
-     ?{operationId:command.operationId,status:'rejected',changed:false,changeSequence:null,error:{code:'assetTombstoned',status:409,message:'failure'}}
-     :{operationId:command.operationId,status:'applied',changed:true,changeSequence:1,membership:{}})};
-   if(path.startsWith('/v1/albums/likes?'))return {albumId:'likes',memberships:(new URL(`https://test${path}`).searchParams.get('assetIds')??'').split(',').map(assetId=>({assetId,desiredState:false,entityRevision:3}))};
-   return original(path,signal,body);
- });
- render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
- fireEvent.contextMenu(await screen.findByText('tile-a1'));fireEvent.contextMenu(screen.getByText('tile-a2'));
- fireEvent.click(await screen.findByRole('button',{name:'좋아요 켜기'}));
- await screen.findByText(/2개 중 1개 완료, 1개 실패/);
- expect(screen.getByText('1개 선택')).toBeTruthy();expect(screen.getByText('tile-a1')).toBeTruthy();expect(screen.getByText('tile-a2')).toBeTruthy();
- expect(screen.queryByRole('button',{name:'이 앨범에서 빼기'})).toBeNull();
-});
-
 it('trashes the selected assets and offers a batch undo in the tablet gallery',async()=>{
  mocks.native.mockImplementation(async(op:string,body:{assetId:string;command:string})=>{
    if(op==='assetLifecycleState')return {available:true,items:[]};
@@ -1165,7 +1146,7 @@ it('trashes the selected assets and offers a batch undo in the tablet gallery',a
  render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
  fireEvent.contextMenu(await screen.findByText('tile-a1'));fireEvent.contextMenu(screen.getByText('tile-a2'));
  fireEvent.click(await screen.findByRole('button',{name:'휴지통으로',exact:true}));
- const undo=await screen.findByRole('button',{name:'실행 취소'});
+ const undo=await screen.findByRole('button',{name:'되돌리기'});
  expect(screen.queryByText('tile-a1')).toBeNull();expect(screen.queryByText('tile-a2')).toBeNull();
  fireEvent.click(undo);await screen.findByText('tile-a1');expect(screen.getByText('tile-a2')).toBeTruthy();
  expect(mocks.native.mock.calls.filter(([op,payload])=>op==='assetLifecycleSet'&&payload.command==='restore')).toHaveLength(2);

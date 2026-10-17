@@ -137,7 +137,7 @@ function FolderItem({ node, hasNextSibling, scope, expanded, readOnly, editor, d
   const creatingChild = editor.edit?.type === "create" && editor.edit.parentId === folder.id;
   const actions: ContextMenuItem[] = readOnly ? [] : [
     { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(folder.id) },
-    { id: "rename", label: "이름 변경", onSelect: () => onRename(folder) },
+    { id: "rename", label: "이름 바꾸기", onSelect: () => onRename(folder) },
     { id: "move", label: "폴더 이동", onSelect: () => onMove(folder) },
     { id: "delete", label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제", destructive: true, disabled: hasChildren, onSelect: () => onDelete(folder) },
   ];

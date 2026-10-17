@@ -1,6 +1,7 @@
 import {LoadingLine} from './TopBar';
 import {visibleInterval} from './useVisibleInterval';
 import {viewerEditEvent} from './listGeneration';
+import {announceFolderFilled} from './recentFolders';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,EmptyState,IconButton} from './ui';
@@ -201,6 +202,7 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
       // keeps the picker from ever showing a selection the native layer has not recorded.
       const next=await native<ClassificationAssignmentState>('classificationAssignmentSet',{assetId,classificationId});
       window.dispatchEvent(viewerEditEvent());
+      if(classificationId)announceFolderFilled(classificationId);
       setState(next);
       onClose();
     }catch(reason){setError(errorText(reason));}

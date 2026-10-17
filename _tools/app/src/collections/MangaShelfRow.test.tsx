@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaShelfRow, mangaShelfData, shelfEditionVolumes } from "./MangaShelfRow";
 
@@ -44,5 +44,22 @@ describe("manga shelf row", () => {
     fireEvent.click(screen.getByRole("button", { name: "다이의 대모험" }));
     expect(onOpen).toHaveBeenLastCalledWith(null);
     expect(screen.getByLabelText("보유 2권")).toHaveTextContent("2권");
+  });
+  it("asks for the work's action sheet on a long press of its row and swallows the click that follows", () => {
+    vi.useFakeTimers();
+    try {
+      const onLongPress = vi.fn(), onPick = vi.fn();
+      render(<MangaShelfRow id="m1" title="다이의 대모험" owned={2} manga={mangaShelfData([volume("a", 1), volume("b", 2)], [], 2, null)} privacy={false} coverUrl={id => `thumb:${id}`}
+        onNear={() => undefined} onPick={onPick} onOpen={() => undefined} onLongPress={onLongPress} />);
+      const spine = screen.getByRole("button", { name: "1권 보기" });
+      fireEvent.pointerDown(spine, { button: 0, clientX: 30, clientY: 30 });
+      act(() => { vi.advanceTimersByTime(450); });
+      fireEvent.pointerUp(spine, { button: 0 });
+      expect(onLongPress).toHaveBeenCalledOnce();
+      fireEvent.click(spine);
+      expect(onPick).not.toHaveBeenCalled();
+      fireEvent.click(spine);
+      expect(onPick).toHaveBeenCalledWith("a");
+    } finally { vi.useRealTimers(); }
   });
 });

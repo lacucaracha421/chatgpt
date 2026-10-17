@@ -4,6 +4,8 @@
  * plain-folder shelves reorder their child folders. The DOM gesture lives in `shelfDrag.ts`.
  */
 
+import type { ActionDef } from "./contextActions";
+
 /** The draggable bands of folder and character shelves. */
 export type OrderKind = "group" | "character" | "folder";
 export type OrderMove = "prev" | "next" | "first" | "last";
@@ -14,6 +16,15 @@ export const SHELF_MOVE_ITEMS: { move: OrderMove; label: string; shortcut?: stri
   { move: "first", label: "맨 앞으로" },
   { move: "last", label: "맨 뒤로" },
 ];
+/** The order group of a shelf card's menu: ids `move-prev|next|first|last`, switched off where the card cannot move. */
+export const shelfMoveActionDefs = (ids: readonly string[], id: string, busy = false): ActionDef[] =>
+  SHELF_MOVE_ITEMS.map(item => ({
+    id: `move-${item.move}`, label: item.label, shortcut: item.shortcut,
+    icon: "order" as const, disabled: busy || !canMove(ids, id, item.move),
+  }));
+/** The handlers for `shelfMoveActionDefs`: every order item runs `run` with its move. */
+export const shelfMoveHandlers = (run: (move: OrderMove) => void): Record<string, () => void> =>
+  Object.fromEntries(SHELF_MOVE_ITEMS.map(item => [`move-${item.move}`, () => run(item.move)]));
 export const SHELF_KEY_MOVES: Record<string, OrderMove> = { ArrowLeft: "prev", ArrowRight: "next", Home: "first", End: "last" };
 
 /** A card must be held this long without moving before it lifts; moving earlier pans the shelf as before. */

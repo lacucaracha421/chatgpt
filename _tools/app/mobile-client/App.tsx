@@ -69,7 +69,7 @@ import {characterPath} from './characterModel';
 import {FolderCards} from './FolderCards';
 import {Albums,useAlbumTree} from './Albums';
 import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumModel';
-import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView} from './libraryModel';
+import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView,type Entry} from './libraryModel';
 import './library.css';
 import {Gallery} from './Gallery';
 import {displayCount} from '../src/shared/displayDate';
@@ -78,9 +78,12 @@ import {AlbumBatchSheet} from './AlbumBatchSheet';
 import {AlbumManagement} from './AlbumManagement';
 import {FolderManagement,type FolderChange} from './FolderManagement';
 import {FolderScope} from './FolderScope';
+import {FolderActionSheet} from './FolderActions';
+import {ImageActionSheet} from './ImageActions';
+import {useTabletRecentFolders} from './recentFolders';
 import type {FolderAuthority} from './folderCommands';
 import {useSelectionActions} from './useSelectionActions';
-import {MinusCircleIcon} from '@heroicons/react/24/outline';
+import {InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
 import {SelectionBar} from '../src/assets/SelectionBar';
 import {Home} from './Home';
 import {Collections, type CollectionsPlace, type CollectionsRequest} from './Collections';
@@ -226,7 +229,8 @@ export function App() {
   // the classification authority identity a folder command presents (absent before cutover).
   const [listVersion, setListVersion] = useState(0);
   const [folderAuthority, setFolderAuthority] = useState<FolderAuthority|null>(null);
-  const [folderManagement, setFolderManagement] = useState<{folder:Classification}|null>(null);
+  const [folderManagement, setFolderManagement] = useState<{folder:Classification;mode?:'create'|'rename'}|null>(null);
+  const [folderSheet, setFolderSheet] = useState<Entry|null>(null);
   const [indexReady,setIndexReady]=useState(false);
   // Recent folder visits are still recorded per connection (no screen shows them at the moment).
   const [,setRecentFolders] = useState<string[]>([]);
@@ -926,6 +930,7 @@ export function App() {
   };
   const openCurrent = (index: number, visible = visibleItems) => {
     markViewerOpen();
+    if (visible[index]?.kind === 'image') recent.recordCurrent();
     // Opening the still-visible gallery cancels its uncommitted replacement.
     gate.current.cancel(); cancelMore(); setBusy(false); loadInFlight.current=false; setError('');
     lastIntent.current = {view:page.view,cursor:page.cursor,previous:page.previous,filters:page.filters};
@@ -962,6 +967,8 @@ export function App() {
   const filterable = area==='assets' && page.view.tab==='library' && !page.view.root && !page.view.characters && !page.view.revisit && !page.view.description;
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
   const assetTools=<SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}}/>;
+  // 최근 folders: the tablet's own history of folders the user stayed in, opened an image in or filed images into.
+  const recent = useTabletRecentFolders({scope:status.endpoint,view:page.view,focusedNode:focusedCharacter,entries,ready:status.configured&&area==='assets'&&!settings&&indexReady&&page.version>0,onOpen:view=>select(view)});
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia,trailing:assetTools},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable || (area==='assets' && !!page.view.description);
   // Character galleries select like the plain gallery (user, 2026-10-05).
@@ -970,6 +977,9 @@ export function App() {
     ? characterSelection ? characterItems.current.find(asset => selectedIds.has(asset.id)) : visibleItems.find(asset => selectedIds.has(asset.id)) ?? sparse?.ranges.flatMap(range => range.items).find(asset => selectedIds.has(asset.id))
     : undefined;
   useEffect(()=>{clearSelection();},[focusedCharacter,clearSelection]);
+  // The selection bar's ⋯: the image sheet for what is selected (long press on an image still starts the selection).
+  const [imageSheet,setImageSheet]=useState(false);
+  useEffect(()=>{if(!selectedIds.size)setImageSheet(false);},[selectedIds.size]);
   const currentEntry=entries.find(item=>item.id===page.view.classification);
   const childEntries=entries.filter(item=>item.parent_id===currentEntry?.id);
   // The server serves subtree listings, the extra sorts and subtree counts from list version 2.
@@ -1008,7 +1018,7 @@ export function App() {
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
-  const intro=<>{rankedServer&&plainFolder&&!!childEntries.length&&<FolderScope direct={currentEntry?.asset_count} total={currentEntry?.total_asset_count} subtree={subtreeOf(filters)} onChange={applySubtree}/>}{!!childEntries.length&&!subtreeShown&&<section className="folder-intro"><FolderCards strip subtree={rankedServer} place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?viewFilterEmptyTitle(page.filters.media,page.filters.aspect,page.filters.duration):childEntries.length&&!subtreeShown?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'} hint={hasActiveFilters(page.filters)?`${viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)} 보는 중`:undefined} action={hasActiveFilters(page.filters)?<Button variant="ghost" onClick={clearFilters}>필터 초기화</Button>:undefined}/>}</>;
+  const intro=<>{rankedServer&&plainFolder&&!!childEntries.length&&<FolderScope direct={currentEntry?.asset_count} total={currentEntry?.total_asset_count} subtree={subtreeOf(filters)} onChange={applySubtree}/>}{!!childEntries.length&&!subtreeShown&&<section className="folder-intro"><FolderCards strip subtree={rankedServer} place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select} onActions={folderAuthority?setFolderSheet:undefined}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?viewFilterEmptyTitle(page.filters.media,page.filters.aspect,page.filters.duration):childEntries.length&&!subtreeShown?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'} hint={hasActiveFilters(page.filters)?`${viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)} 보는 중`:undefined} action={hasActiveFilters(page.filters)?<Button variant="ghost" onClick={clearFilters}>필터 초기화</Button>:undefined}/>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
   const levelDepth=(view:View)=>{
@@ -1106,19 +1116,19 @@ export function App() {
   const faultLayer=useMotionSurface('layer'),similarityLayer=useMotionSurface('layer'),reviewOverviewLayer=useMotionSurface('layer'),reviewLayer=useMotionSurface('layer'),trashLayer=useMotionSurface('layer'),exchangeLayer=useMotionSurface('layer'),cardAlbumLayer=useMotionSurface('layer');
   const classificationToast=useMotionSurface('toast'),exchangeToast=useMotionSurface('toast');
   const artistsCovered=useLayerCovered(artistsOpen);
-  const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onFavorite={albumTree?.adopted?value=>void selectionActions.run(value?'like':'unlike'):undefined} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button variant="ghost" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>}{page.view.album&&<Button size="icon" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/></Button>}<span className="selection-action-notice" role={selectionActions.notice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
+  const selectionBar=<SelectionBar selectedCount={selectedIds.size} batchPending={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onAddToAlbum={openAlbumBatch} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} characterLabel="분류" characterOpen={!!classificationBatchIds} onCharacterToggle={()=>{if(selectedIds.size)setClassificationBatchIds([...selectedIds]);}} characterPicker={classificationBatchIds?<ClassificationBatchSheet assetIds={classificationBatchIds} onClose={closeClassificationBatch} onBusyChange={value=>{classificationBatchBusy.current=value;}} onComplete={setClassificationNotice}/>:undefined} extraActions={<>{selectedAsset&&<Button size="sm" variant="ghost" aria-label="정보" disabled={selectionActions.busy} onClick={()=>setAssetInfo(selectedAsset)}><InformationCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">정보</span></Button>}{page.view.album&&<Button size="sm" variant="ghost" aria-label="이 앨범에서 빼기" disabled={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} onClick={()=>void selectionActions.run('remove')}><MinusCircleIcon aria-hidden="true"/><span className="asset-selection-bar__label">앨범에서 빼기</span></Button>}<span className="selection-action-notice" role={selectionActions.notice?'alert':'status'}><BusyLabel delay={400} busy={selectionActions.busy} idle={selectionActions.notice}>선택 작업 처리 중 {selectionActions.progress.done}/{selectionActions.progress.total}</BusyLabel></span></>} onMore={()=>setImageSheet(true)} onClearSelection={()=>{if(!selectionActions.busy)clearSelection();}}/>;
   const assetAreaNode=(
       <main className="library-main" ref={mainRef} style={{display:artistsCovered?'none':undefined}}>
         {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}{descriptionToolbar}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot onFolderActions={folderAuthority?setFolderSheet:undefined} endpoint={status.endpoint} onSearchFocus={()=>setSearchListsRequested(true)} onSearchSelect={chooseSearchScope} key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} albumLoading={albumLoading} segment={librarySegment} onSegment={setLibrarySegment} subtree={rankedServer} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? null : <>
         <Gallery arrivalScope={viewKey(page.view,page.filters)} hasMore={page.has_more} stale={busy} sparse={sparse} privacy={privacyMode} folderScope={viewKey(page.view)} folderPath={folderPath} items={selectionVisibleItems} scrubberSort={isRankedSort(sortOf(page.filters))?RANKED_SCRUBBER:undefined} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:descriptionIntro??intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={index=>openCurrent(index,selectionVisibleItems)} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&selectionBar}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser classifications={entries} onOpenFolder={classification=>select({tab:'library',classification,title:entries.find(entry=>entry.id===classification)?.name??''})} hiddenIds={trash.hidden} search={page.view.search} onSearch={query=>{openAssetSearch();setAssetSearchDraft(query??'');}} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
+        {charactersVisited && <CharacterBrowser classifications={entries} onOpenFolder={classification=>select({tab:'library',classification,title:entries.find(entry=>entry.id===classification)?.name??''})} hiddenIds={trash.hidden} search={page.view.search} onSearch={query=>{openAssetSearch();setAssetSearchDraft(query??'');}} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>{markViewerOpen();if(items[index]?.kind==='image')recent.recordCurrent();setViewer({items,index,character,source:'character'});}} backRef={characterBack} onExit={exitCharacters}
           selection={characterSelection?{ids:selectedIds,onSelect:selectAsset,onToggle:toggleSelectedAsset,onClear:clearSelection}:undefined} onItems={characterItemsChanged} moreRef={characterMore}
           review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:setReview}:undefined}/>}
         {characterSelection&&selectionBar}
@@ -1211,7 +1221,8 @@ export function App() {
     </div></BottomSheet>}
     {classificationNotice&&<div className="exchange-toast" role="status" ref={classificationToast} data-state="open"><span>{classificationNotice}</span><Button variant="ghost" onClick={()=>setClassificationNotice('')}>닫기</Button></div>}
     {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection} onPartial={failedIds=>setSelectedIds(new Set(failedIds))}/>}
-    {folderManagement&&folderAuthority&&<FolderManagement authority={folderAuthority} folders={classifications} folder={folderManagement.folder} onClose={()=>setFolderManagement(null)} onChanged={folderChange}/>}
+    {folderManagement&&folderAuthority&&<FolderManagement authority={folderAuthority} folders={classifications} folder={folderManagement.folder} initialMode={folderManagement.mode} onClose={()=>setFolderManagement(null)} onChanged={folderChange}/>}
+    {folderSheet&&folderAuthority&&<FolderActionSheet folder={folderSheet} entries={entries} onClose={()=>setFolderSheet(null)} onManage={mode=>setFolderManagement({folder:folderSheet,mode})}/>}
     {albumManagementOpen&&albumTree&&currentAlbum&&<AlbumManagement tree={albumTree} album={currentAlbum} onClose={()=>setAlbumManagementOpen(false)} onDeleted={albumRoot}/>}
     {selectionActions.notice&&!selectedIds.size&&<div className="trash-snackbar" role="alert">{selectionActions.notice}</div>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}
@@ -1220,6 +1231,9 @@ export function App() {
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
     {reviewOverview && reviewLibrary && <div className="tablet-layer" ref={reviewOverviewLayer}><CharacterReviewOverview libraryId={reviewLibrary} characters={characterIndex} refreshKey={`${characterIndex?.revision}:${reviewClosed}`} paused={!!review} backRef={overviewBack} onOpen={setReview} onClose={() => setReviewOverview(false)}/></div>}
     {review && reviewLibrary && <div className="tablet-layer" ref={reviewLayer}><CharacterReview key={review.target?.id??(review.series?`series:${review.series.id}`:'all')} libraryId={reviewLibrary} target={review.target} series={review.series} serverSeries={review.serverSeries} backRef={reviewBack} onClose={closeReview}/></div>}
+    {imageSheet&&selectedIds.size>0&&<ImageActionSheet assets={[...new Map([...(characterSelection?characterItems.current:[...visibleItems,...(sparse?.ranges.flatMap(range=>range.items)??[])])].map(asset=>[asset.id,asset])).values()].filter(asset=>selectedIds.has(asset.id))}
+      count={selectedIds.size} scopeName={page.view.title} busy={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} albumCount={albumTree?.adopted?albumTree.albums.length:0} inAlbum={!!page.view.album}
+      onAlbum={openAlbumBatch} onRemoveFromAlbum={()=>void selectionActions.run('remove')} onInfo={selectedAsset?()=>setAssetInfo(selectedAsset):undefined} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} onClose={()=>setImageSheet(false)}/>}
     {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
     {viewer && <Viewer totalCount={viewer.source==='library'?libraryTotal:undefined} onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}

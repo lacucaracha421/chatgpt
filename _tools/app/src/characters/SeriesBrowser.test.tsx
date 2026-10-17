@@ -1322,7 +1322,7 @@ it("hearts a series tile in place without reloading the series screen", async ()
   expect(changed).not.toHaveBeenCalled();
 });
 
-it("trashes from the series in place and puts the tile back on 실행 취소", async () => {
+it("trashes from the series in place and puts the tile back on 되돌리기", async () => {
   const trashAssets = vi.fn().mockResolvedValue(undefined), restoreAssets = vi.fn().mockResolvedValue(undefined);
   const { browse, changed } = await mount(undefined, false, [], undefined, false, { gateway: { trashAssets, restoreAssets } });
   await screen.findByRole("option", { name: "이미지 5.webp" });
@@ -1331,7 +1331,7 @@ it("trashes from the series in place and puts the tile back on 실행 취소", a
   await userEvent.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "휴지통으로" }));
   await waitFor(() => expect(screen.queryByRole("option", { name: "이미지 6.webp" })).toBeNull());
   expect(trashAssets).toHaveBeenCalledWith(["image-6"]);
-  await userEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+  await userEvent.click(screen.getByRole("button", { name: "되돌리기" }));
   await waitFor(() => expect(screen.getByRole("option", { name: "이미지 6.webp" })).toBeInTheDocument());
   expect(restoreAssets).toHaveBeenCalledWith(["image-6"]);
   expect([...document.querySelectorAll("[data-asset-id]")].map(node => node.getAttribute("data-asset-id")).slice(0, 3)).toEqual(["image-5", "image-6", "image-7"]);

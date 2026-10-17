@@ -1,11 +1,14 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useMotionSurface } from "./useMotionSurface";
-import { createContext, useContext, useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren, type WheelEventHandler } from "react";
+import { createContext, useContext, useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren, type ReactNode, type WheelEventHandler } from "react";
 import { useBackHandler, useBackNavigationContext, useBackRequest } from "../navigation/BackNavigation";
 
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
+  /** What the title row shows when it is more than the text (a sheet that names its target with a thumbnail); `title` stays the accessible name. */
+  heading?: ReactNode;
+  headingClassName?: string;
   variant?: "default" | "medium" | "wide" | "workspace" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onKeyUp?: KeyboardEventHandler<HTMLDivElement>;
@@ -20,7 +23,7 @@ const SWIPE_BACK_COOLDOWN_MS = 800;
 /** Where dialogs mount; null (the default) is the document body. A Home destination mounts its viewer inside its area. */
 export const DialogPortalContainer = createContext<HTMLElement | null>(null);
 
-export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, layer = false, onClose }: DialogProps) {
+export function Dialog({ children, open, title, heading, headingClassName, variant = "default", onKeyDown, onKeyUp, layer = false, onClose }: DialogProps) {
   const portalContainer = useContext(DialogPortalContainer);
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
@@ -102,7 +105,7 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
             }
           }}
         >
-          <RadixDialog.Title className="ui-dialog__title">{title}</RadixDialog.Title>
+          <RadixDialog.Title className={headingClassName ? `ui-dialog__title ${headingClassName}` : "ui-dialog__title"} aria-label={heading ? title : undefined}>{heading ?? title}</RadixDialog.Title>
           {children}
         </RadixDialog.Content>
       </RadixDialog.Portal>

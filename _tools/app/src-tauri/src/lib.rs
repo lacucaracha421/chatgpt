@@ -297,6 +297,8 @@ pub fn run() {
             exchange::exchange_set_token,
             exchange::exchange_thumbnail,
             commands::home::get_home_overview,
+            commands::folder_pins::folder_pins,
+            commands::folder_pins::change_folder_pins,
             commands::cards::card_state,
             commands::cards::card_open_pack,
             commands::cards::card_keep_pack,

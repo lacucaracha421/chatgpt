@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 import authority
 import classification_authority
 import classification_snapshot
+import folder_pins
 import media_tickets
 from asset_list_query import shuffle_rank
 from projection_cache import ProjectionCache, heads
@@ -103,7 +104,7 @@ def register(app, api):
 
     def projection(db):
         key = cache.key(db, api.list_generation(db), heads(db, (
-            'mobile_character_state', 'classification_snapshots', 'picker_display')))
+            'mobile_character_state', 'classification_snapshots', 'picker_display', 'folder_pins')))
         cached = cache.get(key)
         if cached is not None:
             return cached
@@ -113,7 +114,10 @@ def register(app, api):
         display = db.execute('SELECT payload FROM picker_display WHERE singleton=1').fetchone()
         settings = json.loads(display[0]) if display else {}
         order = {id: i for i, id in enumerate(settings.get('classificationOrderIds', []))}
-        pins = {id: i for i, id in enumerate(settings.get('pinnedClassificationIds', []))}
+        # Pins made on any device live in `folder_pins`; the PC's published list is the fallback
+        # until that list is first written.
+        shared = folder_pins.stored_pins(db)
+        pins = {id: i for i, id in enumerate(settings.get('pinnedClassificationIds', []) if shared is None else shared)}
         links, where, params = folder_links(db)
         direct = {id: set() for id in entries}
         for row in db.execute(f'SELECT link.classification_id,asset.id FROM {links} '

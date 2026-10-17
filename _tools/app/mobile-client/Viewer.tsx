@@ -92,7 +92,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   textGateway: ReturnType<typeof createImageTextGateway>;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
-  /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
+  /** The host's "휴지통으로 이동함 · 되돌리기" snackbar, rendered inside the modal viewer. */
   trashNotice?:React.ReactNode;
   /** The server total when the current page is only a slice of the gallery. */
   totalCount?: number | null;

@@ -1101,7 +1101,7 @@ describe("AssetBrowser", () => {
 
     fireEvent.click(await selectionAction("휴지통으로"));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole("button", { name: "실행 취소" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "되돌리기" })).toBeVisible();
     act(() => vi.advanceTimersByTime(5_000));
     fireEvent.doubleClick(screen.getByRole("option", { name: "asset-0.png" }));
     fireEvent.click(screen.getByRole("button", { name: "좋아요" }));
@@ -1111,7 +1111,7 @@ describe("AssetBrowser", () => {
     expect(gateway.setAssetsFavorite).not.toHaveBeenCalled();
     expect(screen.getByText("favorite failed")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
-    expect(screen.queryByRole("button", { name: "실행 취소" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
   });
 
   it("keeps multi-selection for context actions and targets an unselected tile on right click", async () => {
@@ -1196,7 +1196,7 @@ describe("AssetBrowser", () => {
 
     await user.click(await selectionAction("휴지통으로"));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
-    await user.click(await screen.findByRole("button", { name: "실행 취소" }));
+    await user.click(await screen.findByRole("button", { name: "되돌리기" }));
     expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
   });
 

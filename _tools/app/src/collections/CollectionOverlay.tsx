@@ -424,7 +424,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
           { id: "kakao", label: "Kakao 연결", onSelect: () => setKakaoOpen(true) },
           { id: "kakao-refresh", label: "국내 발매 정보 새로고침", disabled: !kakaoConnection || kakaoRefreshing, onSelect: () => void refreshKakao() },
           { id: "focus", label: "책등 초점 다시 찾기", onSelect: focus.retry },
-          { id: "delete", label: "컬렉션 삭제", destructive: true, onSelect: () => setDeleteOpen(true) },
+          { id: "delete", label: "휴지통으로", destructive: true, onSelect: () => setDeleteOpen(true) },
         ],
       }} /> : <div className="work-loading"><Skeleton label={volumeImport ? `표지 ${volumeImport.imported}/${volumeImport.total} 가져오는 중…` : "만화 작품 화면"} /><Button onClick={onExit}>닫기</Button></div>)}
       {!isManga && <>
@@ -526,12 +526,12 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
         />
       )}
       {deleteOpen && collection && (
-        <Dialog open title="컬렉션 삭제" onClose={() => setDeleteOpen(false)}>
+        <Dialog open title="휴지통으로" onClose={() => setDeleteOpen(false)}>
           <div className="collection-browser__delete">
-            <p>컬렉션 '{collection.name}'을 삭제합니다. 속한 자산은 라이브러리에 보존됩니다.</p>
+            <p>컬렉션 '{collection.name}'을 휴지통으로 옮깁니다. 속한 자산은 라이브러리에 보존됩니다.</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={() => setDeleteOpen(false)}>취소</Button>
-              <Button type="button" variant="danger" onClick={() => void removeCollection()}>삭제</Button>
+              <Button type="button" variant="danger" onClick={() => void removeCollection()}>휴지통으로</Button>
             </div>
           </div>
         </Dialog>

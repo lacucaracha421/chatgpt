@@ -8,6 +8,7 @@ import {Badge} from '../src/shared/ui/Badge';
 import {FolderMove} from '../src/assets/FolderWave';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
+import {useLongPress} from '../src/shared/useLongPress';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,type CSSProperties,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
@@ -32,27 +33,9 @@ export type GalleryVaultSource = {label(asset: Asset): string};
 function Tile({arrivals, asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {arrivals?: ArrivalTracker; asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const privacy=useTabletAssetMask(asset,requestedPrivacy);
-  const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
-
-  const clearTimer=()=>{if(timer.current!==null){window.clearTimeout(timer.current);timer.current=null;}};
-  const cancelPress=()=>{clearTimer();pressStart.current=null;suppressClick.current=true;};
-  useEffect(()=>()=>clearTimer(),[]);
-  const beginPress=(event:PointerEvent<HTMLButtonElement>)=>{
-    if(!onSelect||event.pointerType==='mouse'&&event.button!==0)return;
-    clearTimer();pressStart.current={x:event.clientX,y:event.clientY};suppressClick.current=false;
-    pressCancel.current=cancelPress;onPressStart?.(cancelPress);
-    timer.current=window.setTimeout(()=>{
-      if(!pressStart.current)return;
-      pressStart.current=null;timer.current=null;suppressClick.current=true;onSelect(asset.id);
-    },GALLERY_LONG_PRESS_MS);
-  };
-  const movePress=(event:PointerEvent<HTMLButtonElement>)=>{
-    const start=pressStart.current;if(!start)return;
-    if(Math.hypot(event.clientX-start.x,event.clientY-start.y)>GALLERY_LONG_PRESS_MOVE_PX){cancelPress();onPressEnd?.(pressCancel.current);}
-  };
-  const endPress=()=>{clearTimer();pressStart.current=null;onPressEnd?.(pressCancel.current);};
-  const cancelPointer=()=>{cancelPress();suppressClick.current=false;onPressEnd?.(pressCancel.current);};
+  // Long press enters selection mode; the shared hook swallows the click that follows the hold.
+  const press=useLongPress({enabled:!!onSelect,onLongPress:()=>onSelect?.(asset.id),onStart:onPressStart,onEnd:onPressEnd});
   useEffect(()=>{
     const element=host.current;if(paused||privacy||vault||!element||!window.IntersectionObserver)return;
     let visible:AbortController|undefined;
@@ -83,11 +66,10 @@ function Tile({arrivals, asset, index, width, height, onOpen, onReady, paused, p
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <div ref={shell} className="media-tile-shell" data-arrival={arrival} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&asset.thumbnail_available!==false?"true":undefined} data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
-    if(suppressClick.current){suppressClick.current=false;return;}
+  return <div ref={shell} className="media-tile-shell" data-arrival={arrival} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!preview&&asset.thumbnail_available!==false?"true":undefined} data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={press.click(() => {
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!requestedPrivacy) onOpen(index);
-  }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
+  })} {...press.bind} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
     <span className="tile-picture" style={{height}}>
       {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <StableImage ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
         const element = event.currentTarget;
@@ -111,8 +93,6 @@ const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callba
   observeElementRect(instance, rect => { if (rect.width > 0 && rect.height > 0) callback(rect); });
 /** Keep a bounded row cushion so a fast fling still paints neutral tiles while thumbs arrive. */
 export const GALLERY_ROW_OVERSCAN = 8;
-const GALLERY_LONG_PRESS_MS = 450;
-const GALLERY_LONG_PRESS_MOVE_PX = 10;
 const GALLERY_TILE_GAP = 10;
 const GALLERY_ROW_GAP = GALLERY_TILE_GAP;
 /** A typical tile is about three-quarters as wide as it is tall; the static placeholder pattern uses it for its column count. */

@@ -3,6 +3,7 @@ import {listen} from "@tauri-apps/api/event";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
+import {useFolderPins} from './useFolderPins';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
 import {useAlbumAuthoritySync} from './useAlbumAuthoritySync';
 import {
@@ -219,6 +220,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     persistPreferences({ ...current, classificationOrderIds: withFolderSiblingOrder(entries, current.classificationOrderIds, parentId, ids) });
   }
   useMobilePublications(gateway, libraryRoot, preferences.classificationOrderIds, preferences.pinnedClassificationIds, entries);
+  const changePinnedIds = useFolderPins(gateway, libraryRoot, preferences.pinnedClassificationIds, pinnedClassificationIds => updatePreferences({ pinnedClassificationIds }));
   const appZoomError = useAppZoom(preferences.appZoom);
   useEffect(() => {
     setPreferences((current) => applyInitialCountOrder(entries, current));
@@ -793,7 +795,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               expandedIds={preferences.expandedClassificationIds}
               pinnedIds={preferences.pinnedClassificationIds}
               orderIds={preferences.classificationOrderIds}
-              onPinnedIdsChange={(pinnedClassificationIds) => updatePreferences({ pinnedClassificationIds })}
+              onPinnedIdsChange={changePinnedIds}
               expandedAlbumIds={preferences.expandedAlbumIds}
               sidebarWidth={sidebarWidth}
               createClassificationRequest={createClassificationRequest}

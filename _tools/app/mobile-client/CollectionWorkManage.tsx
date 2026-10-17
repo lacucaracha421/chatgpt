@@ -23,7 +23,7 @@ export function WorkManageButton({onOpen}: {onOpen(): void}) {
 }
 
 /**
- * 작품 관리 for the open work: 컬렉션 편집, the provider rows its type supports, and 컬렉션 삭제.
+ * 작품 관리 for the open work: 컬렉션 편집, the provider rows its type supports, and 휴지통으로.
  * Mounted while the work is open; the provider binding is read only once 작품 관리 opens; `sheet` is owned by the
  * screen so Back closes the innermost layer. `entityRevision` is the revision the shown detail
  * was read at, which the delete expects; `refreshing` while a change confirmed since then has
@@ -56,13 +56,13 @@ export function WorkManage({item, confirmed = item, items = [], avRetry, authori
           run:()=>binding.failure?binding.retry():binding.externalId?act(()=>{binding.refresh();close();}):onSheet('search')},
         {id:'artwork',group:'action',label:artworkLabel(provider),icon:<PhotoIcon/>,disabled:!!binding.blocked||!binding.externalId,hint:binding.blockedText??(binding.blocked||binding.externalId?null:`${name}에 연결하면 이미지를 고를 수 있습니다.`),run:()=>onSheet('artwork')},
       ] as ScreenMenuEntry[]:[]),
-      {id:'delete',group:'action',label:'컬렉션 삭제',icon:<TrashIcon/>,danger:true,disabled:!!deleteBlocked,hint:deleteBlocked,run:()=>onSheet('delete')},
+      {id:'delete',group:'action',label:'휴지통으로',icon:<TrashIcon/>,danger:true,disabled:!!deleteBlocked,hint:deleteBlocked,run:()=>onSheet('delete')},
     ]}/>}
-    {sheet === 'delete' && <Dialog open title="컬렉션 삭제" onClose={close}>
+    {sheet === 'delete' && <Dialog open title="휴지통으로" onClose={close}>
       <div className="library-sheet collection-delete">
-        <DialogDescription>{item.name} 컬렉션을 삭제하시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.</DialogDescription>
+        <DialogDescription>{item.name} 컬렉션을 휴지통으로 옮기시겠습니까? 원본 에셋은 삭제하지 않습니다. 30일 동안 휴지통에서 되살릴 수 있어요.</DialogDescription>
         {failure && <p role="alert" className="collection-manage-failure">{failure}</p>}
-        <div className="ui-dialog__actions"><Button onClick={close}>취소</Button><Button variant="danger" disabled={!!deleteBlocked} onClick={remove}>삭제</Button></div>
+        <div className="ui-dialog__actions"><Button onClick={close}>취소</Button><Button variant="danger" disabled={!!deleteBlocked} onClick={remove}>휴지통으로</Button></div>
       </div>
     </Dialog>}
     {sheet === 'search' && provider && <ProviderSearchSheet item={item} provider={provider} authority={authority} initialKind={searchKind} onClose={close}/>}

@@ -268,11 +268,24 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .album-batch-entry>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .album-batch-progress,.album-batch-confirmation{margin:8px 0;color:var(--color-muted);font-size:var(--type-meta);font-variant-numeric:tabular-nums}
 .album-batch-confirmation{color:var(--color-success)}
-.mobile-app .asset-selection-bar{position:absolute;z-index:30;right:var(--mobile-gutter);bottom:var(--space-3);left:var(--mobile-gutter);display:flex;align-items:center;gap:var(--space-2);width:auto;max-width:720px;margin-inline:auto;min-height:var(--touch-target);padding:var(--space-1);background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-sm);box-shadow:var(--shadow-floating)}
-.mobile-app .asset-selection-bar>strong{flex:none;padding:0 var(--space-1);font-size:var(--type-body);font-weight:600;white-space:nowrap}
-.mobile-app .asset-selection-bar .view-toolbar__divider{width:1px;height:24px;background:var(--color-border);flex:none}
-.mobile-app .asset-selection-bar .ui-button--primary{flex:1;min-width:0}
-.mobile-app .asset-selection-bar .ui-button--primary>svg{width:20px;height:20px}
+/* Tablet selection bar: count | labelled actions ... trash · menu · clear. Every action is the same quiet
+   toolbar button (no face or border, muted icon + label, 44 target, 12px inset), so the gaps read evenly;
+   only the open 분류 keeps its face and the trash keeps the danger colour as its one cue. */
+.mobile-app .asset-selection-bar{position:absolute;z-index:30;right:var(--mobile-gutter);bottom:var(--space-3);left:var(--mobile-gutter);display:flex;align-items:center;gap:0;width:auto;max-width:720px;margin-inline:auto;min-height:var(--touch-target);padding:var(--space-1);background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-sm);box-shadow:var(--shadow-floating)}
+.mobile-app .asset-selection-bar>strong{flex:none;padding:0 var(--space-3);font-size:var(--type-body);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mobile-app .asset-selection-bar .view-toolbar__divider{width:1px;height:24px;margin-inline:var(--space-1);background:var(--color-border);flex:none}
+.mobile-app .asset-selection-bar__end{display:flex;align-items:center;margin-left:auto}
+:is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character,.mobile-app .asset-selection-bar__end)>.ui-button{gap:var(--space-1);padding:0 var(--space-3);border-color:transparent;box-shadow:none;color:var(--color-muted);font-size:var(--type-body);font-weight:400}
+:is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character,.mobile-app .asset-selection-bar__end)>.ui-button--icon{width:var(--touch-target);padding:0}
+:is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character,.mobile-app .asset-selection-bar__end)>.ui-button>svg{width:20px;height:20px}
+:is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character,.mobile-app .asset-selection-bar__end)>.ui-button:active:not(:disabled),
+.mobile-app .asset-selection-bar__character>.ui-button--secondary{color:var(--color-text)}
+.mobile-app .asset-selection-bar__end>.ui-button--danger{color:var(--color-danger)}
+/* Narrow portrait: the labels fold away and every action becomes a 44 icon button. */
+@media (max-width:719px){
+  .mobile-app .asset-selection-bar__label{display:none}
+  :is(.mobile-app .asset-selection-bar,.mobile-app .asset-selection-bar__character)>.ui-button:has(>.asset-selection-bar__label){width:var(--touch-target);padding:0}
+}
 /* Single-Asset Classification assignment.
    The picker composes with the existing Classification tree idiom rather than introducing a
    parallel one: it carries `.classification-index` (which also selects the portrait

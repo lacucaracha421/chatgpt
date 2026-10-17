@@ -147,7 +147,7 @@ export function performersOf(item:CollectionSummary) {
  * 배우별: one shelf row per performer of the loaded works; a tap on the name opens the
  * performer page, the cases behave as on the works shelf (tap picks, a second tap opens).
  */
-export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,onTap,onPerformer}:{items:CollectionSummary[];revision:string;active:boolean;privacy:boolean;perRow:number;picked:string|null;onTap(id:string):void;onPerformer(id:string):void}) {
+export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,onTap,onPerformer,onActions}:{items:CollectionSummary[];revision:string;active:boolean;privacy:boolean;perRow:number;picked:string|null;onTap(id:string):void;onPerformer(id:string):void;/** Long press on a case opens the work's action sheet. */onActions?(work:CollectionSummary):void}) {
   const rows=useMemo(()=>{
     const people=new Map<string,{person:AvPerson;works:CollectionSummary[]}>();
     for(const item of items)for(const person of performersOf(item)){
@@ -164,7 +164,7 @@ export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,
       <span className="muted numeric">{works.length.toLocaleString()}편</span><ChevronRightIcon aria-hidden="true"/>
     </button>
     <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase windowRows pickedId={picked} label={`${performerName(person).primary} 작품 선반`} onPick={onTap}
-      render={work=><ShelfTile item={work} revision={revision} active={active} privacy={privacy} picked={picked===work.id} onTap={onTap}/>}/>
+      render={work=><ShelfTile item={work} revision={revision} active={active} privacy={privacy} picked={picked===work.id} onTap={onTap} onActions={onActions&&(()=>onActions(work))}/>}/>
   </section>)}</div>;
 }
 

@@ -8,9 +8,9 @@ import type {AlbumTree,NativeAlbum} from './albumModel';
 import {errorText} from './transport';
 import './albumManagement.css';
 
-export function AlbumManagement({tree,album,parentId=null,onClose,onDeleted}:{tree:AlbumTree;album?:NativeAlbum;parentId?:string|null;onClose():void;onDeleted?():void}) {
-  const [mode,setMode]=useState<'menu'|'create'|'rename'|'look'|'delete'>(album?'menu':'create');
-  const [name,setName]=useState(album?.name??'새 앨범');
+export function AlbumManagement({tree,album,parentId=null,initialMode,onClose,onDeleted}:{tree:AlbumTree;album?:NativeAlbum;parentId?:string|null;/** A long-press sheet that already chose the action opens straight on its form. */initialMode?:'create'|'rename'|'look'|'delete';onClose():void;onDeleted?():void}) {
+  const [mode,setMode]=useState<'menu'|'create'|'rename'|'look'|'delete'>(initialMode??(album?'menu':'create'));
+  const [name,setName]=useState(initialMode==='create'?'새 앨범':album?.name??'새 앨범');
   const [iconKey,setIcon]=useState(album?.iconKey??null),[colorKey,setColor]=useState(album?.colorKey??null);
   const [snapshot,setSnapshot]=useState<AlbumSnapshot|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const lock=useRef(false);
@@ -18,10 +18,11 @@ export function AlbumManagement({tree,album,parentId=null,onClose,onDeleted}:{tr
   useEffect(()=>{let live=true;const controller=new AbortController();void readAlbumSnapshot(tree,controller.signal).then(value=>{if(live)setSnapshot(value);},reason=>{if(live)setError(errorText(reason));});return()=>{live=false;controller.abort();};},[tree.libraryId,tree.epoch]);
   const current=snapshot?.albums.find(item=>item.id===album?.id);
   const hasChildren=snapshot?.albums.some(item=>item.parentId===album?.id)??false;
+  const deleteBlocked=!!album&&(snapshot?.likesAlbumId===album.id||hasChildren);
   const close=()=>{if(!lock.current)onClose();};
   const save=async()=>{
     if(lock.current||!snapshot||(album&&!current)||!name.trim())return;
-    if(mode==='delete'&&(snapshot.likesAlbumId===album?.id||hasChildren))return;
+    if(mode==='delete'&&deleteBlocked)return;
     lock.current=true;setBusy(true);setError('');
     try {
       const id=mode==='create'?crypto.randomUUID():album!.id;
@@ -61,7 +62,8 @@ export function AlbumManagement({tree,album,parentId=null,onClose,onDeleted}:{tr
         <Button disabled={busy} onClick={()=>{setIcon(null);setColor(null);}}>기본값으로 초기화</Button>
       </>}
       {mode==='delete'&&<DialogDescription>{album?.name} 앨범을 삭제할까요?<br/>앨범 연결만 제거되며 원본 파일과 일반 폴더는 유지됩니다.</DialogDescription>}
-      <div className="ui-dialog__actions"><Button disabled={busy} onClick={close}>취소</Button><Button variant={mode==='delete'?'danger':'primary'} disabled={busy||!snapshot||!!(album&&!current)||!name.trim()} onClick={()=>void save()}><BusyLabel delay={400} busy={busy} idle={mode==='delete'?'삭제':mode==='create'?'만들기':'저장'}>저장 중</BusyLabel></Button></div>
+      {mode==='delete'&&snapshot&&deleteBlocked&&<p className="hint">{snapshot.likesAlbumId===album?.id?'마음에 들어요 앨범은 삭제할 수 없습니다.':'하위 앨범이 있는 앨범은 삭제할 수 없습니다.'}</p>}
+      <div className="ui-dialog__actions"><Button disabled={busy} onClick={close}>취소</Button><Button variant={mode==='delete'?'danger':'primary'} disabled={busy||!snapshot||!!(album&&!current)||!name.trim()||(mode==='delete'&&deleteBlocked)} onClick={()=>void save()}><BusyLabel delay={400} busy={busy} idle={mode==='delete'?'삭제':mode==='create'?'만들기':'저장'}>저장 중</BusyLabel></Button></div>
     </>}
   </>;
   return mode==='delete'?<Dialog open title={title} onClose={close}>{contents}</Dialog>:<BottomSheet title={title} onClose={close}><div className="album-management">{contents}</div></BottomSheet>;

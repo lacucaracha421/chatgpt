@@ -13,6 +13,7 @@ import type { ArtistHubSection, AssetView } from "../library/types";
 import type { ClassificationEntry } from "../library/types";
 import { displayDate } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
+import { artistActionDefs, bindMenuItems } from "../shared/contextActions";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -362,12 +363,10 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
 /** Actions shared by artist tiles (right-click and ⋯): 고정, 이름 바꾸기, 다른 작가와 합치기, 숨기기. */
 function artistMenuItems(artist: ArtistSummary, onNavigate: Navigate, gateway: ReturnType<typeof useArtistGateway>) {
   const flag = (flags: { pinned?: boolean; hidden?: boolean }) => { if (gateway) void gateway.setFlags(artist.id, flags).then(invalidateArtists, () => undefined); };
-  return [
-    { id: "pin", label: artist.pinned ? "고정 해제" : "고정", onSelect: () => flag({ pinned: !artist.pinned }) },
-    { id: "rename", label: "이름 바꾸기", onSelect: () => onNavigate({ kind: "creator", creatorKey: artist.id, edit: true }) },
-    { id: "merge", label: "다른 작가와 합치기", onSelect: () => onNavigate({ kind: "creator", creatorKey: artist.id, edit: true }) },
-    { id: "hide", label: artist.hidden ? "다시 보이기" : "숨기기", onSelect: () => flag({ hidden: !artist.hidden }) },
-  ];
+  const openEditor = () => onNavigate({ kind: "creator", creatorKey: artist.id, edit: true });
+  return bindMenuItems(artistActionDefs({ pinned: artist.pinned, hidden: artist.hidden }), {
+    pin: () => flag({ pinned: !artist.pinned }), rename: openEditor, merge: openEditor, hide: () => flag({ hidden: !artist.hidden }),
+  });
 }
 
 function ArtistMenu({ artist, onNavigate, children }: { artist: ArtistSummary; onNavigate: Navigate; children: React.ReactElement }) {

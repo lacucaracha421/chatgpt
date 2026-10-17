@@ -390,6 +390,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   pushCloudMetadataBackup: () =>
     invoke<CloudMetadataBackupResult>("push_cloud_metadata_backup"),
   runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
+  folderPins: () => invoke("folder_pins"),
+  changeFolderPins: commands => invoke("change_folder_pins", { commands }),
   verifyCollectionAuthorityBaseline: (onProgress) => {
     const channel = new Channel<import("./publicationJobs").PublishProgress>();
     channel.onmessage = value => onProgress?.(value);

@@ -276,6 +276,10 @@ public final class NetworkPolicyTest {
  for(String path:new String[]{"/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/intents?after=0","/v1/home/upcoming/","/v1/home/upcomingx","/v1/home","/v1/home/covers/"+"a".repeat(64)})reject(()->NetworkPolicy.api(path,"GET"));
  reject(()->NetworkPolicy.api("/v1/home/upcoming","PUT"));
  // Artist reads and the one client intent write; publisher log reads stay refused.
+ pass(()->NetworkPolicy.api("/v1/library/folder-pins","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/folder-pins","POST"));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/folder-pins",method));
+ for(String path:new String[]{"/v1/library/folder-pins/","/v1/library/folder-pins/x"})reject(()->NetworkPolicy.api(path,"POST"));
  pass(()->NetworkPolicy.api("/v1/library/artists/intents","POST"));
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/artists/intents",method));
  for(String path:new String[]{"/v1/library/artists/intents?after=0&limit=100","/v1/library/artists/%69ntents","/v1/library/artists/int%65nts"})reject(()->NetworkPolicy.api(path,"GET"));

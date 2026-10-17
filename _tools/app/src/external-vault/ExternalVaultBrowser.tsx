@@ -692,7 +692,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         <Button variant="danger" disabled={busy} onClick={() => void confirmDeletion(confirm)}><BusyLabel busy={!!(busy)} idle={"영구 삭제"}>삭제 중…</BusyLabel></Button>
       </div>
     </Dialog>}
-    {message && <Toast actionLabel={message.undoIds ? "실행 취소" : undefined} onAction={message.undoIds ? () => void undoTrash(message.undoIds!) : undefined}
+    {message && <Toast actionLabel={message.undoIds ? "되돌리기" : undefined} onAction={message.undoIds ? () => void undoTrash(message.undoIds!) : undefined}
       actionDisabled={busy} onDismiss={() => setMessage(null)}>{message.text}</Toast>}
     {importJob?.report && !importJob.running && <ImportReportDialog report={importJob.report} onClose={dismissVaultImport} />}
   </section>;

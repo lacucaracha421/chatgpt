@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { CollectionCoverFocus, CollectionVolume } from "../library/types";
+import { useLongPress } from "../shared/useLongPress";
 import { MangaBookcase, type MangaWorkData } from "./work/MangaBookcase";
 import "./work/collectionWork.css";
 import "./mangaShelf.css";
@@ -42,7 +43,7 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 /** Rows this far beyond the list's visible edge already load, so scrolling meets ready shelves. */
 const NEAR_MARGIN = "600px 0px";
 
-export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, touchTargets = false }: {
+export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false }: {
   id: string; title: string;
   /** Owned volumes in the shown edition; `null` when none is recorded. */owned: number | null;
   /** `null` until the row's volumes are loaded: the empty plank holds the row's place. */manga: MangaWorkData | null;
@@ -52,8 +53,10 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
   onPick(volumeId: string): void;
   /** Opens the work, at `volumeId` when one is given. */onOpen(volumeId: string | null): void;
   /** Double-click on a spine (PC); the tablet opens with a second tap instead. */onEnlarge?(volumeId: string): void;
+  /** Tablet: a long press anywhere on the row asks for the work's action sheet. */onLongPress?(): void;
 }) {
   const row = useRef<HTMLElement>(null);
+  const press = useLongPress({ enabled: Boolean(onLongPress), onLongPress: () => onLongPress?.() });
   const near = useRef(onNear); near.current = onNear;
   useEffect(() => {
     const element = row.current; if (!element) return;
@@ -71,7 +74,8 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     if (event.key !== "Enter" || !spine || spine.getAttribute("aria-pressed") !== "true") return;
     event.preventDefault(); onOpen(spine.dataset.volumeId ?? null);
   };
-  return <section ref={row} className="manga-shelf-row" aria-label={title}>
+  return <section ref={row} className="manga-shelf-row" aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
+    onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}>
     <div className="manga-shelf-row__label">
       <button type="button" className="manga-shelf-row__title" data-collection-id={id} onClick={() => onOpen(null)}>{title}</button>
       {owned !== null && <span className="manga-shelf-row__count numeric" aria-label={`보유 ${owned.toLocaleString()}권`}>{owned.toLocaleString()}권</span>}

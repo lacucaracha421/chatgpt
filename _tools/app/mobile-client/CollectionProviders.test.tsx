@@ -64,17 +64,17 @@ it('disables the provider rows with the server reason when the provider is not c
 });
 
 it.each([
-  ['movie', ['컬렉션 편집', 'TMDB 새로고침', '포스터·배경 변경', '컬렉션 삭제']],
-  ['game', ['컬렉션 편집', 'IGDB 새로고침', '표지·hero 변경', '컬렉션 삭제']],
-  ['manga', ['컬렉션 편집', '컬렉션 삭제']],
-  ['av', ['컬렉션 편집', 'AV 정보 편집', '컬렉션 삭제']],
+  ['movie', ['컬렉션 편집', 'TMDB 새로고침', '포스터·배경 변경', '휴지통으로']],
+  ['game', ['컬렉션 편집', 'IGDB 새로고침', '표지·hero 변경', '휴지통으로']],
+  ['manga', ['컬렉션 편집', '휴지통으로']],
+  ['av', ['컬렉션 편집', 'AV 정보 편집', '휴지통으로']],
 ] as const)('keeps the %s work management rows in screen-menu order', async (type, rows) => {
   render(<Harness work={{...item, id: type === 'game' ? 'game-1' : item.id, type}}/>);
   const sheet = await menu();
   if (type === 'movie' || type === 'game') await waitFor(() => expect(within(sheet).getAllByRole('button')[1]).toBeEnabled());
   expect(within(sheet).getByRole('navigation',{name:item.name})).toBeTruthy();
   expect(within(sheet).getByRole('navigation').querySelectorAll('.more-panel__label')).toHaveLength(rows.length);expect([...within(sheet).getByRole('navigation').querySelectorAll('.more-panel__label')].map(label=>label.firstChild?.textContent)).toEqual(rows);
-  expect(within(sheet).getByRole('button', {name: /^컬렉션 삭제/})).toHaveClass('is-danger');
+  expect(within(sheet).getByRole('button', {name: /^휴지통으로/})).toHaveClass('is-danger');
 });
 
 const baselinePages = () => mocks.api.mock.calls.filter(([path]) => String(path).includes('snapshot=')).length;
@@ -118,7 +118,7 @@ it('offers connect while unbound and keeps artwork waiting for a binding', async
 it('opens the merged edit form from 컬렉션 편집 and blocks delete without the shown revision', async () => {
   const onForm = vi.fn(); render(<Harness entityRevision={null} onForm={onForm}/>);
   const sheet = await menu();
-  const remove = within(sheet).getByRole('button', {name: /^컬렉션 삭제/});
+  const remove = within(sheet).getByRole('button', {name: /^휴지통으로/});
   expect(remove).toBeDisabled(); expect(rowText(remove)).toContain('서버를 업데이트하면 삭제할 수 있습니다');
   fireEvent.click(within(sheet).getByRole('button', {name: /^컬렉션 편집/}));
   expect(onForm).toHaveBeenCalledWith({mode: 'edit', type: 'movie', item});

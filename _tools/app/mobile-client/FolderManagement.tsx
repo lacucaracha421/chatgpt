@@ -19,9 +19,9 @@ export const isOriginalsRoot=(folder:Pick<Classification,'id'|'name'|'parent_id'
  * operation id until the name or target changes, so retrying after a lost reply applies the
  * command once rather than twice.
  */
-export function FolderManagement({authority,folders,folder,onClose,onChanged}:{authority:FolderAuthority;folders:readonly Classification[];folder:Classification;onClose():void;onChanged(change:FolderChange):void}) {
-  const [mode,setMode]=useState<'menu'|'create'|'rename'>('menu');
-  const [name,setName]=useState('');
+export function FolderManagement({authority,folders,folder,initialMode='menu',onClose,onChanged}:{authority:FolderAuthority;folders:readonly Classification[];folder:Classification;/** A long-press sheet that already chose the action opens straight on its form. */initialMode?:'menu'|'create'|'rename';onClose():void;onChanged(change:FolderChange):void}) {
+  const [mode,setMode]=useState<'menu'|'create'|'rename'>(initialMode);
+  const [name,setName]=useState(initialMode==='rename'?folder.name:initialMode==='create'?'새 폴더':'');
   const [snapshot,setSnapshot]=useState<AuthorityFolder[]|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const lock=useRef(false),attempt=useRef<{key:string;operationId:string;folderId:string}|null>(null);
   const read=()=>{setError('');setSnapshot(null);return readFolderSnapshot(authority).then(setSnapshot,reason=>setError(folderErrorText(reason)));};

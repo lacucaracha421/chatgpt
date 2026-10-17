@@ -1,4 +1,4 @@
-import {act, cleanup, render, screen} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {resetSpineWarmForTests} from '../src/collections/spineShelfWarm';
 import {ArtworkMemoryContext, artworkSource, type ArtworkMemory} from './collectionArtwork';
@@ -52,4 +52,23 @@ it('shows an order whose spines are all remembered without waiting', async () =>
   rerender(shelf([game('g2'), game('g1')]));
   expect(titles()).toEqual(['게임 g2', '게임 g1']);
   expect(requested).toEqual([]);
+});
+
+it('asks for a work\'s action sheet on a long press of its spine instead of picking it', async () => {
+  const onPick = vi.fn(), onActions = vi.fn();
+  render(<ArtworkMemoryContext.Provider value={memory}><div className="collection-scroll">
+    <TabletSpineShelf items={[game('g1'), game('g2')]} grouping="sort" size="normal" label="게임 작품 목록" revision="r1" active privacy={false} picked={null} onPick={onPick} onOpen={() => undefined} onActions={onActions}/>
+  </div></ArtworkMemoryContext.Provider>);
+  await act(async () => { releases.splice(0).forEach(release => release()); });
+  const spine = screen.getByRole('button', {name: /게임 g2/});
+  vi.useFakeTimers();
+  fireEvent.pointerDown(spine, {button: 0, clientX: 30, clientY: 30});
+  act(() => { vi.advanceTimersByTime(450); });
+  fireEvent.pointerUp(spine, {button: 0});
+  vi.useRealTimers();
+  expect(onActions).toHaveBeenCalledWith('g2');
+  fireEvent.click(spine);
+  expect(onPick).not.toHaveBeenCalled();
+  fireEvent.click(spine);
+  expect(onPick).toHaveBeenCalledWith('g2');
 });

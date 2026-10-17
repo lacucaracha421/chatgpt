@@ -126,7 +126,7 @@ describe('tablet selection actions',()=>{
     mocks.native.mockImplementation(async(op:string,body:{assetId:string;command:string})=>op==='assetLifecycleState'?{available:true,items:[]}:{available:true,items:[{assetId:body.assetId,command:body.command,state:'pending'}]});
     function Host(){const trash=useLibraryTrash(true,'endpoint',vi.fn());return <><button onClick={()=>void (async()=>{await trash.trashSelected({id:'a',kind:'image'});await trash.trashSelected({id:'b',kind:'image'});trash.offerBatchUndo(['a','b']);})()}>trash both</button><span>{[...trash.hidden].join(',')||'visible'}</span>{trash.snackbar}</>;}
     render(<Host/>);fireEvent.click(screen.getByText('trash both'));await screen.findByText('a,b');
-    fireEvent.click(await screen.findByRole('button',{name:'실행 취소'}));await screen.findByText('visible');
+    fireEvent.click(await screen.findByRole('button',{name:'되돌리기'}));await screen.findByText('visible');
     expect(mocks.native.mock.calls.filter(([op,body])=>op==='assetLifecycleSet'&&body.command==='restore').map(([,body])=>body.assetId)).toEqual(['a','b']);
   });
   it('delays progress text and keeps it briefly after a long batch finishes',async()=>{

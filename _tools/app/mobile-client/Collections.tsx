@@ -21,6 +21,8 @@ import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
 import {TabletSpineShelf} from './CollectionSpineShelf';
+import {CollectionActionSheet} from './CollectionActions';
+import {useLongPress} from '../src/shared/useLongPress';
 import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen, avPerformerView} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
@@ -250,12 +252,13 @@ const ReleaseLine=({caption}:{caption:ReleaseCaption})=><span className={`collec
  * never wraps: when it is too narrow the year drops out first (it wraps onto a hidden second
  * row), then the marker ends in an ellipsis. The DOM order is reversed for that (row-reverse).
  */
-function WorkCard({work,revision,active,meta=true,caption,onOpen,arriving=false,onArrived}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;caption?:ReleaseCaption|null;onOpen(id:string):void;
+function WorkCard({work,revision,active,meta=true,caption,onOpen,onActions,arriving=false,onArrived}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;caption?:ReleaseCaption|null;onOpen(id:string):void;/** Long press opens the work's action sheet. */onActions?(work:CollectionSummary):void;
   /** Appended by scrolling and not shown yet: the whole card rises in once its cover is decoded. */arriving?:boolean;onArrived?(id:string):void}) {
   const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,()=>onArrived?.(work.id));
+  const press=useLongPress({enabled:!!onActions,onLongPress:()=>onActions?.(work)});
   const credit=collectionCardCredit(work),date=meta?collectionCardDate(work):null,score=meta?work.myScore??null:null;
   const tail=(score!=null||caption)&&<span className="collection-card-meta__tail">{score!=null&&<Stars score={score}/>}{score!=null&&caption&&<span className="collection-card-meta__sep" aria-hidden="true">·</span>}{caption&&<ReleaseLine caption={caption}/>}</span>;
-  return <button ref={host} className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active} arrival={arrival}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
+  return <button ref={host} className="collection-tile" {...press.bind} onClick={press.click(()=>onOpen(work.id))}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active} arrival={arrival}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
 }
 
 /** `slot` is the slot (type) of the committed list on screen. */
@@ -471,7 +474,14 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [avInboxOpen,setAvInboxOpen]=useState(false);
   // 작품 관리 (the detail's ⋯) and the 휴지통 shortcut.
   const [manage,setManage]=useState<ManageSheet>(null);
+  // The long-press sheet of a work on a shelf; 휴지통으로 opens the work first, because the delete needs its shown revision.
+  const [workSheet,setWorkSheet]=useState<{work:CollectionSummary;revision:string}|null>(null),[pendingTrash,setPendingTrash]=useState<string|null>(null);
   const [avRetry,setAvRetry]=useState<import('./collectionCommandOutbox').CommandIntent|undefined>();
+  useEffect(()=>{
+    if(!pendingTrash)return;
+    if(selected!==pendingTrash){setPendingTrash(null);return;}
+    if(detail?.item.id===pendingTrash&&edits.authority.identity){setManage('delete');setPendingTrash(null);}
+  },[pendingTrash,selected,detail,edits.authority.identity]);
   const [createSearch,setCreateSearch]=useState<{workId:string;operationId:string;kind:'movie'|'tv'}|null>(null);
   const [searchKind,setSearchKind]=useState<'movie'|'tv'>('movie');
   const providerStatus=useProviderStatus(active&&!paused,refresh);
@@ -577,6 +587,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{beginScreenTiming('collection.work','open');if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
   const stepWork=(offset:-1|1)=>{const index=order.indexOf(selected??''),next=order[index+offset];if(index<0||!next)return;stepping.current=true;setSelected(next);};
   /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
+  const workActions=(work:CollectionSummary,revision:string)=>setWorkSheet({work,revision});
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
   const openPerformer=(id:string)=>{setSheet(null);setPerformer(current=>({id,from:selected??current?.from??null}));setSelected(null);};
   const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
@@ -674,12 +685,12 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     const own=viewOf(kind),order=items.map(work=>work.id);
     const settings=inShowcase&&own.layout==='bookcase'&&(kind==='game'||kind==='av')?{...own,layout:'shelf' as const}:own;
     if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
-      render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
+      render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)} onActions={()=>workActions(work,workRevision)}/>}/>;
     if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
-      picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)}/>;
+      picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)} onActions={id=>{const work=items.find(entry=>entry.id===id);if(work)workActions(work,workRevision);}}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
-      owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
-    return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':columns(settings.perRow)} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
+      owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)} onActions={work=>workActions(work,workRevision)}/>;
+    return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':columns(settings.perRow)} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} onActions={published=>workActions(published,workRevision)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
   };
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
@@ -724,6 +735,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {item&&edits.authority.identity&&<WorkManage key={item.id} item={item} confirmed={detail!.item} items={[...main.items,...showcaseItems]} avRetry={avRetry} authority={edits.authority} status={providerStatus} active={active&&!paused} entityRevision={detail?.item.id===item.id?detail.entityRevision:null}
       refreshing={edits.authority.acknowledgements.some(row=>row.command.workId===item.id&&(row.acceptedAt??0)>(detail?.readAt??0))} searchKind={searchKind} sheet={manage} onSheet={sheet=>{setAvRetry(undefined);setSearchKind('movie');setManage(sheet);}} onForm={setWorkForm} onDeleted={onDeleted}/>}
+    {workSheet&&<CollectionActionSheet work={workSheet.work} revision={workSheet.revision} privacy={privacyMode} showcase={edits.visible(workSheet.work.id,'showcase',workSheet.work.showcase).value} canEdit={!!edits.authority.identity} canShowcase={edits.supported}
+      onClose={()=>setWorkSheet(null)}
+      onEdit={()=>setWorkForm({mode:'edit',type:workSheet.work.type,item:{...edits.authority.work(workSheet.work),volumes:workSheet.work.volumes??[],artworks:[]}})}
+      onShowcase={()=>{const current=edits.visible(workSheet.work.id,'showcase',workSheet.work.showcase).value;try{edits.edit(workSheet.work.id,'showcase',!current,current);}catch{/* Not connected: the sheet offers it only while the tablet can edit. */}}}
+      onTrash={()=>{openWork(workSheet.work.id);setPendingTrash(workSheet.work.id);}}/>}
     {workForm&&edits.authority.identity&&<CollectionWorkForm key={`${workForm.mode}:${workForm.item?.id??'new'}:${workForm.retry?.command.operationId??''}`} form={workForm} authority={edits.authority} onClose={()=>setWorkForm(null)} onCreated={(id,kind,operationId,mediaType)=>{chooseTab(kind);closeSearch();openWork(id);setCreateSearch(!workForm.retry&&mediaType?{workId:id,operationId,kind:mediaType}:null);}}/>}
     {directWork ? workView : <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
@@ -737,7 +753,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
         <AvViewTabs view={avView} onView={chooseAvView}/>
-        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={columns(view.perRow,16)} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
+        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={columns(view.perRow,16)} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer} onActions={work=>workActions(work,revision)}/>}
       </>}
       <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}

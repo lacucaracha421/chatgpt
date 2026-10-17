@@ -3,6 +3,8 @@ import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
+import {ArtistActionSheet} from './ArtistActions';
+import {useLongPress} from '../src/shared/useLongPress';
 import {ArtistImage,EmptyArtists} from './Artists';
 import {ARTIST_LIST_ENTRANCE,PreparedCovers,usePreparedCovers} from './artistCovers';
 import {EmptyState,SegmentedControl,Skeleton} from './ui';
@@ -23,10 +25,11 @@ function readSort(): ArtistSort {
   return 'recent';
 }
 
-function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist;privateMode:boolean;paused:boolean;onOpen():void}) {
+function ArtistGridCard({artist,privateMode,paused,onOpen,onActions}:{artist:LibraryArtist;privateMode:boolean;paused:boolean;onOpen():void;onActions():void}) {
+  const press = useLongPress({onLongPress: onActions});
   const assets = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings).slice(0,3);
   const name = artistName(artist);
-  return <button type="button" className="artist-grid-card" onClick={onOpen} aria-label={`${name}, ${artist.assetCount.toLocaleString('ko-KR')}장${artist.pinned ? ', 고정됨' : ''}`}>
+  return <button type="button" className="artist-grid-card" {...press.bind} onClick={press.click(onOpen)} aria-label={`${name}, ${artist.assetCount.toLocaleString('ko-KR')}장${artist.pinned ? ', 고정됨' : ''}`}>
     <span className="artist-grid-mosaic">
       <ArtistImage asset={assets[0]} privateMode={privateMode} paused={paused}/>
       <ArtistImage asset={assets[1]} privateMode={privateMode} paused={paused}/>
@@ -37,7 +40,8 @@ function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist
   </button>;
 }
 
-export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{artists:LibraryArtist[];state:'idle'|'loading'|'ready'|'empty';paused:boolean;onOpenArtist(artist:LibraryArtist):void;onVisibleNames?(names:string[]):void}) {
+export function ArtistGrid({artists,state,paused,endpoint,onOpenArtist,onVisibleNames}:{artists:LibraryArtist[];state:'idle'|'loading'|'ready'|'empty';paused:boolean;endpoint:string;onOpenArtist(artist:LibraryArtist):void;onVisibleNames?(names:string[]):void}) {
+  const [sheetArtist,setSheetArtist] = useState<LibraryArtist|null>(null);
   const [privateMode] = usePrivacyMode();
   const entry=useArtistEntry(paused,onOpenArtist);
   const [sort,setSort] = useState<ArtistSort>(readSort);
@@ -61,7 +65,8 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
     <div className="artist-grid-toolbar">
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
-    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty">{showLoading && <Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과 없음"/>}
+    {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty">{showLoading && <Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)} onActions={() => setSheetArtist(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과 없음"/>}
+    {sheetArtist && <ArtistActionSheet artist={sheetArtist} endpoint={endpoint} onClose={() => setSheetArtist(null)}/>}
     {sortOpen && <BottomSheet title="정렬" onClose={() => setSortOpen(false)}><SegmentedControl fullWidth label="작가 정렬" options={SORT_OPTIONS} value={sort} onChange={chooseSort}/></BottomSheet>}
   </div>{entry.error&&<div className="inline-error" role="alert">{entry.error}</div>}</>;
 }

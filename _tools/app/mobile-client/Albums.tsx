@@ -1,5 +1,7 @@
 import {Button,EmptyState} from './ui';
 import {AlbumManagement} from './AlbumManagement';
+import {AlbumActionSheet,type AlbumManageMode} from './AlbumActions';
+import {useLongPress} from '../src/shared/useLongPress';
 import {ALBUM_TREE_CHANGED,readAlbumSnapshot} from './albumCommands';
 import {ClassificationIcon,classificationColor} from '../src/classification/classificationAppearance';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
@@ -66,7 +68,8 @@ function useAlbumCovers(tree:AlbumTree,items:NativeAlbum[],paused:boolean,revisi
   },[key,visibleKey,paused]);
   return {covers,onVisible};
 }
-function AlbumResult({album,path,items,paused,onVisible,onSelect}:{album:NativeAlbum;path:string;items:Asset[];paused:boolean;onVisible(id:string,visible:boolean):void;onSelect():void}) {
+function AlbumResult({album,path,items,paused,onVisible,onSelect,onActions}:{album:NativeAlbum;path:string;items:Asset[];paused:boolean;onVisible(id:string,visible:boolean):void;onSelect():void;onActions():void}) {
+  const press=useLongPress({onLongPress:onActions});
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(false);
   useEffect(()=>{
     if(!host.current)return;
@@ -74,10 +77,12 @@ function AlbumResult({album,path,items,paused,onVisible,onSelect}:{album:NativeA
     const observer=new IntersectionObserver(records=>{const next=records.some(r=>r.isIntersecting);setVisible(next);onVisible(album.id,next);},{rootMargin:'120px'});
     observer.observe(host.current);return()=>observer.disconnect();
   },[album.id,onVisible]);
-  return <button ref={host} className="library-result" aria-label={`${album.name}, ${path}`} onClick={onSelect}><span className="album-result-cover"><CoverGroup items={items.slice(0,1)} paused={paused||!visible}/></span><span className="result-name"><strong>{album.name}</strong><small>{path}</small></span>{album.assetCount!==undefined&&<span className="numeric muted">{album.assetCount}</span>}<ChevronRightIcon/></button>;
+  return <button ref={host} className="library-result" aria-label={`${album.name}, ${path}`} {...press.bind} onClick={press.click(onSelect)}><span className="album-result-cover"><CoverGroup items={items.slice(0,1)} paused={paused||!visible}/></span><span className="result-name"><strong>{album.name}</strong><small>{path}</small></span>{album.assetCount!==undefined&&<span className="numeric muted">{album.assetCount}</span>}<ChevronRightIcon/></button>;
 }
 export function Albums({tree,paused,revision,onSelect,query='',parentId}:{tree:AlbumTree;paused:boolean;revision:number;onSelect(view:View):void;query?:string;parentId?:string}) {
   const [manage,setManage]=useState<NativeAlbum|'create'|null>(null);
+  // The long-press sheet, and the form it chose in 앨범 관리.
+  const [sheet,setSheet]=useState<NativeAlbum|null>(null),[chosen,setChosen]=useState<{album:NativeAlbum;mode:AlbumManageMode}|null>(null);
   const stripWheel=useHorizontalWheel();
   const known=new Set(tree.albums.map(album=>album.id)),search=query.trim(),matches=createKoreanMatcher(search);
   const items=tree.albums.filter(album=>search?matches(album.name):parentId?album.parentId===parentId&&album.id!==parentId:!album.parentId||!known.has(album.parentId));
@@ -86,7 +91,9 @@ export function Albums({tree,paused,revision,onSelect,query='',parentId}:{tree:A
   const {covers,onVisible}=useAlbumCovers(tree,items,paused,revision);
   if(!tree.adopted||!tree.libraryId||tree.epoch===null)return null;
   return <>{!search&&!parentId&&<Button className="album-management-create" onClick={()=>setManage('create')}>새 앨범</Button>}<div ref={element=>{host.current=element;return stripWheel(parentId&&!search?element:null);}} className={search?'library-results':parentId?'library-children':'library-folder-grid'}>{items.map(album=>search
-    ? <AlbumResult key={album.id} album={album} path={albumAncestors(tree.albums,album.id).map(parent=>parent.name).join(' › ')||'최상위'} items={covers[album.id]??[]} paused={paused} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/>
-    : <div key={album.id} className="album-card-management"><FolderCard id={album.id} name={album.name} count={album.assetCount} items={covers[album.id]??[]} paused={paused} childrenLabel={tree.albums.some(child=>child.parentId===album.id&&child.id!==album.id)?`하위 앨범 ${tree.albums.filter(child=>child.parentId===album.id&&child.id!==album.id).length}`:undefined} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/><Button size="icon" variant="ghost" aria-label={`${album.name} 앨범 관리`} onClick={()=>setManage(album)}><ClassificationIcon kind="root" iconKey={album.iconKey} style={{color:classificationColor(album.colorKey)}}/></Button></div>
-  )}{search&&!items.length&&<EmptyState inline title="검색 결과 없음" />}</div>{manage&&<AlbumManagement tree={tree} album={manage==='create'?undefined:manage} parentId={parentId} onClose={()=>setManage(null)}/>}</>;
+    ? <AlbumResult key={album.id} album={album} path={albumAncestors(tree.albums,album.id).map(parent=>parent.name).join(' › ')||'최상위'} items={covers[album.id]??[]} paused={paused} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))} onActions={()=>setSheet(album)}/>
+    : <div key={album.id} className="album-card-management"><FolderCard id={album.id} name={album.name} count={album.assetCount} items={covers[album.id]??[]} paused={paused} childrenLabel={tree.albums.some(child=>child.parentId===album.id&&child.id!==album.id)?`하위 앨범 ${tree.albums.filter(child=>child.parentId===album.id&&child.id!==album.id).length}`:undefined} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))} onActions={()=>setSheet(album)}/><Button size="icon" variant="ghost" aria-label={`${album.name} 앨범 관리`} onClick={()=>setManage(album)}><ClassificationIcon kind="root" iconKey={album.iconKey} style={{color:classificationColor(album.colorKey)}}/></Button></div>
+  )}{search&&!items.length&&<EmptyState inline title="검색 결과 없음" />}</div>{manage&&<AlbumManagement tree={tree} album={manage==='create'?undefined:manage} parentId={parentId} onClose={()=>setManage(null)}/>}
+  {sheet&&<AlbumActionSheet tree={tree} album={sheet} cover={covers[sheet.id]?.[0]} onClose={()=>setSheet(null)} onManage={mode=>setChosen({album:sheet,mode})}/>}
+  {chosen&&<AlbumManagement tree={tree} album={chosen.album} initialMode={chosen.mode} onClose={()=>setChosen(null)}/>}</>;
 }

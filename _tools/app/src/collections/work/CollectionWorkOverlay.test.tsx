@@ -213,13 +213,13 @@ describe("Collection work open path", () => {
   it("keeps AV information editing, artwork selection, performers, Showcase and delete reachable", async () => {
     const { Harness, api, gateway } = fixtures("av"); render(<Harness />); const user = userEvent.setup(); await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
     await user.click(await screen.findByRole("button", { name: "작품 관리" }));
-    for (const label of ["컬렉션 편집", "AV 정보 편집", "표지 앞면·책등·뒷면", "쇼케이스에 추가", "컬렉션 삭제"]) expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
+    for (const label of ["컬렉션 편집", "AV 정보 편집", "표지 앞면·책등·뒷면", "쇼케이스에 추가", "휴지통으로"]) expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "AV 정보 편집" })); expect(screen.getByRole("dialog", { name: "AV 정보 편집" })).toBeInTheDocument(); await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "표지 앞면·책등·뒷면" })); expect(screen.getByRole("dialog", { name: "표지 앞면·책등·뒷면" })).toBeInTheDocument(); await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /배우.*내 라이브러리/ })); expect(await screen.findByRole("article", { name: "AV 배우 상세" })).toBeInTheDocument(); expect(api.getPerformer).toHaveBeenCalledWith("person"); await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "쇼케이스" })); await waitFor(() => expect(gateway.setCollectionShowcase).toHaveBeenCalledWith("a", true));
-    await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "컬렉션 삭제" })); const dialog = screen.getByRole("dialog", { name: "컬렉션 삭제" });
-    expect(gateway.deleteCollection).not.toHaveBeenCalled(); await user.click(within(dialog).getByRole("button", { name: "삭제" })); await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("a"));
+    await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "휴지통으로" })); const dialog = screen.getByRole("dialog", { name: "휴지통으로" });
+    expect(gateway.deleteCollection).not.toHaveBeenCalled(); await user.click(within(dialog).getByRole("button", { name: "휴지통으로" })); await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("a"));
   });
 });
 

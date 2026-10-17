@@ -16,3 +16,20 @@
 [role="dialog"]:has(>.library-sheet>.tablet-more) { width:min(560px,100%); }
 /* 닫기 lines its text up with the row labels (row padding + 16px icon + gap). */
 .library-sheet>.tablet-more+.ui-button { width:100%; justify-content:flex-start; padding-left:calc(var(--space-3) + 16px + var(--space-3)); }
+/* The long-press action sheet's first row names the target (thumb, name, one meta line) in place of the text title. */
+.ui-dialog__title.action-sheet__target { display:flex; align-items:center; gap:var(--space-3); min-height:var(--row-height-2,64px); margin:0 0 var(--space-2); padding:0 var(--space-3) var(--space-3); border-bottom:1px solid var(--color-border); font-size:var(--type-body); font-weight:400; }
+.action-sheet__thumb { position:relative; flex:none; width:48px; height:48px; overflow:hidden; border-radius:var(--radius-mark,2px); background:var(--color-surface); }
+.action-sheet__thumb > .home-cover { position:absolute; inset:0; width:auto; height:auto; }
+.action-sheet__thumb--icon { display:grid; place-items:center; color:var(--folder-color,var(--color-muted)); }
+.action-sheet__thumb--icon svg { width:24px; height:24px; }
+/* A selection shows up to two overlapping thumbnails. */
+.action-sheet__thumb--stack { overflow:visible; background:none; }
+.action-sheet__thumb--stack > .home-cover { width:38px; height:38px; overflow:hidden; border-radius:var(--radius-mark,2px); box-shadow:0 0 0 2px var(--color-surface-raised); }
+.action-sheet__thumb--stack > .home-cover:first-child { inset:auto auto 0 0; }
+.action-sheet__thumb--stack > .home-cover:last-child { inset:0 0 auto auto; }
+.action-sheet__text { display:flex; flex-direction:column; gap:var(--space-1); min-width:0; }
+.action-sheet__name { overflow:hidden; color:var(--color-text); font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+.action-sheet__meta { overflow:hidden; color:var(--color-muted); font-size:var(--type-meta); text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
+/* The destructive item sits apart under a hairline, as on the PC menu. */
+.tablet-more .more-panel__navigation--danger { margin-top:var(--space-2); padding-top:var(--space-2); border-top:1px solid var(--color-border); }
+.tablet-more .more-panel__navigation + .more-panel__navigation--danger { margin-top:var(--space-2); }

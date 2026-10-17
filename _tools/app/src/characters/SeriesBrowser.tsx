@@ -25,7 +25,8 @@ import { useInfoPanelPreference } from "../assets/useInfoPanelPreference";
 import { CharacterAssignToast, markAssignedTiles, type CharacterAssignNoticeState } from "../assets/characterAssignNotice";
 import { AssignArtistDialog } from "../artists/AssignArtistDialog";
 import { visibleTileRect, type TileRect } from "../shared/viewer/useViewerMotion";
-import { libraryContextItems } from "../assets/libraryContextItems";
+import { libraryContextHandlers } from "../assets/libraryContextItems";
+import { bindMenuItems, imageActionDefs, uniqueSources } from "../shared/contextActions";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { characterCardImage, folderCardImage, seriesShelfCardImages, shelfCardsInView } from "./shelfImages";
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, selectAllLoaded } from "../assets/selection";
@@ -690,7 +691,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (selectedIds.length > 0) setAssetsFavorite(selectedIds, !selectedAssets.every(item => item.favorite));
     else toggleFavorite(asset);
   };
-  /** Trash with 실행 취소: the tiles leave in place and come back to the same spots on undo. */
+  /** Trash with 되돌리기: the tiles leave in place and come back to the same spots on undo. */
   const trashAssets = (assetIds: string[]) => batch(async () => {
     await gateway.trashAssets(assetIds);
     const gone = new Set(assetIds);
@@ -748,23 +749,26 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   });
   const contextItems: ContextMenuItem[] = picking ? [
     { id: "cancel-pick", label: "이미지 선택 취소", onSelect: () => finishPick(false) },
-  ] : [
-    ...(onReviewVideos && contextTarget.targetAssets.length >= 2 && contextTarget.targetAssets.length <= 100 && contextTarget.targetAssets.every(asset => asset.media.kind === "video")
-      ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: busy, onSelect: () => onReviewVideos([...contextTarget.targetIds]) }]
-      : []),
-    ...libraryContextItems({ count: contextTarget.targetIds.length, targetsSelection: contextTarget.targetsSelection, busy, albums,
-      sourceUrls: contextTarget.targetAssets.map(asset => asset.sourceUrl), onMessage: setMessage,
-      onAlbum: id => void batch(async () => { await gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [id], removeAlbumIds: [] }); onMembershipChanged?.(); }, "앨범에 추가하지 못했습니다.") }),
-    { id: "info", label: "정보 열기", onSelect: () => { contextTarget.showInfo(); setInspectorOpen(true); } },
-    { id: "refresh", label: "새로고침", disabled: busy, onSelect: () => {
-      if (contextTarget.targetsSelection) { refresh(); return; }
-      void batch(async () => {
-        const updated = await Promise.all(contextTarget.targetIds.map(id => gateway.getAsset(id)));
-        for (const asset of updated) updateAssetSummary(asset);
-      }, "자산을 새로고침하지 못했습니다.");
-    } },
-    { id: "trash", label: "휴지통으로", destructive: true, disabled: busy || !contextTarget.targetIds.length, onSelect: () => void trashAssets(contextTarget.targetIds) },
-  ];
+  ] : bindMenuItems(
+    imageActionDefs({ count: contextTarget.targetIds.length, targetsSelection: contextTarget.targetsSelection, busy,
+      sourceCount: uniqueSources(contextTarget.targetAssets.map(asset => asset.sourceUrl)).length, albumCount: albums.length,
+      videoCompare: !!onReviewVideos && contextTarget.targetAssets.length >= 2 && contextTarget.targetAssets.length <= 100 && contextTarget.targetAssets.every(asset => asset.media.kind === "video"), refresh: true }),
+    {
+      "video-similarity": onReviewVideos ? () => onReviewVideos([...contextTarget.targetIds]) : undefined,
+      ...libraryContextHandlers({ disabled: busy || contextTarget.targetIds.length === 0, albums,
+        sourceUrls: contextTarget.targetAssets.map(asset => asset.sourceUrl), onMessage: setMessage,
+        onAlbum: id => void batch(async () => { await gateway.patchAssetAlbums({ assetIds: contextTarget.targetIds, addAlbumIds: [id], removeAlbumIds: [] }); onMembershipChanged?.(); }, "앨범에 추가하지 못했습니다.") }),
+      info: () => { contextTarget.showInfo(); setInspectorOpen(true); },
+      refresh: () => {
+        if (contextTarget.targetsSelection) { refresh(); return; }
+        void batch(async () => {
+          const updated = await Promise.all(contextTarget.targetIds.map(id => gateway.getAsset(id)));
+          for (const asset of updated) updateAssetSummary(asset);
+        }, "자산을 새로고침하지 못했습니다.");
+      },
+      trash: () => void trashAssets(contextTarget.targetIds),
+    },
+  );
   const faultItem = playFault && faultScope ? [{ id: "fault", label: "FAULT로 플레이", onSelect: () => playFault(faultScope) }] : [];
   const characterMenuItems = characterTarget ? [
     ...faultItem,
@@ -988,7 +992,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     </div></ContextMenu>
     <AssetInspector presentation="docked" assets={inspectorAssets} classifications={classifications} privacyMode={privacyMode} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={openViewer} onOpenArtist={creatorKey => onNavigate({ kind: "creator", creatorKey })} onAssetUpdated={updateAssetSummary} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
     </div>
-    {message && <Toast actionLabel={trashUndo ? "실행 취소" : undefined} onAction={trashUndo ? undoTrash : undefined} actionDisabled={busy} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
+    {message && <Toast actionLabel={trashUndo ? "되돌리기" : undefined} onAction={trashUndo ? undoTrash : undefined} actionDisabled={busy} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <CharacterAssignToast notice={characterNotice} privacyMode={privacyMode} busy={busy} onDismiss={() => setCharacterNotice(null)} onOpen={() => {
       const target = characterNotice.target;
       if (target.seriesClassificationId) onNavigate({ kind: "classification", classificationId: target.seriesClassificationId, characterId: target.id });
