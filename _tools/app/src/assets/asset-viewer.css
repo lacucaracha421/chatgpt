@@ -153,25 +153,28 @@
 .asset-viewer__edge svg { width: 28px; height: 28px; }
 .asset-viewer__edge:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.03); }
 
-.asset-viewer__stage--filmstrip .asset-viewer__edge { bottom: 88px; }
+.asset-viewer__stage--filmstrip .asset-viewer__edge { bottom: 154px; }
 /* Ctrl+wheel zoom: the image scales around the pointer and is dragged to pan. */
 .asset-viewer__stage[data-zoomed] { cursor: grab; }
 .asset-viewer__stage[data-zoomed]:active { cursor: grabbing; }
 /* Video fills the stage; edge controls stop above the overlaid playback controls. */
 .asset-viewer__stage--video .video-player { height: 100%; }
-.asset-viewer__stage--video .asset-viewer__edge { bottom: 112px; }
+.asset-viewer__stage--video .asset-viewer__edge { bottom: calc(112px + var(--viewer-controls-offset, 0px)); }
 
 .asset-viewer__backdrop { position: absolute; inset: 0; background: var(--color-viewer-bg); pointer-events: none; }
 .asset-viewer__media-surface { display: grid; width: 100%; height: 100%; min-height: 0; min-width: 0; place-items: center; }
 .asset-viewer__media-surface > .video-player { width: 100%; height: 100%; }
 .asset-viewer__filmstrip.centered-filmstrip { bottom: 12px; }
-/* Fade the strip out slowly; visibility flips only after the fade so it never vanishes in one frame. */
+.asset-viewer[data-filmstrip-visible] .asset-viewer__filmstrip {
+  transition: opacity var(--motion-large) var(--ease-standard), visibility 0s;
+}
+/* Match the entrance fade; hide only after the fade finishes. */
 .asset-viewer[data-filmstrip-visible="false"] .asset-viewer__filmstrip {
   opacity: 0; pointer-events: none; visibility: hidden;
   transition: opacity var(--motion-large) var(--ease-standard), visibility 0s linear var(--motion-large);
 }
 .asset-viewer .video-player__controls {
-  /* Stay clickable above the slim strip's unscaled hit box. */
+  /* Stay clickable above the strip. */
   z-index: 5;
   transform: translateY(calc(-1 * var(--viewer-controls-offset, 0px)));
   transition: opacity 100ms ease, transform 200ms var(--ease-sheet);
@@ -251,6 +254,7 @@
   .asset-viewer__topbar,
   .asset-viewer__edge,
   .asset-viewer__filmstrip,
+  .asset-viewer[data-filmstrip-visible] .asset-viewer__filmstrip,
   .asset-viewer[data-filmstrip-visible="false"] .asset-viewer__filmstrip,
   .asset-viewer .video-player__controls {
     transition: none;

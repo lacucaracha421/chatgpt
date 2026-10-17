@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEventHandler, type ReactNode} from 'react';
 import {useHorizontalWheel} from '../ui/useHorizontalWheel';
 import './CenteredFilmstrip.css';
 
@@ -7,6 +7,7 @@ type Props = {
   items: StripItem[]; index: number; height?: number; grown?: boolean; className?: string;
   renderThumbnail(item: StripItem, index: number): ReactNode;
   onIndex(index: number): void; onSwipeUp?(): void; onInteract?(): void; onInteractionChange?(active: boolean): void;
+  onPointerEnter?: PointerEventHandler<HTMLElement>; onPointerLeave?: PointerEventHandler<HTMLElement>;
 };
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -20,7 +21,7 @@ export function filmstripControlsOffset(height: number, grown: boolean, visible:
 }
 
 /** The media viewer is its own control surface: a fixed selection slot with a moving, virtual rail. */
-export function CenteredFilmstrip({items, index, height = 124, grown = false, className = '', renderThumbnail, onIndex, onSwipeUp, onInteract, onInteractionChange}: Props) {
+export function CenteredFilmstrip({items, index, height = 124, grown = false, className = '', renderThumbnail, onIndex, onSwipeUp, onInteract, onInteractionChange, onPointerEnter, onPointerLeave}: Props) {
   const layout = useMemo(() => {
     let x = 0;
     return items.map(item => {
@@ -134,6 +135,7 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
     s.target = -(layout[nearest(s.off + s.velocity * .22)]?.c ?? 0); s.free = true; kick();
   };
   return <nav ref={bind} className={`centered-filmstrip ${grown ? 'is-grown' : ''} ${className}`} aria-label="주변 자산" style={{"--filmstrip-height": `${height}px`} as React.CSSProperties}
+    onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}
     onFocusCapture={() => onInteract?.()}
     onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); event.stopPropagation(); select(clamp(index + (event.key === 'ArrowLeft' ? -1 : 1), 0, items.length - 1)); }}
     onPointerDown={event => {

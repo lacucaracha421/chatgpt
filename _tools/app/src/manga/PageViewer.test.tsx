@@ -654,6 +654,33 @@ describe("PageViewer", () => {
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("20");
   });
 
+  it("holds the window drag bar while hovered and preserves its controls", () => {
+    vi.useFakeTimers();
+    try {
+      const props = viewerProps();
+      render(<PageViewer {...props} />);
+      const reader = document.querySelector<HTMLElement>('.manga-reader')!;
+      const bar = document.querySelector<HTMLElement>('.asset-viewer__topbar')!;
+      expect(bar).toHaveAttribute('data-tauri-drag-region', 'deep');
+      fireEvent.pointerEnter(bar);
+      expect(fireEvent.pointerDown(bar, { button: 0, pointerId: 1, clientX: 600, clientY: 20 })).toBe(true);
+      fireEvent.pointerMove(bar, { pointerId: 1, clientX: 900, clientY: 200 });
+      fireEvent.pointerUp(bar, { pointerId: 1, clientX: 900, clientY: 200 });
+      act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+      expect(reader).toHaveAttribute('data-chrome-visible', 'true');
+      expect(props.onPageChange).not.toHaveBeenCalled();
+      expect(props.onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: '두 쪽 보기' }));
+      expect(screen.getByRole('button', { name: '두 쪽 보기' })).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.pointerDown(screen.getByRole('button', { name: '읽기 설정' }), { button: 0, pointerType: 'mouse' });
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      fireEvent.pointerLeave(bar, { relatedTarget: reader });
+      act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
+      expect(reader).toHaveAttribute('data-chrome-visible', 'false');
+    } finally { vi.useRealTimers(); }
+  });
+
   it("fades the bars after idle time, brings them back on pointer movement or a key, and keeps them hidden while turning pages", () => {
     vi.useFakeTimers();
     try {

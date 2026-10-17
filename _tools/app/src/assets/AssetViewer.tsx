@@ -106,10 +106,8 @@ export function AssetViewer({
   const {nsfwFilter}=usePrivacy();
   const privacyMode = masked(asset, requestedPrivacy);
   const motion = useViewerMotion(activeId, onClose, originRect, asset?.width && asset?.height ? asset.width / asset.height : 1, !privacyMode && activeId ? (mediaSource === "vault" ? vaultAssetUrl(activeId) : assetUrl(activeId)) : undefined, activeId, privacyMode, asset?.media.kind === "image" ? asset.width ?? undefined : undefined);
-  const [stripGrown, setStripGrown] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const stripActive = useRef(false);
-  const stripGrowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [replacementFailed, setReplacementFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [folderPath, setFolderPath] = useState("");
@@ -152,7 +150,7 @@ export function AssetViewer({
   // Overlays show only while the pointer is in their own zone (`viewerZones.ts`), or while held: pointer on the
   // overlay, keyboard focus in it, an open menu (top bar), an active strip drag.
   const pointerZonesRef = useRef<ViewerZoneSet>(NO_VIEWER_ZONES);
-  const pointerOverRef = useRef({ top: false, left: false, right: false });
+  const pointerOverRef = useRef({ top: false, left: false, right: false, bottom: false });
   const keyboardFocusRef = useRef(false);
   const [zones, setZones] = useState<ViewerZoneSet>(NO_VIEWER_ZONES);
   const viewerOpen = Boolean(asset);
@@ -204,7 +202,7 @@ export function AssetViewer({
       top: pointerOverRef.current.top || menuOpen || focusIn(".asset-viewer__topbar"),
       left: pointerOverRef.current.left || focusIn(".asset-viewer__edge--left"),
       right: pointerOverRef.current.right || focusIn(".asset-viewer__edge--right"),
-      bottom: stripActive.current || focusIn(".asset-viewer__filmstrip"),
+      bottom: pointerOverRef.current.bottom || stripActive.current || focusIn(".asset-viewer__filmstrip"),
     });
     setZones((current) => sameViewerZones(current, next) ? current : next);
     return menuOpen;
@@ -223,7 +221,6 @@ export function AssetViewer({
   /** Keeps the overlays the pointer or keyboard is using alive for another idle period. */
   const revealChrome = useCallback(() => { refreshZones(); armIdle(); }, [armIdle, refreshZones]);
 
-  useEffect(() => () => clearTimeout(stripGrowTimer.current), []);
   useEffect(() => () => clearTimeout(textPanTimer.current), []);
   // Opt-in PC timing log: open intent to first picture and to the decoded full image. No-ops when off.
   useLayoutEffect(() => {
@@ -313,9 +310,14 @@ export function AssetViewer({
     if (infoOpen) { setInfoOpen(false); return; }
     motion.close();
   };
-  const overlayHover = (zone: "top" | "left" | "right") => ({
+  const overlayHover = (zone: "top" | "left" | "right" | "bottom") => ({
     onPointerEnter: () => { pointerOverRef.current[zone] = true; refreshZones(); },
-    onPointerLeave: () => { pointerOverRef.current[zone] = false; revealChrome(); },
+    onPointerLeave: () => {
+      pointerOverRef.current[zone] = false;
+      // The idle clock may have expired during hover; give the strip a fresh period on leave.
+      if (zone === "bottom") pointerZonesRef.current = { ...pointerZonesRef.current, bottom: true };
+      revealChrome();
+    },
   });
   // Mouse wheel pages through the assets: down = next, up = previous. A notched wheel steps once per
   // notch; a trackpad's small deltas accumulate, and a short cooldown keeps one flick to one step.
@@ -404,15 +406,12 @@ export function AssetViewer({
       data-left-visible={zones.left}
       data-right-visible={zones.right}
       data-filmstrip-visible={filmstripVisible}
-      style={{"--viewer-controls-offset": `${filmstripControlsOffset(124, stripGrown, filmstripVisible)}px`} as CSSProperties}
+      style={{"--viewer-controls-offset": `${filmstripControlsOffset(124, true, filmstripVisible)}px`} as CSSProperties}
       onPointerMove={(event) => {
         const rect = stageRef.current?.getBoundingClientRect();
         const at = rect ? viewerZonesAt(event.clientX, event.clientY, rect) : NO_VIEWER_ZONES;
         pointerZonesRef.current = at;
         keyboardFocusRef.current = false; revealChrome();
-        if (stripActive.current) return;
-        if (at.bottom) { clearTimeout(stripGrowTimer.current); stripGrowTimer.current = undefined; setStripGrown(true); }
-        else if (!stripGrowTimer.current) stripGrowTimer.current = setTimeout(() => { stripGrowTimer.current = undefined; setStripGrown(false); }, 220);
       }}
       onPointerDown={() => { keyboardFocusRef.current = false; }}
       onPointerLeave={() => { pointerZonesRef.current = NO_VIEWER_ZONES; refreshZones(); }}
@@ -436,7 +435,12 @@ export function AssetViewer({
         onPointerCancel={() => { panRef.current = null; setTextGesture(false); }}
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
-          <div className="asset-viewer__topbar" {...overlayHover("top")}>
+          <div className="asset-viewer__topbar" data-tauri-drag-region="deep" {...overlayHover("top")}
+            // Keep window dragging out of the stage's image pan and viewer zone handlers.
+            onPointerDown={event => event.stopPropagation()}
+            onPointerMove={event => event.stopPropagation()}
+            onPointerUp={event => event.stopPropagation()}
+            onPointerCancel={event => event.stopPropagation()}>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={motion.close}><ArrowLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{index + 1}</b> / {total.toLocaleString("ko-KR")}</span>
             <span className="asset-viewer__title">
@@ -455,7 +459,7 @@ export function AssetViewer({
           </div>
           {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...overlayHover("left")}><ChevronLeftIcon aria-hidden="true" /></button>}
           {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...overlayHover("right")}><ChevronRightIcon aria-hidden="true" /></button>}
-          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown={stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => masked(items[i], requestedPrivacy) ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id, items[i].thumbnailRevision ?? undefined) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
+          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown className="asset-viewer__filmstrip" {...overlayHover("bottom")} onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; revealChrome(); }} renderThumbnail={(_, i) => masked(items[i], requestedPrivacy) ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id, items[i].thumbnailRevision ?? undefined) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
         </div>
         <ViewerMediaContextMenu enabled={Boolean(onSetVideoThumbnail) && asset.media.kind === "video" && !privacyMode}
           onSetThumbnail={() => onSetVideoThumbnail?.(asset, videoPlayerRef.current?.currentTimeMs() ?? 0)}>

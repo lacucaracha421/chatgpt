@@ -328,7 +328,11 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
             onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />)}
         </div>
         <div ref={chrome.ref} className="asset-viewer__chrome" onFocusCapture={chrome.reveal} onBlurCapture={chrome.reveal}>
-          <div className="asset-viewer__topbar" {...chrome.hover}>
+          <div className="asset-viewer__topbar" data-tauri-drag-region="deep" {...chrome.hover}
+            onPointerDown={event => event.stopPropagation()}
+            onPointerMove={event => event.stopPropagation()}
+            onPointerUp={event => event.stopPropagation()}
+            onPointerCancel={event => event.stopPropagation()}>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ArrowLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{position}</b> / {pageCount}</span>
             <span className="asset-viewer__title">

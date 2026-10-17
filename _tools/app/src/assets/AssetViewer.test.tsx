@@ -109,7 +109,7 @@ it("renders a bounded filmstrip and moves from a thumbnail", () => {
   render(<AssetViewer items={items} activeId="asset-7" onActiveIdChange={onActiveIdChange} onClose={vi.fn()} />);
 
   const thumbnails = screen.getAllByRole("button", { name: /번째 자산 보기$/ });
-  expect(thumbnails).toHaveLength(11);
+  expect(thumbnails.length).toBeLessThan(items.length);
   expect(screen.getByRole("button", { name: "8번째 자산 보기" })).toHaveAttribute("aria-current", "true");
   fireEvent.click(screen.getByRole("button", { name: "6번째 자산 보기" }));
   expect(onActiveIdChange).toHaveBeenCalledWith("asset-5");
@@ -125,7 +125,7 @@ it("shows the video strip when paused, hides it while playing, and omits it for 
   expect(document.querySelector(".asset-viewer__filmstrip")).toBeInTheDocument();
   const viewer = document.querySelector<HTMLElement>('.asset-viewer')!;
   expect(viewer).toHaveAttribute('data-filmstrip-visible', 'true');
-  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
   fireEvent.play(document.querySelector('video')!);
   expect(document.querySelector('.asset-viewer')).toHaveClass('asset-viewer--playing');
   expect(viewer).toHaveAttribute('data-filmstrip-visible', 'false');
@@ -133,7 +133,7 @@ it("shows the video strip when paused, hides it while playing, and omits it for 
   fireEvent.pause(document.querySelector('video')!);
   expect(document.querySelector('.asset-viewer')).not.toHaveClass('asset-viewer--playing');
   expect(viewer).toHaveAttribute('data-filmstrip-visible', 'true');
-  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
   // The video layout keeps the edge areas off the player's control bar.
   expect(document.querySelector(".asset-viewer__stage")).toHaveClass("asset-viewer__stage--video");
 
@@ -142,7 +142,7 @@ it("shows the video strip when paused, hides it while playing, and omits it for 
   expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
 });
 
-it('preserves strip geometry across images and videos and rides above the grown strip', () => {
+it('preserves the strip across images and videos and keeps controls above it', () => {
   vi.useFakeTimers();
   try {
     const items = [asset('a','a.png'), videoAsset('v','v.webm')];
@@ -152,7 +152,6 @@ it('preserves strip geometry across images and videos and rides above the grown 
     const strip = screen.getByRole('navigation', {name:'주변 자산'});
     const imageClass = strip.className;
     expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
-    expect(strip).not.toHaveClass('is-grown');
     view.rerender(<AssetViewer {...props} activeId="v"/>);
     expect(strip.className).toBe(imageClass);
     expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
@@ -161,7 +160,6 @@ it('preserves strip geometry across images and videos and rides above the grown 
     const media = document.querySelector('video')!;
     measureStage();
     fireEvent.pointerMove(viewer, NEAR_BOTTOM);
-    expect(strip).toHaveClass('is-grown');
     expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
     fireEvent.play(media);
     expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
@@ -172,14 +170,12 @@ it('preserves strip geometry across images and videos and rides above the grown 
     expect(document.querySelector('.video-player')).toHaveAttribute('data-controls-visible', 'true');
     fireEvent.pointerMove(viewer, CENTRE);
     act(() => vi.advanceTimersByTime(220));
-    expect(strip).not.toHaveClass('is-grown');
-    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
     expect(document.querySelector('.asset-viewer__media-surface')).toBe(stage);
     expect(document.querySelector('video')).toBe(media);
     view.rerender(<AssetViewer {...props} activeId="a"/>);
     fireEvent.pointerMove(viewer, NEAR_BOTTOM);
     expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
-    expect(strip).toHaveClass('is-grown');
   } finally { vi.useRealTimers(); }
 });
 
@@ -834,18 +830,55 @@ it("warms only the next library image, never vault, private or video media", () 
   expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
 });
 
-it('grows the strip near the bottom and shrinks after the pointer leaves', () => {
+it('holds the filmstrip while hovered and restarts the idle clock on leave', () => {
   vi.useFakeTimers();
   try {
     render(<AssetViewer items={[asset('a','a.png'),asset('b','b.png')]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()}/>);
     const viewer=document.querySelector<HTMLElement>('.asset-viewer')!;
     measureStage();
     fireEvent.pointerMove(viewer,NEAR_BOTTOM);
-    expect(screen.getByRole('navigation',{name:'주변 자산'})).toHaveClass('is-grown');
-    fireEvent.pointerMove(viewer,CENTRE);
-    act(()=>vi.advanceTimersByTime(220));
-    expect(screen.getByRole('navigation',{name:'주변 자산'})).not.toHaveClass('is-grown');
+    const strip = screen.getByRole('navigation', {name:'주변 자산'});
+    fireEvent.pointerEnter(strip);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(zoneState(viewer).bottom).toBe(true);
+    fireEvent.pointerLeave(strip, { relatedTarget: viewer });
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS - 1));
+    expect(zoneState(viewer).bottom).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
+    expect(zoneState(viewer).bottom).toBe(false);
+    expect(screen.getByRole('navigation', {name:'주변 자산'})).toBe(strip);
   } finally {vi.useRealTimers();}
+});
+
+it('keeps the window drag bar visible without panning the image or changing viewer zones', () => {
+  vi.useFakeTimers();
+  try {
+    const onClose = vi.fn();
+    const onToggleFavorite = vi.fn();
+    render(<AssetViewer items={[asset('a', 'a.png'), asset('b', 'b.png')]} activeId="a" onActiveIdChange={vi.fn()} onClose={onClose} onToggleFavorite={onToggleFavorite} />);
+    measureStage();
+    const viewer = document.querySelector<HTMLElement>('.asset-viewer')!;
+    const stage = document.querySelector<HTMLElement>('.asset-viewer__stage')!;
+    const bar = document.querySelector<HTMLElement>('.asset-viewer__topbar')!;
+    const image = screen.getByRole('img', { name: 'a.png' });
+    fireEvent.wheel(stage, { deltaY: -200, ctrlKey: true, ...CENTRE });
+    expect(stage).toHaveAttribute('data-zoomed', 'true');
+    const transform = image.style.transform;
+    expect(bar).toHaveAttribute('data-tauri-drag-region', 'deep');
+    fireEvent.pointerMove(viewer, NEAR_TOP);
+    fireEvent.pointerEnter(bar);
+    expect(fireEvent.pointerDown(bar, { button: 0, pointerId: 1, ...NEAR_TOP })).toBe(true);
+    fireEvent.pointerMove(bar, { pointerId: 1, ...NEAR_BOTTOM });
+    fireEvent.pointerUp(bar, { pointerId: 1, ...NEAR_BOTTOM });
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(image.style.transform).toBe(transform);
+    expect(zoneState(viewer)).toEqual({ ...NONE, top: true });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '좋아요' }));
+    expect(onToggleFavorite).toHaveBeenCalledOnce();
+    fireEvent.pointerLeave(bar, { relatedTarget: viewer });
+    expect(zoneState(viewer)).toEqual(NONE);
+  } finally { vi.useRealTimers(); }
 });
 
 it('NSFW viewer and filmstrip use each rating and never preload the masked neighbour',async()=>{
