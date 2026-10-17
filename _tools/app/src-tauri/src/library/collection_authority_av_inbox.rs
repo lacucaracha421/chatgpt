@@ -7,6 +7,22 @@
 
 pub(crate) const AV_INBOX_OPERATION_PREFIX: &str = "avInbox:op:";
 
+/// The authority keeps a trashed work's name reserved until it is purged, so a new work
+/// with the same name is refused (`nameConflict`) only after the whole sequence was queued
+/// and the optimistic copy is rolled back. The trash is not part of `collections`, so the
+/// local unique index cannot see it: look it up here and refuse before anything is queued.
+pub(crate) fn av_name_held_by_trash(
+    db: &rusqlite::Connection,
+    name: &str,
+) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collection_authority_trash WHERE lifecycle='trashed' \
+         AND json_extract(payload,'$.type')='av' AND json_extract(payload,'$.name')=?1 COLLATE NOCASE)",
+        [name],
+        |r| r.get(0),
+    )
+}
+
 /// Reverse index operation -> inbox item. Also marks server-prepared artwork, which has
 /// no local file to upload.
 pub(crate) fn av_inbox_operation_key(operation: &str) -> String {
@@ -115,6 +131,9 @@ pub(crate) fn enqueue_av_inbox_apply(
             return Err(LibraryError::InvalidCollectionMetadata);
         }
         let name = super::collection::normalized_name(plan.name.clone())?;
+        if av_name_held_by_trash(tx, &name)? {
+            return Err(LibraryError::DuplicateCollectionName);
+        }
         tx.execute(
             "INSERT INTO collections(id,name,type,created_at,updated_at) VALUES(?1,?2,'av',?3,?3)",
             params![work, name, now],

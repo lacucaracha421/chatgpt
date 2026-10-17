@@ -874,6 +874,30 @@ fn apply_refuses_a_destination_with_another_product_code() {
 }
 
 #[test]
+fn apply_new_refuses_a_name_held_by_a_trashed_work_before_queueing() {
+    // The authority keeps a trashed work's name until it is purged: the create would be
+    // refused as nameConflict and rolled back after the whole sequence was queued.
+    let mut trashed = av_work("av-trash", 2, None);
+    trashed["name"] = json!("ssis-001");
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    let (_temp, library, _) = routed(json!({"works":[trashed]}));
+    let server = item_server(ID, json!([]));
+    let error = library
+        .apply_av_link_routed_with(&server, ID, request_new())
+        .unwrap_err();
+    assert!(matches!(error, AvError::Inbox("av_inbox_name_in_trash", _)));
+    assert!(provider_commands(&library).is_empty());
+    assert!(!server.paths().iter().any(|p| p.ends_with("/artwork")));
+    // Another name is not blocked.
+    let mut renamed = request_new();
+    renamed.new_collection_name = Some("SSIS-001 (2)".into());
+    library
+        .apply_av_link_routed_with(&server, ID, renamed)
+        .unwrap();
+}
+
+#[test]
 fn apply_rejects_a_changed_destination_and_bad_choices_without_queueing() {
     let w = av_work("av-1", 1, Some("SSIS-001"));
     let (_temp, library, _) = routed(json!({"works":[w]}));
