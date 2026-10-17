@@ -40,6 +40,7 @@ describe("device name search", () => {
       { id: "concealed", title: "hidden title", body: "hidden body", concealed: true, deleted: false },
       { id: "deleted", title: "deleted", deleted: true },
       { id: "month", title: "month", type: "ledger-month", deleted: false },
+      { id: "day-memos", title: "달력 메모 2026-10", type: "checklist", deleted: false },
     ];
     const entries = noteTitleEntries(notes, vi.fn());
     expect(entries.map(entry => entry.id)).toEqual(["note-text", "note-secret", "note-concealed"]);

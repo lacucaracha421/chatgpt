@@ -1,4 +1,4 @@
-import type { AssetDateBucket, AssetDateBucketQuery } from "../library/types";
+import type { AssetDateBucket } from "../library/types";
 import type { Note } from "../notes/store";
 import { LEDGER } from "../notes/ledger/model";
 import { displayCount } from "../shared/displayDate";
@@ -69,10 +69,16 @@ export function releaseCalendarModel<T extends CalendarEntry>(entries: T[], toda
   return { days, earlier, later: later.length ? { from: addDays(end, 1), entries: later } : null };
 }
 
-/** Same ledger schedule, price history and confirmation rules used by Home attention and the ledger. */
-export function calendarPayments(notes: Note[], today: string): CalendarPayment[] {
-  const start = mondayOf(today), end = addDays(start, 13);
-  const months = [...new Set([start.slice(0, 7), end.slice(0, 7)])];
+export type PaymentEvent = { key: string; date: string; noteId: string; name: string; amount: number; kind: "charge" | "trialEnd" };
+const monthsBetween = (start: string, end: string) => {
+  const months: string[] = [];
+  for (let month = start.slice(0, 7); month <= end.slice(0, 7); month = addDays(`${month}-28`, 4).slice(0, 7)) months.push(month);
+  return months;
+};
+
+/** Unconfirmed charges and trial ends dated in `start`..`end`: the ledger schedule, price history and confirmation rules shared by Home attention and the ledger. */
+export function paymentEvents(notes: Note[], start: string, end: string): PaymentEvent[] {
+  const months = monthsBetween(start, end);
   // Planned purchases currently have a target month only, never an exact day.
   return notes.filter(note => note.type === LEDGER && !note.deleted && !note.archived && !note.concealed && !note.redacted)
     .flatMap(note => {
@@ -84,23 +90,15 @@ export function calendarPayments(notes: Note[], today: string): CalendarPayment[
             && pending.some(charge => charge.recurring.id === event.recurring.id && charge.date === event.date)
             // Trial end and the first charge share a single line, as in attentionRows.
             && !(event.kind === "charge" && event.recurring.trial && event.date === event.recurring.start))
-          .map(event => ({ key: `${note.id}:${event.recurring.id}:${event.date}`, date: event.date, noteId: note.id,
-            label: `${event.recurring.name} ${event.kind === "trialEnd" ? "무료 끝남" : displayCount(event.amount, "원")}` }));
+          .map((event): PaymentEvent => ({ key: `${note.id}:${event.recurring.id}:${event.date}`, date: event.date, noteId: note.id,
+            name: event.recurring.name, amount: event.amount, kind: event.kind === "trialEnd" ? "trialEnd" : "charge" }));
       });
     }).sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
 }
 
-/** One bounded library read; local Date construction preserves 23/25-hour days at DST changes. */
-export function calendarSavedQuery(today: string): AssetDateBucketQuery {
+/** The two-week strip's payment lines (the tablet's week strip). */
+export function calendarPayments(notes: Note[], today: string): CalendarPayment[] {
   const start = mondayOf(today);
-  const midnight = (date: string) => {
-    const [year, month, day] = date.split("-").map(Number);
-    return new Date(year!, month! - 1, day!);
-  };
-  const localDays = Array.from({ length: 14 }, (_, index) => {
-    const date = addDays(start, index);
-    return { localDate: date, startUtc: midnight(date).toISOString(), endUtc: midnight(addDays(date, 1)).toISOString() };
-  });
-  return { startUtc: localDays[0]!.startUtc, endUtc: localDays[13]!.endUtc,
-    offsetMinutes: -midnight(today).getTimezoneOffset(), imagesOnly: true, localDays };
+  return paymentEvents(notes, start, addDays(start, 13)).map(event => ({ key: event.key, date: event.date, noteId: event.noteId,
+    label: `${event.name} ${event.kind === "trialEnd" ? "무료 끝남" : displayCount(event.amount, "원")}` }));
 }

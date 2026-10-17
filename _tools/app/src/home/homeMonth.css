@@ -1,0 +1,150 @@
+/* PC Home month calendar and day panel (HOME-CAL-001, 2026-10-17). Builds on homeCalendar.css (home-cal__*),
+   homeAttention.css and the shared ledger rows of notes/ledger/ledger.css. */
+
+/* ---------- Layout ----------
+   The day panel sits beside the grid when the left column is wide (a maximised 1920 window), under it otherwise.
+   It is always there: it shows today until another day is chosen. */
+.home-month-layout { container-type:inline-size; container-name:homemonth; min-width:0; }
+.home-media-column > .home-month-layout { flex:1; }
+.home-month-split { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; }
+.home-day-slot { min-width:0; }
+@container homemonth (min-width:1100px) {
+  .home-month-split { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:var(--space-6); align-items:stretch; }
+  /* The panel scrolls inside its own column instead of making the grid's row taller. */
+  .home-day-slot { position:relative; }
+  .home-day-slot > .home-day { position:absolute; inset:0; overflow:auto; border-left:1px solid var(--color-border); padding-left:var(--space-6); }
+  /* The panel never scrolls sideways; the right padding keeps a focus ring of the full-width buttons from being cut. */
+  .home-day-slot > .home-day { overflow-x:hidden; padding-right:var(--space-1); }
+}
+
+/* ---------- Head: month title, ‹ 오늘 ›, the month's money, the release calendar link ---------- */
+.home-month { display:flex; flex-direction:column; gap:var(--space-3); min-width:0; }
+.home-month__head { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2) var(--space-4); min-height:var(--control-height); }
+.home-month__title { margin:0; min-width:4.5em; font-size:var(--type-title); font-weight:600; line-height:1.2; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.home-month__nav { display:inline-flex; align-items:center; gap:var(--space-1); }
+.home-month__nav .ui-button--icon svg { width:16px; height:16px; }
+.home-month__spacer { flex:1; }
+.home-month__totals { display:flex; align-items:baseline; gap:var(--space-4); margin:0; }
+.home-month__totals > div { display:flex; align-items:baseline; gap:var(--space-2); }
+.home-month__totals dt { color:var(--color-faint); font-size:var(--type-meta); }
+.home-month__totals dd { margin:0; color:var(--color-text); font-size:var(--type-body); font-weight:600; }
+.home-month__totals > div + div dd { color:var(--color-muted); font-weight:400; }
+
+/* ---------- Grid: six week rows always (paging never changes the height), Monday first ---------- */
+.home-cal--month { grid-auto-rows:auto; }
+.home-cal__row { display:contents; }
+.home-cal--month .home-cal__day { position:relative; height:140px; overflow:hidden; width:100%; margin:0; padding:var(--space-2); gap:var(--space-1); border:0; border-top:1px solid var(--color-border); border-radius:0; background:transparent; color:var(--color-text); font:inherit; text-align:left; cursor:pointer; transition:background-color 90ms var(--ease-standard); }
+@media (hover:hover) { .home-cal--month .home-cal__day:hover:not([aria-selected="true"]) { background:var(--color-surface-hover); } }
+.home-cal--month .home-cal__day:active:not([aria-selected="true"]) { background:var(--color-surface-pressed); }
+.home-cal--month .home-cal__day:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:-2px; }
+.home-cal--month .home-cal__day > span { display:flex; min-width:0; flex:none; }
+/* The current week: a quiet face across its seven days. */
+.home-cal--month .home-cal__day[data-week="current"] { background:var(--color-surface); }
+/* Days of the neighbouring months: same markers, dimmed; still selectable, no paging on click. */
+.home-cal--month .home-cal__day[data-outside] > span { opacity:.42; }
+
+/* Selected day = the current-location slab (DESIGN §4/§6): accent face, on-accent text, the hard echo
+   (masked with the page background) and the small dark mark in the top-right corner. */
+.home-cal--month .home-cal__day[aria-selected="true"] { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-bg), 3px 3px 0 0 var(--color-selection-echo); z-index:1; }
+.home-cal--month .home-cal__day[aria-selected="true"]::after { content:""; position:absolute; top:0; right:0; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); }
+.home-cal--month .home-cal__day[aria-selected="true"] > span { opacity:1; }
+.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__date,
+.home-cal--month .home-cal__day[aria-selected="true"] small,
+.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__pay,
+.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__foot,
+.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__saved { color:color-mix(in srgb, var(--color-on-accent) 72%, var(--color-accent)); }
+.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__line b { color:var(--color-on-accent); }
+.home-cal--month .home-cal__day[aria-selected="true"] .home-kind { color:color-mix(in srgb, var(--color-on-accent) 72%, var(--color-accent)); }
+/* Today keeps its filled square (user 2026-10-15); on the slab the square inverts. */
+.home-cal--month .home-cal__day[aria-selected="true"][data-tense="today"] .home-cal__date { background:var(--color-on-accent); color:var(--color-accent); }
+.home-cal--month .home-cal__day[aria-selected="true"] .ui-badge--plain { background:color-mix(in srgb, var(--color-on-accent) 14%, var(--color-accent)); color:var(--color-on-accent); }
+
+/* Saved-image heat (user 2026-10-17): the strip alone is filled, one hue (--color-focus) in four steps by the day's rank among the
+   shown days' counts. Selecting or today never changes the fill, so text on it always uses the normal colours. */
+.home-cal--month .home-cal__day[data-heat="1"] { --heat-fill:color-mix(in srgb, var(--color-focus) 8%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="2"] { --heat-fill:color-mix(in srgb, var(--color-focus) 14%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="3"] { --heat-fill:color-mix(in srgb, var(--color-focus) 20%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="4"] { --heat-fill:color-mix(in srgb, var(--color-focus) 27%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="5"] { --heat-fill:color-mix(in srgb, var(--color-focus) 34%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="6"] { --heat-fill:color-mix(in srgb, var(--color-focus) 41%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="7"] { --heat-fill:color-mix(in srgb, var(--color-focus) 49%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="8"] { --heat-fill:color-mix(in srgb, var(--color-focus) 57%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat] .home-cal__head { background:var(--heat-fill); }
+.home-cal--month .home-cal__day[data-heat] .home-cal__date,
+.home-cal--month .home-cal__day[data-heat] .home-cal__saved,
+.home-cal--month .home-cal__day[data-heat] .home-cal__head .ui-dday { color:var(--color-text); }
+.home-cal--month .home-cal__day[data-heat][data-tense="today"] .home-cal__date { background:var(--color-accent); color:var(--color-on-accent); }
+.home-cal--month .home-cal__day[data-heat][aria-selected="true"] .home-cal__head .ui-badge--plain { background:var(--color-surface-elevated); color:var(--color-muted); }
+
+/* Markers: one release line (+N), one payment line (+N), then memo mark and the day's spending. Each may wrap to two lines
+   (user 2026-10-17); the cell has a fixed height (the most it can hold is 20 + 2 x 36 + 18 + gaps), so no row changes height between months. */
+/* The top strip (date, 사진 N장, D-day) spans the cell edge to edge so it can carry its own fill. */
+.home-cal--month .home-cal__head { width:calc(100% + 2 * var(--space-2)); margin:calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0; padding:var(--space-2) var(--space-2) var(--space-1); box-sizing:border-box; }
+.home-cal--month .home-cal__saved { animation:none; background:transparent; padding:0; }
+.home-cal__line, .home-cal__pay { width:100%; align-items:flex-start; gap:var(--space-1); min-height:var(--line-meta); font-size:var(--type-meta); line-height:var(--line-meta); }
+/* The kind icon leads the title and wraps with it; a manga volume (22권) trails it. */
+.home-cal__line b { flex:0 1 auto; min-width:0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; font-weight:600; }
+.home-cal__line small { flex:none; white-space:nowrap; color:var(--color-muted); font-size:var(--type-meta); }
+.home-cal__line .ui-badge { flex:none; margin-top:calc((var(--line-meta) - var(--badge-height)) / 2); }
+.home-cal__line .ui-badge--plain { margin-left:auto; }
+.home-kind { display:inline-block; flex:none; width:12px; height:12px; margin-right:var(--space-1); vertical-align:-2px; color:var(--color-muted); }
+.home-kind > svg { display:block; width:12px; height:12px; }
+.home-cal__pay { color:var(--color-muted); }
+.home-cal__pay > svg, .home-cal__foot svg { flex:none; width:12px; height:12px; }
+.home-cal__pay > svg { margin-top:calc((var(--line-meta) - 12px) / 2); }
+.home-cal__pay > span:not(.ui-badge) { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; min-width:0; overflow:hidden; overflow-wrap:anywhere; }
+.home-cal__pay .ui-badge { flex:none; margin-left:auto; margin-top:calc((var(--line-meta) - var(--badge-height)) / 2); }
+.home-cal__foot { width:100%; margin-top:auto; align-items:center; gap:var(--space-1); min-height:var(--line-meta); color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-cal__spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
+
+/* Privacy mode: amounts become the secret-note dots (notes/noteCard.css .notes-card__secret-row). */
+.home-mask { letter-spacing:2px; color:var(--color-faint); font-weight:400; }
+
+/* ---------- Day panel ---------- */
+.home-day { display:flex; flex-direction:column; gap:var(--space-4); min-width:0; min-height:0; }
+.home-day__head { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); }
+.home-day__title { margin:0; font-size:var(--type-body); font-weight:600; line-height:var(--line-ui); white-space:nowrap; }
+.home-day__title span { color:var(--color-muted); font-weight:400; }
+.home-day__head .home-link { margin-left:auto; }
+.home-day__body { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; }
+.home-day__col { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; }
+.home-day__col:empty { display:none; }
+/* Under the grid the panel is wide: 발매·이미지 | 메모 | 가계부 side by side. */
+@container homemonth (max-width:1099px) {
+  .home-day__body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr); gap:var(--space-8); align-items:start; }
+  .home-day__col:empty { display:flex; }
+}
+.home-day .home-arrival-cover { width:32px; height:44px; }
+/* The kind icon leads the title; the title itself may use two lines. */
+.home-day__release-name { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.home-day .home-kind { color:var(--color-faint); }
+.home-day__saved > svg:last-child { flex:none; width:16px; height:16px; color:var(--color-faint); }
+.home-day__saved .home-attention-mark > svg { width:16px; height:16px; }
+/* One short note: the 빠른 메모 text area, shorter. */
+textarea.ui-text-input.home-day__memo { display:block; width:100%; height:auto; min-height:96px; resize:none; margin:0; padding:var(--space-3); line-height:1.7; }
+textarea.ui-text-input.home-day__memo:focus { box-shadow:none; }
+/* Ledger: the 가계부's own rows and quick entry; subscription charges are read-only rows. */
+.home-day .ledger-items { margin:0; }
+.home-day .ledger-entry__main { min-height:var(--control-height); padding:var(--space-1) 0; }
+.home-day .ledger-entry__icon { display:inline-grid; place-items:center; width:16px; flex:none; color:var(--color-muted); }
+.home-day .ledger-entry__amount { font-variant-numeric:tabular-nums; }
+.home-day .ledger-entry.is-derived .ledger-entry__main { cursor:default; }
+.home-day .ledger-entry.is-derived .ledger-entry__main:hover { background:transparent; }
+.home-day .ledger-entry[data-fresh] .ledger-entry__main { animation:home-entry-fresh 1400ms var(--ease-standard) both; }
+@keyframes home-entry-fresh { from { background:color-mix(in srgb, var(--color-success) 14%, transparent); } to { background:transparent; } }
+.home-day .ledger-entry-form__row .ui-button { min-height:var(--control-height); }
+.home-day .ledger-entry-form__amount input { width:84px; }
+.home-day__sum { color:var(--color-text); font-size:var(--type-meta); font-weight:600; font-variant-numeric:tabular-nums; }
+
+/* 모든 구독 / 사고 싶은 것: folded until opened; the state is kept per device. No starting-style, so a day change never replays the opening. */
+.home-fold { display:grid; grid-template-rows:0fr; opacity:0; pointer-events:none; transition:grid-template-rows 140ms var(--ease-standard), opacity 140ms var(--ease-standard); }
+.home-fold[data-open="true"] { grid-template-rows:1fr; opacity:1; pointer-events:auto; }
+.home-fold > .home-fold__inner { min-width:0; min-height:0; overflow:hidden; }
+/* The chevron sits at the right edge and turns about its centre: mid-turn its box reaches past the edge and made the panel scroll sideways. */
+.home-day .ui-section-label--collapsible { min-height:var(--control-height); overflow:clip; }
+
+@media (prefers-reduced-motion:reduce) {
+  .home-fold { transition:none; }
+  .home-cal--month .home-cal__day { transition:none; }
+  .home-day .ledger-entry[data-fresh] .ledger-entry__main { animation:none; }
+}

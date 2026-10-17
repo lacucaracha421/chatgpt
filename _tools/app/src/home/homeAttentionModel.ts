@@ -13,7 +13,9 @@ export type ConnectionProblem = { key: string; label: string; value: string; ton
 const reviewOrder = ['unsorted', 'similar', 'pending', 'confirm', 'duplicates', 'av-link'];
 
 /** Shared PC/tablet display rules. Concealed and unavailable note bodies never become previews. */
-export function attentionRows(notes: Note[], reviews: ReviewCount[], connections: ConnectionProblem[], today: string): AttentionRow[] {
+export function attentionRows(notes: Note[], reviews: ReviewCount[], connections: ConnectionProblem[], today: string, hideAmounts = false): AttentionRow[] {
+  // Privacy mode hides amounts only (HOME-CAL-001); names stay.
+  const money = (amount: number) => hideAmounts ? '••••' : won(amount);
   const visible = notes.filter(n => !n.deleted && !n.archived && !n.concealed && n.type !== 'secret');
   const ledgers = visible.filter(n => n.type === LEDGER);
   const subscribed = ledgers.filter(n => (n.recurring?.length ?? 0) > 0);
@@ -22,13 +24,13 @@ export function attentionRows(notes: Note[], reviews: ReviewCount[], connections
     const total = subscribed.reduce((sum, n) => sum + monthSummary(n, monthNotesOf(notes, n.id), today.slice(0, 7), today).recurringThisMonth, 0);
     const charges = subscribed.flatMap(n => (n.recurring ?? []).flatMap(r => { const next = nextCharge(r, today); return next ? [{ ...next, name: r.name, noteId: n.id }] : []; })).sort((a, b) => a.date.localeCompare(b.date));
     const next = charges[0];
-    rows.push({ key: 'subscriptions', label: `구독 이번 달 ${won(total)}`, secondary: next ? `다음 결제 ${ddayLabel(daysAfter(next.date, today)) ?? displayDate(next.date, new Date(`${today}T12:00:00`))} · ${next.name}` : '다음 결제 없음', value: `${subscribed.reduce((n, l) => n + (l.recurring?.length ?? 0), 0)}개`, noteId: next?.noteId ?? subscribed[0]!.id });
+    rows.push({ key: 'subscriptions', label: `구독 이번 달 ${money(total)}`, secondary: next ? `다음 결제 ${ddayLabel(daysAfter(next.date, today)) ?? displayDate(next.date, new Date(`${today}T12:00:00`))} · ${next.name}` : '다음 결제 없음', value: `${subscribed.reduce((n, l) => n + (l.recurring?.length ?? 0), 0)}개`, noteId: next?.noteId ?? subscribed[0]!.id });
   }
   // Confirmed or skipped charges (month-note entries) are no longer reminders.
   const notices = ledgers.flatMap(n => reminders(n, today, ledgerEntries(monthNotesOf(notes, n.id)))
     // Trial end and its first charge share one reminder.
     .filter(e => e.kind !== 'charge' || !n.recurring?.find(r => r.id === e.recurring.id && r.trial && r.start === e.date))
-    .map(e => ({ key: `reminder:${n.id}:${e.recurring.id}:${e.date}`, label: `${e.recurring.name} ${e.kind === 'trialEnd' ? '무료 끝남' : '결제'}`, secondary: `${displayDate(e.date, new Date(`${today}T12:00:00`))} · ${won(e.amount)}${e.kind === 'trialEnd' ? '부터 결제' : ''}`, days: daysAfter(e.date, today), noteId: n.id })));
+    .map(e => ({ key: `reminder:${n.id}:${e.recurring.id}:${e.date}`, label: `${e.recurring.name} ${e.kind === 'trialEnd' ? '무료 끝남' : '결제'}`, secondary: `${displayDate(e.date, new Date(`${today}T12:00:00`))} · ${money(e.amount)}${e.kind === 'trialEnd' ? '부터 결제' : ''}`, days: daysAfter(e.date, today), noteId: n.id })));
   rows.push(...notices.sort((a, b) => a.days - b.days || a.key.localeCompare(b.key)));
   rows.push(...reviews.filter(r => r.count !== null && r.count > 0).sort((a, b) => reviewOrder.indexOf(a.key) - reviewOrder.indexOf(b.key)).map(r => ({ key: r.key, label: r.label, value: `${r.count!.toLocaleString()}${r.unit ?? ''}` })));
   rows.push(...visible.filter(n => n.pinned && n.type !== LEDGER).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).flatMap(n => {

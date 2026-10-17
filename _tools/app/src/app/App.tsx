@@ -851,7 +851,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     overviewReady={trashRead?.gateway === gateway && trashRead.root === libraryRoot}
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
                     onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
-                    characters={characterHub.targets} classifications={entries} />
+                    characters={characterHub.targets} classifications={entries} linksRequest={view.links ? view : undefined} />
                 ) : view.kind === "notes" ? <NotesView key={view.noteId ?? "notes"} noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}

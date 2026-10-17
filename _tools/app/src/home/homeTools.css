@@ -1,5 +1,4 @@
-/* Home tools row (전송 · 빠른 메모 · 링크 보관) and the 오늘의 카드 place (layout A, 2026-10-15). */
-.home-tools { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1fr) minmax(0,1.25fr); gap:var(--space-8); align-items:stretch; }
+/* Home tools (전송, 빠른 메모) and the 오늘의 카드 place, all in the right column (HOME-CAL-001). */
 .home-tool { min-width:0; }
 .home-tool > div:last-child, .home-tool__body { flex:1; min-width:0; display:flex; flex-direction:column; }
 .home-tool__body { gap:var(--space-2); }
@@ -34,7 +33,14 @@ textarea.ui-text-input.home-qmemo__text:focus { box-shadow:none; }
 .home-slot__empty { flex:1; min-height:120px; display:grid; place-items:center; background:var(--color-surface); border-radius:var(--radius-control); }
 .home-slot__empty .ui-empty-state--inline { margin:0; padding:0; }
 .home-daily-card { flex:none; }
-.home-daily-card__body { flex:none; height:268px; }
+/* Compact (user 2026-10-17, as the tablet): the pack beside its copy, one fixed height for every state so nothing jumps. */
+.home-daily-card__body { flex:none; height:168px; gap:var(--space-4); }
+.home-daily-card .daily-card-stage__art { width:80px; }
+.home-daily-card .daily-card-result__art { width:88px; }
+.home-daily-card .daily-card-skeleton { width:80px; height:160px; }
 
-@container home (max-width:1000px) { .home-tools { grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); } .home-tools > .home-slot { grid-column:1 / -1; } }
-@container home (max-width:700px) { .home-tools { grid-template-columns:minmax(0,1fr); } }
+/* 전송 and 빠른 메모 live in the right column under 오늘 할 것; 빠른 메모 takes the rest of the height. */
+.home-day-column .home-drop { height:88px; }
+.home-day-column > .home-attention-section.home-qmemo { flex:1; min-height:0; }
+.home-day-column > .home-qmemo > .home-tool__body { flex:1; }
+.home-day-column textarea.ui-text-input.home-qmemo__text { min-height:160px; }

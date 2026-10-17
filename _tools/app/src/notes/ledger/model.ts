@@ -1,3 +1,5 @@
+import { isDayMemoNote } from "../dayMemo";
+
 /**
  * Ledger (가계부) notes: types, limits, won formatting and the text fallback body.
  * See docs/research/budget-notes-design-20260925.md §4. Rust (`notes/ledger.rs`) and
@@ -260,10 +262,10 @@ export function keepOnly<T extends Forkable>(list: T[], id: string): T[] {
 }
 
 export const isLedgerKind = (note: { type?: string }) => note.type === LEDGER || note.type === LEDGER_MONTH;
-/** Month notes stay internal while their parent ledger still exists. */
-export function hiddenLedgerMonths(notes: readonly { id: string; type?: string; ledger?: string }[]): Set<string> {
+/** Month notes stay internal while their parent ledger still exists; so do Home's day-memo month notes. */
+export function hiddenLedgerMonths(notes: readonly { id: string; type?: string; ledger?: string; title?: string }[]): Set<string> {
   const ledgers = new Set(notes.filter((note) => note.type === LEDGER).map((note) => note.id));
-  return new Set(notes.filter((note) => note.type === LEDGER_MONTH && note.ledger !== undefined && ledgers.has(note.ledger)).map((note) => note.id));
+  return new Set(notes.filter((note) => (note.type === LEDGER_MONTH && note.ledger !== undefined && ledgers.has(note.ledger)) || isDayMemoNote(note)).map((note) => note.id));
 }
 /**
  * Until the ledger screens exist, the generic editors show ledger notes read-only with

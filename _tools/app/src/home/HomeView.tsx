@@ -9,12 +9,15 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetDateBucket, AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import type { CharacterTarget } from "../characters/api";
 import { confirmSources, confirmTotal, type ConfirmScope, type ConfirmSources } from "../characters/confirmClient";
 import { ConfirmOverview } from "../characters/ConfirmOverview";
 import { taggerDecisionApi, type TaggerDecisionApi } from "../characters/taggerReviewClient";
-import { notesStore, type NotesStore } from "../notes/store";
+import { notesStore, type Note, type NotesStore } from "../notes/store";
+import type { LedgerEntry } from "../notes/ledger/model";
+import { dayMemoTitle, dayMemos, isDayMemoNote } from "../notes/dayMemo";
+import { ledgerEntries, monthNotesOf } from "../notes/ledger/summary";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { useLocalDayClock } from "../shared/useLocalDayClock";
 import { Dialog as UiDialog } from "../shared/ui/Dialog";
@@ -24,10 +27,12 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Button } from "../shared/ui/Button";
 import { localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { attentionRows } from "./homeAttentionModel";
-import { HomeToday, type HomeReleaseCard } from "./HomeAttention";
+import { HomeToday } from "./HomeAttention";
 import { useHomeVisit } from "./useHomeVisit";
-import { HomeCalendar } from "./HomeCalendar";
-import { calendarPayments, calendarSavedQuery, releaseCalendarModel } from "./homeCalendarModel";
+import { HomeMonth } from "./HomeMonth";
+import { HomeDay } from "./HomeDay";
+import { paymentEvents } from "./homeCalendarModel";
+import { gridDates, homeLedger, monthDays, monthOf, monthSavedQueries, monthTotals, pastReleaseRows, type MonthRelease, type PastReleaseRow } from "./homeMonthModel";
 import { HomeTransfer, type PickFiles } from "./HomeTransfer";
 import { HomeQuickMemo } from "./HomeQuickMemo";
 import { HomeDailyCard, HomeLinkVault } from "./HomeSlots";
@@ -78,13 +83,17 @@ export type HomeViewProps = {
   exchange?: ExchangeStore;
   subscribeDrops?: DropSubscriber;
   pickFiles?: PickFiles;
+  /** A new object each time 더보기 or 찾기 asks for the 링크 보관 screen. */
+  linksRequest?: object;
 };
 
 /** PC Home (layout A): the release calendar and the tools on the left, today's card and attention on the right. */
 
-export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, linksRequest }: HomeViewProps) {
   const [cardAlbum, setCardAlbum] = useState(false);
-  const [linksView, setLinksView] = useState(false);
+  const [linksView, setLinksView] = useState(() => Boolean(linksRequest));
+  const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => { if (linksRequest) setLinksView(true); }, [linksRequest]);
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const requested = useContext(AreaRequested);
@@ -185,20 +194,31 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   }, [calendarApi, root, shelfRetry, active, visitNumber, deferReleaseReads]);
 
   const [queueRead, setQueueRead] = useState(0);
-  const [savedDays, setSavedDays] = useState<{ root: string; days: AssetDateBucket[] } | null>(null);
+  // The shown month and the chosen day; `null` follows today (also past midnight).
+  const [shown, setShown] = useState<{ month: string | null; selected: string | null }>({ month: null, selected: null });
+  const selected = shown.selected ?? today;
+  const month = shown.month ?? monthOf(selected);
+  const [savedCounts, setSavedCounts] = useState<{ root: string; counts: Map<string, number> } | null>(null);
   const [savedDaysSettled, setSavedDaysSettled] = useState<string | null>(null);
   const [savedDaysError, setSavedDaysError] = useState(false);
   const [savedDaysRetry, setSavedDaysRetry] = useState(0);
+  // One batched read per shown month (its six weeks). Counts already read stay on screen while the next month loads.
   useEffect(() => {
     if (!overviewActive || !gateway.listAssetDateBuckets) return;
     let live = true;
-    void gateway.listAssetDateBuckets(calendarSavedQuery(today)).then(days => {
+    const list = gateway.listAssetDateBuckets;
+    void Promise.all(monthSavedQueries(month).map(query => list(query))).then(parts => {
       if (!live) return;
-      setSavedDays({ root, days });
+      const read = new Map(parts.flat().map(bucket => [bucket.date, bucket.count]));
+      setSavedCounts(previous => {
+        const counts = new Map(previous?.root === root ? previous.counts : []);
+        for (const date of gridDates(month)) counts.set(date, read.get(date) ?? 0);
+        return { root, counts };
+      });
       setSavedDaysError(false);
     }, () => { if (live) setSavedDaysError(true); }).finally(() => { if (live) setSavedDaysSettled(root); });
     return () => { live = false; };
-  }, [gateway, root, today, refreshVersion, trashCount, overviewActive, savedDaysRetry]);
+  }, [gateway, root, month, refreshVersion, trashCount, overviewActive, savedDaysRetry]);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(Boolean(gateway.getHomeOverview));
   const [overviewError, setOverviewError] = useState(false);
@@ -310,10 +330,26 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   // can predate the first watch result and would keep "연결 안 됨" until the next overview read.
   if (!gateway.authoritySyncHealth && overview?.server?.configured && !overview.server.live && !problems.some(row => row.key === 'server')) problems.unshift({ key: 'server', label: '서버', value: '연결 안 됨', tone: 'off', view: { kind: 'settings', section: 'connection' } });
   // 중복 판본 is no longer a Home to-do (user 2026-10-16: most resolve automatically); its review stays in the catalog.
-  const todayRows = attentionRows(notesState.notes, todos, problems, today).map(row => ({ ...row,
+  const todayRows = attentionRows(notesState.notes, todos, problems, today, privacyMode).map(row => ({ ...row,
     disabled: row.key === 'pending' ? overviewLoading || fieldFailed('server') : false }));
 
-  const cover = (row: ReleaseRow | UpcomingRow) => {
+  // ---- month calendar data (all derived from reads Home already holds) ----
+  const gridStart = gridDates(month)[0]!, gridEnd = gridDates(month)[41]!;
+  const ledgerNotes = notesState.keyringLocked ? NO_NOTES : notesState.notes;
+  const notesUnavailable = !store || !notesState.ready || !notesState.unlocked || Boolean(notesState.keyringLocked);
+  const ledger = useMemo(() => homeLedger(ledgerNotes), [ledgerNotes]);
+  const ledgerRecords = useMemo(() => ledger ? ledgerEntries(monthNotesOf(ledgerNotes, ledger.id)) : NO_ENTRIES, [ledger, ledgerNotes]);
+  const payments = useMemo(() => paymentEvents(ledgerNotes, gridStart, gridEnd), [ledgerNotes, gridStart, gridEnd]);
+  const memos = useMemo(() => dayMemos(ledgerNotes, [...new Set(gridDates(month).map(monthOf))]), [ledgerNotes, month]);
+  const pastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, gridStart, gridEnd), [collections, board, inbox, wishlist, today, gridStart, gridEnd]);
+  // The day panel reads its own day, so it stays right when the shown month moves away from it.
+  const dayPastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, selected, selected), [collections, board, inbox, wishlist, today, selected]);
+  const dayPayments = useMemo(() => paymentEvents(ledgerNotes, selected, selected), [ledgerNotes, selected]);
+  const dayMemo = useMemo(() => dayMemos(ledgerNotes, [monthOf(selected)]).get(selected) ?? '', [ledgerNotes, selected]);
+  const dayEntries = useMemo(() => ledgerRecords.filter(entry => entry.date === selected), [ledgerRecords, selected]);
+  const memoNote = useMemo(() => ledgerNotes.find(note => isDayMemoNote(note) && note.title === dayMemoTitle(monthOf(selected)) && !note.deleted) ?? null, [ledgerNotes, selected]);
+
+  const cover = (row: ReleaseRow | UpcomingRow | PastReleaseRow) => {
     if (privacyMode) return null;
     const collection = "collection" in row ? (row as ReleaseRow).collection : "collectionId" in row ? (row as UpcomingRow).collectionId ? collections.find((item) => item.id === (row as UpcomingRow).collectionId) : undefined : undefined;
     if (collection) return collectionCoverUrl(collection);
@@ -368,29 +404,51 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   </>;
 
   const releaseKind = (kind: ReleaseRow['kind'], volume?: number | null) => volume ? `${volume}권` : ({ game: '게임', movie: '영화', anime: '애니', manga: '만화' })[kind];
-  const releaseCover = (row: ReleaseRow | UpcomingRow) => { const src = cover(row); return src ? <StableImage src={src} alt="" loading="lazy" decoding="async" /> : undefined; };
-  const releaseCards: HomeReleaseCard[] = [
-    ...visit.arrivals.map(row => ({ key: row.key, name: row.name, date: row.date ?? null, detail: releaseKind(row.kind, row.volume), fresh: true, cover: releaseCover(row), onOpen: () => openRelease(row) })),
-    ...upcoming.filter(row => !visit.arrivals.some(arrival => arrival.date === row.date && (arrival.volume ?? null) === (row.volume ?? null) && (arrival.key === row.key || arrival.collection?.id === row.collectionId && !!row.collectionId)))
-      .map(row => ({ key: row.key, name: row.name, date: row.date, detail: releaseKind(row.kind, row.volume), cover: releaseCover(row), onOpen: () => openUpcoming(row) })),
-  ];
-  const calendar = releaseCalendarModel(releaseCards, today, 2, {
-    payments: calendarPayments(notesState.keyringLocked ? [] : notesState.notes, today),
-    saved: savedDays?.root === root ? savedDays.days : [],
-  });
+  const releaseCover = (row: ReleaseRow | UpcomingRow | PastReleaseRow) => { const src = cover(row); return src ? <StableImage src={src} alt="" loading="lazy" decoding="async" /> : undefined; };
+  const isArrival = (row: { key: string; date: string; volume?: number | null; collectionId?: string }) => visit.arrivals.some(arrival => arrival.date === row.date && (arrival.volume ?? null) === (row.volume ?? null)
+    && (arrival.key === row.key || arrival.collection?.id === row.collectionId && !!row.collectionId));
+  const openPast = (row: PastReleaseRow) => {
+    if (row.collectionId) { onNavigate({ kind: 'collection', collectionId: row.collectionId }); return; }
+    const title = wishlist.find(item => item.id === row.titleId);
+    if (title) { setReleaseNoticeError(null); setReleaseDetail(title); }
+  };
+  const arrivals: MonthRelease[] = visit.arrivals.flatMap(row => row.date ? [{ key: row.key, kind: row.kind, date: row.date, name: row.name, detail: releaseKind(row.kind, row.volume), fresh: true, token: row.token, cover: releaseCover(row), onOpen: () => openRelease(row) }] : []);
+  const fromUpcoming = (row: UpcomingRow): MonthRelease => ({ key: row.key, kind: row.kind, date: row.date, name: row.name, detail: releaseKind(row.kind, row.volume), fresh: false, cover: releaseCover(row), onOpen: () => openUpcoming(row) });
+  const fromPast = (row: PastReleaseRow): MonthRelease => ({ key: row.key, kind: row.kind, date: row.date, name: row.name, detail: row.detail || releaseKind(row.kind, row.volume), fresh: false, cover: releaseCover(row), onOpen: () => openPast(row) });
+  const monthReleases: MonthRelease[] = [...arrivals, ...upcoming.filter(row => !isArrival(row)).map(fromUpcoming), ...pastRows.filter(row => !isArrival(row)).map(fromPast)];
+  const dayReleases: MonthRelease[] = [...arrivals.filter(row => row.date === selected), ...upcoming.filter(row => row.date === selected && !isArrival(row)).map(fromUpcoming), ...dayPastRows.filter(row => !isArrival(row)).map(fromPast)];
+  // NEW releases the six weeks cannot place stay reachable from the header.
+  const unplaced: MonthRelease[] = visit.arrivals.filter(row => !row.date || row.date < gridStart || row.date > gridEnd)
+    .map(row => ({ key: row.key, kind: row.kind, date: row.date ?? '', name: row.name, detail: releaseKind(row.kind, row.volume), fresh: true, token: row.token, onOpen: () => openRelease(row) }));
+  const days = monthDays(month, today, { releases: monthReleases, payments, entries: ledgerRecords, memos,
+    saved: savedCounts?.root === root ? [...savedCounts.counts].map(([date, count]) => ({ date, count })) : [] });
+  const totals = ledger && !notesUnavailable ? monthTotals(month, ledgerRecords, payments) : null;
+  const daySaved = selected <= today && savedCounts?.root === root ? savedCounts.counts.get(selected) ?? 0 : 0;
+  const choose = (date: string) => {
+    setShown(previous => ({ month: previous.month ?? month, selected: date }));
+    // Under the grid the panel can be below the fold; bring it into view only when it is hardly visible.
+    const panel = panelRef.current, scroller = panel?.closest<HTMLElement>('.home-scroll');
+    if (panel && scroller && typeof panel.scrollIntoView === 'function' && panel.getBoundingClientRect().top > scroller.getBoundingClientRect().bottom - 120)
+      panel.scrollIntoView({ block: 'nearest', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  };
   return <div className="home-view" ref={launchHost}>
     <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{displayDate(at, at)}</span> {weekdayLabel(at)}</span>} />
     <div className="home-scroll"><div className="home-content home-pc-layout" aria-busy={firstLoad}>
       <div className="home-media-column">
         {firstLoad ? <div className="home-media-waiting"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <>
-          <HomeCalendar model={calendar} at={at} onOpenCalendar={() => onNavigate(calendarView())} onOpenNote={noteId => onNavigate({ kind: 'notes', noteId })} />
+          <div className="home-month-layout"><div className="home-month-split">
+            <HomeMonth month={month} today={today} at={at} selected={selected} days={days} totals={totals} hideAmounts={privacyMode} earlier={unplaced}
+              onMonth={next => setShown(previous => ({ month: next, selected: previous.selected }))} onSelect={choose}
+              onToday={() => setShown({ month: null, selected: null })} onOpenCalendar={() => onNavigate(calendarView())}
+              onEnterPanel={() => panelRef.current?.querySelector<HTMLElement>('textarea')?.focus()} />
+            <div className="home-day-slot">
+              <HomeDay date={selected} today={today} releases={dayReleases} savedCount={daySaved} hideAmounts={privacyMode} store={store} ledger={ledger}
+                notesUnavailable={notesUnavailable} syncing={notesState.syncing} memo={dayMemo} memoNote={memoNote} entries={dayEntries} allEntries={ledgerRecords} payments={dayPayments} panelRef={panelRef}
+                onToday={() => setShown({ month: null, selected: null })} onOpenSaved={() => onNavigate({ kind: 'classification', classificationId: null })} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
+            </div>
+          </div></div>
           {savedDaysError && <p role="status">저장한 이미지 수를 확인할 수 없습니다 <Button variant="quiet" onClick={() => setSavedDaysRetry(value => value + 1)}>다시 시도</Button></p>}
           {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
-          <div className="home-tools">
-            <HomeTransfer at={at} enabled={active && visible} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
-            <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
-            <HomeLinkVault key={root} store={store} root={root} onOpen={() => setLinksView(true)} onOpenNotes={() => onNavigate({ kind: 'notes' })} />
-          </div>
         </>}
       </div>
       <div className="home-day-column">
@@ -402,6 +460,8 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         else todos.find(todo => todo.key === row.key)?.open();
       }} />}
       {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}
+      {!firstLoad && <HomeTransfer at={at} enabled={active && visible} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />}
+      {!firstLoad && <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />}
       </div>
     </div></div>
     {dialogs}
@@ -417,6 +477,8 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
 }
 
 const NO_WISHLIST: ReleaseWishlistItem[] = [];
+const NO_NOTES: Note[] = [];
+const NO_ENTRIES: LedgerEntry[] = [];
 const noopSubscribe = () => () => undefined;
 const EMPTY_NOTES = { notes: [], keyringLocked: false } as unknown as ReturnType<NotesStore["snapshot"]>;
 const emptyNotes = () => EMPTY_NOTES;

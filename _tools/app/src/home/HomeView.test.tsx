@@ -85,6 +85,15 @@ function renderHome({ props = {}, notes = [], characters = 0, candidates = [], p
   return { onNavigate, confirmSource, view };
 }
 
+/** A day cell of the month grid, and the day panel beside or under it. */
+const cell = (date: string) => document.querySelector<HTMLElement>(`[data-day="${date}"]`)!;
+const dayPanel = () => document.querySelector<HTMLElement>('.home-day')!;
+const calendarRegion = () => screen.findByRole('region', { name: '달력' });
+async function pickDay(date: string) {
+  await waitFor(() => expect(cell(date)).toBeTruthy());
+  fireEvent.click(cell(date));
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
@@ -113,7 +122,7 @@ afterEach(() => {
 });
 
 describe('Home attention', () => {
-  it('loads saved counts with the initial layout, keeps them through refresh and reuses the loaded ledger', async () => {
+  it('loads saved counts with the initial layout, keeps them through refresh, reuses the loaded ledger and hides only amounts in privacy mode', async () => {
     let finish!: (value: { date: string; count: number }[]) => void;
     gateway.listAssetDateBuckets.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const recurring = [{ id: 'netflix', name: '넷플릭스', amount: 13500, every: 1, unit: 'month' as const, start: '2026-01-26', until: null, trial: false, memo: '', order: 'a', remindDays: 1 }];
@@ -121,26 +130,31 @@ describe('Home attention', () => {
     const load = vi.spyOn(store, 'load');
     const { view, onNavigate } = renderHome({ props: { notes: store }, privacy: true });
     await act(async () => {});
-    expect(screen.queryByRole('region', { name: '발매 캘린더' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '달력' })).toBeNull();
     await act(async () => finish([{ date: '2026-09-26', count: 12 }]));
-    const calendar = await screen.findByRole('region', { name: '발매 캘린더' });
-    expect(within(calendar).getByLabelText('저장한 이미지 12장')).toHaveTextContent('12장');
-    fireEvent.click(within(calendar).getByRole('button', { name: '넷플릭스 13,500원' }));
-    expect(onNavigate).toHaveBeenCalledWith({ kind: 'notes', noteId: 'ledger' });
+    const calendar = await calendarRegion();
+    expect(cell('2026-09-26')).toHaveAccessibleName(/저장 12장/);
+    expect(cell('2026-09-26').textContent).not.toMatch(/12장/);
+    // The subscription charge stays visible by name; its amount is hidden everywhere, 오늘 할 것 included.
+    expect(within(cell('2026-09-26')).getByText(/넷플릭스/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/13,500/);
+    expect(within(dayPanel()).getAllByLabelText('금액 숨김').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /구독 이번 달 ••••/ })).toBeTruthy();
     expect(load).toHaveBeenCalledOnce();
-    expect(gateway.listAssetDateBuckets).toHaveBeenCalledOnce();
-    expect(gateway.listAssetDateBuckets.mock.calls[0]![0]).toMatchObject({ imagesOnly: true, localDays: expect.any(Array) });
+    expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(2);
+    expect(gateway.listAssetDateBuckets.mock.calls[0]![0]).toMatchObject({ imagesOnly: true });
+    expect(gateway.listAssetDateBuckets.mock.calls.flatMap(call => call[0].localDays ?? [])).toHaveLength(42);
 
     gateway.listAssetDateBuckets.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const props = { collections: [], reviewCount: 0, unsortedCount: 0, trashCount: 0, notes: store, now: () => NOW, onNavigate };
     view.rerender(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
       <HomeView {...props} refreshVersion={1} />
     </WorkspaceChromeProvider></PrivacyProvider>);
-    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('region', { name: '발매 캘린더' })).toBe(calendar);
-    expect(within(calendar).getByLabelText('저장한 이미지 12장')).toBeTruthy();
+    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(4));
+    expect(screen.getByRole('region', { name: '달력' })).toBe(calendar);
+    expect(cell('2026-09-26')).toHaveAccessibleName(/저장 12장/);
     await act(async () => finish([{ date: '2026-09-26', count: 15 }]));
-    expect(within(calendar).getByLabelText('저장한 이미지 15장')).toHaveTextContent('15장');
+    expect(cell('2026-09-26')).toHaveAccessibleName(/저장 15장/);
     expect(load).toHaveBeenCalledOnce();
   });
 
@@ -148,18 +162,18 @@ describe('Home attention', () => {
     const store = new NotesStore(async <T,>() => ({ unlocked: false, keyringLocked: true, lastSyncedAt: null,
       notes: [note('locked', { type: 'ledger', recurring: [{ id: 'r', name: '숨긴 결제명', amount: 1000, every: 1, unit: 'month', start: '2026-01-26', until: null, trial: false, memo: '', order: 'a' }] })] }) as T);
     renderHome({ props: { notes: store } });
-    const calendar = await screen.findByRole('region', { name: '발매 캘린더' });
-    expect(within(calendar).queryByText(/숨긴 결제명/)).toBeNull();
+    await calendarRegion();
+    expect(document.querySelector('.home-month-layout')!.textContent).not.toMatch(/숨긴 결제명/);
   });
 
   it('finishes Home on a saved-count error and retries only that bounded read', async () => {
     gateway.listAssetDateBuckets.mockRejectedValueOnce(new Error('unavailable'));
     renderHome();
-    await screen.findByRole('region', { name: '발매 캘린더' });
+    await calendarRegion();
     const error = screen.getByText('저장한 이미지 수를 확인할 수 없습니다');
     const overviewReads = gateway.getHomeOverview.mock.calls.length;
     fireEvent.click(within(error).getByRole('button', { name: '다시 시도' }));
-    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(4));
     await waitFor(() => expect(screen.queryByText('저장한 이미지 수를 확인할 수 없습니다')).toBeNull());
     expect(gateway.getHomeOverview).toHaveBeenCalledTimes(overviewReads);
   });
@@ -171,27 +185,33 @@ describe('Home attention', () => {
     expect(screen.queryByRole('button', { name: /중복 판본/ })).toBeNull();
     expect(gateway.getCatalogReviewCount).not.toHaveBeenCalled();
   });
-  it('holds the first layout until the first reads arrive, then shows the calendar, tools and card place, and opens the release calendar', async () => {
+  it('holds the first layout until the first reads arrive, then shows the month, the day panel, the tools in the right column and no 링크 보관, and opens the release calendar', async () => {
     let finish!: (value: HomeOverview) => void;
     gateway.getHomeOverview.mockReturnValueOnce(new Promise<HomeOverview>(resolve => { finish = resolve; }));
     gateway.releaseCalendar.wishlist.mockResolvedValue([title('a', '오늘 발매', 'game', '2026-09-26'), title('b', '내일 발매', 'game', '2026-09-27')]);
     const { view, onNavigate } = renderHome();
     await act(async () => {});
     expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('true');
-    expect(screen.queryByRole('region', { name: '발매 캘린더' })).toBeNull();
+    expect(screen.queryByRole('region', { name: '달력' })).toBeNull();
     await act(async () => finish(overview({ total: 1, today: 0, week: 0 })));
-    const calendar = await screen.findByRole('region', { name: '발매 캘린더' });
+    const calendar = await calendarRegion();
     expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('false');
-    for (const name of ['전송', '빠른 메모', '링크 보관', '오늘의 카드']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['전송', '빠른 메모', '오늘의 카드']) expect(screen.getByRole('region', { name })).toBeTruthy();
     expect(screen.getByRole('button', { name: '앨범' })).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: '링크 보관' })).getByRole('textbox', { name: 'URL 붙여넣기' })).toBeTruthy();
+    // 링크 보관 left Home; 더보기 and 찾기 open it.
+    expect(screen.queryByRole('region', { name: '링크 보관' })).toBeNull();
+    // Right column order: 오늘의 카드, 전송, 빠른 메모.
+    const column = view.container.querySelector('.home-day-column')!;
+    const order = [...column.querySelectorAll('section[aria-label]')].map(section => section.getAttribute('aria-label')).filter(name => ['오늘의 카드', '오늘 할 것', '전송', '빠른 메모'].includes(name!));
+    expect(order).toEqual(['오늘의 카드', '전송', '빠른 메모']);
     // 지금 하는 중, 오늘의 그림 and 1년 전 오늘 are no longer on Home, and their reads are not made.
     for (const name of [/지금 하는 중/, /오늘의 그림/, /1년 전 오늘/]) expect(screen.queryByRole('region', { name })).toBeNull();
     expect(gateway.getHomeMedia).not.toHaveBeenCalled();
     expect(gateway.getRevisitSlate).not.toHaveBeenCalled();
-    expect(within(calendar).getByText('오늘 발매')).toBeTruthy();
+    // The panel shows today first; tomorrow's release sits on its cell.
+    expect(within(dayPanel()).getByText('오늘 발매')).toBeTruthy();
     expect(within(calendar).getByText('내일 발매')).toBeTruthy();
-    fireEvent.click(within(calendar).getByRole('button', { name: '발매 캘린더 전체' }));
+    fireEvent.click(within(calendar).getByRole('button', { name: /발매 캘린더/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false, releaseCalendar: true });
     fireEvent.click(screen.getByRole('button', { name: /상세/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'exchange' });
@@ -205,15 +225,15 @@ describe('Home attention', () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'unsorted' });
     fireEvent.click(within(today).getByRole('button', { name: /유사 이미지 검토/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'similarity_review' });
-    for (const label of ['자산 현황', '작가', 'AV 배우', '메모', '상태', '이어지는 시리즈', '즐겨찾는 배우']) expect(screen.queryByRole('region', { name: label })).toBeNull();
+    for (const label of ['자산 현황', '작가', 'AV 배우', '상태', '이어지는 시리즈', '즐겨찾는 배우']) expect(screen.queryByRole('region', { name: label })).toBeNull();
     expect(gateway.listAvFavorites).not.toHaveBeenCalled();
   });
-  it('hides an empty 오늘 할 것 and draws an empty calendar without a placeholder line', async () => {
+  it('hides an empty 오늘 할 것 and draws an empty month without a placeholder line', async () => {
     renderHome();
-    await screen.findByRole('region', { name: '발매 캘린더' });
+    await calendarRegion();
     expect(screen.queryByRole('region', { name: /오늘 할 것/ })).toBeNull();
-    expect(document.querySelectorAll('.home-cal__day')).toHaveLength(14);
-    expect(document.querySelectorAll('.home-cal__item')).toHaveLength(0);
+    expect(document.querySelectorAll('.home-cal__day')).toHaveLength(42);
+    expect(document.querySelectorAll('.home-cal__line')).toHaveLength(0);
   });
   it('puts the monthly subscriptions and reminder before reviews and pinned text-body tasks', async () => {
     const subscription = { id: 'sub', name: 'Netflix', amount: 17000, every: 1, unit: 'month' as const, start: '2026-09-28', trial: true, until: null, remindDays: 3, memo: '', order: 'a' };
@@ -232,36 +252,70 @@ describe('Home attention', () => {
     expect(screen.queryByText('동기화됨')).toBeNull();
     expect(screen.queryByText('연결됨')).toBeNull();
   });
-  it('keeps NEW through refresh and a device revisit until opened', async () => {
+  it('keeps NEW through refresh and a device revisit until opened, then leaves the release on its day without NEW', async () => {
     localStorage.setItem('lakomics.home.visit.v1:fixture', JSON.stringify({ lastVisit: '2026-09-24T00:00:00Z', pending: [], opened: [] }));
     gateway.releaseCalendar.wishlist.mockResolvedValue([title('game', '새 게임', 'game', '2026-09-25', { released: true })]);
     const { view, onNavigate } = renderHome();
-    const card = await screen.findByRole('button', { name: /새 게임/ });
-    expect(within(card).getByText('NEW')).toBeTruthy();
+    await calendarRegion();
+    await waitFor(() => expect(within(cell('2026-09-25')).getByText('NEW')).toBeTruthy());
+    await pickDay('2026-09-25');
+    expect(within(within(dayPanel()).getByRole('button', { name: /새 게임/ })).getByText('NEW')).toBeTruthy();
     view.unmount();
     const next = renderHome();
-    const nextCard = await screen.findByRole('button', { name: /새 게임/ });
-    expect(within(nextCard).getByText('NEW')).toBeTruthy();
-    fireEvent.click(nextCard);
-    expect(await screen.findByRole('dialog', {name:'새 게임'})).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', {name:'발매 캘린더 열기'}));
+    await waitFor(() => expect(within(cell('2026-09-25')).getByText('NEW')).toBeTruthy());
+    await pickDay('2026-09-25');
+    fireEvent.click(within(dayPanel()).getByRole('button', { name: /새 게임/ }));
+    expect(await screen.findByRole('dialog', { name: '새 게임' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '발매 캘린더 열기' }));
     expect(next.onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false, releaseCalendar: true });
-    await waitFor(() => expect(screen.queryByRole('button', { name: /새 게임/ })).toBeNull());
+    // Past releases stay visible on their day; only the NEW mark ends.
+    await waitFor(() => expect(within(cell('2026-09-25')).queryByText('NEW')).toBeNull());
+    expect(within(cell('2026-09-25')).getByText('새 게임')).toBeTruthy();
     expect(onNavigate).not.toHaveBeenCalled();
     next.view.unmount(); renderHome();
-    await screen.findByRole('region', { name: '발매 캘린더' });
-    expect(screen.queryByRole('button', { name: /새 게임/ })).toBeNull();
+    await calendarRegion();
+    expect(within(cell('2026-09-25')).queryByText('NEW')).toBeNull();
   });
-  it('grids two weeks from this week\'s Monday across the month boundary and counts what comes after', async () => {
-    gateway.releaseCalendar.wishlist.mockResolvedValue([title('today', '오늘 작품', 'game', '2026-09-26'), title('edge', '경계 작품', 'game', '2026-10-04'), title('late', '나중 작품', 'game', '2026-10-05'), title('later', '더 나중 작품', 'game', '2026-11-05')]);
-    const { onNavigate } = renderHome();
-    const region = await screen.findByRole('region', { name: '발매 캘린더' });
-    // Saturday 9.26: the grid runs 9.21 - 10.4.
+  it('draws six Monday-first weeks around the shown month, selects on click and pages months with the data of that month', async () => {
+    gateway.releaseCalendar.wishlist.mockResolvedValue([title('today', '오늘 작품', 'game', '2026-09-26'), title('edge', '경계 작품', 'game', '2026-10-04'), title('later', '더 나중 작품', 'game', '2026-11-05')]);
+    renderHome();
+    const region = await calendarRegion();
+    // Saturday 9.26: September's grid runs 8.31 - 10.11.
+    const days = [...region.querySelectorAll<HTMLElement>('[data-day]')].map(item => item.dataset.day);
+    expect(days).toHaveLength(42);
+    expect(days[0]).toBe('2026-08-31');
+    expect(days[41]).toBe('2026-10-11');
     expect(region.querySelector('[data-tense="today"] .home-cal__date')).toBeTruthy();
-    expect(within(region).getByText('D-8')).toBeTruthy();
-    expect(within(region).queryByText('나중 작품')).toBeNull();
-    fireEvent.click(within(region).getByRole('button', { name: '10.5 이후 2개' }));
-    expect(onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false, releaseCalendar: true });
+    expect(within(cell('2026-10-04')).getByText('D-8')).toBeTruthy();
+    expect(within(region).queryByText('더 나중 작품')).toBeNull();
+    // Clicking a day of the next month only selects it.
+    fireEvent.click(cell('2026-10-04'));
+    expect(cell('2026-10-04')).toHaveAttribute('aria-selected', 'true');
+    expect(within(region).getByRole('heading', { name: '9월' })).toBeTruthy();
+    expect(within(dayPanel()).getByText('경계 작품')).toBeTruthy();
+    // Paging reads that month once and keeps the selected day in the panel.
+    const reads = gateway.listAssetDateBuckets.mock.calls.length;
+    fireEvent.click(within(region).getByRole('button', { name: '다음 달' }));
+    expect(within(region).getByRole('heading', { name: '10월' })).toBeTruthy();
+    expect(within(cell('2026-11-05')).getByText('더 나중 작품')).toBeTruthy();
+    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(reads + 2));
+    expect(cell('2026-10-04')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(within(region).getByRole('button', { name: '오늘' }));
+    expect(within(region).getByRole('heading', { name: '9월' })).toBeTruthy();
+    expect(cell('2026-09-26')).toHaveAttribute('aria-selected', 'true');
+  });
+  it('moves the selection with the arrow keys and pages the month when it leaves it', async () => {
+    const user = userEvent.setup();
+    renderHome();
+    const region = await calendarRegion();
+    cell('2026-09-26').focus();
+    await user.keyboard('{ArrowDown}');
+    expect(cell('2026-10-03')).toHaveAttribute('aria-selected', 'true');
+    expect(within(region).getByRole('heading', { name: '10월' })).toBeTruthy();
+    expect(cell('2026-10-03')).toHaveFocus();
+    await user.keyboard('{ArrowLeft}{Home}');
+    expect(cell('2026-09-26')).toHaveAttribute('aria-selected', 'true');
+    expect(within(region).getByRole('heading', { name: '9월' })).toBeTruthy();
   });
   it('keeps shown counts during an overview refresh and a failed read', async () => {
     gateway.getHomeOverview.mockResolvedValue(overview({total: 0, today: 0, week: 0}, {capturesPending: 3}));
@@ -329,7 +383,7 @@ describe("Home visit read acknowledgement", () => {
     expect(screen.getByText("Cached release")).toBeVisible();
     expect(readHomeVisit("fixture").lastVisit).toBe(previous);
     await act(async () => { finish([title("cached", "Cached release", "game", "2026-09-25"), title("fresh", "Fresh release", "game", "2026-09-26")]); });
-    await within(screen.getByRole("region", {name: /발매 캘린더/})).findByText("Fresh release");
+    await within(screen.getByRole("region", {name: "달력"})).findByText("Fresh release");
     await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
     expect(readHomeVisit("fixture").pending).toContain("title:fresh:2026-09-26:");
   });
@@ -370,13 +424,13 @@ describe("Home server-owned release reads", () => {
     let finish!: (items: ReleaseWishlistItem[]) => void;
     gateway.releaseCalendar.wishlist.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const { view } = renderHome();
-    await within(await screen.findByRole("region", { name: /발매 캘린더/ })).findByText("Saved release");
+    await within(await screen.findByRole("region", { name: "달력" })).findByText("Saved release");
     expect(view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("false");
     await waitFor(() => expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledOnce());
-    expect(screen.getByText("Saved release")).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "달력" })).getByText("Saved release")).toBeVisible();
     await act(async () => { finish([title("saved", "Saved release", "game", "2026-09-26"), title("fresh", "Fresh release", "game", "2026-09-27")]); });
-    await within(screen.getByRole("region", { name: /발매 캘린더/ })).findByText("Fresh release");
-    expect(screen.getByText("Saved release")).toBeVisible();
+    await within(screen.getByRole("region", { name: "달력" })).findByText("Fresh release");
+    expect(within(screen.getByRole("region", { name: "달력" })).getByText("Saved release")).toBeVisible();
     expect(readWishlistCache("fixture")?.map(item => item.id)).toEqual(["saved", "fresh"]);
   });
   it("saves the first server reply, an empty list included, for the next start", async () => {
@@ -417,7 +471,8 @@ describe("Home wishlist arrivals", () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);
     gateway.releaseCalendar.acknowledge.mockResolvedValue(undefined);
     renderHome();
-    fireEvent.click(await screen.findByRole("button", { name: /관심 영화/ }));
+    await pickDay("2026-09-23");
+    fireEvent.click(within(dayPanel()).getByRole("button", { name: /관심 영화/ }));
     await waitFor(() => expect(gateway.releaseCalendar.acknowledge).toHaveBeenCalledWith(["event"]));
   });
   it("reports a failed notice acknowledgement while keeping the title open", async () => {
@@ -425,7 +480,8 @@ describe("Home wishlist arrivals", () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);
     gateway.releaseCalendar.acknowledge.mockRejectedValueOnce(new Error("offline"));
     renderHome();
-    fireEvent.click(await screen.findByRole("button", { name: /관심 영화/ }));
+    await pickDay("2026-09-23");
+    fireEvent.click(within(dayPanel()).getByRole("button", { name: /관심 영화/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("발매 캘린더에서 다시 확인");
     expect(screen.getByRole("dialog", {name: "관심 영화"})).toBeTruthy();
   });
@@ -443,9 +499,10 @@ describe("Home wishlist arrivals", () => {
     const watched = title("wish", "관심 영화", "movie", "2026-09-23", { released: true, unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: "2026-09-23", detectedAt: iso(12), readAt: null }] });
     gateway.releaseCalendar.wishlist.mockResolvedValue([watched, { ...watched, id: "muted", title: "조용한 영화", muted: true }]);
     renderHome();
-    const row = await screen.findByRole("button", { name: /관심 영화/ });
+    await pickDay("2026-09-23");
+    const row = await within(dayPanel()).findByRole("button", { name: /관심 영화/ });
     expect(within(row).getByText("NEW")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /조용한 영화/ })).toBeNull();
+    expect(screen.queryByText("조용한 영화")).toBeNull();
   });
 });
 
@@ -480,7 +537,8 @@ it('keeps the saved visit until collections have successfully loaded and their a
   expect(view.container.querySelector('.home-pc-layout')?.getAttribute('aria-busy')).toBe('true');
   expect(readHomeVisit('fixture').lastVisit).toBe(previous);
   view.rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><HomeView {...props} collectionsReady collections={[{id:'owned',name:'늦게 읽은 게임',type:'game',releaseDate:'2026-09-25'} as HomeViewProps['collections'][number]]}/></PrivacyProvider>);
-  const card=await screen.findByRole('button',{name:/늦게 읽은 게임/});
+  await pickDay('2026-09-25');
+  const card=await within(dayPanel()).findByRole('button',{name:/늦게 읽은 게임/});
   expect(within(card).getByText('NEW')).toBeTruthy();
   await waitFor(()=>expect(readHomeVisit('fixture').lastVisit).toBe(NOW.toISOString()));
 });
@@ -504,4 +562,214 @@ it("covers Home's first load on app start with the launch splash, leaves when Ho
   expect(later.view.container.querySelector(".home-pc-layout")?.getAttribute("aria-busy")).toBe("true");
   expect(document.querySelector(".launch-splash")).toBeNull();
   splash.unmount();
+});
+
+describe("Home day panel", () => {
+  const ledgerNote = note("L", { type: "ledger", title: "가계부", pinned: true, recurring: [{ id: "claude", name: "클로드", amount: 159000, every: 1, unit: "month" as const, start: "2026-01-28", until: null, trial: false, memo: "", order: "a" }] });
+  /** In-memory stand-in for the notes backend: saves store the draft; month notes are `m-YYYY-MM`. */
+  async function liveStore(initial: Note[] = [ledgerNote]) {
+    let notes = initial;
+    const saves: Record<string, any>[] = [];
+    const store = new NotesStore((async (op: string, input: Record<string, any>) => {
+      if (op === "ledgerMonthId") return { id: `m-${input.month}` };
+      if (op === "save") {
+        const { expectedRevision, ...draft } = input;
+        saves.push(draft);
+        const saved = { ...(notes.find(n => n.id === draft.id) ?? {}), ...draft, localRevision: expectedRevision + 1, pending: true, deleted: false, createdAt: iso(1), updatedAt: iso(1), body: "", conflict: false } as Note;
+        notes = [saved, ...notes.filter(n => n.id !== saved.id)];
+        return saved;
+      }
+      return { unlocked: true, notes, lastSyncedAt: null };
+    }) as never);
+    await store.load();
+    return { store, saves };
+  }
+
+  it("saves a day memo into a hidden month note and marks the day", async () => {
+    const { store, saves } = await liveStore();
+    renderHome({ props: { notes: store } });
+    await calendarRegion();
+    await pickDay("2026-09-24");
+    const memo = within(dayPanel()).getByRole("textbox", { name: "9월 24일 메모" });
+    fireEvent.change(memo, { target: { value: "서점 가기" } });
+    expect(memo).toHaveValue("서점 가기");
+    fireEvent.blur(memo);
+    await waitFor(() => expect(saves.some(save => save.type === "checklist")).toBe(true));
+    expect(saves.find(save => save.type === "checklist")).toMatchObject({ title: "달력 메모 2026-09", archived: true, items: [{ id: "2026-09-24", text: "서점 가기" }] });
+    await waitFor(() => expect(cell("2026-09-24")).toHaveAccessibleName(/메모 있음/));
+    // The text stays while the notes report it back, and the note stays out of the 오늘 할 것 list.
+    expect(memo).toHaveValue("서점 가기");
+    // Switching days swaps the panel content in one step; coming back shows the saved memo.
+    await pickDay("2026-09-25");
+    expect(within(dayPanel()).getByRole("textbox", { name: "9월 25일 메모" })).toHaveValue("");
+    await pickDay("2026-09-24");
+    expect(within(dayPanel()).getByRole("textbox", { name: "9월 24일 메모" })).toHaveValue("서점 가기");
+  });
+
+  it("adds, edits and deletes a ledger row of the chosen day with the 가계부's own quick entry", async () => {
+    const user = userEvent.setup();
+    const { store, saves } = await liveStore();
+    renderHome({ props: { notes: store } });
+    await calendarRegion();
+    await pickDay("2026-09-25");
+    const quick = within(dayPanel()).getByRole("textbox", { name: "이날 지출 빠른 입력" });
+    await user.type(quick, "점심 8000{Enter}");
+    const monthSave = () => { const list = saves.filter(save => save.type === "ledger-month"); return list[list.length - 1]; };
+    await waitFor(() => expect(monthSave()?.entries).toHaveLength(1));
+    expect(monthSave()).toMatchObject({ month: "2026-09", entries: [{ date: "2026-09-25", amount: 8000, name: "점심" }] });
+    const row = await within(dayPanel()).findByRole("button", { name: /점심/ });
+    expect(row).toHaveTextContent("₩8,000");
+    await waitFor(() => expect(cell("2026-09-25")).toHaveAccessibleName(/지출 8,000원/));
+    expect(within(document.querySelector(".home-month__totals")!).getByText("₩8,000")).toBeTruthy();
+
+    await user.click(row);
+    const form = within(dayPanel()).getByRole("group", { name: "기록 고치기" });
+    const amount = within(form).getByRole("textbox", { name: "금액" });
+    await user.clear(amount);
+    await user.type(amount, "9500{Enter}");
+    await waitFor(() => expect(monthSave()?.entries[0].amount).toBe(9500));
+
+    await user.click(await within(dayPanel()).findByRole("button", { name: /점심/ }));
+    await user.click(within(dayPanel()).getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(monthSave()?.entries).toHaveLength(0));
+    const undo = await screen.findByRole("button", { name: "되돌리기" });
+    await user.click(undo);
+    await waitFor(() => expect(monthSave()?.entries).toHaveLength(1));
+    expect(monthSave()?.entries[0]).toMatchObject({ name: "점심", amount: 9500 });
+  });
+
+  it("lists unconfirmed subscription charges of the day read-only and counts them in the day total", async () => {
+    const { store } = await liveStore();
+    renderHome({ props: { notes: store } });
+    await calendarRegion();
+    await pickDay("2026-09-28");
+    const charge = within(dayPanel()).getByRole("group", { name: "클로드 결제 예정" });
+    expect(charge).toHaveTextContent("고정·구독 자동");
+    expect(charge).toHaveTextContent("₩159,000");
+    expect(within(dayPanel()).getByLabelText("하루 합계")).toHaveTextContent("₩159,000");
+    expect(within(dayPanel()).queryByRole("button", { name: /클로드/ })).toBeNull();
+    expect(within(document.querySelector(".home-month__totals")!).getByText("₩159,000")).toBeTruthy();
+  });
+
+  it("keeps privacy-mode rows read-only so the edit form never shows an amount", async () => {
+    const entry = { id: "e1", date: "2026-09-26", amount: 8000, name: "점심", createdAt: iso(9) };
+    const { store } = await liveStore([ledgerNote, note("m-2026-09", { type: "ledger-month", ledger: "L", month: "2026-09", entries: [entry], archived: true, pinned: false })]);
+    renderHome({ props: { notes: store }, privacy: true });
+    await calendarRegion();
+    expect(within(dayPanel()).getByRole("group", { name: "점심" })).toBeTruthy();
+    expect(within(dayPanel()).queryByRole("button", { name: /점심/ })).toBeNull();
+    expect(dayPanel().textContent).not.toMatch(/8,000/);
+    expect(cell("2026-09-26")).not.toHaveAccessibleName(/8,000/);
+  });
+
+  it("marks a release with its kind icon instead of the kind word, in the cell and in the day panel", async () => {
+    gateway.releaseCalendar.wishlist.mockResolvedValue([title("g", "새 게임", "game", "2026-09-28"), title("m", "새 영화", "movie", "2026-09-28")]);
+    renderHome();
+    await calendarRegion();
+    await waitFor(() => expect(cell("2026-09-28").querySelector(".home-cal__line")).toBeTruthy());
+    expect(within(cell("2026-09-28")).queryByText("게임")).toBeNull();
+    expect(cell("2026-09-28").querySelector(".home-cal__line [aria-label]")).toBeTruthy();
+    await pickDay("2026-09-28");
+    const row = within(dayPanel()).getByRole("button", { name: /새 게임/ });
+    expect(within(row).getByRole("img", { name: "게임" })).toBeTruthy();
+    expect(within(row).queryByText("게임")).toBeNull();
+    expect(within(within(dayPanel()).getByRole("button", { name: /새 영화/ })).getByRole("img", { name: "영화" })).toBeTruthy();
+  });
+
+  describe("모든 구독 and 사고 싶은 것", () => {
+    const planned = [
+      { id: "p1", name: "기계식 키보드", amount: 120000, month: null, memo: "", dropped: false, order: "a" },
+      { id: "p2", name: "이미 산 것", amount: 5000, month: "2026-09", memo: "", dropped: false, order: "b" },
+      { id: "p3", name: "안 사기로 한 것", amount: 9000, month: null, memo: "", dropped: true, order: "c" },
+    ];
+    const bought = { id: "e1", date: "2026-09-20", amount: 5000, name: "이미 산 것", planned: "p2", createdAt: iso(9) };
+    const withLists = () => [note("L", { type: "ledger", title: "가계부", pinned: true, planned, recurring: ledgerNoteRecurring }), note("m-2026-09", { type: "ledger-month", ledger: "L", month: "2026-09", entries: [bought], archived: true, pinned: false })];
+    const ledgerNoteRecurring = [{ id: "claude", name: "클로드", amount: 159000, every: 1, unit: "month" as const, start: "2026-01-28", until: null, trial: false, memo: "", order: "a" }];
+    const fold = (name: string) => within(dayPanel()).getByRole("button", { name: new RegExp(name) });
+    const rowsOf = (name: string) => within(dayPanel()).getByRole("region", { name }).querySelector<HTMLElement>(".home-fold")!;
+
+    it("starts folded with counts, opens to the rows (bought and dropped things left out) and keeps the choice on this device", async () => {
+      const first = renderHome({ notes: withLists() });
+      await calendarRegion();
+      await waitFor(() => expect(fold("모든 구독")).toBeTruthy());
+      expect(fold("모든 구독")).toHaveAttribute("aria-expanded", "false");
+      expect(fold("모든 구독")).toHaveTextContent("1");
+      expect(fold("사고 싶은 것")).toHaveAttribute("aria-expanded", "false");
+      expect(fold("사고 싶은 것")).toHaveTextContent("1");
+      expect(rowsOf("모든 구독")).toHaveAttribute("inert");
+      fireEvent.click(fold("모든 구독"));
+      expect(fold("모든 구독")).toHaveAttribute("aria-expanded", "true");
+      expect(rowsOf("모든 구독")).not.toHaveAttribute("inert");
+      expect(within(rowsOf("모든 구독")).getByText("클로드")).toBeTruthy();
+      expect(rowsOf("모든 구독")).toHaveTextContent("₩159,000");
+      fireEvent.click(fold("사고 싶은 것"));
+      expect(within(rowsOf("사고 싶은 것")).getByText("기계식 키보드")).toBeTruthy();
+      expect(rowsOf("사고 싶은 것")).not.toHaveTextContent("이미 산 것");
+      expect(rowsOf("사고 싶은 것")).not.toHaveTextContent("안 사기로 한 것");
+      // Another day and another start both keep the two choices.
+      await pickDay("2026-09-28");
+      expect(fold("모든 구독")).toHaveAttribute("aria-expanded", "true");
+      first.view.unmount();
+      renderHome({ notes: withLists() });
+      await calendarRegion();
+      await waitFor(() => expect(fold("모든 구독")).toHaveAttribute("aria-expanded", "true"));
+      fireEvent.click(fold("모든 구독"));
+      expect(fold("모든 구독")).toHaveAttribute("aria-expanded", "false");
+      expect(fold("사고 싶은 것")).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("adds a thing to buy right in the opened section: it shows at once, the count follows and the ledger note keeps it", async () => {
+      localStorage.setItem("lakomics.home.dayFolds.v1", JSON.stringify({ subscriptions: false, wishes: true }));
+      const user = userEvent.setup();
+      const { store, saves } = await liveStore(withLists());
+      renderHome({ props: { notes: store } });
+      await calendarRegion();
+      await waitFor(() => expect(fold("사고 싶은 것")).toBeTruthy());
+      const quick = within(rowsOf("사고 싶은 것")).getByRole("textbox", { name: "사고 싶은 것 빠른 입력" });
+      expect(quick).toHaveAttribute("placeholder", "예: 키보드 120000");
+      expect(quick).not.toHaveFocus();
+      await user.type(quick, "무선 마우스 45,000{Enter}");
+      await waitFor(() => expect(within(rowsOf("사고 싶은 것")).getByText("무선 마우스")).toBeTruthy());
+      expect(rowsOf("사고 싶은 것")).toHaveTextContent("₩45,000");
+      expect(fold("사고 싶은 것")).toHaveTextContent("2");
+      expect(quick).toHaveValue("");
+      const ledgerSave = saves.filter(save => save.type === "ledger").pop();
+      expect(ledgerSave?.planned).toHaveLength(4);
+      expect(ledgerSave?.planned[3]).toMatchObject({ name: "무선 마우스", amount: 45000, month: null, dropped: false });
+      // A name alone is kept without a price.
+      await user.type(quick, "독서대{Enter}");
+      await waitFor(() => expect(within(rowsOf("사고 싶은 것")).getByText("독서대")).toBeTruthy());
+      expect(fold("사고 싶은 것")).toHaveTextContent("3");
+      expect(within(rowsOf("사고 싶은 것")).getByText("독서대").closest(".ledger-entry__main")).not.toHaveTextContent("₩");
+    });
+
+    it("hides the amount of a thing added in privacy mode", async () => {
+      localStorage.setItem("lakomics.home.dayFolds.v1", JSON.stringify({ subscriptions: false, wishes: true }));
+      const user = userEvent.setup();
+      const { store } = await liveStore(withLists());
+      renderHome({ props: { notes: store }, privacy: true });
+      await calendarRegion();
+      await waitFor(() => expect(fold("사고 싶은 것")).toBeTruthy());
+      await user.type(within(rowsOf("사고 싶은 것")).getByRole("textbox", { name: "사고 싶은 것 빠른 입력" }), "모니터 300000{Enter}");
+      await waitFor(() => expect(within(rowsOf("사고 싶은 것")).getByText("모니터")).toBeTruthy());
+      expect(rowsOf("사고 싶은 것").textContent).not.toMatch(/300,000/);
+    });
+
+    it("hides the amounts of both lists in privacy mode but keeps the names", async () => {
+      localStorage.setItem("lakomics.home.dayFolds.v1", JSON.stringify({ subscriptions: true, wishes: true }));
+      renderHome({ notes: withLists(), privacy: true });
+      await calendarRegion();
+      await waitFor(() => expect(fold("모든 구독")).toBeTruthy());
+      expect(rowsOf("모든 구독")).toHaveTextContent("클로드");
+      expect(rowsOf("사고 싶은 것")).toHaveTextContent("기계식 키보드");
+      expect(rowsOf("모든 구독").textContent).not.toMatch(/159,000/);
+      expect(rowsOf("사고 싶은 것").textContent).not.toMatch(/120,000/);
+    });
+  });
+
+  it("opens 링크 보관 from a request of 더보기 or 찾기", async () => {
+    const view = renderHome({ props: { linksRequest: {} } });
+    expect(await screen.findByRole("textbox", { name: "URL 붙여넣기" })).toBeTruthy();
+    view.view.unmount();
+  });
 });

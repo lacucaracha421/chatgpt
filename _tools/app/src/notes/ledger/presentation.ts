@@ -50,6 +50,13 @@ export function parseQuickEntry(text: string): { name: string; amount: number } 
   const name = match[1]!.trim(), amount = Number(match[2]!.replace(/,/g, ''));
   return name && Array.from(name).length <= 100 && validAmount(amount) && amount > 0 ? { name, amount } : null;
 }
+/** A thing to buy typed in one line: "키보드 120000", or just a name when the price is not known yet (0원). */
+export function parseWishEntry(text: string): { name: string; amount: number } | null {
+  const priced = parseQuickEntry(text);
+  if (priced) return priced;
+  const name = text.trim();
+  return name && Array.from(name).length <= 100 ? { name, amount: 0 } : null;
+}
 export function priceChange(r: Recurring, amount: number, date: string) {
   if (!isDate(date)) return null;
   const history = r.priceHistory ?? [];

@@ -27,3 +27,12 @@ it("adds only already-known collection and note counts to the shared More/Find e
   expect(count()).toBe(6);
   expect(fixture.load).not.toHaveBeenCalled();
 });
+
+it("offers 링크 보관 in the shared More/Find entries and opens Home's full screen", () => {
+  const onNavigate = vi.fn();
+  const { result } = renderHook(() => useNavigationEntries({ view: { kind: "home" }, onNavigate, reviewCount: 0, unsortedCount: 0, trashCount: 0, privateVaultAvailable: false }));
+  const entry = result.current.find(item => item.id === "links");
+  expect(entry).toMatchObject({ group: "go", label: "링크 보관", selected: false });
+  entry!.run();
+  expect(onNavigate).toHaveBeenCalledWith({ kind: "home", links: true });
+});

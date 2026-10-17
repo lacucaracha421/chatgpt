@@ -3,7 +3,7 @@ import { matchesKoreanSearch } from "../shared/koreanSearch";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
 import { useExchangeSnapshot } from "../exchange/exchangeStore";
-import { ChartBarIcon, FolderIcon, InboxIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ChartBarIcon, FolderIcon, InboxIcon, LinkIcon, PlusIcon, RectangleStackIcon, Square2StackIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 import { AREA_ICONS } from "../shared/ui/areaIcons";
 import { useSyncExternalStore } from "react";
 import { useOptionalLibrary } from "../library/LibraryContext";
@@ -55,6 +55,8 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: MORE_LABELS.unsorted, icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
     { id: "notes", group: "go", label: "메모", icon: <AREA_ICONS.notes />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
     // Utility outside the Library: listed as a queue only while received files are unseen.
+    // 링크 보관 left Home (HOME-CAL-001); this and 찾기 open its full screen.
+    { id: "links", group: "go", label: "링크 보관", keywords: ["링크", "북마크", "주소"], icon: <LinkIcon />, selected: view.kind === "home" && Boolean(view.links), run: go({ kind: "home", links: true }) },
     { id: "exchange", group: queued(received) ? "queue" : "go", label: MORE_LABELS.exchange, keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <AREA_ICONS.exchange />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: MORE_LABELS.private_vault, keywords: ["비밀 보관함"], icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
     { id: "artists", group: "go", label: MORE_LABELS.artists, keywords: ["다시보기", "작가 미상", "artist"], icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },

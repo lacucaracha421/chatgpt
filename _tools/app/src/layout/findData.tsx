@@ -3,6 +3,7 @@ import { thumbnailUrl } from "../assets/mediaUrl";
 import type { ArtistSummary } from "../artists/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import type { AssetView, CollectionSummary } from "../library/types";
+import { isDayMemoNote } from "../notes/dayMemo";
 import { notesStore, type Note } from "../notes/store";
 import { AREA_ICONS } from "../shared/ui/areaIcons";
 import type { NavigationEntry } from "./navigationEntries";
@@ -10,7 +11,7 @@ import type { NavigationEntry } from "./navigationEntries";
 import {FIND_WORK_TYPE_LABEL} from "../shared/findEntries";
 /** Only project titles; never copy note bodies, fields, labels or checklist content into the index. */
 export function noteTitleEntries(notes: Pick<Note, "id" | "title" | "type" | "deleted">[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
-  return notes.filter(note => !note.deleted && note.type !== "ledger-month").map(note => ({
+  return notes.filter(note => !note.deleted && note.type !== "ledger-month" && !isDayMemoNote(note)).map(note => ({
     id: `note-${note.id}`, group: "note", label: note.title.trim() || "제목 없는 메모", icon: <AREA_ICONS.notes />,
     run: () => onNavigate({ kind: "notes", noteId: note.id }),
   }));

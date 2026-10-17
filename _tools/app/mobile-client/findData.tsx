@@ -3,6 +3,7 @@ import {FolderIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {FIND_SCOPES} from '../src/shared/findModel';
 import {FIND_WORK_TYPE_LABEL,type NavigationEntry} from '../src/shared/findEntries';
+import {isDayMemoNote} from '../src/notes/dayMemo';
 import type {Note,NotesStore} from '../src/notes/store';
 import {api} from './transport';
 import {collectionPath,type CollectionSummary,type CollectionPage,type CollectionKind} from './collectionModel';
@@ -24,7 +25,7 @@ export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:
     entry('new-releases','go','신간',{kind:'shortcut',shortcut:'releases'},{icon:<AREA_ICONS.collections/>}),
     ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{workType:work.item.type,keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
     ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{count:artist.assetCount,keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
-    ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month').map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),
+    ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month'&&!isDayMemoNote(note)).map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),
     ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{placeKind:folder.characterKind==='character'?'character':'folder',count:folder.asset_count,context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
     ...(albums?.adopted?albums.albums.map(album=>entry(`place-album-${album.id}`,'place',album.name,{kind:'place',view:albumView(albums,album)},{context:'앨범',icon:<RectangleStackIcon/>})):[]),
     ...([['home','홈',AREA_ICONS.home],['assets','에셋',AREA_ICONS.assets],['collections','컬렉션',AREA_ICONS.collections],['catalog','카탈로그',AREA_ICONS.manga],['notes','메모',AREA_ICONS.notes],['settings','설정',AREA_ICONS.settings]] as const).map(([screen,label,Icon])=>entry(`screen-${screen}`,'go',label,{kind:'screen',screen},{icon:<Icon/>})),

@@ -324,7 +324,7 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["미분류", "작가", "통계", "휴지통 3개", "설정"]);
+    .toEqual(["미분류", "링크 보관", "작가", "통계", "휴지통 3개", "설정"]);
 
   const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }],
     ["작가", { kind: "artists" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];

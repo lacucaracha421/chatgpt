@@ -3,11 +3,11 @@ import { EmptyState } from "../../shared/ui/EmptyState";
 import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { ArrowPathRoundedSquareIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { Button } from "../../shared/ui/Button";
-import { keyBetween } from "../model";
 import type { Note, NotesStore } from "../store";
 import { addMonths, localToday } from "./cycle";
-import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProblem, monthLabel, signedWon, sortRecurring, validIncomeDay, won, type LedgerEntry, type Planned, type Recurring } from "./model";
-import { baseIncome, ledgerEntries, monthNotesOf, monthSummary, monthCharges, type Charge } from "./summary";
+import { forkedIds, keepOnly, LEDGER_LIMITS, monthLabel, signedWon, validIncomeDay, won, type LedgerEntry, type Planned, type Recurring } from "./model";
+import { baseIncome, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
+import { ledgerSaveProblem, ledgerWriter, orderAfter, type EntryDraft } from "./entryWrites";
 import { amountText, dotDate, formatAmountInput, parseAmount, parseDay, weekday } from "./input";
 import { Dialog } from "../../shared/ui/Dialog";
 import { LedgerContents, QuickEntry } from "./LedgerContents";
@@ -18,8 +18,6 @@ export { ledgerCard } from "./card";
 const monthNumber = (month: string) => Number(month.slice(5, 7));
 const codePoints = (text: string) => Array.from(text).length;
 const nameTooLong = (text: string) => codePoints(text) > LEDGER_LIMITS.nameChars;
-/** Every save checks the item limits and the whole-note size first (design §4.4). */
-const saveProblem = (note: Note) => ledgerLimitProblem(note) ?? ledgerSizeProblem(note);
 
 /** Notes list preview of a ledger: this month's 쓸 수 있는 돈 (or 쓴 돈 without an income). */
 export function ledgerPreview(ledger: Note, notes: Note[], today = localToday()): string {
@@ -43,11 +41,10 @@ function AmountInput({ value, onChange, label, allowIn = false, placeholder = "0
     <input ref={inputRef} aria-label={label} inputMode="numeric" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onChange(formatAmountInput(e.target.value, allowIn))} /></span>;
 }
 
-type EntryDraft = { date: string; amount: number; name: string; in: boolean };
 type EntryInitial = { date: string; amount: string; name: string; in: boolean };
 
 /** The entry row: 날짜 · 금액 · 이름 · 추가. Works with Tab and Enter only; `+` before the amount = 들어온 돈. */
-function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnlink, onSubmit, onCancel, onDelete, amountRef }: {
+export function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnlink, onSubmit, onCancel, onDelete, amountRef }: {
   label: string; month: string; initial: EntryInitial; submitLabel?: string; link?: string; onUnlink?: () => void;
   onSubmit: (draft: EntryDraft) => Promise<boolean> | boolean; onCancel?: () => void; onDelete?: () => void; amountRef?: RefObject<HTMLInputElement | null>;
 }) {
@@ -143,10 +140,6 @@ export function LedgerView({ store, ledgerId, today, actions, children }: { stor
 function upsert<T extends { id: string }>(list: T[], item: T): T[] {
   return list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item];
 }
-function orderAfter<T extends Recurring | Planned>(list: T[]): string {
-  const sorted = sortRecurring(list);
-  return keyBetween(sorted.length ? sorted[sorted.length - 1]!.order : null, null);
-}
 
 function LedgerScreen({ store, ledger, notes, today, actions, children }: { store: NotesStore; ledger: Note; notes: Note[]; today: string; actions?: ReactNode; children?: ReactNode }) {
   const currentMonth = today.slice(0, 7);
@@ -170,55 +163,17 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   const base = baseIncome(ledger, monthNotes, month);
 
   // ---- writes -------------------------------------------------------------------------
-  const freshMonthNotes = () => monthNotesOf(store.snapshot().notes, ledger.id);
   function saveLedger(change: (current: Note) => Partial<Note>): boolean {
     const current = store.snapshot().notes.find((n) => n.id === ledger.id) ?? ledger;
     const next = { ...current, ...change(current) };
-    const problem = saveProblem(next);
+    const problem = ledgerSaveProblem(next);
     setError(problem);
     if (problem) return false;
     store.edit(next);
     return true;
   }
-  /** Writes the month note of `m` (created on first write; its id is derived natively). */
-  async function saveMonth(m: string, update: (list: LedgerEntry[]) => LedgerEntry[], extra: Partial<Note> = {}): Promise<boolean> {
-    try {
-      const id = await store.ledgerMonth(ledger.id, m);
-      // Finish the initial empty-month save before writing its first entry.
-      if (!await store.flush()) { setError(store.snapshot().error ?? "가계부 기록을 저장하지 못했습니다."); return false; }
-      const note = store.snapshot().notes.find((n) => n.id === id);
-      if (!note) return false;
-      const next = { ...note, ...extra, entries: update(note.entries ?? []) };
-      const problem = saveProblem(next);
-      setError(problem);
-      if (problem) return false;
-      store.edit(next);
-      return true;
-    } catch (e) { setError(typeof e === "string" ? e : "가계부 기록을 저장하지 못했습니다."); return false; }
-  }
-  /** Every month note holding the entry (keep-both copies repeat entries); nothing is saved if any would break a limit. */
-  function editContaining(id: string, update: (list: LedgerEntry[]) => LedgerEntry[]): boolean {
-    const next = freshMonthNotes().filter((note) => (note.entries ?? []).some((e) => e.id === id)).map((note) => ({ ...note, entries: update(note.entries ?? []) }));
-    const problem = next.map(saveProblem).find(Boolean) ?? null;
-    setError(problem);
-    if (problem) return false;
-    for (const note of next) store.edit(note);
-    return true;
-  }
-  function addEntry(draft: EntryDraft, extra: Partial<LedgerEntry> = {}) {
-    const entry: LedgerEntry = { id: crypto.randomUUID(), date: draft.date, amount: draft.amount, name: draft.name, createdAt: new Date().toISOString(), ...(draft.in ? { in: true } : {}), ...extra };
-    return saveMonth(draft.date.slice(0, 7), (list) => {
-      if (entry.recurring) {
-        // Recheck after the asynchronous month creation/flush, including moved confirmations.
-        const all = ledgerEntries(freshMonthNotes());
-        const link = entry.recurring;
-        if (all.some(e => e.recurring?.id === link.id && e.recurring.date === link.date)) return list;
-        const current = store.snapshot().notes.find(n => n.id === ledger.id) ?? ledger;
-        if (monthCharges(current.recurring ?? [], all, link.date.slice(0, 7)).some(c => c.recurring.id === link.id && c.date === link.date && c.confirmedBy)) return list;
-      }
-      return [...list, entry];
-    });
-  }
+  const writer = useMemo(() => ledgerWriter(store, ledger.id, setError), [store, ledger.id]);
+  const { saveMonth, editContaining, addEntry } = writer;
   async function confirmCharge(charge: Charge, amount: number): Promise<boolean> {
     if (chargeSaving.current) return false;
     chargeSaving.current = true;
@@ -230,15 +185,7 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
     } finally { chargeSaving.current = false; setChargeBusy(false); }
   }
   async function updateEntry(old: LedgerEntry, draft: EntryDraft): Promise<boolean> {
-    const next: LedgerEntry = { ...old, date: draft.date, amount: draft.amount, name: draft.name };
-    if (draft.in) next.in = true; else delete next.in;
-    const target = draft.date.slice(0, 7);
-    if (target === old.date.slice(0, 7)) { if (!editContaining(old.id, (list) => list.map((e) => (e.id === old.id ? next : e)))) return false; }
-    else {
-      // Moving months: write the target first, then remove the entry from the source (design §4.2).
-      if (!await saveMonth(target, (list) => [...list.filter((e) => e.id !== old.id), next])) return false;
-      for (const note of freshMonthNotes()) if (note.month !== target && (note.entries ?? []).some((e) => e.id === old.id)) store.edit({ ...note, entries: (note.entries ?? []).filter((e) => e.id !== old.id) });
-    }
+    if (!await writer.updateEntry(old, draft)) return false;
     setEditingEntry(null);
     return true;
   }

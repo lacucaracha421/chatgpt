@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, calendarPayments, calendarSavedQuery, mondayOf, releaseCalendarModel } from "./homeCalendarModel";
+import { addDays, calendarPayments, mondayOf, releaseCalendarModel } from "./homeCalendarModel";
 import type { Note } from "../notes/store";
 import type { Recurring } from "../notes/ledger/model";
 
@@ -97,19 +97,5 @@ describe("calendar activity", () => {
     const saved = [ { date: "2026-09-20", count: 9 }, { date: "2026-09-21", count: 12 }, { date: "2026-09-26", count: 3 }, { date: "2026-09-27", count: 20 } ];
     const model = releaseCalendarModel([], "2026-09-26", 2, { saved });
     expect(model.days.map(day => day.savedCount)).toEqual([12, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0]);
-  });
-
-  it("requests fourteen local-midnight ranges rather than splitting UTC dates", () => {
-    // The native test also covers a 25-hour day; these expectations use the host's local zone.
-    const query = calendarSavedQuery("2026-11-01");
-    expect(query.imagesOnly).toBe(true);
-    expect(query.localDays).toHaveLength(14);
-    expect(query.startUtc).toBe(new Date(2026, 9, 26).toISOString());
-    expect(query.endUtc).toBe(new Date(2026, 10, 9).toISOString());
-    query.localDays!.forEach((range, index) => {
-      expect(range.localDate).toBe(addDays("2026-10-26", index));
-      expect(range.startUtc).toBe(new Date(2026, 9, 26 + index).toISOString());
-      expect(range.endUtc).toBe(new Date(2026, 9, 27 + index).toISOString());
-    });
   });
 });

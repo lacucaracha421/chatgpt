@@ -12,19 +12,21 @@ import { forkedIds, sortRecurring, signedWon, won, type LedgerEntry, type Planne
 import { donePlans, type LedgerLike, type MonthSummary } from './summary';
 import { budgetFigures, monthlyEvents, parseQuickEntry, subscriptionPills } from './presentation';
 
-export function QuickEntry({ onSave }: { onSave(value: { name: string; amount: number }): Promise<boolean> }) {
+export function QuickEntry({ onSave, label = '지출 빠른 입력', placeholder = '예: 점심 8000', hint = '이름과 금액을 적어 주세요. 예: 점심 8000', parse = parseQuickEntry }: {
+  onSave(value: { name: string; amount: number }): Promise<boolean>; label?: string; placeholder?: string; hint?: string; parse?(text: string): { name: string; amount: number } | null;
+}) {
   const [text, setText] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const composing = useRef(false), saving = useRef(false);
   async function save() {
     if (composing.current || saving.current) return;
     const submitted = text;
-    const parsed = parseQuickEntry(submitted);
-    if (!parsed) { setError('이름과 금액을 적어 주세요. 예: 점심 8000'); return; }
+    const parsed = parse(submitted);
+    if (!parsed) { setError(hint); return; }
     saving.current = true; setBusy(true); setError('');
     try { if (await onSave(parsed)) setText(current => current === submitted ? '' : current); } finally { saving.current = false; setBusy(false); }
   }
   return <div className="ledger-quick">
-    <TextInput aria-label="지출 빠른 입력" placeholder="예: 점심 8000" value={text}
+    <TextInput aria-label={label} placeholder={placeholder} value={text}
       onChange={e => setText(e.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={e => { if (e.key === 'Enter' && !composing.current && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void save(); } }} />
     <Button size="sm" variant="quiet" disabled={busy} onClick={() => void save()}>추가</Button>

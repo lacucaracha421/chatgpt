@@ -422,7 +422,8 @@ export type AssetView =
   | { kind: "trash" }
   | { kind: "statistics" }
   /** PC Home (HOME-DASH-001): the information dashboard, first on the rail. */
-  | { kind: "home" }
+  /** `links` opens the 링크 보관 screen (from 더보기 and 찾기). */
+  | { kind: "home"; links?: boolean }
   /** `noteId` opens that note (from Home's pinned notes). */
   | { kind: "notes"; noteId?: string }
   | { kind: "exchange" }
