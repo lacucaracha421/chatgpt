@@ -12,6 +12,8 @@ export interface CardData {
   artWidth: number;
   artHeight: number;
   cutoutUrl?: string;
+  /** The server holds a 768 px copy of the art that the tablet album grid may swap in. */
+  artMedium?: boolean;
   tint?: string;
   count: number;
   level: number;

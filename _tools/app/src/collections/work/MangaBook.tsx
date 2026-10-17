@@ -1,4 +1,4 @@
-import { useWorkTurnBlocked } from "./WorkZoom";
+import { useWorkTurnBlocked, useWorkTurnGesture } from "./WorkZoom";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import "../case/CaseMaterials.css";
 import { MangaBack, coverAverageColor, MANGA_BACK_COLOR, type MangaBackData } from "./MangaBack";
@@ -71,6 +71,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
   const illustration = useRef<HTMLSpanElement>(null);
   const [angle, setAngle] = useState(0);
   const blocked = useWorkTurnBlocked();
+  const gesture = useWorkTurnGesture();
   const [dragging, setDragging] = useState(false);
   const [ratio, setRatio] = useState(.71);
   const [backColor, setBackColor] = useState({ src, color: MANGA_BACK_COLOR });
@@ -154,10 +155,13 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
       }} onPointerMove={event => {
         if (blocked?.current) { endDrag(); return; }
         const start = drag.current; if (!start || event.pointerId !== start.pointer) return;
-        const distance = event.clientX - start.x;
-        if (!start.moved && Math.abs(distance) < 4) return;
-        if (!start.moved) { start.moved = true; setDragging(true); }
-        const value = start.angle + distance * .6, node = bookRef.current;
+        // A touch drag waits for the stage to choose its axis, then follows the finger from where it first touched.
+        if (!start.moved) {
+          const lock = event.pointerType === "touch" ? gesture?.current : null;
+          if (lock === "pending" || (lock !== "turn" && Math.abs(event.clientX - start.x) < 4)) return;
+          start.moved = true; setDragging(true);
+        }
+        const value = start.angle + (event.clientX - start.x) * .6, node = bookRef.current;
         liveAngle.current = value;
         if (node) { node.style.setProperty("--manga-turn-angle", `${value}deg`); node.dataset.angle = String(value); }
       }} onPointerUp={event => {

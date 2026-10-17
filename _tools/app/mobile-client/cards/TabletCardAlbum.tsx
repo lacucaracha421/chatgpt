@@ -3,7 +3,7 @@ import { CardAlbumAction } from "../../src/cards/CardAlbumAction";
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {FilterChip} from '../../src/shared/ui/FilterChip';
 import {CardViewer} from '../../src/cards/CardViewer';
-import {TradingCard} from '../../src/cards/TradingCard';
+import {AlbumTileCard} from './AlbumTileCard';
 import {groupAlbum} from '../../src/cards/groupAlbum';
 import {cardTiers, type CardData, type CardTier} from '../../src/cards/types';
 import {usePrivacyMode} from '../privacyMode';
@@ -11,7 +11,7 @@ import {TopBar} from '../TopBar';
 import {useSyncSignal} from '../syncSignals';
 import {Button, EmptyState, Skeleton} from '../ui';
 import {CardsPrivacy} from './CardsPrivacy';
-import {displayCards, tabletCardsApi, type TabletCardsApi} from './cardsClient';
+import {displayCards, originalArtUrl, tabletCardsApi, type TabletCardsApi} from './cardsClient';
 import {useAndroidBack} from './useAndroidBack';
 import './tabletCards.css';
 
@@ -120,6 +120,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
     readRef.current();
   };
   const albumAction = (card: CardData) => <CardAlbumAction key={card.id} card={card} backRef={confirmBack} trashed={trashed} setTrashed={api.setTrashed} onChanged={changed} />;
+  const sharpArt = useCallback((card: CardData) => card.artAssetId ? originalArtUrl(api, card.artAssetId) : Promise.resolve(''), [api]);
   const changeScope = (value: boolean) => { closeViewer(); setSeries(null); setTrashed(value); };
   return <div className="tablet-cards tablet-card-album" data-viewer-open={viewerOpen}>
     <TopBar title="카드 앨범" back={{label: '홈으로', onClick: onClose}} loading={pending && '카드 앨범 불러오는 중'}/>
@@ -140,7 +141,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
         <div className="tablet-card-album__grid">{[...characters].map(([id, owned]) => {
           const best = owned[0];
           return <button type="button" className="tablet-card-album__tile" key={id} aria-pressed={selected === id} onClick={() => openViewer(best)} aria-label={`${best.characterName} · ${best.tier.toUpperCase()}`}>
-            <span className="tablet-card-album__card"><TradingCard card={best}/></span>
+            <AlbumTileCard card={best} api={api}/>
             <b>{best.characterName}</b>
             <small>{best.tier.toUpperCase()} · ×{best.count} · Lv.{best.level}</small>
             <span className="tablet-card-album__tiers" aria-label="보유 등급">{cardTiers.map(value => <i key={value} data-owned={owned.some(card => card.tier === value)}>{value.toUpperCase()}</i>)}</span>
@@ -150,7 +151,7 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
       {data && !visibleGroups.length && <EmptyState inline title={data.cards.length ? '이 등급의 카드가 없습니다' : data.trashed ? '카드 휴지통이 비어 있습니다' : '아직 모은 카드가 없습니다'}/>}
       {data?.next && <div ref={moreRef} className="tablet-card-album__more"><Button disabled={pending} onClick={() => readRef.current(true)}>더 보기</Button></div>}
     </main>
-    {viewerOpen && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter}
+    {viewerOpen && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter} sharpArt={sharpArt}
       onIndexChange={next => { const card = viewerCards[next]; if (card) openViewer(card); }}/>}
   </div>;
 }

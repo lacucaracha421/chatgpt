@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 import album_authority
 import asset_visibility
 import authority
+import card_art_medium
 import conditional
 from home_publications import Digest, Strict, bounded_body, fail, text
 
@@ -80,6 +81,7 @@ def _columns(db, table):
 
 def startup_db(db):
     db.executescript(DDL)
+    card_art_medium.install(db)
     # Tables created before the keep step lack these columns. Packs opened back then
     # already put every card in the album, so they count as fully kept.
     legacy = "kept_at" not in _columns(db, "card_packs")
@@ -134,6 +136,13 @@ def status_signal(db):
 
 def _bump(db):
     db.execute("UPDATE card_state SET revision=revision+1 WHERE singleton=1")
+
+
+def touch(db):
+    """Publish a change made outside a card command (a new medium copy) to the clients."""
+    db.execute("BEGIN IMMEDIATE")
+    _bump(db)
+    db.commit()
 
 
 def saved_count(db, day):
@@ -261,10 +270,13 @@ def _card(db, character_id, tier, art_id, count, level, serial, is_new, nodes):
                    and n["sourceId"] == node["seriesId"]), "")
     art = db.execute("SELECT width,height FROM visible_assets WHERE id=? AND " + IMAGE_SQL, [art_id]).fetchone()
     cutout = db.execute("SELECT 1 FROM card_cutouts WHERE asset_id=? AND state='ready'", [art_id]).fetchone()
+    medium = db.execute("SELECT 1 FROM card_art_medium WHERE asset_id=?", [art_id]).fetchone()
     return {"characterId": character_id, "characterName": node["name"] if node else character_id,
             "seriesName": series, "tier": tier, "artAssetId": art_id,
             "artWidth": (art[0] or 0) if art else 0, "artHeight": (art[1] or 0) if art else 0,
             "cutout": {"assetId": art_id} if art and cutout and tier in TIERS[3:] else None,
+            # A 768 px copy of the art exists: the album grid may swap it in for the 360 px thumbnail.
+            "artMedium": bool(art and medium),
             "count": count, "level": level, "serial": str(serial) if serial is not None else None,
             "isNew": is_new}
 
@@ -456,6 +468,19 @@ def _upcoming_art(db, now):
         rows = db.execute("SELECT * FROM card_draws WHERE pack_id=? ORDER BY slot", [pack["id"]]).fetchall()
         result += [(card["artAssetId"], card["tier"]) for card in _simulate(db, rows, [])]
     return result
+
+
+def medium_wanted(db, scope):
+    """Art Asset ids that should have a medium copy, in order of need.
+
+    ``new``: the art of cards clients will see soon (unopened packs, packs waiting for a keep).
+    ``all``: those, then the album (live cards first, newest first, then the trash).
+    """
+    ids = [art for art, _ in _upcoming_art(db, _now())]
+    if scope == "all":
+        ids += [r[0] for r in db.execute(
+            "SELECT art_asset_id FROM card_album ORDER BY trashed_at IS NOT NULL, last_drawn_at DESC, character_id, tier")]
+    return list(dict.fromkeys(ids))
 
 
 def _cover_view(db, day):
@@ -694,6 +719,14 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
                 [json.dumps(wanted)])}
         return {"assetIds": [asset_id for asset_id in wanted if asset_id in usable]}
 
+    def art_allowed(db, asset_id):
+        """The art is in an owned card, an upcoming pack or today's cover."""
+        owned = db.execute("SELECT 1 FROM card_album WHERE art_asset_id=? LIMIT 1", [asset_id]).fetchone()
+        cover = _cover_view(db, card_day(_now()))
+        # Art of a pre-drawn pack is warmed before it is opened: the prefetch lists these ids.
+        allowed = bool(owned or cover and asset_id in cover["assetIds"])
+        return allowed or asset_id in {art for art, _ in _upcoming_art(db, _now())}
+
     @app.post(PREFIX + "/cutouts/{asset_id}/ticket")
     def ticket(asset_id: str, authorization: str | None = Header(default=None)):
         require_client(authorization)
@@ -703,15 +736,24 @@ def register(app, get_db, require_client, require_publisher, *, storage, bucket,
             asset_visibility.install(db)
             row = db.execute("SELECT c.* FROM card_cutouts c JOIN visible_assets v ON v.id=c.asset_id "
                              "WHERE c.asset_id=? AND c.state='ready' AND v." + IMAGE_SQL, [asset_id]).fetchone()
-            owned = db.execute("SELECT 1 FROM card_album WHERE art_asset_id=? LIMIT 1", [asset_id]).fetchone()
-            cover = _cover_view(db, card_day(_now()))
-            # Art of a pre-drawn pack is warmed before it is opened: the prefetch lists these ids.
-            allowed = bool(owned or cover and asset_id in cover["assetIds"])
-            if row is not None and not allowed:
-                allowed = asset_id in {art for art, _ in _upcoming_art(db, _now())}
-            if row is None or not allowed:
+            if row is None or not art_allowed(db, asset_id):
                 fail(404, "cutoutUnavailable", "No owned card, upcoming pack or today's cover uses this cutout.")
         return {"url": presign_get(row["object_key"], TICKET_SECONDS), "expires_in": TICKET_SECONDS,
                 "sha256": row["sha256"], "size_bytes": row["size_bytes"], "content_type": row["content_type"]}
+
+    @app.post(PREFIX + "/art/{asset_id}/medium/ticket")
+    def medium_ticket(asset_id: str, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        _asset_id(asset_id)
+        with get_db() as db:
+            db.execute("BEGIN")
+            asset_visibility.install(db)
+            # Only a copy made from the Asset's current original is served.
+            row = db.execute("SELECT m.* FROM card_art_medium m JOIN visible_assets v ON v.id=m.asset_id "
+                             "WHERE m.asset_id=? AND m.source_sha256=v.sha256 AND v." + IMAGE_SQL, [asset_id]).fetchone()
+            if row is None or not art_allowed(db, asset_id):
+                fail(404, "cardArtMediumUnavailable", "No owned card, upcoming pack or today's cover has a medium copy of this art.")
+        return {"url": presign_get(row["object_key"], TICKET_SECONDS), "expires_in": TICKET_SECONDS,
+                "sha256": row["sha256"], "size_bytes": row["size_bytes"], "content_type": card_art_medium.CONTENT_TYPE}
 
     return startup

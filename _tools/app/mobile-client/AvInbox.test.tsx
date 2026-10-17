@@ -89,6 +89,12 @@ it('requires explicit target for several matches and offers a new work',()=>{
   chooser({...inboxFixture,matches:[{libraryId:inboxIdentity.libraryId,workId:'a',name:'첫 컬렉션',entityRevision:1},{libraryId:inboxIdentity.libraryId,workId:'b',name:'둘째 컬렉션',entityRevision:1}]});
   expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();fireEvent.click(screen.getByRole('radio',{name:'새 AV 컬렉션으로 만들기'}));expect(screen.getByRole('button',{name:'적용'})).not.toBeDisabled();
 });
+it('offers the spine of a spine-less wide jacket, taken from the DVD cover',()=>{
+  chooser({...inboxFixture,candidate:{...inboxFixture.candidate!,jacketWidth:2184,jacketHeight:1638,defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true}}});
+  const spine=within(screen.getByRole('group',{name:'책등 선택'}));
+  expect(spine.getByRole('button',{name:'후보 사용'})).not.toBeDisabled();expect(spine.getByRole('button',{name:'후보 사용'})).toHaveAttribute('aria-pressed','true');
+  expect(screen.getByText('책등은 DVD 표지에서 가져옴')).toBeTruthy();
+});
 it('offers no spine candidate and privacy requests no jackets/covers',async()=>{
   localStorage.setItem(PRIVACY_MODE_KEY,'1');chooser({...inboxFixture,candidate:{...inboxFixture.candidate!,defaultSplit:{...inboxFixture.candidate!.defaultSplit,useSpine:false}}});
   expect(screen.getAllByText('후보 없음',{selector:'span'}).length).toBeGreaterThan(0);expect(within(screen.getByRole('group',{name:'책등 선택'})).getByRole('button',{name:'후보 사용'})).toBeDisabled();await waitFor(()=>expect(mocks.native).not.toHaveBeenCalled());expect(screen.queryByRole('img')).toBeNull();

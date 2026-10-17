@@ -1121,6 +1121,40 @@ def shutdown_image_thumbnails():
         released()
 
 
+# Medium (768 px) copies of the art of upcoming cards, for the tablet album grid. Existing cards
+# are covered by the operator backfill (card_art_medium_backfill.py), never by this worker.
+import card_art_medium
+
+_card_art_medium_worker = None
+
+
+@lifecycle(app).on_startup
+def startup_card_art_medium():
+    global _card_art_medium_worker
+    from r2 import thumbnail_storage_client
+
+    if _card_art_medium_worker is None:
+        _card_art_medium_worker = card_art_medium.CardArtMediumWorker(
+            DB_PATH, thumbnail_storage_client(), R2_BUCKET,
+            wanted=lambda db: cards.medium_wanted(db, "new"), on_change=cards.touch)
+    _card_art_medium_worker.start()
+
+
+@lifecycle(app).on_shutdown
+def shutdown_card_art_medium():
+    worker = _card_art_medium_worker
+    if worker is None:
+        return
+
+    def released():
+        global _card_art_medium_worker
+        if _card_art_medium_worker is worker:
+            _card_art_medium_worker = None
+
+    if worker.stop(on_stopped=released):
+        released()
+
+
 @lifecycle(app).on_startup
 def startup_library_projection_cache():
     # All component tables now exist. This additive DDL does not backfill data,

@@ -1,7 +1,7 @@
 import { useWorkImageReady } from "../work/useWorkImageReady";
 import { useLongPress } from "../../shared/useLongPress";
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { useWorkTurnBlocked } from "../work/WorkZoom";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useWorkTurnBlocked, useWorkTurnGesture } from "../work/WorkZoom";
 import "./CollectionCase.css";
 import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
@@ -135,6 +135,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   onDiscHold?(): void;
 }) {
   const blocked = useWorkTurnBlocked();
+  const gesture = useWorkTurnGesture();
   const lid = useRef<HTMLSpanElement>(null);
   useCaseSound(sound, open, data.platform, lid);
   const [angle, setAngle] = useState(open ? -10 : initialAngle);
@@ -146,17 +147,22 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   const [dragging, setDragging] = useState(false);
   // While a drag turns the case, the angle goes straight onto the case element: no React render per pointer move
   // (the whole model re-rendered every move and stuttered on the tablet). The release commits it once.
+  // It goes in as an inline transform, not as the inherited --ry: a changed custom property restyles every face, and the
+  // faces printed with var(--grain) (floor, inner lid, inner spine) were repainted and re-rasterised each frame, which
+  // took the Galaxy Tab from 120 to about 40 fps when zoomed in (2026-10-18). Keep the string equal to .kase { transform }.
   const kaseRef = useRef<HTMLDivElement>(null);
   const liveAngle = useRef<number | null>(null);
   function follow(next: number) {
     const value = ((next + 180) % 360 + 360) % 360 - 180;
     liveAngle.current = value;
     const node = kaseRef.current; if (!node) return;
-    node.style.setProperty("--ry", `${value}deg`);
+    node.style.transform = `rotateX(-5deg) rotateY(${value}deg) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5))`;
     node.dataset.angle = String(value);
     // The sheen repaints the whole front each frame: a touch screen moves it once, when the drag ends.
     if (!coarsePointer()) node.style.setProperty("--gloss", `${50 + value}%`);
   }
+  // Once the drag is committed, --ry carries the same angle again and the inline transform goes.
+  useLayoutEffect(() => { if (!dragging) kaseRef.current?.style.removeProperty("transform"); }, [dragging, angle]);
   function endDrag() {
     drag.current = null; setDragging(false);
     if (liveAngle.current !== null) { setAngle(liveAngle.current); liveAngle.current = null; }
@@ -214,7 +220,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     <div className="collection-case-object">
     <div ref={kaseRef} className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
       onPointerDown={event => { if (blocked?.current) { endDrag(); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; discHeld.current = false; if (holdable && ((event.target instanceof Element && event.target.closest(".disc")) || onDisc(event.currentTarget, event.clientX, event.clientY))) press.bind.onPointerDown(event); event.currentTarget.setPointerCapture?.(event.pointerId); }}
-      onPointerMove={event => { press.bind.onPointerMove(event); if (blocked?.current) { endDrag(); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } follow(start.angle + (event.clientX - start.x) * .6); }}
+      onPointerMove={event => { press.bind.onPointerMove(event); if (blocked?.current) { endDrag(); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved) { const lock = event.pointerType === "touch" ? gesture?.current : null; if (lock === "pending" || (lock !== "turn" && Math.abs(event.clientX - start.x) < 4)) return; start.moved = true; setDragging(true); } follow(start.angle + (event.clientX - start.x) * .6); }}
       onPointerUp={event => { press.bind.onPointerUp(); if (drag.current?.pointer !== event.pointerId) return; if (discHeld.current) { discHeld.current = false; endDrag(); return; } const click = !blocked?.current && drag.current && !drag.current.moved; endDrag(); if (click) onOpenChange(!open); }} onPointerCancel={() => { press.bind.onPointerCancel(); endDrag(); }} onLostPointerCapture={() => { press.cancel(); setDiscHolding(false); endDrag(); }}
       onKeyDown={event => {
         if (event.key === "ArrowLeft") turn(angle - 15);

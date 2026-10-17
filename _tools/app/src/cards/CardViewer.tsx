@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { displayDate } from "../shared/displayDate";
@@ -9,7 +9,7 @@ import { IconButton } from "../shared/ui/IconButton";
 import { StableImage } from "../shared/ui/StableImage";
 import { useCardReducedMotion } from "./motion";
 import { TradingCard } from "./TradingCard";
-import type { CardData } from "./types";
+import { hasCutoutLayer, type CardData } from "./types";
 import "./viewer.css";
 
 /** How long the old card stays under the new one while they cross-fade. Matches viewer.css. */
@@ -34,14 +34,25 @@ export interface CardViewerProps {
   albumAction?: (card: CardData) => ReactNode;
   /** Tests replace the image preparation; the default decodes the art. */
   preload?: (card: CardData) => Promise<unknown>;
+  /**
+   * A sharper copy of a card's art for the big card and 그림 보기, or "" when there is none. The tablet's
+   * album art is its 360 px thumbnail, which the full-window card enlarges 4-9 times.
+   */
+  sharpArt?: (card: CardData) => Promise<string>;
 }
+
+/** The card with its sharper art, once decoded. A cutout card's face is generated, so only 그림 보기 changes. */
+const withSharp = (card: CardData, sharp: ReadonlyMap<string, string>) => {
+  const url = sharp.get(card.id);
+  return url && !(hasCutoutLayer(card.tier) && card.cutoutUrl) ? { ...card, artUrl: url } : card;
+};
 
 /**
  * Full-window card viewer shared by the PC and tablet albums: the card as large as fits, with tilt,
  * foil and pop-out, stepping through the album list. The current card stays on screen until the
  * next one has its art decoded, then the two cross-fade (reduced motion: instant swap).
  */
-export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, onCharacter, albumAction, preload = preloadCard }: CardViewerProps) {
+export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, onCharacter, albumAction, preload = preloadCard, sharpArt }: CardViewerProps) {
   const reduced = useCardReducedMotion();
   const target = cards[index] ?? cards[0];
   const [shown, setShown] = useState<CardData>(target);
@@ -65,10 +76,25 @@ export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, 
     const timer = window.setTimeout(() => setLeaving(null), CARD_VIEWER_FADE_MS + 40);
     return () => window.clearTimeout(timer);
   }, [leaving]);
+  // Sharper art replaces the thumbnail only after it is decoded, so the card never blanks or blurs back.
+  const [sharp, setSharp] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const asked = useRef(new Set<string>());
+  const sharpen = useCallback((card: CardData) => {
+    if (!sharpArt || asked.current.has(card.id)) return;
+    asked.current.add(card.id);
+    void sharpArt(card).then(async url => {
+      if (!url || url === card.artUrl) return;
+      await preload({ ...card, artUrl: url, cutoutUrl: undefined });
+      setSharp(old => new Map(old).set(card.id, url));
+    }).catch(() => { asked.current.delete(card.id); });
+  }, [sharpArt, preload]);
+  useEffect(() => { sharpen(shown); }, [shown, sharpen]);
   // Neighbours are decoded ahead so stepping is immediate.
   useEffect(() => {
-    for (const card of [cards[index + 1], cards[index - 1]]) if (card) void Promise.resolve(preload(card)).catch(() => undefined);
-  }, [cards, index, preload]);
+    for (const card of [cards[index + 1], cards[index - 1]]) if (card) { void Promise.resolve(preload(card)).catch(() => undefined); sharpen(card); }
+  }, [cards, index, preload, sharpen]);
+  const shownFace = useMemo(() => withSharp(shown, sharp), [shown, sharp]);
+  const leavingFace = useMemo(() => leaving && withSharp(leaving, sharp), [leaving, sharp]);
 
   const step = useCallback((delta: number) => {
     const next = index + delta;
@@ -118,10 +144,10 @@ export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, 
       <div className="card-viewer__stage" onClick={onStageClick} onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={() => { swipe.current = null; }}>
         {art ? <div className="card-viewer__layer card-viewer__layer--art">
           {masked ? <span className="card-viewer__art privacy-mask" role="img" aria-label="이미지 숨김" />
-            : <StableImage className="card-viewer__art" src={shown.artUrl} alt={`${shown.characterName} 원본 그림`} draggable={false} respectReducedMotion />}
+            : <StableImage className="card-viewer__art" src={sharp.get(shown.id) ?? shown.artUrl} alt={`${shown.characterName} 원본 그림`} draggable={false} respectReducedMotion />}
         </div> : <>
-          {leaving && <div key={`out:${leaving.id}`} className="card-viewer__layer card-viewer__layer--out" aria-hidden="true"><div className="card-viewer__card"><TradingCard card={leaving} /></div></div>}
-          <div key={`in:${shown.id}`} className="card-viewer__layer card-viewer__layer--in"><div className="card-viewer__card" data-viewer-card><TradingCard card={shown} /></div></div>
+          {leavingFace && <div key={`out:${leavingFace.id}`} className="card-viewer__layer card-viewer__layer--out" aria-hidden="true"><div className="card-viewer__card"><TradingCard card={leavingFace} /></div></div>}
+          <div key={`in:${shown.id}`} className="card-viewer__layer card-viewer__layer--in"><div className="card-viewer__card" data-viewer-card><TradingCard card={shownFace} /></div></div>
         </>}
       </div>
       <header className="card-viewer__bar" data-tauri-drag-region="deep"

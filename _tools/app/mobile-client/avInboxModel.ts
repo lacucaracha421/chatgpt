@@ -71,4 +71,6 @@ export async function jacketPreview(id:string,signal:AbortSignal):Promise<string
   const reply=await native<{url:string}>('providerImage',{path:`${inboxPath(id)}/jacket`,connection},signal);
   return reply.url;
 }
-export const candidateHasSurface=(c:InboxCandidate,s:Surface)=>s==='front'||c.defaultSplit.isWrap&&(s==='back'?c.defaultSplit.x1>0:c.defaultSplit.useSpine&&c.defaultSplit.x2>c.defaultSplit.x1);
+/** useSpine on a wrap whose lines enclose nothing: the jacket has no spine of its own, the server cuts it from the DVD cover. */
+export const spineBorrowed=(c:InboxCandidate)=>c.defaultSplit.isWrap&&c.defaultSplit.useSpine&&c.defaultSplit.x1===c.defaultSplit.x2;
+export const candidateHasSurface=(c:InboxCandidate,s:Surface)=>s==='front'||c.defaultSplit.isWrap&&(s==='back'?c.defaultSplit.x1>0:c.defaultSplit.useSpine);

@@ -111,7 +111,10 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   const matches = candidate?.matches ?? [];
   const needsPick = isNew && matches.length > 1 && !choseNew;
   const spinePercent = candidate ? ((split.x2 - split.x1) / candidate.jacketWidth) * 100 : 0;
-  const spineWarning = Boolean(candidate?.defaultSplit.isWrap) && (spinePercent < 1 || spinePercent > 12);
+  // A wide jacket with no spine of its own (4:3): the server cuts the spine from the DVD cover instead,
+  // as long as the lines leave less than 1% between them.
+  const borrowedSpine = Boolean(candidate && spineIsBorrowed(candidate.defaultSplit)) && spinePercent < 1;
+  const spineWarning = Boolean(candidate?.defaultSplit.isWrap) && !borrowedSpine && (spinePercent < 1 || spinePercent > 12);
 
   function moveLine(line: "x1" | "x2", delta: number) {
     if (!candidate) return;
@@ -237,12 +240,13 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
           <div className="av-link-surfaces">{SURFACES.map(({ key, label }) => {
             const bounds = cropBounds(key, split, candidate.jacketWidth);
             const currentId = candidate.current?.covers[`${key}Id`] ?? null;
+            const borrowed = key === "spine" && borrowedSpine;
             return <section key={key} className="av-link-surface" aria-label={label}>
-              <h4>{label}<small className="numeric">{bounds.width} × {candidate.jacketHeight}</small></h4>
+              <h4>{label}{borrowed ? <small>책등은 DVD 표지에서 가져옴</small> : <small className="numeric">{bounds.width} × {candidate.jacketHeight}</small>}</h4>
               <div className="av-link-surface__pair">
                 <ArtworkBox label="지금" url={currentId ? workArtworkThumbnailUrl(currentId) : null} privacy={privacyMode} />
                 <ChevronRightIcon aria-hidden="true" />
-                <CropBox candidate={candidate} x={bounds.x} width={bounds.width} privacy={privacyMode} choice={surfaces[key]} />
+                <CropBox candidate={candidate} x={bounds.x} width={bounds.width} privacy={privacyMode} choice={surfaces[key]} borrowed={borrowed} />
               </div>
               <div className="av-link-segment" role="group" aria-label={`${label} 선택`}>{([
                 ["candidate", "후보 사용"], ["keep", "유지"], ["clear", "비우기"],
@@ -284,7 +288,13 @@ function ArtworkBox({ label, url, privacy }: { label: string; url: string | null
   return <div className="av-link-art-box"><div>{url && !privacy ? <img src={url} alt="현재 표지" /> : <span>{privacy ? "비공개" : "없음"}</span>}</div><small>{label}</small></div>;
 }
 
-function CropBox({ candidate, x, width, privacy, choice }: { candidate: AvLinkCandidate; x: number; width: number; privacy: boolean; choice: AvLinkSurfaceChoice }) {
+/** useSpine on a jacket whose lines enclose nothing: the spine exists, but in another image. */
+function spineIsBorrowed(split: AvLinkCandidate["defaultSplit"]) {
+  return split.isWrap && split.useSpine && split.x1 === split.x2;
+}
+
+function CropBox({ candidate, x, width, privacy, choice, borrowed = false }: { candidate: AvLinkCandidate; x: number; width: number; privacy: boolean; choice: AvLinkSurfaceChoice; borrowed?: boolean }) {
+  if (borrowed) return <div className="av-link-art-box"><div className="av-link-crop"><span>{choice === "candidate" ? "DVD 표지에서" : choice === "keep" ? "지금 것 유지" : "비움"}</span></div><small>후보</small></div>;
   if (width < 1) return <div className="av-link-art-box"><div className="av-link-crop"><span>후보 없음</span></div><small>후보</small></div>;
   const style = { "--crop-image-width": `${(candidate.jacketWidth / width) * 100}%`, "--crop-image-left": `${(-x / width) * 100}%`, aspectRatio: `${width} / ${candidate.jacketHeight}` } as CSSProperties;
   return <div className="av-link-art-box"><div className="av-link-crop" style={style}>{!privacy && <img src={candidate.jacketUrl} alt="후보 표지 자르기" draggable={false} />}

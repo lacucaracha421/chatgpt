@@ -35,12 +35,15 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
   const [teasing, setTeasing] = useState(false);
   const cutout = cutoutOf(card);
   const art = useMemo(() => masked ? "" : background(card), [card, masked]);
+  // Keyed by the art's asset: a sharper copy of the same picture (card viewer) keeps the mask instead of flashing the sheen.
+  const lumKey = card.artAssetId ?? card.artUrl, lumUrl = useRef(card.artUrl);
+  lumUrl.current = card.artUrl;
   useEffect(() => {
     const node = host.current!; let live = true;
     node.style.removeProperty("--lum");
-    if (!masked && !cutout) void luminanceMask(card.artUrl).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
+    if (!masked && !cutout) void luminanceMask(lumUrl.current).then(mask => { if (live && mask) node.style.setProperty("--lum", mask); });
     return () => { live = false; };
-  }, [card.artUrl, cutout, masked]);
+  }, [lumKey, cutout, masked]);
   const frame = useMemo(() => {
     if (card.tier !== "n" && card.tier !== "r") return undefined;
     try { return `url("${frameTexture(card.tier)}")`; } catch { return undefined; }
@@ -67,23 +70,25 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
       onFocus={() => setTeasing(true)} onBlur={() => setTeasing(false)}>
       <div className="card__flip"><div className="card__tilt">
         <div className="face front" aria-hidden={faceDown}>
-          {masked ? <span className="f-bg privacy-mask" aria-label="이미지 숨김" /> : art && <StableImage className="f-bg" src={art} alt="" draggable={false} respectReducedMotion />}
-          <div className="f-sheen" /><div className="f-etch" /><div className="f-shade" /><div className="f-frame" style={{ backgroundImage: frame }} /><div className="f-glare" /><div className="f-rainbow" /><div className="f-depth" />
-          {!masked && cutout && <div className="f-subjwrap"><StableImage className="f-subj" src={cutout} alt="" draggable={false} respectReducedMotion /></div>}
-          <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>
-          <div className="f-cost"><span className="num">{rank + 1}</span></div>
-          <div className={`f-dup${card.count > 9 ? " two" : ""}`}><span className="num">{card.count}</span></div>
-          <div className="f-power"><b className="num">{power >= 1000 ? Math.floor(power / 1000) : power}</b><span className="pw-tail"><i>PW</i>{power >= 1000 && <small className="num">{String(power % 1000).padStart(3, "0")}</small>}</span></div>
-          <div className="f-gem"><span className="f-type"><svg viewBox="0 0 24 24"><path d="m12 3 7 9-7 9-7-9z" /></svg></span></div>
-          <div className="f-fx"><div className="fx"><span className="kw">시리즈</span><span className="tx">{card.seriesName}</span></div><div className="fx"><span className="kw">수집</span><span className="tx">보유 {card.count}장 · 레벨 {card.level}</span></div></div>
-          <div className="f-nb"><span className="nb-lv"><i>Lv.</i><b className="num">{card.level}</b></span><span className={`f-title${card.tier === "sr" ? " emboss" : ""}`}>{card.characterName}</span><span className="nb-no"><span>{card.id}</span><span className="f-rar">
-            {rank === 0 ? "●" : Array.from({ length: rank >= 3 ? rank - 2 : rank }, (_, i) => <svg key={i} viewBox="0 0 20 20" aria-hidden="true" style={{ fill: `url(#${rarityId}-${i})` }}>
-              <defs><linearGradient id={`${rarityId}-${i}`}><stop stopColor={rank >= 3 ? "#a8711c" : "#8a929c"} /><stop offset=".35" stopColor={rank >= 3 ? "#fff3c8" : "#fff"} /><stop offset=".7" stopColor={rank >= 3 ? "#c88d2a" : "#9aa2ac"} /><stop offset="1" stopColor={rank >= 3 ? "#ffe9a6" : "#f4f6f8"} /></linearGradient></defs>
-              <path d="m10 1 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L10 15.4l-5.6 2.9 1.1-6.3L1 7.6l6.2-.9Z" />
-            </svg>)}<span>{card.tier.toUpperCase()}</span>
-          </span></span></div>
-          <div className="f-traits">{card.serial && rank >= 4 && <span className="f-serial">{card.serial}</span>}<span className="t">{card.seriesName}</span></div>
-          <div className="f-vc">© Lakomics · 카드 컬렉션</div>{card.tier === "lr" && card.serial && <div className="f-ser2">한정 · {card.serial}</div>}
+          <div className="f-plate">
+            {masked ? <span className="f-bg privacy-mask" aria-label="이미지 숨김" /> : art && <StableImage className="f-bg" src={art} alt="" draggable={false} respectReducedMotion />}
+            <div className="f-sheen" /><div className="f-etch" /><div className="f-shade" /><div className="f-frame" style={{ backgroundImage: frame }} /><div className="f-glare" /><div className="f-rainbow" /><div className="f-depth" />
+            {!masked && cutout && <div className="f-subjwrap"><StableImage className="f-subj" src={cutout} alt="" draggable={false} respectReducedMotion /></div>}
+            <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>
+            <div className="f-cost"><span className="num">{rank + 1}</span></div>
+            <div className={`f-dup${card.count > 9 ? " two" : ""}`}><span className="num">{card.count}</span></div>
+            <div className="f-power"><b className="num">{power >= 1000 ? Math.floor(power / 1000) : power}</b><span className="pw-tail"><i>PW</i>{power >= 1000 && <small className="num">{String(power % 1000).padStart(3, "0")}</small>}</span></div>
+            <div className="f-gem"><span className="f-type"><svg viewBox="0 0 24 24"><path d="m12 3 7 9-7 9-7-9z" /></svg></span></div>
+            <div className="f-fx"><div className="fx"><span className="kw">시리즈</span><span className="tx">{card.seriesName}</span></div><div className="fx"><span className="kw">수집</span><span className="tx">보유 {card.count}장 · 레벨 {card.level}</span></div></div>
+            <div className="f-nb"><span className="nb-lv"><i>Lv.</i><b className="num">{card.level}</b></span><span className={`f-title${card.tier === "sr" ? " emboss" : ""}`}>{card.characterName}</span><span className="nb-no"><span>{card.id}</span><span className="f-rar">
+              {rank === 0 ? "●" : Array.from({ length: rank >= 3 ? rank - 2 : rank }, (_, i) => <svg key={i} viewBox="0 0 20 20" aria-hidden="true" style={{ fill: `url(#${rarityId}-${i})` }}>
+                <defs><linearGradient id={`${rarityId}-${i}`}><stop stopColor={rank >= 3 ? "#a8711c" : "#8a929c"} /><stop offset=".35" stopColor={rank >= 3 ? "#fff3c8" : "#fff"} /><stop offset=".7" stopColor={rank >= 3 ? "#c88d2a" : "#9aa2ac"} /><stop offset="1" stopColor={rank >= 3 ? "#ffe9a6" : "#f4f6f8"} /></linearGradient></defs>
+                <path d="m10 1 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L10 15.4l-5.6 2.9 1.1-6.3L1 7.6l6.2-.9Z" />
+              </svg>)}<span>{card.tier.toUpperCase()}</span>
+            </span></span></div>
+            <div className="f-traits">{card.serial && rank >= 4 && <span className="f-serial">{card.serial}</span>}<span className="t">{card.seriesName}</span></div>
+            <div className="f-vc">© Lakomics · 카드 컬렉션</div>{card.tier === "lr" && card.serial && <div className="f-ser2">한정 · {card.serial}</div>}
+          </div>
         </div><BackFace />
       </div></div>
       <span className="rim" aria-hidden="true"><i /></span>

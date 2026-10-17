@@ -1,4 +1,5 @@
 """Shared card routes on temporary sqlite databases; no real storage or library."""
+import hashlib
 import json
 import random
 import sqlite3
@@ -23,7 +24,7 @@ SHA = "a" * 64
 FIXTURE_DDL = """
 CREATE TABLE assets(id TEXT PRIMARY KEY,kind TEXT NOT NULL,object_key TEXT NOT NULL,
  created_at TEXT NOT NULL,updated_at TEXT NOT NULL,collected_at TEXT,committed INTEGER,
- width INTEGER,height INTEGER);
+ width INTEGER,height INTEGER,sha256 TEXT,size_bytes INTEGER,content_type TEXT);
 CREATE TABLE asset_authority_state(library_id TEXT,asset_id TEXT,lifecycle TEXT,
  PRIMARY KEY(library_id,asset_id));
 CREATE TABLE mobile_character_state(singleton INTEGER PRIMARY KEY,revision TEXT,
@@ -44,9 +45,10 @@ def nodes():
 
 
 def add_image(db, asset_id, at=NOW, kind="image", collected=None, committed=1):
-    db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,collected_at,committed,width,height) "
-               "VALUES(?,?,?,?,?,?,?,?,?)", [asset_id, kind, "original/" + asset_id, cards._iso(at), cards._iso(at),
-                                           collected, committed, 800, 1200])
+    db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,collected_at,committed,width,height,"
+               "sha256,size_bytes,content_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+               [asset_id, kind, "original/" + asset_id, cards._iso(at), cards._iso(at),
+                collected, committed, 800, 1200, hashlib.sha256(asset_id.encode()).hexdigest(), 5000, "image/jpeg"])
 
 
 def publish_nodes(db, value=None):
@@ -577,6 +579,52 @@ class CardRoutes(HomeFixture):
         album = self.ok(self.album())["cards"]
         self.assertEqual([c["cutout"] for c in album if c["tier"] == "ssr"], [{"assetId": "art1"}])
         self.assertEqual([c["cutout"] for c in album if c["tier"] == "n"], [None])
+
+    def medium_ticket(self, asset="art1", headers=None):
+        return self.client.post(PREFIX + f"/art/{asset}/medium/ticket", headers=self.auth if headers is None else headers)
+
+    def add_medium(self, asset="art1", source=None):
+        source = source or hashlib.sha256(asset.encode()).hexdigest()
+        with self.get_db() as db:
+            db.execute("INSERT OR REPLACE INTO card_art_medium VALUES(?,?,?,?,?,?)",
+                       [asset, source, "b" * 64, 40000, "derived/card-medium/v1/" + "b" * 64 + ".webp", cards._iso(NOW)])
+            db.commit()
+
+    def test_medium_art_is_flagged_in_the_album_and_ticketed_only_for_owned_current_art(self):
+        self.fixed_open()
+        self.assertEqual({c["artMedium"] for c in self.ok(self.album())["cards"]}, {False})
+        self.assertEqual(self.medium_ticket().status_code, 404)
+        self.add_medium()
+        self.assertEqual({c["artMedium"] for c in self.ok(self.album())["cards"]}, {True})
+        reply = self.ok(self.medium_ticket())
+        key = "derived/card-medium/v1/" + "b" * 64 + ".webp"
+        self.assertEqual((reply["url"], reply["content_type"]), ("https://r2.test/" + key, "image/webp"))
+        self.get_url.assert_called_with(key, cards.TICKET_SECONDS)
+        self.assertEqual(self.client.post(PREFIX + "/art/art1/medium/ticket").status_code, 401)
+        # A copy made from an older original is not served, and unowned art has no ticket.
+        self.add_medium(source="c" * 64)
+        self.assertEqual(self.medium_ticket().status_code, 404)
+        with self.get_db() as db:
+            add_image(db, "unowned")
+            db.commit()
+        self.add_medium("unowned")
+        self.assertEqual(self.medium_ticket("unowned").status_code, 404)
+
+    def test_medium_wanted_lists_upcoming_art_first_and_the_album_only_on_request(self):
+        self.second_character()
+        self.fixed_open("d-20261015", keep=True)
+        with self.get_db() as db:
+            db.execute("DELETE FROM card_pending")
+            db.execute("INSERT INTO card_packs(id,kind,day,granted_at) VALUES('b-20261015','bonus','2026-10-15',?)", [cards._iso(NOW)])
+            for slot in range(5):
+                db.execute("INSERT INTO card_pending VALUES('b-20261015',?,?,?,?,?)",
+                           [slot, "c2", "n", "art3", cards._iso(NOW)])
+            db.commit()
+            cards.asset_visibility.install(db)
+            self.assertEqual(cards.medium_wanted(db, "new"), ["art3"])
+            wanted = cards.medium_wanted(db, "all")
+            self.assertEqual(wanted[0], "art3")
+            self.assertEqual(set(wanted), {"art3"} | {r[0] for r in db.execute("SELECT art_asset_id FROM card_album")})
 
     def test_cutout_size_mismatch_conflict_missing_and_storage_failure(self):
         self.ok(self.prepare())

@@ -215,3 +215,13 @@ it('confirms trash with Android Back cancelling first, restores cards and shows 
   fireEvent.click(screen.getByRole('button', {name: '보유 카드'})); await settle(2500);
   expect(screen.getByRole('button', {name: '루나 · SR'}).textContent).toContain('×2');
 });
+
+it('shows the viewer with the original art while the album grid keeps the thumbnails', async () => {
+  const api = {...apiFixture([page([luna('sr')])]), original: vi.fn(async (id: string) => `https://orig.test/${id}.jpg`)};
+  render(<TabletCardAlbum api={api} onClose={vi.fn()}/>); await settle(500);
+  expect(api.original).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: '루나 · SR'})); await settle(500);
+  expect(api.original).toHaveBeenCalledWith('a-sr');
+  fireEvent.click(screen.getByRole('button', {name: '그림 보기'}));
+  expect(screen.getByRole('img', {name: '루나 원본 그림'}).getAttribute('src')).toBe('https://orig.test/a-sr.jpg');
+});

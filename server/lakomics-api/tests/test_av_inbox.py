@@ -224,6 +224,120 @@ class AvInboxTests(unittest.TestCase):
         self.assertTrue(self.worker.process_one())
         self.assertEqual(json.loads(self.row(id_)['candidate'])['jacketWidth'],800)
 
+    def serve(self, code, record, images):
+        """Route outbound HTTP by address: the LibreDMM record, the given PNGs (address -> bytes), Wikidata; else 404."""
+        self.asked = []
+        def route(request, timeout=None):
+            url = request.full_url
+            self.asked.append(url)
+            if url.startswith('https://www.libredmm.com/'):
+                return Response({**movie(), 'normalized_id': code, **record})
+            if url.startswith('https://query.wikidata.org/'):
+                return Response(wiki())
+            if url in images:
+                return Response(images[url], 'image/png')
+            return Response({}, status=404)
+        self.open.side_effect = route
+
+    def stored_image(self, receipt):
+        with Image.open(io.BytesIO(fake_s3.objects[wp.artwork_key(receipt['sha256'])]['body'])) as image:
+            return image.convert('RGB')
+
+    def test_wrap_and_centre_spine_of_a_dvd_wrap(self):
+        self.assertEqual(av.wrap_spine(800,538),(378,422))
+        self.assertEqual(av.wrap_spine(800,438),(382,418))  # much wider wrap: spine in the centre
+        self.assertIsNone(av.wrap_spine(800,600))           # 4:3 has no spine to take
+        self.assertTrue(av.is_spineless(2184,1638))
+        self.assertFalse(av.is_spineless(2184,1468))
+        self.assertFalse(av.is_spineless(378,538))
+        self.assertEqual(av.default_split(2184,1638,True),dict(x1=1092,x2=1092,isWrap=True,useSpine=True))
+        self.assertFalse(av.default_split(378,538,True)['useSpine'])
+
+    def test_front_only_cover_is_replaced_by_its_wrap_when_it_is_one(self):
+        ps='https://pics.dmm.co.jp/mono/movie/adult/77midv032/77midv032ps.jpg'
+        mono=ps.replace('ps.jpg','pl.jpg')
+        digital='https://pics.dmm.co.jp/digital/video/midv00032/midv00032pl.jpg'
+        record=dict(cover_image_url=ps,sample_image_urls=['https://pics.dmm.co.jp/digital/video/midv00032/midv00032jp-1.jpg'])
+        def found(images):
+            id_=self.new('midv032')
+            self.serve('MIDV-032',record,images)
+            self.assertTrue(self.worker.process_one())
+            return json.loads(self.row(id_)['candidate'])
+        # The wrap on the mono path wins over the digital one; the front-only image is not kept.
+        candidate=found({ps:png((147,200)),mono:png((800,538)),digital:png((800,565))})
+        self.assertEqual((candidate['jacketWidth'],candidate['jacketHeight']),(800,538))
+        self.assertEqual(candidate['defaultSplit'],av.default_split(800,538))
+        self.assertLess(self.asked.index(ps),self.asked.index(mono))
+        self.assertNotIn(digital,self.asked)
+        # No mono wrap: the digital one on DMM's own host.
+        candidate=found({ps:png((147,200)),digital:png((800,565))})
+        self.assertEqual((candidate['jacketWidth'],candidate['jacketHeight']),(800,565))
+        # A "pl" that is not clearly wider than a front changes nothing.
+        candidate=found({ps:png((147,200)),mono:png((400,500))})
+        self.assertEqual((candidate['jacketWidth'],candidate['defaultSplit']['isWrap']),(147,False))
+        # A cover that is not front-only is never second-guessed.
+        record['cover_image_url']=mono
+        candidate=found({mono:png((800,538))})
+        self.assertEqual(candidate['jacketWidth'],800)
+        self.assertEqual([u for u in self.asked if u.startswith('https://pics.')],[mono])
+
+    def test_spineless_digital_jacket_takes_the_spine_of_the_dvd_wrap(self):
+        mono='https://pics.dmm.co.jp/mono/movie/adult/k9snos130/k9snos130pl.jpg'
+        record=dict(cover_image_url=mono,sample_image_urls=['https://pics.dmm.co.jp/digital/video/snos00130/snos00130jp-1.jpg'])
+        hires=av.HIRES_URL.format(cid='snos00130')
+        id_=self.new('snos130')
+        self.serve('SNOS-130',record,{hires:png((2184,1638)),mono:png((800,438))})
+        self.assertTrue(self.worker.process_one())
+        candidate=json.loads(self.row(id_)['candidate'])
+        self.assertEqual((candidate['jacketWidth'],candidate['jacketHeight']),(2184,1638))
+        self.assertEqual(candidate['defaultSplit'],dict(x1=1092,x2=1092,isWrap=True,useSpine=True))
+        source=candidate['spineSource']
+        self.assertEqual((source['address'],source['x1'],source['x2'],source['width'],source['height']),(mono,382,418,800,438))
+        self.assertNotEqual(source['sha256'],candidate['jacket']['sha256'])
+        self.assertEqual(av.detail(self.get_db,id_)['candidate']['spineSource']['sha256'],source['sha256'])
+        fn=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
+        def prepare(x1,x2,surfaces=('front','spine','back')):
+            return {i['surface']:i for i in asyncio.run(fn(id_,request(dict(x1=x1,x2=x2,surfaces=list(surfaces))),self.auth))['items']}
+        # The tablet sends the default split (x1 == x2): back and front from the wide jacket, the spine strip
+        # of the DVD wrap scaled to its height.
+        items=prepare(1092,1092)
+        self.assertEqual({k:(v['width'],v['height']) for k,v in items.items()},
+                         {'front':(1092,1638),'spine':(135,1638),'back':(1092,1638)})
+        self.assertEqual(items['spine']['providerImageId'],f"SNOS-130:{candidate['jacket']['sha256']}:1092:1092:spine")
+        pixel=self.stored_image(items['spine']['original']).getpixel((67,800))
+        self.assertTrue(all(abs(a-b)<8 for a,b in zip(pixel,(0,128,0))),pixel)
+        # The PC keeps a 1 px "spine" between the lines; that is still no spine of its own.
+        items=prepare(1092,1093)
+        self.assertEqual({k:v['width'] for k,v in items.items()},{'front':1091,'spine':135,'back':1092})
+        # A spine drawn on purpose (at least 1% of the width) is cut from the wide jacket itself.
+        items=prepare(1000,1150)
+        self.assertEqual({k:v['width'] for k,v in items.items()},{'front':1034,'spine':150,'back':1000})
+        # The authority accepts the borrowed spine like any other artwork.
+        self.create_av('av','SNOS-130')
+        spine={k:v for k,v in prepare(1092,1092,('spine',))['spine'].items() if k!='surface'}
+        self.assertEqual(self.command('addArtwork',workId='av',artworkId='spine',**spine)['entities']['artworks'][0]['kind'],'spine')
+
+    def test_no_spine_to_borrow_keeps_the_spine_less_split(self):
+        mono='https://pics.dmm.co.jp/mono/movie/adult/k9snos130/k9snos130pl.jpg'
+        digital='https://pics.dmm.co.jp/digital/video/snos00130/snos00130pl.jpg'
+        record=dict(cover_image_url=mono,sample_image_urls=[digital.replace('pl.jpg','jp-1.jpg')])
+        hires=av.HIRES_URL.format(cid='snos00130')
+        id_=self.new('snos130')
+        # The only wraps are 4:3 images, which have no spine to take.
+        self.serve('SNOS-130',record,{hires:png((2184,1638)),mono:png((800,600)),digital:png((800,600))})
+        self.assertTrue(self.worker.process_one())
+        candidate=json.loads(self.row(id_)['candidate'])
+        self.assertNotIn('spineSource',candidate)
+        self.assertEqual(candidate['defaultSplit'],dict(x1=1092,x2=1092,isWrap=True,useSpine=False))
+        fn=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
+        self.code(lambda:asyncio.run(fn(id_,request(dict(x1=1092,x2=1092,surfaces=['spine'])),self.auth)),'invalidAvSplit',422)
+        # A wide jacket with its own spine borrows nothing and asks for no second image.
+        id_=self.new('snos130')
+        self.serve('SNOS-130',record,{hires:png((2184,1468))})
+        self.assertTrue(self.worker.process_one())
+        self.assertNotIn('spineSource',json.loads(self.row(id_)['candidate']))
+        self.assertEqual([u for u in self.asked if u.endswith('.jpg')],[hires])
+
     def test_name_mapping_escaping_ambiguity_and_cache(self):
         values = wiki(['日本名'])
         self.assertEqual(av.parse_names(json.dumps(values).encode(),['日本名'])[0]['fanzaActressId'],'123')

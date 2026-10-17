@@ -565,6 +565,21 @@
  position: absolute; 
 
 }
+:where(.lkm-cards) .f-plate > * {
+
+ position: absolute; 
+
+}
+/* The print plate (PERF-20261018): every face is laid out at the 630 x 880 print size and scaled to the
+   card as one picture, so text, numbers and offsets keep their proportions at any card width. A small
+   card can no longer meet a browser minimum font size (Android WebView raises text under 8 px), which
+   pushed COST, Count and the side print out of their slots. Its cqw resolve against the 630 px plate. */
+:where(.lkm-cards) .f-plate {
+
+ left: calc(50% - 315px); top: calc(50% - 440px); width: 630px; height: 880px; container-type: inline-size; border-radius: 28.35px;
+  scale: tan(atan2(100cqw, 630px)); 
+
+}
 :where(.lkm-cards) .card {
 
  --wt: 3.8cqw; --wx: 3.8cqw; --wh: 113.2cqw; --wbm: 22.68cqw; --c1: #ffb08a; --c2: #c92a4a; 
@@ -1145,7 +1160,7 @@
  overflow: visible; 
 
 }
-:where(.lkm-cards) .card[data-tier="ur"] .front > .f-bg, :where(.lkm-cards) .card[data-tier="lr"] .front > .f-bg, :where(.lkm-cards) .card[data-tier="ur"] .f-sheen, :where(.lkm-cards) .card[data-tier="lr"] .f-sheen, :where(.lkm-cards) .card[data-tier="ur"] .f-glit, :where(.lkm-cards) .card[data-tier="lr"] .f-glit {
+:where(.lkm-cards) .card[data-tier="ur"] .front .f-bg, :where(.lkm-cards) .card[data-tier="lr"] .front .f-bg, :where(.lkm-cards) .card[data-tier="ur"] .f-sheen, :where(.lkm-cards) .card[data-tier="lr"] .f-sheen, :where(.lkm-cards) .card[data-tier="ur"] .f-glit, :where(.lkm-cards) .card[data-tier="lr"] .f-glit {
 
  border-radius: inherit; 
 

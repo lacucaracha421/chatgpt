@@ -1,18 +1,27 @@
-"""Operator-only backfill: replace 800 px AV jackets with the full digital-CDN wrap jacket.
+"""Operator-only backfill: better AV jackets for works already confirmed.
 
 Dry-run is the default and writes nothing (the database is opened read-only); ``--apply``
-writes. For every live AV work whose selected LibreDMM crops came from a jacket at most
-800 px wide it looks up the high-resolution jacket exactly like a new lookup does
-(``av_inbox.hires_addresses`` / ``fetch_hires``). When one exists with the same aspect
-ratio, the stored split lines are scaled, the same surfaces are re-cropped, and the new
-artwork is added and selected through the ordinary Collections authority commands, so the
-change feed carries it to the PC and the tablet. The old artwork rows and every old blob
-stay; only the selection moves. A different aspect ratio is left untouched and listed
-for a manual re-split. Pending inbox candidates (status ``found``) with a small jacket
-are re-queued so the worker fetches them again with the new jacket logic.
+writes. Three rules look at the live AV works' selected LibreDMM crops, each looking the
+jacket up exactly like a new lookup does (``av_inbox.choose_jacket``):
 
-Results are kept in ``av_jacket_backfill`` so a rerun skips finished and hopeless items.
-Every remote fetch is spaced by ``--delay`` seconds (LibreDMM at least 2 s).
+* ``work`` (800 px -> wide): crops that came from a jacket at most 800 px wide are replaced by
+  DMM's wide digital jacket when it has the same aspect ratio: the stored split lines are
+  scaled and the same surfaces are re-cropped. A different aspect ratio is left untouched and
+  listed for a manual re-split.
+* ``work-wrap`` (front only -> wrap): a work whose cover is a front-only ``ps`` image gets the
+  wrap the lookup would find now (wide digital jacket, else the ``pl`` wrap), split with the
+  default split: front replaces the old front, back and spine are added where still empty.
+* ``work-spine`` (borrowed spine): a wide digital jacket that has no spine (4:3) gets the
+  spine of the 800 px DVD wrap as a new spine artwork; front and back stay as they are.
+
+The new artwork is added and selected through the ordinary Collections authority commands in
+one batch, so the change feed carries it to the PC and the tablet. The old artwork rows and
+every old blob stay; only the selection moves. Pending inbox candidates (status ``found``)
+that the new rules would improve are re-queued so the worker fetches them again.
+
+Results are kept in ``av_jacket_backfill`` (one scope per rule) so a rerun skips finished and
+hopeless items; each rule's scope is its version, so a new rule never inherits another's
+verdicts. Every remote fetch is spaced by ``--delay`` seconds (LibreDMM at least 2 s).
 """
 import argparse
 from collections import Counter
@@ -44,7 +53,9 @@ DDL = """CREATE TABLE IF NOT EXISTS av_jacket_backfill (
  scope TEXT NOT NULL, ref_id TEXT NOT NULL, old_sha TEXT NOT NULL, state TEXT NOT NULL,
  new_sha TEXT, detail TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(scope, ref_id, old_sha))"""
 #: Finished or hopeless; a rerun skips them unless ``--retry``. error/conflict are always retried.
-TERMINAL = ('done', 'aspect_mismatch', 'no_hires')
+TERMINAL = ('done', 'aspect_mismatch', 'no_hires', 'no_wrap', 'no_spine_source', 'split_unclear', 'unchanged')
+#: Scopes of the rules; ``work`` and ``inbox`` are the 800 px rule's (``inbox`` before the front-only/spine rules).
+WORK, WORK_WRAP, WORK_SPINE, INBOX = 'work', 'work-wrap', 'work-spine', 'inbox2'
 
 
 class Skip(Exception):
@@ -95,9 +106,12 @@ def old_dimensions(group):
     if front is None:
         return None
     wrap = not (x1 == 0 and x2 == 0)
-    if (arts.get('spine') and arts['spine']['width'] != x2 - x1) or (arts.get('back') and arts['back']['width'] != x1):
+    width = front['width'] + (x2 if wrap else 0)
+    # A spine-less jacket's spine artwork is borrowed from another image, so its width says nothing.
+    own_spine = wrap and x2 - x1 >= width * av.SPINE_MIN_SHARE
+    if (arts.get('spine') and own_spine and arts['spine']['width'] != x2 - x1) or (arts.get('back') and arts['back']['width'] != x1):
         return None
-    return front['width'] + (x2 if wrap else 0), front['height']
+    return width, front['height']
 
 
 def surface_boxes(width, height, x1, x2):
@@ -145,8 +159,8 @@ class Backfill:
             self.sleep(wait)
         self.next_at[kind] = time.monotonic() + max(minimum, self.delay)
 
-    def find_hires(self, code):
-        """(jacket, reason): the high-resolution jacket tuple from av_inbox.fetch_hires, or why none."""
+    def fetch_record(self, code):
+        """(LibreDMM record, reason): the record of a product code, or why there is none."""
         self.pace('libredmm', LIBREDMM_MIN_DELAY)
         self.remote += 1
         try:
@@ -159,11 +173,36 @@ class Backfill:
             raise
         if not isinstance(raw, dict) or av.normalize_code(raw.get('normalized_id')) != code:
             return None, 'libredmmMismatch'
+        return raw, None
+
+    def find_hires(self, code):
+        """(jacket, reason): the high-resolution jacket tuple from av_inbox.fetch_hires, or why none."""
+        raw, why = self.fetch_record(code)
+        if raw is None:
+            return None, why
         addresses = av.hires_addresses(code, raw)
         if not addresses:
             return None, 'noDigitalCid'
         jacket = av.fetch_hires(addresses, time.monotonic() + 40, lambda: self.pace('dmm', 0.5))
         return jacket, None if jacket else 'noHiresOnCdn'
+
+    def find_choice(self, code):
+        """(choice, reason): the jacket a lookup of this code would use now (av_inbox.choose_jacket)."""
+        raw, why = self.fetch_record(code)
+        if raw is None:
+            return None, why
+        try:
+            return av.choose_jacket(code, raw, time.monotonic() + 60, lambda: self.pace('dmm', 0.5)), None
+        except ValueError:
+            return None, 'noCover'
+
+    def find_spine(self, code, deadline=40):
+        """(wrap, reason): a DVD/digital wrap whose spine can be taken, or why none."""
+        raw, why = self.fetch_record(code)
+        if raw is None:
+            return None, why
+        wrap = av.fetch_wrap(code, raw, time.monotonic() + deadline, lambda: self.pace('dmm', 0.5), for_spine=True)
+        return wrap, None if wrap else 'noSpineSource'
 
     # -- one work's jacket -------------------------------------------------------------
     def work_group(self, domain, group):
@@ -175,21 +214,23 @@ class Backfill:
         if dims is None:
             return self.result('work', work, code, 'skip_unknown_size')
         old_w, old_h = dims
+        if group['x1'] == 0 and group['x2'] == 0:
+            return self.wrap_group(domain, group, old_w, old_h)
         if old_w > OLD_MAX_WIDTH:
-            return self.counts.update(['skip_already_large'])
-        prior = self.previous('work', work, sha)
+            return self.spine_group(domain, group, old_w, old_h)
+        prior = self.previous(WORK, work, sha)
         if prior in TERMINAL and not self.retry:
             return self.counts.update(['skip_recorded_' + prior])
         jacket, why = self.find_hires(code)
         if jacket is None:
-            self.record('work', work, sha, 'no_hires', detail=why)
-            return self.result('work', work, code, 'no_hires', reason=why)
+            self.record(WORK, work, sha, 'no_hires', detail=why)
+            return self.result(WORK, work, code, 'no_hires', reason=why)
         data, mime, new_w, new_h = jacket
         if not same_aspect(old_w, old_h, new_w, new_h):
             info = dict(old=[old_w, old_h], new=[new_w, new_h])
-            self.record('work', work, sha, 'aspect_mismatch', detail=info)
+            self.record(WORK, work, sha, 'aspect_mismatch', detail=info)
             self.manual.append(dict(workId=work, code=code, **info))
-            return self.result('work', work, code, 'aspect_mismatch', **info)
+            return self.result(WORK, work, code, 'aspect_mismatch', **info)
         nx1, nx2 = scale_split(old_w, group['x1'], group['x2'], new_w)
         frame = av.decode_jacket(data, mime)
         try:
@@ -202,26 +243,104 @@ class Backfill:
                     surfaces=selected, bytes=size)
         if not self.apply:
             self.bytes += size
-            return self.result('work', work, code, 'would_swap', **info)
+            return self.result(WORK, work, code, 'would_swap', **info)
+        self.commit(WORK, domain, group, (data, mime), nx1, nx2, rendered, info, size)
+
+    def wrap_group(self, domain, group, old_w, old_h):
+        """Front-only cover (a ``ps`` image): the wrap a lookup finds now, split with the default split."""
+        work, code, sha = group['workId'], group['code'], group['sha']
+        prior = self.previous(WORK_WRAP, work, sha)
+        if prior in TERMINAL and not self.retry:
+            return self.counts.update(['skip_recorded_' + prior])
+        choice, why = self.find_choice(code)
+        if choice is None or choice['width'] / choice['height'] <= av.WRAP_MIN_ASPECT:
+            self.record(WORK_WRAP, work, sha, 'no_wrap', detail=why or 'noWrap')
+            return self.result(WORK_WRAP, work, code, 'no_wrap', reason=why or 'noWrap')
+        new_w, new_h, borrowed = choice['width'], choice['height'], choice['spine']
+        split = av.default_split(new_w, new_h, borrowed is not None)
+        nx1, nx2 = split['x1'], split['x2']
+        info = dict(old=[old_w, old_h], new=[new_w, new_h], newSplit=[nx1, nx2], source=choice['address'],
+                    spineFrom=borrowed['address'] if borrowed else None)
+        if not split['useSpine'] and nx2 - nx1 >= new_w * av.SPINE_MIN_SHARE:
+            # A spine wider than 12% means the default split cannot be trusted: leave it to a manual split.
+            self.record(WORK_WRAP, work, sha, 'split_unclear', detail=info)
+            self.manual.append(dict(workId=work, code=code, **info))
+            return self.result(WORK_WRAP, work, code, 'split_unclear', **info)
+        wanted = ['front'] + (['back'] if nx1 > 0 else []) + (['spine'] if split['useSpine'] else [])
+        # The front replaces the old front; back and spine only fill slots nobody has chosen for.
+        surfaces = [s for s in wanted if s == 'front' or not group['selection'].get(SLOT[s])]
+        frame = av.decode_jacket(choice['data'], choice['mime'])
+        try:
+            boxes = surface_boxes(new_w, new_h, nx1, nx2)
+            rendered = {s: av.render_surface(frame, boxes[s]) for s in surfaces if not (s == 'spine' and borrowed)}
+        finally:
+            frame.close()
+        if 'spine' in surfaces and borrowed:
+            rendered['spine'] = self.borrowed_spine(borrowed, new_h)
+        size = len(choice['data']) + sum(len(r['encoded']) for r in rendered.values())
+        info.update(surfaces=surfaces, bytes=size)
+        if not self.apply:
+            self.bytes += size
+            return self.result(WORK_WRAP, work, code, 'would_wrap', **info)
+        self.commit(WORK_WRAP, domain, group, (choice['data'], choice['mime']), nx1, nx2, rendered, info, size)
+
+    def spine_group(self, domain, group, old_w, old_h):
+        """Wide jacket without a spine (4:3): add the DVD wrap's spine as the spine artwork."""
+        work, code, sha, x1, x2 = group['workId'], group['code'], group['sha'], group['x1'], group['x2']
+        if x2 - x1 >= old_w * av.SPINE_MIN_SHARE or 'spine' in group['arts']:
+            return self.counts.update(['skip_already_large'])
+        if group['selection'].get(SLOT['spine']):
+            return self.counts.update(['skip_spine_selected'])
+        prior = self.previous(WORK_SPINE, work, sha)
+        if prior in TERMINAL and not self.retry:
+            return self.counts.update(['skip_recorded_' + prior])
+        wrap, why = self.find_spine(code)
+        if wrap is None:
+            self.record(WORK_SPINE, work, sha, 'no_spine_source', detail=why)
+            return self.result(WORK_SPINE, work, code, 'no_spine_source', reason=why)
+        rendered = {'spine': self.borrowed_spine(wrap, old_h)}
+        size = len(rendered['spine']['encoded'])
+        info = dict(old=[old_w, old_h], split=[x1, x2], spineFrom=wrap['address'], spineBox=[wrap['x1'], wrap['x2']],
+                    spineSize=[rendered['spine']['width'], rendered['spine']['height']], surfaces=['spine'], bytes=size)
+        if not self.apply:
+            self.bytes += size
+            return self.result(WORK_SPINE, work, code, 'would_borrow_spine', **info)
+        self.commit(WORK_SPINE, domain, group, None, x1, x2, rendered, info, size)
+
+    @staticmethod
+    def borrowed_spine(wrap, height):
+        """The spine strip of a DVD wrap scaled to the jacket's height, rendered like any other surface."""
+        frame = av.decode_jacket(wrap['data'], wrap['mime'])
+        try:
+            return av.render_surface(frame, (wrap['x1'], 0, wrap['x2'], frame.height), height)
+        finally:
+            frame.close()
+
+    def commit(self, scope, domain, group, jacket, nx1, nx2, rendered, info, size):
+        """Store the new crops (and the new jacket, when there is one) and swap the selection."""
+        work, code, sha = group['workId'], group['code'], group['sha']
         deadline = time.monotonic() + 120
-        jacket_receipt = av.confirm_blobs(self.get_db, self.storage, self.bucket, [(data, mime)], deadline)[0]
+        new_sha = sha if jacket is None else av.confirm_blobs(self.get_db, self.storage, self.bucket, [jacket], deadline)[0]['sha256']
         prepared = {}
         for surface, item in rendered.items():
             receipts = av.store_surface(self.get_db, self.storage, self.bucket, item, deadline)
             prepared[surface] = dict(original=receipts[0], thumbnail=receipts[1] if len(receipts) > 1 else None,
                                      width=item['width'], height=item['height'])
         try:
-            outcome = self.swap(domain, group, jacket_receipt['sha256'], nx1, nx2, prepared)
+            outcome = self.swap(domain, group, new_sha, nx1, nx2, prepared)
         except Skip as exc:
-            self.record('work', work, sha, 'conflict', detail=str(exc))
-            return self.result('work', work, code, 'conflict', reason=str(exc))
+            self.record(scope, work, sha, 'conflict', detail=str(exc))
+            return self.result(scope, work, code, 'conflict', reason=str(exc))
         except HTTPException as exc:
             reason = exc.detail.get('code') if isinstance(exc.detail, dict) else str(exc.detail)
-            self.record('work', work, sha, 'conflict', detail=reason)
-            return self.result('work', work, code, 'conflict', reason=reason)
+            self.record(scope, work, sha, 'conflict', detail=reason)
+            return self.result(scope, work, code, 'conflict', reason=reason)
         self.bytes += size
-        self.record('work', work, sha, 'done', jacket_receipt['sha256'], info)
-        self.result('work', work, code, outcome, newSha=jacket_receipt['sha256'], **info)
+        self.record(scope, work, sha, 'done', new_sha, info)
+        if scope == WORK_WRAP and new_sha != sha:
+            # The wrap rule already took the best jacket there is; the 800 px rule has nothing to add for it.
+            self.record(WORK, work, new_sha, 'done', new_sha, dict(fromRule=scope))
+        self.result(scope, work, code, outcome, newSha=new_sha, **info)
 
     def swap(self, domain, group, new_sha, nx1, nx2, prepared):
         """Add the new crops and move the selection to them in one authority batch."""
@@ -244,7 +363,8 @@ class Backfill:
                                 operationId=str(uuid.uuid5(uuid.UUID(batch), f'{command_type}:{key}')), commandType=command_type,
                                 workId=work, **fields)
                 for surface, item in prepared.items():
-                    old = group['arts'][surface]
+                    # A surface the work had no crop for (a new back or spine) expects an empty slot.
+                    old_id = group['arts'][surface]['artwork_id'] if surface in group['arts'] else None
                     image_id = f'{code}:{new_sha}:{nx1}:{nx2}:{surface}'
                     existing = db.execute("SELECT artwork_id FROM collection_authority_artworks WHERE library_id=? AND work_id=? "
                                           "AND provider='libredmm' AND provider_image_id=? AND kind=? ORDER BY artwork_id LIMIT 1",
@@ -253,13 +373,13 @@ class Backfill:
                     if selection.get(SLOT[surface]) == art_id:
                         finished += 1
                         continue
-                    if selection.get(SLOT[surface]) != old['artwork_id']:
+                    if selection.get(SLOT[surface]) != old_id:
                         raise Skip('selectionChanged')
                     if existing is None:
                         adds.append(command(ca.ADD_ARTWORK, surface, artworkId=art_id, kind=KIND[surface],
                                             provider='libredmm', providerImageId=image_id, language='ja', **item))
                     selects.append(command(ca.SELECT_ARTWORK, surface, slot=SLOT[surface], artworkId=art_id,
-                                           expectedArtworkId=old['artwork_id']))
+                                           expectedArtworkId=old_id))
                 if finished == len(prepared):
                     db.rollback()
                     return 'already_done'
@@ -275,33 +395,40 @@ class Backfill:
     # -- one pending inbox candidate ---------------------------------------------------
     def candidate(self, row):
         candidate = json.loads(row['candidate'])
-        old_w, sha, code = candidate['jacketWidth'], candidate['jacket']['sha256'], row['normalized_code']
+        old_w, old_h, sha, code = candidate['jacketWidth'], candidate['jacketHeight'], candidate['jacket']['sha256'], row['normalized_code']
         id_ = row['request_id']
-        if old_w > OLD_MAX_WIDTH or av.normalize_code(code) != code:
+        has_spine_source = bool(candidate.get('spineSource'))
+        improvable = (old_w <= OLD_MAX_WIDTH or not candidate['defaultSplit']['isWrap']
+                      or (av.is_spineless(old_w, old_h) and not has_spine_source))
+        if not improvable or av.normalize_code(code) != code:
             return self.counts.update(['skip_candidate_large'])
-        prior = self.previous('inbox', id_, sha)
+        prior = self.previous(INBOX, id_, sha)
         if prior in TERMINAL and not self.retry:
             return self.counts.update(['skip_recorded_' + prior])
-        jacket, why = self.find_hires(code)
-        if jacket is None:
-            self.record('inbox', id_, sha, 'no_hires', detail=why)
-            return self.result('inbox', id_, code, 'no_hires', reason=why)
-        info = dict(old=[old_w, candidate['jacketHeight']], new=list(jacket[2:]), bytes=len(jacket[0]))
+        choice, why = self.find_choice(code)
+        if choice is None:
+            self.record(INBOX, id_, sha, 'no_hires', detail=why)
+            return self.result(INBOX, id_, code, 'no_hires', reason=why)
+        info = dict(old=[old_w, old_h], new=[choice['width'], choice['height']], bytes=len(choice['data']),
+                    spineFrom=choice['spine']['address'] if choice['spine'] else None)
+        if [choice['width'], choice['height']] == info['old'] and not (choice['spine'] and not has_spine_source):
+            self.record(INBOX, id_, sha, 'unchanged')
+            return self.result(INBOX, id_, code, 'unchanged', **info)
         if not self.apply:
-            return self.result('inbox', id_, code, 'would_requeue', **info)
+            return self.result(INBOX, id_, code, 'would_requeue', **info)
         with self.get_db() as db:
-            # Back to the worker's queue, exactly like the "retry" action: the stale 800 px
-            # candidate is not usable meanwhile, so a split drawn on it cannot be misapplied.
+            # Back to the worker's queue, exactly like the "retry" action: the stale candidate is
+            # not usable meanwhile, so a split drawn on it cannot be misapplied.
             changed = db.execute("UPDATE av_inbox SET status='queued',attempts=0,last_error=NULL,fetched_at=NULL,"
                                  "started_at=NULL,next_attempt_at=0,generation=generation+1,candidate=NULL "
                                  "WHERE request_id=? AND generation=? AND status='found'",
                                  (id_, row['generation'])).rowcount
             db.commit()
         if changed != 1:
-            self.record('inbox', id_, sha, 'conflict', detail='candidateChanged')
-            return self.result('inbox', id_, code, 'conflict', reason='candidateChanged')
-        self.record('inbox', id_, sha, 'done', detail=info)
-        self.result('inbox', id_, code, 'requeued', **info)
+            self.record(INBOX, id_, sha, 'conflict', detail='candidateChanged')
+            return self.result(INBOX, id_, code, 'conflict', reason='candidateChanged')
+        self.record(INBOX, id_, sha, 'done', detail=info)
+        self.result(INBOX, id_, code, 'requeued', **info)
 
     # -- driver ------------------------------------------------------------------------
     def run(self, *, limit=None, candidates=True, deadline=None):
@@ -327,7 +454,7 @@ class Backfill:
                     code = item['code'] if kind == 'work' else item['normalized_code']
                     sha = item['sha'] if kind == 'work' else json.loads(item['candidate'])['jacket']['sha256']
                     reason = exc.detail.get('code') if isinstance(exc, HTTPException) and isinstance(exc.detail, dict) else type(exc).__name__
-                    self.record(kind, ref, sha, 'error', detail=reason)
+                    self.record(WORK if kind == 'work' else INBOX, ref, sha, 'error', detail=reason)
                     self.result(kind, ref, code, 'error', reason=reason)
         return dict(mode='apply' if self.apply else 'dry-run', counts=dict(self.counts), remoteFetches=self.remote,
                     newBytes=self.bytes, manualResplit=self.manual)
@@ -345,7 +472,7 @@ def main(argv=None):
     parser.add_argument('--apply', action='store_true', help='write; the default is a read-only dry run')
     parser.add_argument('--limit', type=int, help='stop after this many remote item lookups')
     parser.add_argument('--delay', type=float, default=1.0, help='seconds between remote fetches (LibreDMM at least 2)')
-    parser.add_argument('--retry', action='store_true', help='look again at items recorded as having no high-resolution jacket')
+    parser.add_argument('--retry', action='store_true', help='look again at items recorded as hopeless (no wide jacket, no wrap, no spine source ...)')
     parser.add_argument('--no-candidates', action='store_true', help='skip pending inbox candidates')
     parser.add_argument('--max-seconds', type=float, default=14400)
     args = parser.parse_args(argv)

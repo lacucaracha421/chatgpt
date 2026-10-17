@@ -1,15 +1,22 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject } from "react";
 
-type ZoomState = { zoom: number; session: string; change(factor: number): void; blocked: RefObject<boolean> };
+/** One-finger gesture on the stage: "pending" until the axis is chosen, then it either turns the object or scrolls the page. */
+export type WorkGesture = "pending" | "turn" | "scroll" | null;
+/** A one-finger drag chooses its axis once it has moved this far (CSS px); the rest of the gesture stays on that axis. */
+const AXIS_LOCK_PX = 10;
+type ZoomState = { zoom: number; session: string; change(factor: number): void; blocked: RefObject<boolean>; gesture: RefObject<WorkGesture> };
 const ZoomContext = createContext<ZoomState | null>(null);
 export function useWorkTurnBlocked() { return useContext(ZoomContext)?.blocked; }
+/** The object waits for a touch drag to choose "turn" before it follows the finger; null outside a zoom stage. */
+export function useWorkTurnGesture() { return useContext(ZoomContext)?.gesture; }
 
 /** The work owns zoom, so changing volumes or presentation slots keeps the same scale. */
 export function WorkZoomProvider({ workId, reset, children }: { workId: string; reset: number; children: ReactNode }) {
   const [zoom, setZoom] = useState(1);
   const blocked = useRef(false);
-  useLayoutEffect(() => { setZoom(1); blocked.current = false; }, [workId, reset]);
-  return <ZoomContext.Provider value={{ zoom, blocked, session: JSON.stringify([workId, reset]), change: factor => setZoom(value => Math.min(2.5, Math.max(.6, value * factor))) }}>{children}</ZoomContext.Provider>;
+  const gesture = useRef<WorkGesture>(null);
+  useLayoutEffect(() => { setZoom(1); blocked.current = false; gesture.current = null; }, [workId, reset]);
+  return <ZoomContext.Provider value={{ zoom, blocked, gesture, session: JSON.stringify([workId, reset]), change: factor => setZoom(value => Math.min(2.5, Math.max(.6, value * factor))) }}>{children}</ZoomContext.Provider>;
 }
 
 /** Only object layers scale; controls and backdrops stay fixed at the stage centre. */
@@ -29,11 +36,13 @@ export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children
   const pinched = useRef(false);
   const suppressClick = useRef(false);
   const clickStart = useRef<{ pointer: number; x: number; y: number; empty: boolean } | null>(null);
-  // The stage takes every touch (touch-action: none) so pinches reach it; a one-finger vertical drag still scrolls the page by hand.
-  const scroll = useRef<{ pointer: number; x: number; y: number; target: HTMLElement | null; active: boolean } | null>(null);
+  // The stage takes every touch (touch-action: none) so pinches reach it. A one-finger drag picks its axis after AXIS_LOCK_PX:
+  // horizontal turns the object (and the page never moves again in that gesture), vertical scrolls the page by hand.
+  const scroll = useRef<{ pointer: number; x: number; y: number; target: HTMLElement | null; axis: "x" | "y" | null; active: boolean } | null>(null);
   useLayoutEffect(() => {
     if (pinched.current && model) model.blocked.current = false;
     touches.current.clear(); distance.current = null; pinched.current = false; suppressClick.current = false; scroll.current = null; clickStart.current = null;
+    if (model) model.gesture.current = null;
     return () => { if (pinched.current && latest.current) latest.current.blocked.current = false; };
   }, [model?.session, enabled]);
   useEffect(() => {
@@ -56,7 +65,7 @@ export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children
     if (!touches.current.size) {
       pinched.current = false;
       scroll.current = null;
-      if (model) model.blocked.current = false;
+      if (model) { model.blocked.current = false; model.gesture.current = null; }
     }
   }
   return <div {...props} ref={element => {
@@ -69,9 +78,10 @@ export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children
       clickStart.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, empty: isEmptyStage(event.target) };
       if (!enabled || !model || event.pointerType !== "touch") return;
       touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (touches.current.size === 1) scroll.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, target: scrollParent(event.currentTarget), active: false };
+      if (touches.current.size === 1) { scroll.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, target: scrollParent(event.currentTarget), axis: null, active: false }; model.gesture.current = "pending"; }
       if (touches.current.size >= 2) {
         if (scroll.current) scroll.current = null;
+        model.gesture.current = null;
         pinched.current = true; suppressClick.current = true; model.blocked.current = true; distance.current = span();
       }
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -81,10 +91,16 @@ export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children
       if (start?.pointer === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) suppressClick.current = true;
       if (!touches.current.has(event.pointerId)) return;
       const drag = scroll.current;
-      if (drag && drag.pointer === event.pointerId && !pinched.current && drag.target) {
+      if (drag && drag.pointer === event.pointerId && !pinched.current) {
         const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-        if (!drag.active && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.5) { drag.active = true; suppressClick.current = true; if (model) model.blocked.current = true; }
-        if (drag.active) { drag.target.scrollTop -= dy; drag.x = event.clientX; drag.y = event.clientY; event.preventDefault(); return; }
+        if (!drag.axis && Math.hypot(dx, dy) >= AXIS_LOCK_PX) {
+          // The dominant axis wins and stays: a turn never scrolls the page later, a scroll never turns the object.
+          // With nothing to scroll, every drag is a turn.
+          drag.axis = drag.target && Math.abs(dy) > Math.abs(dx) ? "y" : "x";
+          if (model) model.gesture.current = drag.axis === "y" ? "scroll" : "turn";
+          if (drag.axis === "y") { drag.active = true; suppressClick.current = true; if (model) model.blocked.current = true; }
+        }
+        if (drag.active && drag.target) { drag.target.scrollTop -= dy; drag.x = event.clientX; drag.y = event.clientY; event.preventDefault(); return; }
       }
       touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       const next = span();

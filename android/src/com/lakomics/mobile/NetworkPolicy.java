@@ -85,13 +85,13 @@ final class NetworkPolicy {
   // HOME-DASH-001: the wishlist intent command and the Home cover ticket (see the Home GETs above).
   post=post || p.equals("/v1/home/upcoming/wishlist") || p.matches("/v1/home/covers/[a-f0-9]{64}/media-ticket");
   // CARD-GACHA-001: the daily card packs. Reads (state, one pack, the album page), the two pack
-  // commands (open, keep) and the cutout download ticket, each with its one method. Pack ids are
+  // commands (open, keep) and the cutout and medium-art download tickets, each with its one method. Pack ids are
   // the server's `d-`/`b-` plus a day, so no segment can traverse. The publisher routes
   // (`/cutouts/prepare`, `/cutouts/{id}/complete`, `/cutout-candidates`) stay unreachable.
   String cardPack="[db]-[0-9]{8}";
   get=get || p.equals("/v1/cards/state") || p.equals("/v1/cards/album") || p.matches("/v1/cards/packs/"+cardPack);
   post=post || p.matches("/v1/cards/album/[A-Za-z0-9_-]{1,128}/(n|r|sr|ssr|ur|lr)/(trash|restore)");
-  post=post || p.matches("/v1/cards/packs/"+cardPack+"/(open|keep)") || p.matches("/v1/cards/cutouts/[A-Za-z0-9_-]{1,128}/ticket");
+  post=post || p.matches("/v1/cards/packs/"+cardPack+"/(open|keep)") || p.matches("/v1/cards/cutouts/[A-Za-z0-9_-]{1,128}/ticket") || p.matches("/v1/cards/art/[A-Za-z0-9_-]{1,128}/medium/ticket");
   get=get || p.equals("/v1/collections") || (p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}") && !p.equals("/v1/collections/personal-edits"));
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/suggestions") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");

@@ -28,6 +28,13 @@ it('composes create, surfaces, field CAS and preserved/new credits with exact re
   expect(commands[8]).toMatchObject({expectedRevision:5,people:[{nameJa:'女優',displayName:'배우'}]});
   expect(commands.filter(c=>c.commandType==='addArtwork').every(c=>!('surface' in c))).toBe(true);
 });
+it('adds the spine artwork of a spine-less wide jacket, which the server cuts from the DVD cover',()=>{
+  const spineless={...inboxFixture,candidate:{...inboxFixture.candidate!,jacketWidth:2184,jacketHeight:1638,defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true}}};
+  const choices=initialChoices(spineless,null);expect(choices.surfaces).toEqual({front:'candidate',spine:'candidate',back:'candidate'});
+  const plan=createInboxPlan(spineless,authority,choices);
+  plan.manifests=(['front','spine','back'] as const).map(s=>({...manifest(s),providerImageId:`SSIS-001:${spineless.candidate!.jacketSha256}:1092:1092:${s}`}));
+  expect(composeInboxCommands(plan).filter(c=>c.commandType==='addArtwork').map(c=>(c as {providerImageId:string}).providerImageId.split(':').pop())).toEqual(['front','spine','back']);
+});
 it('keeps manual artwork, sends only chosen surfaces, fills blank code and preserves existing credits',async()=>{
   const base={...inboxWork,details:{av:{genres:[]}},avCredits:[{personId:'old',role:'performer' as const,order:0,creditName:null}]};authority.works=[base];
   const choices=initialChoices(inboxFixture,base);choices.surfaces.spine='keep';choices.people[0].action='link';choices.people[0].personId='known';

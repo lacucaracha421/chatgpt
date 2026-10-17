@@ -70,6 +70,14 @@ describe('routes', () => {
     expect(await tabletCardsApi.cutout('asset_3')).toBe('');
   });
 
+  it('asks for the medium art ticket with POST and accepts only an https URL', async () => {
+    mocks.api.mockResolvedValueOnce({url: 'https://r2.test/medium.webp?sig=1', expires_in: 300});
+    expect(await tabletCardsApi.artMedium!('asset_1')).toBe('https://r2.test/medium.webp?sig=1');
+    expect(mocks.api).toHaveBeenLastCalledWith('/v1/cards/art/asset_1/medium/ticket', undefined, undefined, 'POST');
+    mocks.api.mockResolvedValueOnce({url: 'http://insecure.test/x'});
+    expect(await tabletCardsApi.artMedium!('asset_2')).toBe('');
+  });
+
   it('propagates server errors so a failed tear can be retried', async () => {
     mocks.api.mockRejectedValue(Object.assign(new Error('서버 오류'), {status: 503}));
     await expect(tabletCardsApi.open('d-20261015', 'op')).rejects.toThrow('서버 오류');

@@ -23,7 +23,7 @@ const settle = async (ms = 0) => { await act(async () => { await vi.advanceTimer
 /** A controlled host: the viewer index lives in state, as in the albums. */
 function Host({ cards = list, start = 0, onClose = vi.fn(), preload = instant, ...rest }: {
   cards?: CardData[]; start?: number; onClose?: () => void; preload?: (card: CardData) => Promise<unknown>;
-  onOpenAsset?: (id: string) => void; onCharacter?: (id: string) => void;
+  onOpenAsset?: (id: string) => void; onCharacter?: (id: string) => void; sharpArt?: (card: CardData) => Promise<string>;
 }) {
   const [index, setIndex] = useState(start);
   return <CardViewer cards={cards} index={index} onIndexChange={setIndex} onClose={onClose} preload={preload} {...rest} />;
@@ -179,4 +179,15 @@ it("masks the card and the original art in privacy mode", async () => {
   fireEvent.click(screen.getByRole("button", { name: "그림 보기" }));
   expect(dialog.querySelectorAll("img")).toHaveLength(0);
   expect(within(dialog).getByRole("img", { name: "이미지 숨김" })).toHaveClass("privacy-mask");
+});
+
+it("swaps in the sharper art once it is ready and keeps the thumbnail when there is none", async () => {
+  const sharpArt = vi.fn(async (c: CardData) => c.characterName === "루나" ? "https://big.test/루나.jpg" : "");
+  render(<Host sharpArt={sharpArt} />); await settle();
+  // The next card is asked ahead, so stepping shows it sharp at once.
+  expect(sharpArt.mock.calls.map(([c]) => c.characterName).sort()).toEqual(["루나", "미카"]);
+  fireEvent.click(screen.getByRole("button", { name: "그림 보기" }));
+  expect(screen.getByRole("img", { name: "루나 원본 그림" })).toHaveAttribute("src", "https://big.test/루나.jpg");
+  fireEvent.click(screen.getByRole("button", { name: "다음 카드" })); await settle(CARD_VIEWER_FADE_MS + 100);
+  expect([...document.querySelectorAll(".card-viewer__art")].map(image => image.getAttribute("src"))).toContain("https://art.test/미카.jpg");
 });

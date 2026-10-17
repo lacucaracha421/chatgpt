@@ -1,5 +1,6 @@
 """AV jacket backfill: decisions, the authority swap and reruns, with fake HTTP and fake R2."""
 import asyncio
+import hashlib
 import io
 import json
 import unittest
@@ -59,9 +60,14 @@ class BackfillTests(unittest.TestCase):
         id_ = t.new(code)
         t.open.side_effect = [Response({**movie(), 'normalized_id': code}), Response(png(size), 'image/png'), Response(wiki())]
         self.assertTrue(t.worker.process_one())
-        split = t.row(id_)['candidate']
-        split = json.loads(split)['defaultSplit']
-        body = dict(x1=split['x1'], x2=split['x2'], surfaces=['front', 'spine', 'back'])
+        return self.confirm(id_, work, code)
+
+    def confirm(self, id_, work, code, surfaces=None):
+        """Crop the found candidate at its default split and apply it to a new AV work."""
+        t = self.t
+        split = json.loads(t.row(id_)['candidate'])['defaultSplit']
+        surfaces = surfaces or (['front', 'spine', 'back'] if split['isWrap'] else ['front'])
+        body = dict(x1=split['x1'], x2=split['x2'], surfaces=surfaces)
         items = asyncio.run(t.endpoint(av.PREFIX + '/{id_}/artwork', 'POST')(id_, request(body), t.auth))['items']
         t.create_av(work, code)
         for item in items:
@@ -72,6 +78,25 @@ class BackfillTests(unittest.TestCase):
         t.post(id_, 'applied', {'workId': work})
         return id_
 
+    def record(self, code, cover, cid=None):
+        """What LibreDMM answers for a code: the cover, and the digital cid its sample images carry."""
+        self.libredmm[code] = {**movie(), 'normalized_id': code, 'cover_image_url': cover,
+                               **({'sample_image_urls': [f'https://pics.dmm.co.jp/digital/video/{cid}/{cid}jp-1.jpg']} if cid else {})}
+
+    def image(self, url, size):
+        self.cdn[url] = (png(size), 'image/png')
+
+    def lookup(self, code, cover, images, cid=None):
+        """Run a real inbox lookup against the same fake CDN; returns the inbox id."""
+        id_ = self.t.new(code)
+        self.record(code, cover, cid)
+        for url, size in images.items():
+            self.image(url, size)
+        with mock.patch.object(wp, 'outbound', side_effect=self.outbound):
+            self.assertTrue(self.t.worker.process_one())
+        self.assertEqual(self.t.row(id_)['status'], 'found')
+        return id_
+
     def hires(self, code, cid, size):
         label = code.split('-')[0].lower()
         self.libredmm[code] = {**movie(), 'normalized_id': code, 'cover_image_url': f'https://pics.dmm.co.jp/mono/movie/adult/k9{label}001/k9{label}001pl.jpg',
@@ -80,10 +105,10 @@ class BackfillTests(unittest.TestCase):
         Image.new('RGB', size, 'white').save(image, 'JPEG')
         self.cdn[av.HIRES_URL.format(cid=cid)] = (image.getvalue(), 'image/jpeg')
 
-    def run_backfill(self, apply, candidates=False):
+    def run_backfill(self, apply, candidates=False, retry=False):
         lines = []
         job = bf.Backfill(self.get_db, lambda: fake_s3, lambda: 'test-bucket', apply=apply, sleep=lambda _: None,
-                          log=lines.append)
+                          log=lines.append, retry=retry)
         with mock.patch.object(wp, 'outbound', side_effect=self.outbound):
             summary = job.run(candidates=candidates)
         return summary, [json.loads(line) for line in lines]
@@ -184,3 +209,150 @@ class BackfillTests(unittest.TestCase):
         self.assertTrue(self.t.worker.process_one())
         candidate = json.loads(self.t.row(id_)['candidate'])
         self.assertEqual((candidate['jacketWidth'], candidate['defaultSplit']['x1']), (1600, 756))
+
+    # -- front-only covers and borrowed spines ----------------------------------------
+    PS = 'https://pics.dmm.co.jp/mono/movie/adult/77midv032/77midv032ps.jpg'
+    MONO = 'https://pics.dmm.co.jp/mono/movie/adult/k9snos130/k9snos130pl.jpg'
+
+    def sha_of(self, url):
+        return hashlib.sha256(self.cdn[url][0]).hexdigest()
+
+    def surface_arts(self, work):
+        selected, arts, _ = self.selection(work)
+        return {surface: arts[selected[slot]] for slot, surface in (('work', 'front'), ('spine', 'spine'), ('back', 'back'))
+                if selected.get(slot)}
+
+    def test_front_only_cover_becomes_a_wrap_with_back_and_spine(self):
+        pl = self.PS.replace('ps.jpg', 'pl.jpg')
+        self.old_work('w10', 'MIDV-032', size=(147, 200))
+        self.record('MIDV-032', self.PS)
+        self.image(self.PS, (147, 200))
+        self.image(pl, (800, 538))
+        before = self.selection('w10')
+        self.assertEqual({k for k, v in before[0].items() if v}, {'work'})
+
+        summary, lines = self.run_backfill(apply=False)
+        self.assertEqual(summary['counts'], {'would_wrap': 1})
+        self.assertEqual((lines[0]['scope'], lines[0]['newSplit'], lines[0]['surfaces'], lines[0]['source']),
+                         ('work-wrap', [378, 422], ['front', 'back', 'spine'], pl))
+        self.assertEqual(self.selection('w10')[0], before[0])
+
+        summary, lines = self.run_backfill(apply=True)
+        self.assertEqual(summary['counts'], {'done': 1})
+        sha = self.sha_of(pl)
+        new = self.surface_arts('w10')
+        self.assertEqual({k: (v['width'], v['height']) for k, v in new.items()},
+                         {'front': (378, 538), 'spine': (44, 538), 'back': (378, 538)})
+        for surface, art in new.items():
+            self.assertEqual(art['provider_image_id'], f'MIDV-032:{sha}:378:422:{surface}')
+        self.assertIn(before[0]['work'], self.selection('w10')[1])  # the old front-only artwork stays, unselected
+        self.assertNotIn(before[0]['work'], self.selection('w10')[0].values())
+        self.assertFalse(fake_s3.deleted)
+
+        cursor = self.selection('w10')[2]
+        self.fetched.clear()
+        summary, _ = self.run_backfill(apply=True)
+        self.assertEqual((self.fetched, self.selection('w10')[2]), ([], cursor))
+
+    def test_front_only_cover_without_a_wrap_is_asked_once(self):
+        self.old_work('w11', 'MIDV-033', size=(147, 200))
+        self.record('MIDV-033', self.PS.replace('midv032', 'midv033'))
+        self.image(self.PS.replace('midv032', 'midv033'), (147, 200))
+        before = self.selection('w11')
+        summary, lines = self.run_backfill(apply=True)
+        self.assertEqual((summary['counts'], lines[0]['reason']), ({'no_wrap': 1}, 'noWrap'))
+        self.assertEqual(self.selection('w11'), before)
+        self.fetched.clear()
+        self.assertEqual(self.run_backfill(apply=True)[0]['counts'], {'skip_recorded_no_wrap': 1})
+        self.assertEqual(self.fetched, [])
+
+    def test_front_only_cover_takes_the_wide_jacket_and_its_borrowed_spine(self):
+        hires = av.HIRES_URL.format(cid='snos00130')
+        self.old_work('w12', 'SNOS-130', size=(147, 200))
+        self.record('SNOS-130', self.MONO, 'snos00130')
+        self.image(hires, (2184, 1638))
+        self.image(self.MONO, (800, 438))
+        summary, lines = self.run_backfill(apply=True)
+        self.assertEqual(summary['counts'], {'done': 1})
+        sha = self.sha_of(hires)
+        new = self.surface_arts('w12')
+        self.assertEqual({k: (v['width'], v['height']) for k, v in new.items()},
+                         {'front': (1092, 1638), 'spine': (135, 1638), 'back': (1092, 1638)})
+        self.assertEqual(new['spine']['provider_image_id'], f'SNOS-130:{sha}:1092:1092:spine')
+        self.assertEqual(lines[0]['spineFrom'], self.MONO)
+
+    def test_wide_jacket_without_a_spine_gets_the_dvd_spine_and_nothing_else_changes(self):
+        hires = av.HIRES_URL.format(cid='snos00130')
+        id_ = self.lookup('SNOS-130', self.MONO, {hires: (2184, 1638)}, 'snos00130')  # no DVD wrap anywhere yet
+        self.assertNotIn('spineSource', json.loads(self.t.row(id_)['candidate']))
+        self.confirm(id_, 'w13', 'SNOS-130', ['front', 'back'])
+        before = self.selection('w13')
+
+        summary, lines = self.run_backfill(apply=True)  # nothing to borrow: asked once, remembered
+        self.assertEqual((summary['counts'], lines[0]['reason']), ({'no_spine_source': 1}, 'noSpineSource'))
+        self.fetched.clear()
+        self.assertEqual(self.run_backfill(apply=True)[0]['counts'], {'skip_recorded_no_spine_source': 1})
+        self.assertEqual(self.fetched, [])
+
+        self.image(self.MONO, (800, 438))
+        summary, lines = self.run_backfill(apply=False, retry=True)
+        self.assertEqual(summary['counts'], {'would_borrow_spine': 1})
+        self.assertEqual((lines[0]['scope'], lines[0]['spineBox'], lines[0]['spineSize'], lines[0]['surfaces']),
+                         ('work-spine', [382, 418], [135, 1638], ['spine']))
+        self.assertEqual(self.selection('w13')[0], before[0])
+
+        summary, _ = self.run_backfill(apply=True, retry=True)
+        self.assertEqual(summary['counts'], {'done': 1})
+        selected, arts, cursor = self.selection('w13')
+        self.assertEqual({s: selected[s] for s in ('work', 'back')}, {s: before[0][s] for s in ('work', 'back')})
+        sha = arts[selected['work']]['provider_image_id'].split(':')[1]
+        spine = arts[selected['spine']]
+        self.assertEqual((spine['width'], spine['height'], spine['provider_image_id']),
+                         (135, 1638, f'SNOS-130:{sha}:1092:1092:spine'))
+        self.assertEqual(len(arts), 3)
+
+        self.fetched.clear()
+        summary, _ = self.run_backfill(apply=True, retry=True)
+        self.assertEqual((summary['counts'], self.fetched, self.selection('w13')[2]), ({'skip_already_large': 1}, [], cursor))
+
+    def test_dry_run_lists_every_kind_of_change_and_writes_nothing(self):
+        hires = av.HIRES_URL.format(cid='snos00130')
+        self.old_work('w20', 'SSIS-001')
+        self.hires('SSIS-001', 'ssis00001', (1600, 1076))
+        self.old_work('w21', 'MIDV-032', size=(147, 200))
+        self.record('MIDV-032', self.PS)
+        self.image(self.PS, (147, 200))
+        self.image(self.PS.replace('ps.jpg', 'pl.jpg'), (800, 538))
+        id_ = self.lookup('SNOS-130', self.MONO, {hires: (2184, 1638)}, 'snos00130')
+        self.confirm(id_, 'w22', 'SNOS-130', ['front', 'back'])
+        self.image(self.MONO, (800, 438))
+        before = {w: self.selection(w) for w in ('w20', 'w21', 'w22')}
+
+        summary, lines = self.run_backfill(apply=False)
+        self.assertEqual(summary['counts'], {'would_swap': 1, 'would_wrap': 1, 'would_borrow_spine': 1})
+        self.assertEqual({line['id'] for line in lines}, {'w20', 'w21', 'w22'})
+        self.assertEqual({w: self.selection(w) for w in before}, before)
+        with self.get_db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM av_jacket_backfill').fetchone()[0], 0)
+
+        self.assertEqual(self.run_backfill(apply=True)[0]['counts'], {'done': 3})
+        self.fetched.clear()
+        self.run_backfill(apply=True)
+        self.assertEqual(self.fetched, [])
+
+    def test_pending_candidates_the_new_rules_improve_go_back_to_the_worker(self):
+        ps = self.PS.replace('midv032', 'midv040')
+        pl = 'https://pics.dmm.co.jp/mono/movie/adult/77midv041/77midv041pl.jpg'
+        stuck = self.lookup('MIDV-040', ps, {ps: (147, 200)})
+        fine = self.lookup('MIDV-041', pl, {pl: (800, 538)})
+        # A front-only candidate whose wrap exists now goes back to the worker; one nothing can improve stays.
+        self.image(ps.replace('ps.jpg', 'pl.jpg'), (800, 538))
+        summary, _ = self.run_backfill(False, candidates=True)
+        self.assertEqual(summary['counts'], {'would_requeue': 1, 'unchanged': 1})
+        self.assertEqual((self.t.row(stuck)['status'], self.t.row(fine)['status']), ('found', 'found'))
+        summary, _ = self.run_backfill(True, candidates=True)
+        self.assertEqual(summary['counts'], {'requeued': 1, 'unchanged': 1})
+        self.assertEqual((self.t.row(stuck)['status'], self.t.row(fine)['status']), ('queued', 'found'))
+        self.fetched.clear()
+        self.assertEqual(self.run_backfill(True, candidates=True)[0]['counts'], {'skip_recorded_unchanged': 1})
+        self.assertEqual(self.fetched, [])

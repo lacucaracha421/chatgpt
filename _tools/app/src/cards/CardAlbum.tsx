@@ -13,6 +13,7 @@ import { TradingCard } from "./TradingCard";
 import { cardsApi, displayCards, type CardsApi } from "./api";
 import { groupAlbum } from "./groupAlbum";
 import { cardTiers, tierRank, type CardData, type CardTier } from "./types";
+import { isLocalPreview } from "./warmup";
 import "./album.css";
 
 interface Snapshot { cards: CardData[]; next: string | null; revision: number; pages: number; trashed: boolean }
@@ -78,6 +79,8 @@ export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: 
   const viewerIndex = viewerId ? viewerCards.findIndex(card => card.id === viewerId) : -1;
   const openViewer = useCallback((card: CardData) => { choose(card); setViewerId(card.id); }, [choose]);
   const closeViewer = useCallback(() => setViewerId(null), []);
+  // The album's 1280 px preview is enlarged on a tall high-DPI viewer card; the viewer asks the library for a bigger one.
+  const sharpArt = useCallback((card: CardData) => Promise.resolve(isLocalPreview(card.artUrl) ? card.artUrl.replace(/\/\d{3,4}$/, "/2560") : ""), []);
   useBackHandler(closeViewer, 60, viewerIndex >= 0);
   const stale = !!data && data.trashed !== trashed;
   const changed = (id: string) => {
@@ -117,7 +120,7 @@ export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: 
         <Button variant="quiet" disabled={!onCharacter || !detail.characterId} onClick={() => onCharacter?.(detail.characterId!)}>캐릭터 폴더</Button>
       </div> : <p>카드를 선택해 주세요</p>}</aside>
     </div>
-    {viewerIndex >= 0 && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter}
+    {viewerIndex >= 0 && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter} sharpArt={sharpArt}
       onIndexChange={next => { const card = viewerCards[next]; if (card) { choose(card); setViewerId(card.id); } }} />}
   </div>;
 }

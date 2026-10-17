@@ -736,7 +736,7 @@ class ImageThumbnailWorker:
         if hasher.hexdigest() != sha256:
             raise _TerminalError(E_TERMINAL["sourceDigestMismatch"])
 
-    def _encode(self, asset_id, source, output, kind=IMAGE_KIND):
+    def _encode(self, asset_id, source, output, kind=IMAGE_KIND, max_edge=None):
         """Bound the entire encoder/tool process group, including a crashed supervisor.
 
         Resource limits are applied after exec by the child, never by a threaded
@@ -747,6 +747,8 @@ class ImageThumbnailWorker:
         if os.name != "posix":
             raise _TerminalError(E_TERMINAL["encodeUnsupportedPlatform"])
         command = [sys.executable, self.encoder_script, source, output, kind]
+        if max_edge is not None:
+            command.append(str(int(max_edge)))
         process = None
         try:
             process = subprocess.Popen(

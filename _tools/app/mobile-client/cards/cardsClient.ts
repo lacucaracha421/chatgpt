@@ -30,6 +30,10 @@ export interface TabletCardsApi {
   art(assetId: string): Promise<string>;
   /** The server's cutout layer for an Asset (a short-lived download ticket); `""` when there is none. */
   cutout(assetId: string): Promise<string>;
+  /** The Library original, for the full-window card viewer only: the album grid stays on thumbnails. */
+  original?(assetId: string): Promise<string>;
+  /** The 768 px copy of the art for album cells larger than the thumbnail; `""` when there is none. */
+  artMedium?(assetId: string): Promise<string>;
 }
 
 export const ALBUM_PAGE_SIZE = 50;
@@ -48,6 +52,11 @@ export const tabletCardsApi: TabletCardsApi = {
     // The thumbnail is cached on the device; an Asset without one falls back to the original.
     try { return (await mediaTicket(artAsset(assetId), 'thumbnail')).url; }
     catch { return (await mediaTicket(artAsset(assetId), 'original')).url; }
+  },
+  original: async assetId => (await mediaTicket(artAsset(assetId), 'original')).url,
+  async artMedium(assetId) {
+    const reply = await api<{url?: string}>(`/v1/cards/art/${encodeURIComponent(assetId)}/medium/ticket`, undefined, undefined, 'POST');
+    return typeof reply.url === 'string' && /^https:\/\//.test(reply.url) ? reply.url : '';
   },
   async cutout(assetId) {
     const reply = await api<{url?: string}>(`/v1/cards/cutouts/${encodeURIComponent(assetId)}/ticket`, undefined, undefined, 'POST');
@@ -71,6 +80,12 @@ function cached(client: TabletCardsApi, key: string, load: () => Promise<string>
 }
 export const artUrl = (client: TabletCardsApi, assetId: string) => cached(client, `art:${assetId}`, () => client.art(assetId));
 export const cutoutUrl = (client: TabletCardsApi, assetId: string) => cached(client, `cutout:${assetId}`, () => client.cutout(assetId));
+/** The medium copy of the art for the album grid. `""` when the server has none or cannot be reached. */
+export const mediumArtUrl = (client: TabletCardsApi, assetId: string) =>
+  client.artMedium ? cached(client, `medium:${assetId}`, () => client.artMedium!(assetId)) : Promise.resolve('');
+/** The viewer's sharp art: the 360 px thumbnail would be enlarged 4-9 times there. `""` when unavailable. */
+export const originalArtUrl = (client: TabletCardsApi, assetId: string) =>
+  client.original ? cached(client, `original:${assetId}`, () => client.original!(assetId)) : Promise.resolve('');
 
 const ART_PARALLEL = 4;
 /** Cards ready to show: art, and the cutout layer for SSR and above when the server has one. */

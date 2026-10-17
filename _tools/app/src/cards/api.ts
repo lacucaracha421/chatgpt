@@ -8,6 +8,8 @@ export interface ServerCard {
   slot: number | null; characterId: string; characterName: string; seriesName: string;
   tier: CardTier; artAssetId: string; artWidth: number; artHeight: number;
   cutout: { assetId: string } | null; count: number; level: number;
+  /** The server holds a 768 px copy of the art (tablet album grid); absent from older servers. */
+  artMedium?: boolean;
   serial: string | null; isNew: boolean; firstDrawnAt?: string; kept?: boolean;
 }
 /** Art ids of one sealed pack. Deliberately without tier, character or slot: it is only a warm-up list. */

@@ -301,10 +301,10 @@ def read_object(storage, bucket, key, *, digest=None, size=None, deadline=None):
         body.close()
 
 
-def publish_buffer(storage, bucket, data, digest, *, deadline=None):
+def publish_buffer(storage, bucket, data, digest, *, deadline=None, key=None):
     if not 0 < len(data) <= MAX_BYTES or hashlib.sha256(data).hexdigest() != digest:
         raise InvalidObject("thumbnailPublishDigest")
-    key = immutable_key(digest)
+    key = key or immutable_key(digest)
     try:
         read_object(storage, bucket, key, digest=digest, size=len(data), deadline=deadline)
         return key

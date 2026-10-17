@@ -66,6 +66,17 @@ describe("AvLinkChooserDialog", () => {
     expect(within(screen.getByRole("region", { name: "앞표지" })).getByText("1 × 438")).toBeInTheDocument();
   });
 
+  it("offers a spine for a spine-less wide jacket and says it comes from the DVD cover", async () => {
+    const { client } = show({ ...baseCandidate(false), jacketWidth: 2184, jacketHeight: 1638, defaultSplit: { x1: 1092, x2: 1092, isWrap: true, useSpine: true } });
+    const spine = await screen.findByRole("region", { name: "책등" });
+    expect(within(spine).getByText("책등은 DVD 표지에서 가져옴")).toBeInTheDocument();
+    expect(within(spine).getByRole("button", { name: "후보 사용" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/책등이 너무 넓거나 좁아요/)).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "새 컬렉션 만들기" }));
+    await waitFor(() => expect(client.apply).toHaveBeenCalled());
+    expect(vi.mocked(client.apply).mock.calls[0][1]).toMatchObject({ split: { x1: 1092, x2: 1093 }, surfaces: { spine: "candidate" } });
+  });
+
   it("checks only empty current metadata by default and labels same and different values", async () => {
     show(baseCandidate());
     await screen.findByRole("table", { name: "후보 정보 비교" });

@@ -18,7 +18,7 @@ reaches them even when this process is killed first.
 
 Usage::
 
-    python image_thumbnail_encode.py <input-path> <output-path> [image|gif|video]
+    python image_thumbnail_encode.py <input-path> <output-path> [image|gif|video [max-edge]]
 
 The third argument is the source kind and defaults to ``image``. On success the
 thumbnail is written to ``<output-path>`` and its metadata to ``<output-path>.json``:
@@ -93,6 +93,8 @@ FFPROBE = os.environ.get("LAKOMICS_FFPROBE") or "/usr/bin/ffprobe"
 #: for now; MEDIA-R2-001 can add further immutable variants later. A source whose
 #: longest edge is already under this is written at its own size, never upscaled.
 MAX_EDGE = 512
+#: Largest edge a caller may ask for with the optional fifth argument.
+MAX_VARIANT_EDGE = 1024
 
 #: Hard ceiling on decoded pixels, well below Pillow's default bomb threshold of
 #: ~89 MP. A 24 MP source is already far beyond what a 512 px tile needs and keeps
@@ -249,12 +251,19 @@ def _use_kind_limits(kind):
 def main(argv):
     if len(argv) == 3 and argv[1] == "--verify-webp":
         return verify_webp(argv[2])
-    if len(argv) < 3 or len(argv) > 4:
+    if len(argv) < 3 or len(argv) > 5:
         return EXIT_USAGE
     input_path, output_path = argv[1], argv[2]
     kind = argv[3] if len(argv) > 3 else KIND_IMAGE
     if kind not in KINDS:
         return EXIT_USAGE
+    if len(argv) == 5:
+        # A larger variant of the same recipe (card art, 768 px). Never below the tile
+        # size, and bounded so the pixel and address-space ceilings stay meaningful.
+        global MAX_EDGE
+        if not (argv[4].isascii() and argv[4].isdigit() and MAX_EDGE <= int(argv[4]) <= MAX_VARIANT_EDGE):
+            return EXIT_USAGE
+        MAX_EDGE = int(argv[4])
 
     _use_kind_limits(kind)
     if not _apply_own_resource_limits():
