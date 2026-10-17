@@ -14,6 +14,8 @@ import { Button } from "../../shared/ui/Button";
 import { Menu, type MenuItem } from "../../shared/ui/Menu";
 import { StableImage } from "../../shared/ui/StableImage";
 import { CaseInside, CollectionCase, type CaseData } from "../case/CollectionCase";
+import { jableUrl } from "../av/jableLink";
+import { handedCaseAngle } from "../case/caseHandoff";
 import { playCaseSound } from "../case/caseSounds";
 import { AvPortrait } from "../av/AvPortrait";
 import { WorkInfo, insideFacts, insideRecord } from "./WorkInfo";
@@ -31,6 +33,8 @@ export type WorkActions = {
   onManage(data: CollectionWorkData): MenuItem[]; onSave(collection: CollectionSummary, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>; onPickVolume?(id: string): void; onEnlargeManga?(): void;
   onOpenPerson(id: string): void; onOpenCollection?(id: string): void; /** Resolves once the code is on the clipboard, so the copy icon can show it was copied. */
   onCopyCode(code: string | null): Promise<unknown> | void;
+  /** PC only: a long press on the AV disc opens this product page in the browser. Without it the disc stays inert. */
+  onOpenJable?(url: string): void;
 };
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
   // Game spine images keep their own painted slot, preserving the current case rotation.
@@ -101,6 +105,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
     return () => observer?.disconnect();
   }, [info, data.collection.id]);
   const caseData = { ...data.case, privacy, discLabel: [data.av?.productCode, data.av?.maker, data.av?.label].filter(Boolean).join(" · ") };
+  const jable = data.collection.type === "av" ? jableUrl(data.av?.productCode) : null;
   const heroId = heroArtwork(data.collection);
   const heroSrc = !privacy && heroId ? workArtworkUrl(heroId) : null;
   const activeVolume = data.manga?.volumes.find(volume => volume.id === data.manga?.activeVolumeId);
@@ -136,7 +141,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
     <WorkZoomStage stageRef={stage} className={`work-stage${data.collection.type !== "av" && !data.artworks.length ? " work-stage--no-strip" : ""}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
-        <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} sound={active ? { turn: caseTurn, work: data.collection.id } : undefined} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
+        <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} sound={active ? { turn: caseTurn, work: data.collection.id } : undefined} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset} initialAngle={handedCaseAngle(data.collection.id)} onDiscHold={jable && actions.onOpenJable ? () => actions.onOpenJable?.(jable) : undefined}
           backContent={{ hero: heroSrc, overview: data.collection.overview,
             screenshots: data.artworks.filter(art => art.kind === "screenshot").slice(0, 3).map(art => workArtworkThumbnailUrl(art.id)),
             facts: backFacts(data.collection, data.av),

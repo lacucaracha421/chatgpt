@@ -61,7 +61,12 @@ const TYPES: CollectionType[] = ["game", "manga", "movie", "av"];
 const NO_INBOX: ReleaseInboxItem[] = [];
 /** Shelves whose first appearance has played this session; revisits, sorts and filters do not animate. */
 const enteredSpineShelves = new Set<string>();
-export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
+/**
+ * Per list scope: scroll, the work last opened and the exhibition page. `pick` marks a work screen opened from that list:
+ * coming back from it puts that case back out on the 책장 once; leaving Collections otherwise clears it
+ * (App clears every mark when another area opens).
+ */
+export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number; pick?: boolean }>;
 
 type CollectionBrowserProps = {
   /** The 신간 view: kakao = 한국 정발, mangadex = 일본. */
@@ -120,6 +125,9 @@ export function CollectionBrowser({
   const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [mangaPick, setMangaPick] = useState<MangaShelfPick>(null);
+  // Another type tab starts with every case on the shelf.
+  const [pickType, setPickType] = useState(typeFilter);
+  if (pickType !== typeFilter) { setPickType(typeFilter); setPickedId(null); setMangaPick(null); }
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
@@ -159,6 +167,13 @@ export function CollectionBrowser({
   const [pageMemory] = useState<{ scope: string; page: number } | null>(null);
   const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar, kakaoReviewOpen]);
   useCollectionCoverPerf(stageRef, scope, collections);
+  // A return from the work screen puts its case back out once: the mark is read when the scope first shows, then spent.
+  const returnPick = useRef<{ scope: string; pick: boolean } | null>(null);
+  if (returnPick.current?.scope !== scope) returnPick.current = { scope, pick: Boolean(navigationMemory?.get(scope)?.pick) };
+  useEffect(() => {
+    const entry = navigationMemory?.get(scope);
+    if (entry?.pick) navigationMemory!.set(scope, { ...entry, pick: false });
+  }, [scope, navigationMemory]);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -254,7 +269,7 @@ export function CollectionBrowser({
   }
 
   const openCollection = (collection: CollectionSummary, order = visible) => {
-    navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id, page: exhibition.page });
+    navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id, page: exhibition.page, pick: true });
     if (onOpenWork && (collection.type === "game" || collection.type === "av" || collection.type === "movie")) onOpenWork(collection.id, order.map(item => item.id));
     else onViewChange({ kind: "collection", collectionId: collection.id });
   };
@@ -446,7 +461,7 @@ export function CollectionBrowser({
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
               : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={SPINE_SCALE.pc[viewSettings.spineSize ?? "normal"]} label={`${sectionLabel} 작품 목록`}
                 pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} prepare={spineData.prepare} controlRef={spineControl}
-                restoredFocusId={navigationMemory?.get(scope)?.focusId} entrance={spineEntrance} />
+                restoredFocusId={navigationMemory?.get(scope)?.focusId} restorePick={returnPick.current.pick} entrance={spineEntrance} />
               : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}

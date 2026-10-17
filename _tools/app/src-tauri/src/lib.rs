@@ -1,4 +1,5 @@
 mod activities;
+mod brave_link;
 mod card_cutouts;
 mod catalog_source;
 mod catalog_transport;
@@ -269,6 +270,7 @@ pub fn run() {
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
             activities::activity_snapshot,
+            brave_link::open_in_brave,
             link_preview::home_link_preview,
             link_preview::home_link_thumbnail,
             link_preview::home_link_import,

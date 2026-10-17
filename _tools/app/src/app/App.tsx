@@ -199,6 +199,12 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [view, setView] = useState<AssetView>(initialWorkspaceView);
   useMediaViewChanged(JSON.stringify(view));
   const area = workspaceSwitchKey(view);
+  // Only the way back from a work screen puts its case back out on the 책장; another area clears that.
+  useEffect(() => { if (area !== "collections" && area !== "collection-work") {
+    // Inline rather than imported: CollectionBrowser loads lazily.
+    const memory = collectionNavigationMemory.current;
+    for (const [scope, entry] of memory) if (entry.pick) memory.set(scope, { ...entry, pick: false });
+  } }, [area]);
   const [shownArea, setShownArea] = useState(area);
   const [areaSettling, setAreaSettling] = useState(false);
   const shownView = useRef(view);

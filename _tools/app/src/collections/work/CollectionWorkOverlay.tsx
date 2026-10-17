@@ -9,6 +9,7 @@ import { Dialog } from "../../shared/ui/Dialog";
 import { requestMissingGameSpine, selectedSpine, useSpineArtworkRevision } from "../launchBoxSpines";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { avError, avGateway } from "../avClient";
+import { openInBrave } from "../av/jableLink";
 import type { AvGateway } from "../avTypes";
 import { AvEditPanel } from "../AvEditPanel";
 import { AvArtworkDialog } from "../AvArtworkDialog";
@@ -148,6 +149,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     },
     onOpenPerson: setPerformer, onOpenCollection,
     onCopyCode: code => code && navigator.clipboard?.writeText ? navigator.clipboard.writeText(code).catch(reason => { setError(avError(reason)); throw reason; }) : Promise.reject(new Error("clipboard unavailable")),
+    onOpenJable: url => void openInBrave(url).catch(() => setError("브라우저를 열지 못했습니다.")),
     onManage: data => [
       { id: "edit", label: "컬렉션 편집", onSelect: () => setPanel({ kind: "edit", data }) },
       { id: "showcase", label: data.collection.showcase ? "쇼케이스에서 빼기" : "쇼케이스에 추가", onSelect: () => actions.onShowcase(data.collection) },

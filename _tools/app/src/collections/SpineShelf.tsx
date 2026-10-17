@@ -2,8 +2,10 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useLongPress } from "../shared/useLongPress";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
-import { CASE_PLASTIC, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
-import { nearestCell, packSpineShelf, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
+import { CASE_PLASTIC, CollectionCase, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
+import { handOffCaseAngle } from "./case/caseHandoff";
+import { stageForCaseHeight } from "./case/fitCaseStage";
+import { nearestCell, packSpineShelf, SPINE_SHELF, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
 import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
 
@@ -12,6 +14,8 @@ export type SpineWork = PackedWork & {
   title: string; credit: string; developer: string | null;
   /** Front cover shown when the case is pulled out; spine artwork shown on the spine. */
   front: string | null; spine: string | null;
+  /** The stored back cover (AV jacket split); without it the pulled-out case prints a back from the work's own data. */
+  back?: string | null;
   /** The owned device or spine artwork is not read yet: the spine stays plastic only, at its final size. */
   pending: boolean;
 };
@@ -39,6 +43,19 @@ const FIRST_HOLD_MS = 350;
 /** The viewport assumed until the scroll area has a measurable size. */
 const FALLBACK_VIEWPORT = 900;
 const ENTRANCE_MS = 800;
+const NO_IDS: readonly string[] = [];
+/** Spine artwork fading in over its stand-in (SpineShelf.css). */
+const SPINE_FADE_MS = 140;
+/** The put-back move (`spine-out-home` in SpineShelf.css); the spine shows again when it ends. */
+const PUT_BACK_MS = 440;
+/** The pulled-out case is held a little closer than the shelf: this much taller than its spine, and lifted off the plank. */
+const PULL_GROW = 1.28;
+const PULL_LIFT = 12;
+/**
+ * The spine stays on the shelf until the pulled-out case has painted its faces (front, spine, back), so the swap
+ * never shows a blank case; a slow image waits at most this long and then fills in on the case.
+ */
+const PREPARE_CAP_MS = 350;
 /** The entries (labels and rows) that overlap the visible part of the shelf plus `overscan` viewports on each side. */
 function windowRange(entries: readonly { top: number; height: number }[], top: number, height: number, overscan = OVERSCAN_VIEWPORTS): [number, number] {
   const low = top - height * overscan, high = top + height * (1 + overscan);
@@ -66,6 +83,8 @@ type Props<W extends SpineWork> = {
   /** Space between the host edge and the first spine. */
   gutter?: number;
   restoredFocusId?: string | null;
+  /** Also put the `restoredFocusId` case back out (a return from its work screen); otherwise it only gets focus. */
+  restorePick?: boolean;
   menu?(id: string): ContextMenuItem[];
   /** Tablet: a long press on a work (or, with `touchTargets`, the nearest one in the row) asks for its action sheet. */
   onLongPress?(id: string): void;
@@ -85,7 +104,7 @@ type Props<W extends SpineWork> = {
   controlRef?: { current: SpineShelfControl | null };
 };
 
-export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
+export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, restorePick = false, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -127,6 +146,23 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     setAhead(current => current[0] === far[0] && current[1] === far[1] ? current : far);
   }, [entries, viewport]);
   const measureRef = useRef(measure); measureRef.current = measure;
+  // Another 책등 크기 repacks every row: the row that was at the top of the view stays there, at the same share of its
+  // height, so the size changes in one step around what was being looked at instead of jumping elsewhere.
+  const sized = useRef({ scale, rows });
+  useLayoutEffect(() => {
+    const before = sized.current; sized.current = { scale, rows };
+    if (before.scale === scale) return;
+    const host = hostRef.current, root = rootOf();
+    if (!host || !root || !before.rows.length) return;
+    const offset = host.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+    const top = root.scrollTop - offset;
+    if (top <= 0) return;
+    const old = before.rows.find(row => row.top + row.height > top) ?? before.rows[before.rows.length - 1];
+    const cell = cells.get(old.cells[0].work.id);
+    if (!cell) return;
+    const next = rows[cell.row];
+    root.scrollTop = offset + next.top + Math.min(1, (top - old.top) / old.height) * next.height;
+  }, [scale, rows, cells, rootOf]);
   // A new packing (width, size, list) moves the rows: measure again before painting.
   useLayoutEffect(() => { measure(); }, [measure]);
   useLayoutEffect(() => {
@@ -162,12 +198,29 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     return () => { controlRef.current = null; };
   });
 
-  // Rows that stay mounted outside the window: the picked case, the tab stop and the one focus returns to.
+  // Put-back: the case of a pick that ended turns back into its spine before it goes. It is worked out while rendering,
+  // so the very commit that drops the pick shows that case leaving: it is never unmounted and mounted again (which
+  // showed the spine at once and replayed the move later). Several can be on their way back at once.
+  // At the end of its move a case is `landing`: its spine shows again under it, and the case goes only once the spine
+  // has been painted (two frames), so a spine whose image the WebView let go of while hidden never shows blank.
+  const [pickTrack, setPickTrack] = useState<{ picked: string | null; leaving: readonly string[]; landing: readonly string[] }>({ picked: pickedId, leaving: NO_IDS, landing: NO_IDS });
+  let leavingIds = pickTrack.leaving, landingIds = pickTrack.landing;
+  if (pickTrack.picked !== pickedId) {
+    const before = pickTrack.picked;
+    const next = pickTrack.leaving.filter(id => id !== pickedId && id !== before);
+    if (before && !reducedMotion()) next.push(before);
+    const landed = pickTrack.landing.filter(id => id !== pickedId && id !== before);
+    leavingIds = next.length ? next : NO_IDS;
+    landingIds = landed.length === pickTrack.landing.length ? pickTrack.landing : landed.length ? landed : NO_IDS;
+    setPickTrack({ picked: pickedId, leaving: leavingIds, landing: landingIds });
+  }
+
+  // Rows that stay mounted outside the window: the picked and leaving cases, the tab stop and the one focus returns to.
   const pinned = useMemo(() => {
     const set = new Set<number>();
-    for (const id of [pickedId, tabbableId, restoredFocusId]) { const cell = id ? cells.get(id) : undefined; if (cell) set.add(cell.row); }
+    for (const id of [pickedId, tabbableId, restoredFocusId, ...leavingIds, ...landingIds]) { const cell = id ? cells.get(id) : undefined; if (cell) set.add(cell.row); }
     return set;
-  }, [pickedId, tabbableId, restoredFocusId, cells]);
+  }, [pickedId, tabbableId, restoredFocusId, leavingIds, landingIds, cells]);
   const mounted = useMemo(() => {
     const shown: PackedEntry<W>[] = [];
     entries.forEach((entry, index) => { if ((index >= range[0] && index <= range[1]) || (entry.kind === "row" && pinned.has(entry.index))) shown.push(entry); });
@@ -209,22 +262,49 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
   const entranceStarted = entering.current !== null;
   useEffect(() => { if (!entranceStarted) return; const timer = window.setTimeout(() => entering.current?.clear(), ENTRANCE_MS); return () => window.clearTimeout(timer); }, [entranceStarted]);
 
-  // Put-down: the pulled-out cover of the previous pick turns back into its spine before it goes.
-  const [leaving, setLeaving] = useState<string | null>(null);
-  const previousPick = useRef<string | null>(pickedId);
+  // Put-back timers: each leaving case lands when its own move has ended, and goes two frames after its spine shows.
+  const leaveTimers = useRef(new Map<string, number>());
   useEffect(() => {
-    const before = previousPick.current; previousPick.current = pickedId;
-    if (!before || before === pickedId || reducedMotion()) { setLeaving(null); return; }
-    setLeaving(before);
-    const timer = window.setTimeout(() => setLeaving(current => current === before ? null : current), 380);
-    return () => window.clearTimeout(timer);
-  }, [pickedId]);
+    const timers = leaveTimers.current;
+    for (const id of leavingIds) if (!timers.has(id)) timers.set(id, window.setTimeout(() => {
+      timers.delete(id);
+      setPickTrack(track => track.leaving.includes(id) ? { ...track, leaving: track.leaving.filter(item => item !== id), landing: [...track.landing, id] } : track);
+    }, PUT_BACK_MS + 20));
+    for (const [id, timer] of timers) if (!leavingIds.includes(id)) { window.clearTimeout(timer); timers.delete(id); }
+  }, [leavingIds]);
+  const landFrames = useRef(new Map<string, number>());
+  useEffect(() => {
+    const frames = landFrames.current;
+    for (const id of landingIds) if (!frames.has(id)) frames.set(id, requestAnimationFrame(() => frames.set(id, requestAnimationFrame(() => {
+      frames.delete(id);
+      setPickTrack(track => ({ ...track, landing: track.landing.filter(item => item !== id) }));
+    }))));
+    for (const [id, frame] of frames) if (!landingIds.includes(id)) { cancelAnimationFrame(frame); frames.delete(id); }
+  }, [landingIds]);
+  useEffect(() => () => {
+    const timers = leaveTimers.current, frames = landFrames.current;
+    timers.forEach(timer => window.clearTimeout(timer)); timers.clear();
+    frames.forEach(frame => cancelAnimationFrame(frame)); frames.clear();
+  }, []);
+  // A case put back out by a returning visit is already in the hand: it appears pulled out, without the move.
+  const stillPick = useRef<string | null>(null);
+  useEffect(() => { if (pickedId !== stillPick.current) stillPick.current = null; }, [pickedId]);
+  const still = pickedId !== null && stillPick.current === pickedId ? pickedId : null;
+  // The work screen's case starts at the angle the pulled-out case was turned to, so the hero move reads as one object.
+  const onOpenRef = useRef(onOpen); onOpenRef.current = onOpen;
+  const open = useCallback((id: string) => {
+    const kase = [...hostRef.current?.querySelectorAll<HTMLElement>(".spine-shelf__out") ?? []].find(out => out.dataset.id === id)?.querySelector<HTMLElement>(".kase");
+    if (kase?.dataset.angle) handOffCaseAngle(id, Number(kase.dataset.angle));
+    onOpenRef.current(id);
+  }, []);
 
-  // A returning visit puts the remembered case back out (the browser restores scroll and focus).
+  // A returning visit focuses the remembered case; a return from its work screen also puts it back out.
   const restored = useRef<string | null>(null);
+  const restorePickRef = useRef(restorePick); restorePickRef.current = restorePick;
   useEffect(() => {
     if (!restoredFocusId || restored.current === restoredFocusId || !cells.has(restoredFocusId)) return;
-    restored.current = restoredFocusId; setFocusId(restoredFocusId); onPick(restoredFocusId);
+    restored.current = restoredFocusId; setFocusId(restoredFocusId);
+    if (restorePickRef.current) { stillPick.current = restoredFocusId; onPick(restoredFocusId); }
   }, [restoredFocusId, cells, onPick]);
 
   useLayoutEffect(() => {
@@ -247,7 +327,7 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     if (pick) onPick(id);
   };
   const activate = (id: string) => {
-    if (pickedId === id) { onOpen(id); return; }
+    if (pickedId === id) { open(id); return; }
     setFocusId(id); onPick(id);
   };
   /** The work under a press: its spine or pulled-out case, else (on touch) the nearest one in the row. */
@@ -266,7 +346,13 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
   const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const out = target.closest<HTMLElement>(".spine-shelf__out");
-    if (out) { onOpen(out.dataset.id!); return; }
+    if (out) {
+      // The case is the work's 3D model: a click on it (not the end of a turn) opens through its own handler.
+      // The scroller's put-down must not take it away either way.
+      event.stopPropagation();
+      if (!target.closest(".kase")) open(out.dataset.id!);
+      return;
+    }
     const spine = target.closest<HTMLElement>(".spine");
     if (spine) { activate(spine.dataset.collectionId!); return; }
     const rowElement = touchTargets ? target.closest<HTMLElement>("[data-shelf-row]") : null;
@@ -294,9 +380,14 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
       case "ArrowUp": next = nearestCell(rows[cell.row - 1], cell.x + cell.width / 2)?.work.id ?? id; break;
       case "Home": next = row.cells[0].work.id; break;
       case "End": next = row.cells[row.cells.length - 1].work.id; break;
-      case "Enter": event.preventDefault(); if (pickedId === id) onOpen(id); else { setFocusId(id); onPick(id); } return;
+      case "Enter": event.preventDefault(); if (pickedId === id) open(id); else { setFocusId(id); onPick(id); } return;
       case " ": event.preventDefault(); if (pickedId === id) onPick(null); else { setFocusId(id); onPick(id); } return;
-      case "Escape": if (pickedId) { event.preventDefault(); event.stopPropagation(); onPick(null); } return;
+      case "Escape":
+        if (!pickedId) return;
+        event.preventDefault(); event.stopPropagation();
+        // From the turned case, focus goes back to its spine as it returns.
+        if (holder.classList.contains("spine-shelf__out")) { pendingFocus.current = id; setFocusId(id); }
+        onPick(null); return;
       default: return;
     }
     event.preventDefault();
@@ -304,6 +395,7 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
   };
 
   const entranceOf = (row: PackedRow<W>) => entering.current?.get(row.index);
+  const inRow = (row: PackedRow<W>, list: readonly string[]) => { const ids = list.filter(id => row.cells.some(cell => cell.work.id === id)); return ids.length ? ids : NO_IDS; };
   return <div ref={hostRef} className="spine-shelf" role="group" aria-label={label}
     style={{ height: packed.height, "--spine-scale": scale, "--spine-gutter": `${gutter}px` } as CSSProperties}
     onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}
@@ -312,39 +404,44 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     {mounted.map(entry => entry.kind === "label"
       ? <div key={`label:${entry.top}`} className="spine-shelf__label" style={{ top: entry.top, height: entry.height }}><SectionLabel title={entry.label} count={entry.count} /></div>
       : <ShelfRow<W> key={`row:${entry.index}`} row={entry} available={available} picked={entry.cells.some(cell => cell.work.id === pickedId) ? pickedId : null}
-        leaving={leaving && entry.cells.some(cell => cell.work.id === leaving) ? leaving : null}
+        leaving={inRow(entry, leavingIds.length || landingIds.length ? [...leavingIds, ...landingIds] : NO_IDS)} landing={inRow(entry, landingIds)}
+        still={entry.cells.some(cell => cell.work.id === still) ? still : null} onOpen={open}
         tabbable={entry.cells.some(cell => cell.work.id === tabbableId) ? tabbableId : null} privacy={privacy} menu={menu} art={(art ?? WORK_ART) as SpineArt<W>} entering={entranceOf(entry)} />)}
   </div>;
 }
 
 type RowProps<W extends SpineWork> = {
-  row: PackedRow<W>; available: number; picked: string | null; leaving: string | null; tabbable: string | null; privacy: boolean;
-  menu?(id: string): ContextMenuItem[]; art: SpineArt<W>; entering?: number;
+  row: PackedRow<W>; available: number; picked: string | null; leaving: readonly string[]; landing: readonly string[]; still: string | null; tabbable: string | null; privacy: boolean;
+  menu?(id: string): ContextMenuItem[]; art: SpineArt<W>; entering?: number; onOpen(id: string): void;
 };
-function ShelfRowView<W extends SpineWork>({ row, available, picked, leaving, tabbable, privacy, menu, art, entering }: RowProps<W>) {
+function ShelfRowView<W extends SpineWork>({ row, available, picked, leaving, landing, still, tabbable, privacy, menu, art, entering, onOpen }: RowProps<W>) {
   const board = useRef<HTMLDivElement>(null);
-  const outs = [picked, leaving].filter((id, index, list): id is string => Boolean(id) && list.indexOf(id) === index);
-  return <div className={`spine-shelf__row${entering !== undefined ? " is-entering" : ""}`} data-shelf-row={row.index}
+  const outs = [picked, ...leaving].filter((id, index, list): id is string => Boolean(id) && list.indexOf(id) === index);
+  // The pulled-out cases that have painted: only their spines hide, in the same commit as the case appears.
+  const [shown, setShown] = useState<readonly string[]>([]);
+  const onShown = useCallback((id: string, on: boolean) => setShown(list => on ? list.includes(id) ? list : [...list, id] : list.includes(id) ? list.filter(item => item !== id) : list), []);
+  // The row holding a case out paints over its neighbours: the case may reach into the rows above and below.
+  return <div className={`spine-shelf__row${entering !== undefined ? " is-entering" : ""}${outs.length ? " is-holding" : ""}`} data-shelf-row={row.index}
     style={{ top: row.top, height: row.height, "--board-height": `${row.board}px`, ...(entering !== undefined ? { "--i": entering } : {}) } as CSSProperties}>
     <div ref={board} className="spine-shelf__board">
       <div className="spine-shelf__spines">
-        {row.cells.map(cell => <Spine<W> key={cell.work.id} cell={cell} picked={picked === cell.work.id} tabbable={tabbable === cell.work.id} privacy={privacy} menu={menu} art={art} />)}
+        {row.cells.map(cell => <Spine<W> key={cell.work.id} cell={cell} picked={picked === cell.work.id} out={outs.includes(cell.work.id) && shown.includes(cell.work.id) && !landing.includes(cell.work.id)} tabbable={tabbable === cell.work.id} privacy={privacy} menu={menu} art={art} />)}
       </div>
       {outs.map(id => {
         const cell = row.cells.find(item => item.work.id === id)!;
-        return <PulledOut<W> key={id} cell={cell} available={available} leaving={id !== picked} privacy={privacy} art={art} />;
+        return <PulledOut<W> key={id} cell={cell} row={row} available={available} leaving={id !== picked} still={id === still} privacy={privacy} art={art} onOpen={onOpen} onShown={onShown} />;
       })}
     </div>
   </div>;
 }
 const ShelfRow = memo(ShelfRowView) as typeof ShelfRowView;
 
-function SpineView<W extends SpineWork>({ cell, picked, tabbable, privacy, menu, art }: { cell: PackedCell<W>; picked: boolean; tabbable: boolean; privacy: boolean; menu?(id: string): ContextMenuItem[]; art: SpineArt<W> }) {
+function SpineView<W extends SpineWork>({ cell, picked, out, tabbable, privacy, menu, art }: { cell: PackedCell<W>; picked: boolean; out: boolean; tabbable: boolean; privacy: boolean; menu?(id: string): ContextMenuItem[]; art: SpineArt<W> }) {
   const { work } = cell;
   const host = useRef<HTMLButtonElement>(null);
   const { url, pending } = art.useSpine(work, host);
   const button = <button ref={host} type="button" className="spine" data-collection-id={work.id} tabIndex={tabbable ? 0 : -1}
-    aria-label={work.credit ? `${work.title} · ${work.credit}` : work.title} aria-pressed={picked}
+    aria-label={work.credit ? `${work.title} · ${work.credit}` : work.title} aria-pressed={picked} data-out={out || undefined}
     style={{ "--w": `${cell.width}px`, "--h": `${cell.height}px`, "--plastic": CASE_PLASTIC[work.platform] } as CSSProperties}>
     <span className="spine__case">{(privacy || !pending) && <SpineArtView key={url ?? "template"} work={work} url={url} privacy={privacy} />}</span>
   </button>;
@@ -352,27 +449,87 @@ function SpineView<W extends SpineWork>({ cell, picked, tabbable, privacy, menu,
 }
 const Spine = memo(SpineView) as typeof SpineView;
 
-/** The printed insert. Artwork fades in over the plastic once it is decoded; a template appears in one step. */
+/**
+ * The printed insert. A template appears in one step. Spine artwork that is not decoded yet stands in as the drawn
+ * template, so it shows with its neighbours, and the artwork fades in over it once decoded.
+ */
 function SpineArtView({ work, url, privacy }: { work: SpineWork; url: string | null; privacy: boolean }) {
   const [settled, setSettled] = useState(!url || privacy || isSpineWarm(url));
+  const [standIn, setStandIn] = useState(!settled);
+  useEffect(() => {
+    if (!settled || !standIn) return;
+    const timer = window.setTimeout(() => setStandIn(false), SPINE_FADE_MS + 20);
+    return () => window.clearTimeout(timer);
+  }, [settled, standIn]);
   const data: CaseData = { title: work.title, platform: work.platform, developer: work.developer, front: null, spine: url, privacy };
   const settle = useCallback(() => setSettled(true), []);
   return <span className={spineInsertClass(data)} data-settled={settled}>
+    {standIn && <span className="spine__stand-in" aria-hidden="true"><CaseSpine decorative data={{ ...data, spine: null }} /></span>}
     <CaseSpine decorative data={data} onSettled={settle} />
   </span>;
 }
 
-function PulledOutView<W extends SpineWork>({ cell, available, leaving, privacy, art }: { cell: PackedCell<W>; available: number; leaving: boolean; privacy: boolean; art: SpineArt<W> }) {
-  const host = useRef<HTMLButtonElement>(null);
-  const front = art.useFront(cell.work, host);
+/**
+ * Where the pulled-out case is held, in board pixels: a little taller than its spine, centred over its slot within
+ * the row, lifted off the plank (lower instead when the top of the shelf would cut it). `from` is the wrapper
+ * transform that lays the edge-on 3D case exactly over its spine, where the pull starts and the put-back ends.
+ */
+function pullPose(cell: PackedCell<SpineWork>, row: PackedRow<SpineWork>, available: number) {
+  const height = Math.round(cell.height * PULL_GROW), width = Math.round(height * cell.coverWidth / cell.height);
   const center = cell.x + cell.width / 2;
-  const left = Math.max(0, Math.min(available - cell.coverWidth, center - cell.coverWidth / 2));
-  const from = `translateX(${center - (left + cell.coverWidth / 2)}px) scaleX(${cell.width / cell.coverWidth})`;
-  return <button ref={host} type="button" className={`spine-shelf__out${leaving ? " is-leaving" : ""}`} data-id={cell.work.id} tabIndex={-1} aria-label={`${cell.work.title} 열기`}
-    style={{ left, "--cover-w": `${cell.coverWidth}px`, "--h": `${cell.height}px`, "--plastic": CASE_PLASTIC[cell.work.platform], "--from": from } as CSSProperties}>
-    <span className="spine-shelf__face">
-      {privacy ? <span className="case-mask" /> : front && <img src={front} alt="" decoding="async" draggable={false} onError={event => { event.currentTarget.style.visibility = "hidden"; }} />}
-    </span>
-  </button>;
+  const left = Math.max(0, Math.min(available - width, center - width / 2));
+  const top = row.top + SPINE_SHELF.rowTop + row.board - PULL_LIFT - height;
+  const lift = PULL_LIFT + Math.min(0, top);
+  // Edge-on, the spine faces the viewer half a case width nearer than the case's middle, so the case's perspective
+  // (2200px on screen, CollectionCase.css) draws it larger and lower: the start scale and offset take that back out.
+  const near = 2200 / (2200 - width / 2), scale = cell.height / height / near;
+  const dx = center - (left + width / 2), dy = lift - scale * height * (near - 1) / 2;
+  return { left, width, height, lift, from: `translate(${dx.toFixed(2)}px, calc(${dy.toFixed(2)}px + var(--start-lift, 0px))) scale(${scale.toFixed(4)})` };
+}
+
+/**
+ * The picked case, pulled out of its slot toward the viewer and turned to its front in one move (PC and tablet).
+ * It is the work screen's own 3D case: a drag turns it, a click opens the work. Put back, it turns edge-on and
+ * slides into its slot. Only this case is a full model; the others stay flat spines.
+ */
+function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, still, privacy, art, onOpen, onShown }: { cell: PackedCell<W>; row: PackedRow<W>; available: number; leaving: boolean; still: boolean; privacy: boolean; art: SpineArt<W>; onOpen(id: string): void; onShown(id: string, shown: boolean): void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const front = art.useFront(cell.work, host);
+  const { url: spine, pending: spinePending } = art.useSpine(cell.work, host);
+  const id = cell.work.id;
+  // Painted: the case's images are decoded (or the cap ran out). Until then it is laid out but transparent and the
+  // spine stays on the shelf; then both swap in one commit and the pull starts. A case put back before it painted
+  // just goes, as its spine never left.
+  const [painted, setPainted] = useState(still);
+  const pendingRef = useRef(spinePending); pendingRef.current = spinePending;
+  useEffect(() => {
+    if (painted) return;
+    const timer = window.setTimeout(() => setPainted(true), PREPARE_CAP_MS);
+    return () => window.clearTimeout(timer);
+  }, [painted]);
+  // Before paint, so the spine hides in the same frame as the case appears.
+  useLayoutEffect(() => { if (painted) onShown(id, true); }, [painted, id, onShown]);
+  useLayoutEffect(() => () => onShown(id, false), [id, onShown]);
+  const pose = pullPose(cell, row, available);
+  const stage = useMemo(() => stageForCaseHeight(pose.height), [pose.height]);
+  // Put back from wherever it was turned: to the nearer edge-on angle with the spine toward the viewer.
+  useLayoutEffect(() => {
+    if (!leaving) return;
+    const angle = Number(host.current?.querySelector<HTMLElement>(".kase")?.dataset.angle ?? 28);
+    host.current?.style.setProperty("--ry-home", `${angle < -90 ? -270 : 90}deg`);
+  }, [leaving]);
+  // The pull plays once; afterwards the case rests and turns only by hand. Picked again on its way back, it comes out again.
+  const [pulled, setPulled] = useState(still);
+  const [wasLeaving, setWasLeaving] = useState(leaving);
+  if (wasLeaving !== leaving) { setWasLeaving(leaving); if (!leaving) setPulled(false); }
+  const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back: cell.work.back ?? null, privacy };
+  if (leaving && !painted) return null;
+  return <div ref={host} className={`spine-shelf__out${!painted ? " is-preparing" : leaving ? " is-leaving" : pulled ? "" : " is-pulling"}`} data-id={id}
+    onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "spine-out-pull") setPulled(true); }}
+    style={{ left: pose.left, "--out-w": `${pose.width}px`, "--out-h": `${pose.height}px`, "--lift": `${pose.lift}px`, "--from": pose.from,
+      // The model keeps the package's real thickness (CASE_MM), so edge-on it is exactly the spine it replaces.
+      "--out-depth": `${(520 * cell.width / cell.height).toFixed(2)}px` } as CSSProperties}>
+    <CollectionCase data={data} open={false} stageBox={stage} onOpenChange={() => onOpen(id)} onReady={() => { if (!pendingRef.current) setPainted(true); }} />
+  </div>;
 }
 const PulledOut = memo(PulledOutView) as typeof PulledOutView;

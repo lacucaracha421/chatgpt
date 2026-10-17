@@ -1,4 +1,5 @@
 import { useWorkImageReady } from "../work/useWorkImageReady";
+import { useLongPress } from "../../shared/useLongPress";
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useWorkTurnBlocked } from "../work/WorkZoom";
 import "./CollectionCase.css";
@@ -6,7 +7,10 @@ import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 import { CaseBack, type CaseBackContent } from "./CaseBack";
 import { CASE_SOUND_ATTACK_MS, playCaseSound, preloadCaseSounds } from "./caseSounds";
+import { watchCaseRaster } from "./caseRaster";
 export { CaseInside } from "./CaseInside";
+
+watchCaseRaster();
 
 export type CasePlatform = "sw2" | "sw" | "ps5" | "ps4" | "pc" | "other" | "av" | "film" | "book";
 /** NEC machines are not PCs; they stay unknown rather than getting the Steam spine. */
@@ -53,7 +57,7 @@ function TrayWalls({ tray }: { tray: "base" | "lid" }) {
     <span className={`k-lip k-${tray}-lip k-lip-${wall}`} aria-hidden="true" />
   </Fragment>)}</>;
 }
-function TrayMedia({ data, front }: { data: CaseData; front: string | null }) {
+function TrayMedia({ data, front, holdable = false, holding = false }: { data: CaseData; front: string | null; holdable?: boolean; holding?: boolean }) {
   const rimId = useId();
   const label = <span className="media-label" style={!data.privacy && front ? { backgroundImage: `url(${JSON.stringify(front)})` } : undefined}>
     {data.privacy && <span className="case-mask" />}
@@ -64,13 +68,14 @@ function TrayMedia({ data, front }: { data: CaseData; front: string | null }) {
     <span className="cart-slot"><span className="cart">{label}</span><span className="nub nub-top" /><span className="nub nub-bottom" /></span>
   </span> : <span className="tray-media tray-media--disc" aria-hidden="true">
     <span className="holder"><span className="thumb thumb-left" /><span className="thumb thumb-right" />
-      <span className="disc">{label}{data.platform === "av" && !data.privacy && data.discLabel && <svg className="av-disc-rim" viewBox="0 0 200 200">
+      <span className={`disc${holding ? " is-holding" : ""}`} data-hold={holdable || undefined}>{label}{data.platform === "av" && !data.privacy && data.discLabel && <svg className="av-disc-rim" viewBox="0 0 200 200">
         <defs><path id={rimId} d="M 100,18 a 82,82 0 1,1 0,164 a 82,82 0 1,1 0,-164" /></defs>
         <text><textPath href={`#${rimId}`} textLength={2 * Math.PI * 82} lengthAdjust="spacingAndGlyphs">{data.discLabel}</textPath></text>
       </svg>}</span><span className="hub" />
     </span><span className="disc-note">PUSH</span>
   </span>;
 }
+const coarsePointer = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)").matches);
 /** The case's open/close move (`.kase` transition in CollectionCase.css). */
 const UNFOLD_MS = 560;
 /** A work screen's case sounds: `turn` counts the user's actions that opened or closed this case; `work` names the shown work. */
@@ -108,22 +113,59 @@ function useCaseSound(cue: CaseSoundCue | undefined, open: boolean, platform: Ca
   }, [turn, work]);
 }
 
-export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox, sound }: {
+/** Whether a point falls on the exposed disc. The 3D faces above it take the hit test, so the
+ * target is the case body; the disc's projected box (a circle) decides instead. */
+function onDisc(root: Element, x: number, y: number) {
+  const disc = root.querySelector(".disc");
+  if (!disc) return false;
+  const r = disc.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const dx = (x - (r.left + r.width / 2)) / (r.width / 2), dy = (y - (r.top + r.height / 2)) / (r.height / 2);
+  return dx * dx + dy * dy <= 1;
+}
+
+export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox, sound, initialAngle = 28, onDiscHold }: {
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
   inside?: ReactNode; note?: ReactNode; backContent?: CaseBackContent; onReady?(): void; large?: boolean; stageBox?: StageBox;
   /** Only the work screen's case sounds; shelves and previews stay silent. */
   sound?: CaseSoundCue;
+  /** The closed case's turn when it mounts (the shelf hands over the angle its pulled-out case was turned to). */
+  initialAngle?: number;
+  /** A long press on the exposed AV disc (PC): the work screen opens the product page. Without it the disc stays inert. */
+  onDiscHold?(): void;
 }) {
   const blocked = useWorkTurnBlocked();
   const lid = useRef<HTMLSpanElement>(null);
   useCaseSound(sound, open, data.platform, lid);
-  const [angle, setAngle] = useState(open ? -10 : 28);
+  const [angle, setAngle] = useState(open ? -10 : initialAngle);
   const [ratio, setRatio] = useState(.71);
   const [loadedFront, setLoadedFront] = useState<string | null>(null);
-  const savedAngle = useRef(28);
+  const savedAngle = useRef(initialAngle);
   const lastReset = useRef(frontReset);
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
+  // While a drag turns the case, the angle goes straight onto the case element: no React render per pointer move
+  // (the whole model re-rendered every move and stuttered on the tablet). The release commits it once.
+  const kaseRef = useRef<HTMLDivElement>(null);
+  const liveAngle = useRef<number | null>(null);
+  function follow(next: number) {
+    const value = ((next + 180) % 360 + 360) % 360 - 180;
+    liveAngle.current = value;
+    const node = kaseRef.current; if (!node) return;
+    node.style.setProperty("--ry", `${value}deg`);
+    node.dataset.angle = String(value);
+    // The sheen repaints the whole front each frame: a touch screen moves it once, when the drag ends.
+    if (!coarsePointer()) node.style.setProperty("--gloss", `${50 + value}%`);
+  }
+  function endDrag() {
+    drag.current = null; setDragging(false);
+    if (liveAngle.current !== null) { setAngle(liveAngle.current); liveAngle.current = null; }
+  }
+  const discHeld = useRef(false);
+  const [discHolding, setDiscHolding] = useState(false);
+  const holdable = Boolean(onDiscHold) && data.platform === "av" && !data.privacy && open;
+  const press = useLongPress({ enabled: holdable, onStart: () => setDiscHolding(true), onEnd: () => setDiscHolding(false),
+    onLongPress: () => { discHeld.current = true; setDiscHolding(false); onDiscHold?.(); } });
   // Opening refits the stage (the open case is twice as wide). The fit scale moves on the unfolding's
   // curve only while it opens or closes; stage resizes and cover settling still apply at once.
   const [unfolding, setUnfolding] = useState(false);
@@ -170,10 +212,10 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className="collection-case-object">
-    <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
-      onPointerDown={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
-      onPointerMove={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } turn(start.angle + (event.clientX - start.x) * .6); }}
-      onPointerUp={event => { if (drag.current?.pointer !== event.pointerId) return; const click = !blocked?.current && drag.current && !drag.current.moved; drag.current = null; setDragging(false); if (click) onOpenChange(!open); }} onPointerCancel={() => { drag.current = null; setDragging(false); }} onLostPointerCapture={() => { drag.current = null; setDragging(false); }}
+    <div ref={kaseRef} className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
+      onPointerDown={event => { if (blocked?.current) { endDrag(); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; discHeld.current = false; if (holdable && ((event.target instanceof Element && event.target.closest(".disc")) || onDisc(event.currentTarget, event.clientX, event.clientY))) press.bind.onPointerDown(event); event.currentTarget.setPointerCapture?.(event.pointerId); }}
+      onPointerMove={event => { press.bind.onPointerMove(event); if (blocked?.current) { endDrag(); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } follow(start.angle + (event.clientX - start.x) * .6); }}
+      onPointerUp={event => { press.bind.onPointerUp(); if (drag.current?.pointer !== event.pointerId) return; if (discHeld.current) { discHeld.current = false; endDrag(); return; } const click = !blocked?.current && drag.current && !drag.current.moved; endDrag(); if (click) onOpenChange(!open); }} onPointerCancel={() => { press.bind.onPointerCancel(); endDrag(); }} onLostPointerCapture={() => { press.cancel(); setDiscHolding(false); endDrag(); }}
       onKeyDown={event => {
         if (event.key === "ArrowLeft") turn(angle - 15);
         else if (event.key === "ArrowRight") turn(angle + 15);
@@ -183,7 +225,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
         event.preventDefault(); event.stopPropagation();
       }}>
       <span className="k-back"><span className="ins">{!data.back && !data.privacy && data.platform !== "book" ? <CaseBack data={data} content={backContent} /> : face(data.back, "뒷면")}</span></span>
-      <span className="k-floor"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} />{!data.privacy && note && <div className="note">{note}</div>}</span>
+      <span className="k-floor"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} holdable={holdable} holding={discHolding} />{!data.privacy && note && <div className="note">{note}</div>}</span>
       <TrayWalls tray="base" /><span className="k-ridge" aria-hidden="true" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
@@ -215,7 +257,7 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
   const template = SPINE_TEMPLATES.includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
   return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
-    {slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" loading={decorative ? "lazy" : undefined} alt={decorative ? "" : `${data.title} 책등`} draggable={false}
+    {slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" alt={decorative ? "" : `${data.title} 책등`} draggable={false}
       style={hasPaintedSpine && painted === index ? undefined : { position: "absolute", visibility: "hidden", pointerEvents: "none" }}
       aria-hidden={painted !== index || undefined}
       onLoad={async event => {

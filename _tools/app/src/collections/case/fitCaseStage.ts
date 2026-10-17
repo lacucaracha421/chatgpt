@@ -17,3 +17,8 @@ export function fitFlatJacket(box: StageBox, ratio: number) {
   const scale = Math.max(0, Math.min(1, (box.width - EDGE_TARGETS) / (CASE_HEIGHT * ratio * 2 + FLAT_SPINE), (box.height - VERTICAL_SPACE * 2) / CASE_HEIGHT));
   return { height: CASE_HEIGHT * scale, spine: FLAT_SPINE * scale };
 }
+
+/** The stage in which `fitCollectionCase` draws the closed case exactly `height` pixels tall (a shelf's pulled-out case). */
+export function stageForCaseHeight(height: number): StageBox {
+  return { width: Number.MAX_SAFE_INTEGER, height: height * PROJECTION_ROOM + VERTICAL_SPACE };
+}

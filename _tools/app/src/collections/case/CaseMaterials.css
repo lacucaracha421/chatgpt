@@ -48,3 +48,7 @@
 .collection-light-case--book .manga-jspine { container-type: size; }
 .collection-light-case--book .manga-jspine-author { --author-size: max(7px, min(calc(var(--bd) * .3), calc(14.5cqh / (var(--author-cells) * 1.2)))); font-size: var(--author-size); transform: translateX(-50%) scaleY(min(1, calc(14.5cqh / (var(--author-size) * var(--author-cells) * 1.2)))) scaleX(min(1, calc(var(--bd) / ((var(--author-size) + var(--bd) * .06) * var(--author-columns))))); }
 .collection-light-case--book .manga-jspine-illustration img { display: block; width: 100%; height: 100%; }
+/* On a touch screen the sheen stays put while a drag turns the case (it repaints the whole front) and glides to its
+   place when the finger lifts. */
+@media (pointer: coarse) { .collection-case .k-front::after { transition: background-position 240ms var(--ease-standard); } }
+@media (pointer: coarse) and (prefers-reduced-motion: reduce) { .collection-case .k-front::after { transition: none; } }

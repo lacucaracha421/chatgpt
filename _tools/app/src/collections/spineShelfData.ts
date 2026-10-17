@@ -9,8 +9,9 @@ import { collectionCredit } from "./collectionFormat";
 import type { SpineWork } from "./SpineShelf";
 import { decodeSpine, isSpineWarm, warmSpines } from "./spineShelfWarm";
 
-type AvArt = { front: string | null; spine: string | null };
-/** The last read per library and work, so a shelf that mounts again prints its spines at once. */
+type AvArt = { front: string | null; spine: string | null; back: string | null };
+/** The last read per library and work, so a shelf that mounts again prints its spines at once. The back is the stored
+ * back cover the pulled-out case shows, as on the work screen. */
 const rememberedAvArt = new Map<string, AvArt>();
 const spineUrl = (artworkId: string | null, revision: string) => artworkId ? `${workArtworkThumbnailUrl(artworkId)}?v=${encodeURIComponent(revision)}` : null;
 const avArtKey = (root: string, collection: Pick<CollectionSummary, "id" | "updatedAt">) => JSON.stringify([root, collection.id, collection.updatedAt]);
@@ -100,7 +101,7 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
         for (const item of wanted) {
           const set = found.get(item.id), key = avArtKey(root, item);
           if (!set) { failed.push(key); continue; }
-          const art = { front: spineUrl(set.frontId, set.revision), spine: spineUrl(set.spineId, set.revision) };
+          const art = { front: spineUrl(set.frontId, set.revision), spine: spineUrl(set.spineId, set.revision), back: spineUrl(set.backId, set.revision) };
           rememberedAvArt.delete(key); rememberedAvArt.set(key, art);
           if (rememberedAvArt.size > 2048) rememberedAvArt.delete(rememberedAvArt.keys().next().value!);
           arrived.set(key, art);
@@ -129,9 +130,13 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
     return artworkId ? workArtworkThumbnailUrl(artworkId) : null;
   }, [type, root]);
 
-  /** The works near the viewport: their cover sets are read, then their spines decoded a few at a time. */
+  /**
+   * The works near the viewport: their spines are decoded a few at a time ahead of scrolling (AV reads its cover
+   * sets first), so rows that mount later draw their artwork at once like the drawn templates.
+   */
   const onWindow = useCallback((ids: string[]) => {
-    if (!enabled || type !== "av" || privacy) return;
+    if (!enabled || privacy) return;
+    if (type !== "av") { warmSpines(ids.flatMap(id => spineOf(id) ?? [])); return; }
     const items = ids.flatMap(id => byId.current.get(id) ?? []);
     void loadCovers(items).then(() => warmSpines(ids.flatMap(id => spineOf(id) ?? [])));
   }, [enabled, type, privacy, loadCovers, spineOf]);
@@ -155,7 +160,7 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
     const base = { id: item.id, title: item.name, credit: collectionCredit(item), developer: item.developer ?? null };
     if (type === "av") {
       const key = avArtKey(root, item), art = avArt.get(key) ?? rememberedAvArt.get(key);
-      return { ...base, platform: "av", front: art?.front ?? coverUrl(item), spine: art?.spine ?? null, pending: !privacy && !art && !avFailed.has(key) };
+      return { ...base, platform: "av", front: art?.front ?? coverUrl(item), spine: art?.spine ?? null, back: art?.back ?? null, pending: !privacy && !art && !avFailed.has(key) };
     }
     const info = infoOf(item.id);
     return { ...base, platform: workCasePlatform("game", item.platforms, info?.ownedPlatform), front: coverUrl(item),

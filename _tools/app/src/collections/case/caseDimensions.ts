@@ -11,13 +11,17 @@ export const CASE_MM: Record<CasePlatform, CaseSizeMm> = {
   sw: SWITCH, sw2: SWITCH,
 };
 
-/** 책장 size (작게 / 보통 / 크게); the scale is pixels per millimetre. */
+/**
+ * 책장 size (작게 / 보통 / 크게); the scale is pixels per millimetre. 크게 is about 1.36x 보통 (user, 2026-10-17: the old
+ * 크게 was too close to 보통). At 1.45 px/mm a DVD spine is about 276px tall (user 2026-10-17: kept just under 1.5): the 360px spine thumbnails stay sharp up to a
+ * display scale of about 1.25 and are resampled a little (about 1.2x) at 1.5; the drawn templates are sharp at any size.
+ */
 export type SpineSize = "small" | "normal" | "large";
 export const SPINE_SIZES: readonly SpineSize[] = ["small", "normal", "large"];
 export const SPINE_SIZE_LABEL: Record<SpineSize, string> = { small: "작게", normal: "보통", large: "크게" };
 export const SPINE_SCALE = {
-  pc: { small: .9, normal: 1.1, large: 1.35 },
-  tablet: { small: 1, normal: 1.25, large: 1.5 },
+  pc: { small: .9, normal: 1.1, large: 1.45 },
+  tablet: { small: 1, normal: 1.25, large: 1.7 },
 } as const satisfies Record<string, Record<SpineSize, number>>;
 export const isSpineSize = (value: unknown): value is SpineSize => value === "small" || value === "normal" || value === "large";
 

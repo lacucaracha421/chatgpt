@@ -112,10 +112,10 @@
 /* The approved book is one physical object, scaled with its material and spine type. */
 .manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); }
 /* Keep the snapshot outside the preserve-3d book, with object-sized bounds. */
-.manga-book-object { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); scale: calc(var(--book-scale) / 2); perspective: calc(1800px / var(--book-scale)); }
+.manga-book-object { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); scale: calc(var(--book-scale) / var(--case-raster, 2)); perspective: calc(1800px / var(--book-scale)); }
 /* Rasterise the 3D book at twice its size and show it at half scale, like the collection case, so the rotated
    cover stays as sharp as the flat image (user, 2026-10-17). `zoom` doubles every length inside the book. */
-.manga-book-object { zoom: 2; }
+.manga-book-object { zoom: var(--case-raster, 2); }
 /* The cover sits at z = 0 and the rest of the book behind it, turning about the book's centre.
    WebView2's GPU drew a face whose transform is only translateZ() shifted near side-on angles
    (~76°), opening a gap between the cover and the spine; every face now carries a rotation or none. */

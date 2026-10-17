@@ -44,6 +44,79 @@ it("pulls a case out on the first click, opens on the second, and puts it back o
   expect(pressed("작품 2")).toBe("false");
 });
 
+it("keeps the spine on the shelf until the pulled-out case has painted its cover, then swaps them at once", async () => {
+  render(<Shelf works={list(4)} />);
+  fireEvent.click(spine("작품 1"));
+  expect(pressed("작품 1")).toBe("true");
+  // The case is laid out with its cover loading; the spine is still the one on screen.
+  const out = document.querySelector<HTMLElement>(".spine-shelf__out")!;
+  expect(out).toHaveClass("is-preparing");
+  expect(spine("작품 1")).not.toHaveAttribute("data-out");
+  fireEvent.load(out.querySelector("img")!);
+  await waitFor(() => expect(spine("작품 1")).toHaveAttribute("data-out"));
+  expect(out).not.toHaveClass("is-preparing");
+});
+
+it.each([
+  ["picking another case", () => fireEvent.click(spine("작품 3"))],
+  ["Esc", () => fireEvent.keyDown(spine("작품 1"), { key: "Escape" })],
+  ["a click on the empty shelf", () => fireEvent.click(screen.getByRole("group", { name: "작품 목록" }))],
+])("puts a case back in one run after %s: the same case turns back while its spine waits, and the spine returns as it goes", async (_label, putBack) => {
+  render(<Shelf works={list(4)} />);
+  fireEvent.click(spine("작품 1"));
+  const out = document.querySelector<HTMLElement>(".spine-shelf__out")!;
+  fireEvent.load(out.querySelector("img")!);
+  await waitFor(() => expect(spine("작품 1")).toHaveAttribute("data-out"));
+  vi.useFakeTimers();
+  try {
+    putBack();
+    // At once and throughout: the very case that was out turns back (not a new one mounted later), and its spine stays hidden.
+    expect(document.querySelector(`.spine-shelf__out[data-id="w1"]`)).toBe(out);
+    expect(out).toHaveClass("is-leaving");
+    expect(spine("작품 1")).toHaveAttribute("data-out");
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(document.querySelector(`.spine-shelf__out[data-id="w1"]`)).toBe(out);
+    expect(out).toHaveClass("is-leaving");
+    expect(spine("작품 1")).toHaveAttribute("data-out");
+    act(() => { vi.advanceTimersByTime(300); });
+    // Landed: the spine shows again under the case, which is still there, edge-on over it.
+    expect(spine("작품 1")).not.toHaveAttribute("data-out");
+    expect(document.querySelector(`.spine-shelf__out[data-id="w1"]`)).toBe(out);
+    // Once the spine has had two frames to paint, the case goes, and it does not come out again.
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(document.querySelector(`.spine-shelf__out[data-id="w1"]`)).toBeNull();
+    expect(spine("작품 1")).not.toHaveAttribute("data-out");
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(document.querySelector(`.spine-shelf__out[data-id="w1"]`)).toBeNull();
+    expect(pressed("작품 1")).toBe("false");
+  } finally { vi.useRealTimers(); }
+});
+
+it("turns the pulled-out case by drag without opening it, opens on a click of the case, and Esc returns it", async () => {
+  const onOpen = vi.fn();
+  render(<Shelf works={list(6)} onOpen={onOpen} />);
+  fireEvent.click(spine("작품 2"));
+  const kase = screen.getByRole("group", { name: "케이스" });
+  const before = Number(kase.dataset.angle);
+  fireEvent.pointerDown(kase, { button: 0, pointerId: 1, clientX: 100 });
+  fireEvent.pointerMove(kase, { pointerId: 1, clientX: 160 });
+  fireEvent.pointerUp(kase, { pointerId: 1, clientX: 160 });
+  // The browser still sends a click after the drag; it must neither open the work nor put the case back.
+  fireEvent.click(kase);
+  expect(Number(kase.dataset.angle)).not.toBe(before);
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(pressed("작품 2")).toBe("true");
+  fireEvent.pointerDown(kase, { button: 0, pointerId: 2, clientX: 160 });
+  fireEvent.pointerUp(kase, { pointerId: 2, clientX: 160 });
+  fireEvent.click(kase);
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(onOpen).toHaveBeenCalledWith("w2");
+  kase.focus();
+  fireEvent.keyDown(kase, { key: "Escape" });
+  expect(pressed("작품 2")).toBe("false");
+  await waitFor(() => expect(document.activeElement).toBe(spine("작품 2")));
+});
+
 it("opens with Enter on a picked case and picks with Enter on a resting one", () => {
   const onOpen = vi.fn();
   render(<Shelf works={list(4)} onOpen={onOpen} />);
@@ -103,6 +176,17 @@ it("keeps a spine plastic-only while its artwork is pending, at its final size",
   expect(spine("작품 0").querySelector(".ins")).not.toBeNull();
 });
 
+it("draws a spine whose artwork is still decoding as its template, then lets the artwork take over", async () => {
+  render(<Shelf works={[work(0, "sw2", { spine: "/spine-0" }), work(1, "sw2")]} />);
+  // Both spines show at once: the generated one, and the downloaded one standing in as the same drawn template.
+  expect(spine("작품 1").querySelector('[data-spine-template="sw2"]')).not.toBeNull();
+  expect(spine("작품 0").querySelector('.spine__stand-in [data-spine-template="sw2"]')).not.toBeNull();
+  expect(spine("작품 0").querySelector(".ins")).toHaveAttribute("data-settled", "false");
+  fireEvent.load(spine("작품 0").querySelector("img")!);
+  await waitFor(() => expect(spine("작품 0").querySelector(".ins")).toHaveAttribute("data-settled", "true"));
+  await waitFor(() => expect(spine("작품 0").querySelector(".spine__stand-in")).toBeNull());
+});
+
 it("hides spines and the pulled-out cover in privacy mode", () => {
   render(<div className="collection-browser__list-scroll"><SpineShelf groups={[{ label: "", works: [work(0, "pc", { spine: "/spine-0" })] }]} scale={1.1} label="작품 목록" pickedId="w0" onPick={() => undefined} onOpen={() => undefined} privacy /></div>);
   expect(document.querySelector(".spine .case-mask")).not.toBeNull();
@@ -124,6 +208,27 @@ it("mounts only a window of rows for a large shelf and follows the scroll", asyn
   await waitFor(() => expect(screen.queryByRole("button", { name: /^작품 999 ·/ })).not.toBeNull());
   expect(screen.queryByRole("button", { name: /^작품 300 ·/ })).toBeNull();
   expect(within(screen.getByRole("group", { name: "작품 목록" })).getAllByRole("button").length).toBeLessThan(600);
+});
+
+it("keeps the row that was at the top of the view in place when 책등 크기 changes", async () => {
+  const shelf = (scale: number) => <div className="collection-browser__list-scroll" data-testid="scroll">
+    <SpineShelf groups={[{ label: "", works: list(1000) }]} scale={scale} label="작품 목록" pickedId={null} onPick={() => undefined} onOpen={() => undefined} />
+  </div>;
+  const { rerender } = render(shelf(1.1));
+  const scroll = screen.getByTestId("scroll");
+  // 57 DVD cases a row at 보통: row 10 starts with 작품 570; look at it from a little way into the row.
+  const rowOf = (title: string) => spine(title).closest<HTMLElement>("[data-shelf-row]")!;
+  scroll.scrollTop = 8 + 10 * 255 + 60;
+  act(() => { fireEvent.scroll(scroll); });
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^작품 570 ·/ })).not.toBeNull());
+  expect(rowOf("작품 570").style.top).toBe(`${8 + 10 * 255}px`);
+  rerender(shelf(1.5));
+  // 크게 packs fewer cases a row, so 작품 570 now sits in another, taller row; the view still starts inside it.
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^작품 570 ·/ })).not.toBeNull());
+  const row = rowOf("작품 570"), top = Number.parseFloat(row.style.top), height = Number.parseFloat(row.style.height);
+  expect(top).not.toBe(8 + 10 * 255);
+  expect(scroll.scrollTop).toBeGreaterThanOrEqual(top);
+  expect(scroll.scrollTop).toBeLessThan(top + height);
 });
 
 function Held({ works, prepare }: { works: SpineWork[]; prepare?: (ids: string[], visible: string[], signal: AbortSignal) => Promise<void> | void }) {

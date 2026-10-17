@@ -7,6 +7,7 @@ import { displayDate } from "../../shared/displayDate";
 import { defaultRecord } from "./WorkRecord";
 import { PrivacyProvider } from "../../privacy/PrivacyContext";
 import { playCaseSound } from "../case/caseSounds";
+import { LONG_PRESS_MS } from "../../shared/useLongPress";
 
 vi.mock("../case/caseSounds", async original => ({ ...await original<typeof import("../case/caseSounds")>(), playCaseSound: vi.fn(), preloadCaseSounds: vi.fn() }));
 const pop = vi.hoisted(() => ({ popToggle: vi.fn() }));
@@ -598,4 +599,37 @@ it("pops the showcase star only from the user's toggle, with the state it turns 
   fireEvent.click(star);
   expect(pop.popToggle).toHaveBeenCalledExactlyOnceWith(star, !fixtureWork.showcase);
   expect(actions.onShowcase).toHaveBeenCalledOnce();
+});
+describe("AV disc long press", () => {
+  const mouse = { pointerId: 3, pointerType: "mouse", button: 0, clientX: 100, clientY: 100 };
+  const openCase = (data: CollectionWorkData, actions: WorkActions) => {
+    const shown = view(data, actions);
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
+    return shown.container.querySelector<HTMLElement>(".disc")!;
+  };
+  afterEach(() => vi.useRealTimers());
+  it("opens the lowercased product code's page only after a long press", () => {
+    vi.useFakeTimers();
+    const actions = { ...callbacks(), onOpenJable: vi.fn() };
+    const disc = openCase(value(true), actions);
+    fireEvent.pointerDown(disc, mouse); act(() => { vi.advanceTimersByTime(200); }); fireEvent.pointerUp(disc, mouse);
+    expect(actions.onOpenJable).not.toHaveBeenCalled();
+    const kase = screen.getByRole("group", { name: "케이스" });
+    expect(kase).toHaveAttribute("aria-expanded", "false"); // The short press stays the ordinary click.
+    fireEvent.keyDown(kase, { key: "Enter" });
+    fireEvent.pointerDown(disc, mouse); act(() => { vi.advanceTimersByTime(LONG_PRESS_MS); });
+    fireEvent.pointerUp(disc, mouse);
+    expect(kase).toHaveAttribute("aria-expanded", "true");
+    expect(actions.onOpenJable).toHaveBeenCalledExactlyOnceWith("https://jp.jable.tv/videos/abc-123/");
+  });
+  it("does nothing without a product code, and a game has no disc to press", () => {
+    vi.useFakeTimers();
+    const actions = { ...callbacks(), onOpenJable: vi.fn() };
+    const av = value(true);
+    const disc = openCase({ ...av, av: { ...av.av!, productCode: null } }, actions);
+    fireEvent.pointerDown(disc, mouse); act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+    cleanup();
+    expect(openCase(value(false), actions)).toBeNull();
+    expect(actions.onOpenJable).not.toHaveBeenCalled();
+  });
 });

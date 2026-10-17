@@ -24,15 +24,16 @@
 /* One case standing spine-out. */
 .spine { position: relative; flex: none; width: var(--w); height: var(--h); padding: 0; border: 0; background: none; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .spine__case { position: absolute; inset: 0; display: block; overflow: hidden; border-radius: 1px; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e;
-  transition: transform 90ms var(--ease-standard), opacity 360ms var(--ease-sheet); }
+  transition: transform 90ms var(--ease-standard); }
 .spine__case::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
 .spine__case > .ins { position: absolute; inset: var(--spine-rim) 0; overflow: hidden; display: block; --cd: var(--w); }
 .spine__case > .ins.bare { display: flex; align-items: center; justify-content: center; }
 .spine__case > .ins > .case-spine-art > img { width: 100%; height: 100%; object-fit: fill; }
 .spine__case .case-mask { display: block; width: 100%; height: 100%; background: var(--color-surface); }
-/* Spine artwork fades in over its plastic once decoded; a template needs no fade and is settled from the start. */
-.spine__case > .ins[data-settled="false"] { opacity: 0; }
-.spine__case > .ins[data-settled="true"] { opacity: 1; transition: opacity 140ms var(--ease-standard); }
+/* Spine artwork not decoded yet shows the drawn template beneath it, then fades in over it; a template alone is settled from the start. */
+.spine__case > .ins > .spine__stand-in { position: absolute; inset: 0; display: block; }
+.spine__case > .ins[data-settled="false"] > .case-spine-art { opacity: 0; }
+.spine__case > .ins[data-settled="true"] > .case-spine-art { opacity: 1; transition: opacity 140ms var(--ease-standard); }
 
 /* Hover (PC): the case rises a little off the plank, but not while the list scrolls. */
 @media (hover: hover) { .spine-shelf:not([data-scrolling]) .spine:hover .spine__case { transform: translateY(-4px); } }
@@ -42,28 +43,43 @@
 /* Keyboard focus: the standard ring around the whole case on all four sides, never an edge stripe. */
 .spine:focus-visible::after { content: ""; position: absolute; inset: -3px; transform: translateY(-4px); border: var(--focus-width) solid var(--color-focus); border-radius: 2px; pointer-events: none; }
 
-/* Picked: the case is pulled out and turned to its front cover. The empty slot stays, so nothing reflows. */
-.spine[aria-pressed="true"] .spine__case { opacity: 0; }
-.spine-shelf__out { position: absolute; bottom: 0; z-index: 3; width: var(--cover-w); height: var(--h); padding: var(--spine-rim) var(--spine-rim) var(--spine-rim) 0; border: 0; border-radius: 2px 4px 4px 2px; cursor: pointer;
-  background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; box-shadow: var(--shadow-floating);
-  transform: translateY(-6px); transform-origin: 50% 100%; animation: spine-out-in 360ms var(--ease-sheet) both; -webkit-tap-highlight-color: transparent; }
-.spine-shelf__out.is-leaving { pointer-events: none; animation: spine-out-away 360ms var(--ease-sheet) both; }
-.spine-shelf__out:active > .spine-shelf__face { background: var(--color-surface-pressed); }
-@keyframes spine-out-in { from { transform: var(--from); } }
-@keyframes spine-out-away { to { transform: var(--from); opacity: 0; } }
-.spine-shelf__out:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
-.spine-shelf__face { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 0 2px 2px 0; background: var(--color-surface); }
-.spine-shelf__face > img { display: block; width: 100%; height: 100%; object-fit: cover; }
-/* The case gloss of the work case's front, kept quiet. */
-.spine-shelf__face::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(104deg, rgba(255,255,255,0) 38%, rgba(255,255,255,.14) 47%, rgba(255,255,255,0) 58%) 50% 0 / 260% 100% no-repeat, linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,0) 5%); }
+/* Picked: the case is pulled out of its slot toward the viewer, turns to its front and stays up as the work's 3D case
+   (CollectionCase). The empty slot stays, so nothing reflows. The spine hides at once and shows again only when the
+   case is back, because the edge-on 3D case starts and ends exactly over it. */
+.spine[data-out] .spine__case { opacity: 0; transition: none; }
+/* Laid out while its faces decode, but not shown; the spine is still on the shelf. */
+.spine-shelf__out.is-preparing { opacity: 0; pointer-events: none; }
+.spine-shelf__row.is-holding { z-index: 2; }
+.spine-shelf__out { position: absolute; bottom: var(--lift); z-index: 3; width: var(--out-w); height: var(--out-h); transform-origin: 50% 100%; -webkit-tap-highlight-color: transparent; }
+/* A picked spine was lifted by hover or focus, so the pull starts from there; the put-back ends on the plank. */
+@media (hover: hover) { .spine-shelf__out { --start-lift: -4px; } .spine-shelf__out.is-leaving { --start-lift: 0px; } }
+/* The work stage's floor glow and contact shadow belong to the stage; on the shelf a soft shadow falls on the plank. */
+.spine-shelf__out .collection-case::before, .spine-shelf__out .collection-case .floor-shadow { display: none; }
+.spine-shelf__out .collection-case--fitted .collection-case-object { --cd: var(--out-depth); }
+.spine-shelf__out::before { content: ""; position: absolute; left: 4%; right: 4%; bottom: calc(var(--lift) * -1 - 8px); height: 16px; border-radius: 50%; background: radial-gradient(ellipse closest-side, rgba(0, 0, 0, .5), rgba(0, 0, 0, 0)); pointer-events: none; }
+/* One move: the case slides forward and up out of its slot while it turns from edge-on to its front. The turn starts a
+   moment later, as a real case clears its neighbours first; putting back, it turns edge-on before it reaches the slot. */
+.spine-shelf__out.is-pulling { animation: spine-out-pull 520ms var(--ease-sheet) both; }
+.spine-shelf__out.is-pulling .kase { animation: spine-case-turn 460ms var(--ease-sheet) 60ms both; }
+.spine-shelf__out.is-pulling::before { animation: spine-out-shadow 520ms var(--ease-sheet) both; }
+.spine-shelf__out.is-leaving { pointer-events: none; animation: spine-out-home 440ms var(--ease-sheet) both; }
+.spine-shelf__out.is-leaving .kase { animation: spine-case-home 360ms var(--ease-sheet) both; }
+.spine-shelf__out.is-leaving::before { animation: spine-out-shadow-away 440ms var(--ease-sheet) both; }
+@keyframes spine-out-pull { from { transform: var(--from); } }
+@keyframes spine-out-home { to { transform: var(--from); } }
+/* The same function list as the case's own transform, so the browser turns it angle by angle. */
+@keyframes spine-case-turn { from { transform: rotateX(0deg) rotateY(90deg) translateX(0px); } }
+@keyframes spine-case-home { to { transform: rotateX(0deg) rotateY(var(--ry-home, 90deg)) translateX(0px); } }
+@keyframes spine-out-shadow { from { opacity: 0; } }
+@keyframes spine-out-shadow-away { to { opacity: 0; } }
 
 /* First appearance only: rows rise 8px and settle, staggered by row. */
 .spine-shelf__row.is-entering { animation: spine-row-in 560ms var(--ease-spring) both; animation-delay: calc(var(--i, 0) * 24ms); }
 @keyframes spine-row-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .spine__case, .spine__case > .ins[data-settled="true"] { transition: none; }
-  .spine-shelf__out, .spine-shelf__out.is-leaving { animation: none; }
+  .spine__case, .spine__case > .ins[data-settled="true"] > .case-spine-art { transition: none; }
+  .spine-shelf__out, .spine-shelf__out .kase, .spine-shelf__out::before { animation: none !important; }
   .spine-shelf__out.is-leaving { display: none; }
   .spine-shelf__row.is-entering { animation: none; }
 }

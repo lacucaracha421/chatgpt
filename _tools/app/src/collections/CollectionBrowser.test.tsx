@@ -20,7 +20,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import type { LaunchBoxSpineBatchRequest, LaunchBoxSpineProgress, CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem, ReleaseCalendarGateway } from "../library/types";
-import { CollectionBrowser } from "./CollectionBrowser";
+import { CollectionBrowser, type CollectionNavigationMemory } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
 import type { AvLinkApi } from "./AvLinkInbox";
@@ -80,6 +80,7 @@ function renderBrowser(props: {
   avLinkApi?: AvLinkApi;
   fetchLaunchBoxSpines?: LibraryGateway["fetchLaunchBoxSpines"];
   patch?: (gateway: LibraryGateway) => void;
+  navigationMemory?: CollectionNavigationMemory;
 }) {
   const gateway = createGateway();
   props.patch?.(gateway);
@@ -88,7 +89,7 @@ function renderBrowser(props: {
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} kakaoReview={props.kakaoReview} avLinkApi={props.avLinkApi}
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} kakaoReview={props.kakaoReview} avLinkApi={props.avLinkApi} navigationMemory={props.navigationMemory}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onOpenWork={props.onOpenWork} onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -1083,6 +1084,29 @@ describe("CollectionBrowser manga shelf", () => {
       expect(onOpenWork).toHaveBeenCalledWith("c2", expect.arrayContaining(["c1", "c2"]));
       fireEvent.keyDown(spines[1], { key: "Escape" });
       expect(spines[1]).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("puts the case back out on the way back from its work screen, and not on a later visit", async () => {
+      store("game");
+      const memory: CollectionNavigationMemory = new Map();
+      const show = async () => {
+        renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Celeste" }], typeFilter: "game", showcase: false, onOpenWork: () => undefined, navigationMemory: memory });
+        const shelf = await screen.findByRole("group", { name: "게임 작품 목록" });
+        return { shelf, celeste: within(shelf).getByRole("button", { name: /^Celeste/ }) };
+      };
+      let { shelf, celeste } = await show();
+      fireEvent.click(celeste);
+      fireEvent.click(shelf.querySelector(".spine-shelf__out")!);
+      cleanup();
+      // Back from the work screen: the case is still out.
+      ({ celeste } = await show());
+      await waitFor(() => expect(celeste).toHaveAttribute("aria-pressed", "true"));
+      cleanup();
+      // Another visit (after another tab): the focus comes back, but every case stands on the shelf.
+      ({ celeste } = await show());
+      await waitFor(() => expect(document.activeElement).toBe(celeste));
+      expect(celeste).toHaveAttribute("aria-pressed", "false");
+      expect(document.querySelector(".spine-shelf__out")).toBeNull();
     });
 
     it("sizes the shelf with 작게 · 보통 · 크게 instead of 한 줄에 N개, and remembers the choice", async () => {

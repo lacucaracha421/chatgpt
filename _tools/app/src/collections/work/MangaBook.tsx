@@ -4,6 +4,9 @@ import "../case/CaseMaterials.css";
 import { MangaBack, coverAverageColor, MANGA_BACK_COLOR, type MangaBackData } from "./MangaBack";
 import { stripPosition } from "./coverStrip";
 import { fitSpineAuthor, spineAuthorColumns, fitSpineTitle, spineTitleSplits, verticalSpineRuns, verticalSpineText, SPINE_TITLE_SCALE, type SpineTitleFit } from "./verticalText";
+import { watchCaseRaster } from "../case/caseRaster";
+
+watchCaseRaster();
 
 /** Share of the spine height the title may take; the rest holds the number, illustration and author. */
 const TITLE_SHARE = .38;
@@ -75,6 +78,13 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
   const [cut, setCut] = useState({ width: 34, height: 560 });
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
+  // A drag turns the book on its element directly, without a React render per pointer move; the release commits it.
+  const bookRef = useRef<HTMLDivElement>(null);
+  const liveAngle = useRef<number | null>(null);
+  const endDrag = () => {
+    drag.current = null; setDragging(false);
+    if (liveAngle.current !== null) { setAngle(liveAngle.current); liveAngle.current = null; }
+  };
   const presentation = JSON.stringify([src, privacy]);
   const settled = useRef({ presentation, generation: 0, faces: new Set<string>() });
   if (settled.current.presentation !== presentation) settled.current = { presentation, generation: settled.current.generation + 1, faces: new Set<string>() };
@@ -134,24 +144,27 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
     <span className="manga-book-shadow" aria-hidden="true" />
     {/* Rotation is an interaction with the physical book, separate from volume navigation. */}
     <div className="manga-book-object">
-    <div className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--manga-turn-angle": `${angle}deg` } as CSSProperties}
+    <div ref={bookRef} className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--manga-turn-angle": `${angle}deg` } as CSSProperties}
       onPointerDown={event => {
-        if (blocked?.current) { drag.current = null; setDragging(false); return; }
+        if (blocked?.current) { endDrag(); return; }
         if (event.button !== 0 || drag.current) return;
         event.currentTarget.focus({ preventScroll: true });
         drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false };
         event.currentTarget.setPointerCapture?.(event.pointerId);
       }} onPointerMove={event => {
-        if (blocked?.current) { drag.current = null; setDragging(false); return; }
+        if (blocked?.current) { endDrag(); return; }
         const start = drag.current; if (!start || event.pointerId !== start.pointer) return;
         const distance = event.clientX - start.x;
         if (!start.moved && Math.abs(distance) < 4) return;
-        start.moved = true; setDragging(true); setAngle(start.angle + distance * .6);
+        if (!start.moved) { start.moved = true; setDragging(true); }
+        const value = start.angle + distance * .6, node = bookRef.current;
+        liveAngle.current = value;
+        if (node) { node.style.setProperty("--manga-turn-angle", `${value}deg`); node.dataset.angle = String(value); }
       }} onPointerUp={event => {
         if (drag.current?.pointer !== event.pointerId) return;
-        drag.current = null; setDragging(false);
+        endDrag();
         if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-      }} onPointerCancel={() => { drag.current = null; setDragging(false); }} onLostPointerCapture={() => { drag.current = null; setDragging(false); }}
+      }} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
       onKeyDown={event => {
         if (event.key === "ArrowLeft") setAngle(value => value - 15);
         else if (event.key === "ArrowRight") setAngle(value => value + 15);

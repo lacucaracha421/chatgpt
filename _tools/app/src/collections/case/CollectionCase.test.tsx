@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { LONG_PRESS_MS } from "../../shared/useLongPress";
 import { CaseInside, casePlatform, CollectionCase, type CaseData } from "./CollectionCase";
 import { useState } from "react";
 import { readFileSync } from "node:fs";
@@ -10,6 +11,59 @@ function Case({ value = data }: { value?: CaseData }) {
   const [open, setOpen] = useState(false);
   return <CollectionCase data={value} open={open} onOpenChange={setOpen} />;
 }
+describe("CollectionCase AV disc long press", () => {
+  const av: CaseData = { title: "AV", front: null, platform: "av", privacy: false, discLabel: "ABC-123" };
+  const mouse = { pointerId: 3, pointerType: "mouse", button: 0, clientX: 100, clientY: 100 };
+  function setup(over: Partial<{ data: CaseData; open: boolean; hold: (() => void) | undefined }> = {}) {
+    vi.useFakeTimers();
+    const hold = "hold" in over ? over.hold : vi.fn(), toggled = vi.fn();
+    const view = render(<CollectionCase data={over.data ?? av} open={over.open ?? true} onOpenChange={toggled} onDiscHold={hold} />);
+    return { hold, toggled, kase: view.container.querySelector<HTMLElement>(".kase")!, disc: view.container.querySelector<HTMLElement>(".disc")! };
+  }
+  afterEach(() => vi.useRealTimers());
+  it("fires once after the hold, shows the pressed state meanwhile, and does not close the case on release", () => {
+    const { hold, toggled, kase, disc } = setup();
+    fireEvent.pointerDown(disc, mouse);
+    expect(disc).toHaveClass("is-holding");
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS - 1); });
+    expect(hold).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(hold).toHaveBeenCalledTimes(1);
+    expect(disc).not.toHaveClass("is-holding");
+    fireEvent.pointerUp(kase, mouse);
+    expect(toggled).not.toHaveBeenCalled();
+  });
+  it("keeps a short press as the ordinary click that toggles the case", () => {
+    const { hold, toggled, kase, disc } = setup();
+    fireEvent.pointerDown(disc, mouse);
+    act(() => { vi.advanceTimersByTime(200); });
+    fireEvent.pointerUp(kase, mouse);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(hold).not.toHaveBeenCalled();
+    expect(toggled).toHaveBeenCalledWith(false);
+    expect(disc).not.toHaveClass("is-holding");
+  });
+  it("cancels when the pointer moves away, and ignores presses outside the disc", () => {
+    const { hold, kase, disc } = setup();
+    fireEvent.pointerDown(disc, mouse);
+    fireEvent.pointerMove(kase, { ...mouse, clientX: 130 });
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+    fireEvent.pointerUp(kase, mouse);
+    fireEvent.pointerDown(kase.querySelector(".k-back")!, mouse);
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+    expect(hold).not.toHaveBeenCalled();
+  });
+  it("stays inert without a handler, in privacy mode, on other platforms and while closed", () => {
+    for (const config of [{ hold: undefined }, { data: { ...av, privacy: true } }, { data: { ...av, platform: "pc" as const } }, { open: false }]) {
+      const { hold, disc } = setup(config);
+      expect(disc).not.toHaveAttribute("data-hold");
+      fireEvent.pointerDown(disc, mouse);
+      act(() => { vi.advanceTimersByTime(LONG_PRESS_MS * 2); });
+      if (hold) expect(hold).not.toHaveBeenCalled();
+      cleanup(); vi.useRealTimers();
+    }
+  });
+});
 describe("CollectionCase", () => {
   it("refits the opening case on the unfolding's curve instead of snapping smaller first", () => {
     vi.useFakeTimers();

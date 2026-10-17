@@ -12,11 +12,11 @@ type Sets = Awaited<ReturnType<NonNullable<typeof avGateway.listCoverSets>>>;
 const item = (id: string) => ({ id, name: `작품 ${id}`, type: "av", updatedAt: "1" }) as unknown as CollectionSummary;
 const sets = (...ids: string[]): Sets => ids.map(id => ({ collectionId: id, frontId: null, spineId: `s-${id}`, backId: null, revision: "r" }));
 
-function AvShelf({ items }: { items: CollectionSummary[] }) {
+function AvShelf({ items, picked = null }: { items: CollectionSummary[]; picked?: string | null }) {
   const data = useSpineShelfWorks(items, "av", { enabled: true, gateway: {} as LibraryGateway, root: "lib", privacy: false, coverUrl: () => null });
   const groups = useMemo(() => shelfGroups(items, "sort").map(group => ({ label: group.label, works: group.items.map(data.toWork) })), [items, data.toWork]);
   return <div className="collection-browser__list-scroll">
-    <SpineShelf groups={groups} scale={1.1} label="AV" pickedId={null} onPick={() => undefined} onOpen={() => undefined} onWindow={data.onWindow} prepare={data.prepare} />
+    <SpineShelf groups={groups} scale={1.1} label="AV" pickedId={picked} onPick={() => undefined} onOpen={() => undefined} onWindow={data.onWindow} prepare={data.prepare} />
   </div>;
 }
 const titles = () => screen.queryAllByRole("button").map(button => button.getAttribute("aria-label")!.split(" ·")[0]);
@@ -83,4 +83,13 @@ it("shows a revisited order immediately, from what was read before", async () =>
   expect(titles()).toEqual(["작품 a2", "작품 a1"]);
   expect(inserts()).toBe(2);
   expect(read).not.toHaveBeenCalled();
+});
+
+it("prints the stored AV back cover on the pulled-out case, as the work screen does", async () => {
+  vi.spyOn(avGateway, "listCoverSets").mockResolvedValue([{ collectionId: "a1", frontId: "f-a1", spineId: "s-a1", backId: "b-a1", revision: "r" }]);
+  render(<AvShelf items={[item("a1")]} picked="a1" />);
+  const back = await screen.findByRole("img", { name: "작품 a1 뒷면" });
+  expect(back.getAttribute("src")).toContain("b-a1");
+  // Not the generated back the case prints for a work without back artwork.
+  expect(document.querySelector(".spine-shelf__out .case-back")).toBeNull();
 });
