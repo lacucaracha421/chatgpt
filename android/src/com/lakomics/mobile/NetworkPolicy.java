@@ -26,11 +26,11 @@ final class NetworkPolicy {
  }
  static void providerImage(String path)throws Exception{
   api(path,"GET");
-  if(!path.startsWith("/v1/providers/image?") && !path.startsWith("/v1/providers/stashdb/image?") && !path.matches("/v1/av-inbox/"+UUID+"/jacket"))throw new IllegalArgumentException("Invalid provider preview route");
+  if(!path.startsWith("/v1/providers/image?") && !path.startsWith("/v1/providers/stashdb/image?") && !path.matches("/v1/av-inbox/"+UUID+"/(jacket|spine-source)"))throw new IllegalArgumentException("Invalid provider preview route");
  }
  static long providerImageLimit(String path)throws Exception{
   providerImage(path);
-  return path.matches("/v1/av-inbox/"+UUID+"/jacket")?8L*1024*1024:4L*1024*1024;
+  return path.matches("/v1/av-inbox/"+UUID+"/(jacket|spine-source)")?8L*1024*1024:4L*1024*1024;
  }
  static void api(String path,String method) throws Exception {
   if(path.length()>(path.startsWith("/v1/mobile-catalog/")?16384:8192) || path.contains("\\") || path.contains("#") || path.contains("\r") || path.contains("\n"))throw new IllegalArgumentException("Unsupported API path");
@@ -109,7 +109,7 @@ final class NetworkPolicy {
   get=get || p.matches("/v1/collections/people/[A-Za-z0-9_-]{1,128}");
   post=post || p.equals("/v1/collections/releases/acknowledge");
   // Tablet inbox review: exact UUID routes only; artwork is prepared on the server.
-  get=get || p.equals("/v1/av-inbox") || p.matches("/v1/av-inbox/"+UUID+"(/jacket)?");
+  get=get || p.equals("/v1/av-inbox") || p.matches("/v1/av-inbox/"+UUID+"(/jacket|/spine-source)?");
   post=post || p.matches("/v1/av-inbox/"+UUID+"/(retry|fix-code|dismiss|artwork|applied)");
   post=post || p.equals("/v1/av-lookups");
   // Collection bindings (MangaDex / Kakao 연결): the capability status, the two provider

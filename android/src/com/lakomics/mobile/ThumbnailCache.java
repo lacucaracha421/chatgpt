@@ -148,7 +148,7 @@ final class ThumbnailCache {
  }
  /** Shared by shelf probes and foreground loads; digests survive metadata-only publications. */
  static String collectionArtworkKey(String account,String collection,String artwork,String variant,String revision,String digest)throws Exception{
-  if(collection==null || !collection.matches("[A-Za-z0-9_-]{1,128}") || artwork==null || !artwork.matches("[A-Za-z0-9_-]{1,128}") || revision==null || !revision.matches("[a-f0-9]{64}") || !("thumbnail".equals(variant) || "original".equals(variant)) || digest==null || !digest.isEmpty()&&!digest.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid artwork");
+  if(collection==null || !collection.matches("[A-Za-z0-9_-]{1,128}") || artwork==null || !artwork.matches("[A-Za-z0-9_-]{1,128}") || revision==null || !revision.matches("[a-f0-9]{64}") || !("thumbnail".equals(variant) || "medium".equals(variant) || "original".equals(variant)) || digest==null || !digest.isEmpty()&&!digest.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid artwork");
   return key(account+"\ncollection/"+collection+"/"+artwork+"/"+(digest.isEmpty()?revision:digest)+"/"+variant);
  }
  /** The WebView URL path of one cached object: a new key or generation is a new URL. */

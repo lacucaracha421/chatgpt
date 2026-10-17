@@ -542,6 +542,7 @@ pub(super) struct ServerCandidate {
     pub width: u32,
     pub height: u32,
     pub split: DefaultSplit,
+    pub spine_source: Option<SpineSource>,
     pub names: Vec<NameMapping>,
     pub matches: Vec<(String, String)>,
 }
@@ -560,6 +561,11 @@ pub(super) fn parse_detail(detail: &Value) -> Result<ServerCandidate, AvError> {
         serde_json::from_value(candidate["fields"].clone()).map_err(|_| AvError::Invalid)?;
     let split: DefaultSplit =
         serde_json::from_value(candidate["defaultSplit"].clone()).map_err(|_| AvError::Invalid)?;
+    // A borrowed spine's strip; an unreadable one only means the menu shows no picture of it.
+    let spine_source: Option<SpineSource> = candidate
+        .get("spineSource")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .filter(|s: &SpineSource| s.width > 0 && s.height > 0 && s.x1 < s.x2 && s.x2 <= s.width);
     let dimension = |key: &str| {
         candidate[key]
             .as_u64()
@@ -600,6 +606,7 @@ pub(super) fn parse_detail(detail: &Value) -> Result<ServerCandidate, AvError> {
         width: dimension("jacketWidth")?,
         height: dimension("jacketHeight")?,
         split,
+        spine_source,
         names,
         matches,
     })
@@ -690,6 +697,10 @@ impl Library {
             jacket_width: parsed.width,
             jacket_height: parsed.height,
             default_split: parsed.split,
+            spine_source: parsed.spine_source.map(|source| SpineSource {
+                url: format!("http://lakomics.localhost/av-link-jacket/{id}/spine"),
+                ..source
+            }),
             inbox: item,
             matches: present,
             current,
@@ -732,7 +743,8 @@ impl Library {
         let mut jackets = JACKETS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        jackets.retain(|(cached, _, _, _)| cached != id);
+        jackets
+            .retain(|(cached, _, _, _)| cached != id && cached.strip_suffix("/spine") != Some(id));
         drop(jackets);
         let c = self.connection()?;
         store_item(&c, &detail["inbox"])
@@ -782,7 +794,33 @@ impl Library {
         server: &impl InboxServer,
         id: &str,
     ) -> Result<(Vec<u8>, &'static str), AvError> {
+        self.routed_image(server, id, false)
+    }
+
+    /// The image a borrowed spine is cut from (the DVD cover), served under `<id>/spine`.
+    pub(crate) fn routed_spine_source(
+        &self,
+        server: &impl InboxServer,
+        id: &str,
+    ) -> Result<(Vec<u8>, &'static str), AvError> {
+        self.routed_image(server, id, true)
+    }
+
+    fn routed_image(
+        &self,
+        server: &impl InboxServer,
+        id: &str,
+        spine: bool,
+    ) -> Result<(Vec<u8>, &'static str), AvError> {
         uuid::Uuid::parse_str(id).map_err(|_| AvError::Invalid)?;
+        let (path, key) = if spine {
+            (
+                format!("/v1/av-inbox/{id}/spine-source"),
+                format!("{id}/spine"),
+            )
+        } else {
+            (format!("/v1/av-inbox/{id}/jacket"), id.to_owned())
+        };
         let _lane = JACKET_LANE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -791,18 +829,14 @@ impl Library {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.retain(|(_, _, _, at)| at.elapsed() < JACKET_TTL);
-            if let Some((_, bytes, mime, _)) = cache.iter().find(|(cached, _, _, _)| cached == id) {
+            if let Some((_, bytes, mime, _)) = cache.iter().find(|(cached, _, _, _)| *cached == key)
+            {
                 return Ok((bytes.clone(), mime));
             }
         }
         let mut response = None;
         for attempt in 0..3 {
-            let current = server.request(
-                "GET",
-                &format!("/v1/av-inbox/{id}/jacket"),
-                None,
-                MAX_JACKET_BYTES,
-            )?;
+            let current = server.request("GET", &path, None, MAX_JACKET_BYTES)?;
             if current.status == 429 && attempt < 2 {
                 std::thread::sleep(Duration::from_millis(400));
                 continue;
@@ -828,12 +862,7 @@ impl Library {
         if cache.len() >= 4 {
             cache.remove(0);
         }
-        cache.push((
-            id.to_owned(),
-            response.bytes.clone(),
-            mime,
-            std::time::Instant::now(),
-        ));
+        cache.push((key, response.bytes.clone(), mime, std::time::Instant::now()));
         Ok((response.bytes, mime))
     }
 }

@@ -3,7 +3,7 @@ import { Button } from "../shared/ui/Button";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Slider } from "../shared/ui/Slider";
 import { ViewOptionsSection } from "../shared/ui/ViewOptionsSection";
-import { SPINE_SIZE_LABEL, SPINE_SIZES, type SpineSize } from "./case/caseDimensions";
+import { AV_SPINE_SIZES, SPINE_SIZE_LABEL, SPINE_SIZES, type SpineSize } from "./case/caseDimensions";
 import type { CollectionLibraryDirection, CollectionLibrarySort, CollectionRatingFilter } from "./collectionLibrary";
 import "./collectionViewSections.css";
 
@@ -14,11 +14,12 @@ import "./collectionViewSections.css";
 
 export type CollectionGrouping = "device" | "year" | "sort";
 
-const SPINE_SIZE_OPTIONS = SPINE_SIZES.map(value => ({ value, label: SPINE_SIZE_LABEL[value] }));
-/** 배치 → 책등 크기 (game and AV 책장): replaces 한 줄에 N개, which the spines' real sizes make meaningless. */
-export function SpineSizeRow({ value, onChange }: { value: SpineSize; onChange(value: SpineSize): void }) {
+const sizeOptions = (sizes: readonly SpineSize[]) => sizes.map(value => ({ value, label: SPINE_SIZE_LABEL[value] }));
+const SPINE_SIZE_OPTIONS = sizeOptions(SPINE_SIZES), AV_SPINE_SIZE_OPTIONS = sizeOptions(AV_SPINE_SIZES);
+/** 배치 → 책등 크기 (game and AV 책장): replaces 한 줄에 N개, which the spines' real sizes make meaningless. AV adds 아주 크게. */
+export function SpineSizeRow({ value, av = false, onChange }: { value: SpineSize; av?: boolean; onChange(value: SpineSize): void }) {
   return <div className="collection-view-sort__row"><span className="collection-view-sort__label">책등 크기</span>
-    <SegmentedControl label="책등 크기" options={SPINE_SIZE_OPTIONS} value={value} fullWidth onChange={onChange} /></div>;
+    <SegmentedControl label="책등 크기" options={av ? AV_SPINE_SIZE_OPTIONS : SPINE_SIZE_OPTIONS} value={!av && value === "huge" ? "large" : value} fullWidth onChange={onChange} /></div>;
 }
 
 /** Slider stops: 전체, then 0.5 … 5.0 (exact match). 미평가 is a separate toggle, never a stop. */

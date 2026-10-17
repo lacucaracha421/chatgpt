@@ -68,45 +68,61 @@ it('keeps cached rows offline and disables actions',async()=>{
 });
 it('walks candidates after Later and Apply without a toast',async()=>{
   list=[inboxFixture.inbox,second];view();fireEvent.click(await screen.findByRole('button',{name:'후보 차례로 보기 2'}));
-  await screen.findByRole('button',{name:'원제로 채우기'});fireEvent.click(screen.getByRole('button',{name:'나중에'}));
-  await waitFor(()=>expect(screen.getByRole('dialog',{name:'새 AV 컬렉션으로 만들기'})).toHaveTextContent('ABW-100'));
-  fireEvent.click(screen.getByRole('button',{name:'적용'}));await waitFor(()=>expect(readInboxPlans()[0]?.id).toBe(second.id));
-  expect(screen.queryByRole('button',{name:'원제로 채우기'})).toBeNull();expect(screen.queryByText(/적용했어요/)).toBeNull();
+  await screen.findByRole('textbox',{name:'이름'});fireEvent.click(screen.getByRole('button',{name:'나중에'}));
+  await waitFor(()=>expect(screen.getByRole('dialog',{name:'AV 후보 ABW-100'})).toHaveTextContent('ABW-100'));
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));await waitFor(()=>expect(readInboxPlans()[0]?.id).toBe(second.id));
+  expect(screen.queryByRole('textbox',{name:'이름'})).toBeNull();expect(screen.queryByText(/적용했어요/)).toBeNull();
 });
 const chooser=(detail=inboxFixture,state=inboxAuthority)=>render(<AvInboxChooser detail={detail} authority={state} items={[]} disabled={false} onClose={vi.fn()} onLater={vi.fn()} onApplied={vi.fn()} onReject={vi.fn()}/>);
+const details_=()=>{fireEvent.click(screen.getByRole('button',{name:'자세히'}));};
 it('defaults new work to code and available candidate surfaces, shows editable Korean and fixed Japanese names',()=>{
-  chooser();expect(screen.getByRole('textbox',{name:'새 컬렉션 이름'})).toHaveValue('SSIS-001');
-  expect(screen.queryByRole('button',{name:'유지'})).toBeNull();expect(screen.getAllByRole('button',{name:'후보 사용'}).every(b=>b.getAttribute('aria-pressed')==='true')).toBe(true);
+  chooser();expect(screen.getByRole('textbox',{name:'이름'})).toHaveValue('SSIS-001');
+  expect(screen.getByRole('radio',{name:/새 컬렉션/})).toHaveAttribute('aria-checked','true');
+  expect(screen.queryByRole('button',{name:'원제로 채우기'})).toBeNull();
+  for(const name of ['앞표지','책등','뒤표지'])expect(screen.getByRole('button',{name:`${name}: 후보 사용`})).toBeTruthy();
+  details_();
   expect(screen.getByRole('checkbox',{name:'원제 적용'})).toBeChecked();expect(screen.getByRole('checkbox',{name:'시리즈 적용'})).toBeDisabled();expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toHaveValue('배우');
 });
 it('keeps manual cover/nonempty fields and shows already linked people without controls',()=>{
   const work={...inboxWork,avCredits:[{personId:'person',role:'performer' as const,order:0,creditName:null}]};const state={...inboxAuthority,works:[work],artworks:[{workId:'work',artworkId:'manual',kind:'cover',provider:'local-manual',providerImageId:null}],people:[{personId:'person',nameJa:'女優',displayName:'기존 배우'}]};
   chooser({...inboxFixture,matches:[{libraryId:inboxIdentity.libraryId,workId:'work',name:'내 컬렉션',entityRevision:4}]},state);
-  expect(screen.getByText('직접 고름')).toBeTruthy();expect(within(screen.getByRole('group',{name:'앞표지 선택'})).getByRole('button',{name:'유지'})).toHaveAttribute('aria-pressed','true');
-  expect(screen.getByRole('checkbox',{name:'발매일 적용'})).not.toBeChecked();expect(screen.getAllByText('다름').length).toBeGreaterThan(0);expect(screen.getByText(/이미 연결됨/)).toBeTruthy();expect(screen.queryByRole('checkbox',{name:'女優 적용'})).toBeNull();
+  expect(screen.getByRole('button',{name:'앞표지: 지금 것 유지'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'앞표지: 지금 것 유지'}));
+  const keep=screen.getByRole('radio',{name:/지금 것 유지/});expect(keep).toHaveAttribute('aria-checked','true');expect(keep).toHaveTextContent('직접 고름');
+  fireEvent.click(screen.getByRole('button',{name:'닫기'}));
+  details_();
+  expect(screen.getByRole('checkbox',{name:'발매일 적용'})).not.toBeChecked();expect(screen.getAllByText('다름').length).toBeGreaterThan(0);expect(screen.getByText(/이미 연결됨/)).toBeTruthy();expect(screen.queryByRole('checkbox',{name:'女優 넣기'})).toBeNull();
 });
 it('requires explicit target for several matches and offers a new work',()=>{
   chooser({...inboxFixture,matches:[{libraryId:inboxIdentity.libraryId,workId:'a',name:'첫 컬렉션',entityRevision:1},{libraryId:inboxIdentity.libraryId,workId:'b',name:'둘째 컬렉션',entityRevision:1}]});
-  expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();fireEvent.click(screen.getByRole('radio',{name:'새 AV 컬렉션으로 만들기'}));expect(screen.getByRole('button',{name:'적용'})).not.toBeDisabled();
+  expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();expect(screen.getByText('넣을 곳을 고르세요')).toBeTruthy();
+  fireEvent.click(screen.getByRole('radio',{name:/새 컬렉션/}));expect(screen.getByRole('button',{name:'만들기'})).not.toBeDisabled();
 });
 it('offers the spine of a spine-less wide jacket, taken from the DVD cover',()=>{
   chooser({...inboxFixture,candidate:{...inboxFixture.candidate!,jacketWidth:2184,jacketHeight:1638,defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true}}});
-  const spine=within(screen.getByRole('group',{name:'책등 선택'}));
-  expect(spine.getByRole('button',{name:'후보 사용'})).not.toBeDisabled();expect(spine.getByRole('button',{name:'후보 사용'})).toHaveAttribute('aria-pressed','true');
-  expect(screen.getByText('책등은 DVD 표지에서 가져옴')).toBeTruthy();
+  const spine=screen.getByRole('button',{name:'책등: 후보 사용'});expect(spine).toHaveTextContent('DVD');expect(spine).not.toBeDisabled();
+  fireEvent.click(spine);expect(screen.getByRole('radio',{name:/DVD 표지의 책등/})).toHaveAttribute('aria-checked','true');
 });
-it('offers no spine candidate and privacy requests no jackets/covers',async()=>{
+it('starts a spine the server did not find as none, and privacy requests no jackets/covers',async()=>{
   localStorage.setItem(PRIVACY_MODE_KEY,'1');chooser({...inboxFixture,candidate:{...inboxFixture.candidate!,defaultSplit:{...inboxFixture.candidate!.defaultSplit,useSpine:false}}});
-  expect(screen.getAllByText('후보 없음',{selector:'span'}).length).toBeGreaterThan(0);expect(within(screen.getByRole('group',{name:'책등 선택'})).getByRole('button',{name:'후보 사용'})).toBeDisabled();await waitFor(()=>expect(mocks.native).not.toHaveBeenCalled());expect(screen.queryByRole('img')).toBeNull();
+  const spine=screen.getByRole('button',{name:'책등: 비움'});fireEvent.click(spine);
+  expect(screen.getByRole('radio',{name:/비우기/})).toHaveAttribute('aria-checked','true');
+  await waitFor(()=>expect(mocks.native).not.toHaveBeenCalled());expect(screen.queryByAltText(/펼친 재킷/)).toBeNull();
+});
+it('moves a cut line on the tablet and applies with those lines',()=>{
+  chooser();const line=screen.getByRole('slider',{name:'뒤표지와 책등 사이 선'});
+  fireEvent.keyDown(line,{key:'ArrowLeft',shiftKey:true});expect(line).toHaveAttribute('aria-valuenow','368');
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  expect(readInboxPlans()[0].choices.split).toEqual({x1:368,x2:422});
 });
 it('reopens a stopped chooser with choices kept',()=>{
   const plan=createInboxPlan(inboxFixture,inboxAuthority,initialChoices(inboxFixture,null));plan.state='blocked';plan.choices.name='내 선택';
-  const key=Object.keys(localStorage).find(k=>k.startsWith('lakomics.av-inbox.apply.v1.'))!;localStorage.setItem(key,JSON.stringify([plan]));chooser();expect(screen.getByRole('textbox',{name:'새 컬렉션 이름'})).toHaveValue('내 선택');
+  const key=Object.keys(localStorage).find(k=>k.startsWith('lakomics.av-inbox.apply.v1.'))!;localStorage.setItem(key,JSON.stringify([plan]));chooser();expect(screen.getByRole('textbox',{name:'이름'})).toHaveValue('내 선택');
 });
 it('advances immediately to the next candidate after Apply',async()=>{
   list=[inboxFixture.inbox,second];view();fireEvent.click(await screen.findByRole('button',{name:'후보 차례로 보기 2'}));
-  await screen.findByRole('button',{name:'원제로 채우기'});fireEvent.click(screen.getByRole('button',{name:'적용'}));
-  await waitFor(()=>expect(screen.getByRole('dialog',{name:'새 AV 컬렉션으로 만들기'})).toHaveTextContent('ABW-100'));
+  await screen.findByRole('textbox',{name:'이름'});fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  await waitFor(()=>expect(screen.getByRole('dialog',{name:'AV 후보 ABW-100'})).toHaveTextContent('ABW-100'));
   expect(readInboxPlans()[0].id).toBe(inboxFixture.inbox.id);
 });
 it('dismisses a row without a candidate immediately and requests no confirm dialog',async()=>{
@@ -116,9 +132,10 @@ it('dismisses a row without a candidate immediately and requests no confirm dial
 });
 it('does not choose one of several people with the same Japanese name silently',()=>{
   chooser(inboxFixture,{...inboxAuthority,people:[{personId:'p1',displayName:'첫 배우',nameJa:'女優'},{personId:'p2',displayName:'둘째 배우',nameJa:'女優'}]});
-  expect(screen.getByRole('combobox',{name:'女優 인물 연결'})).toHaveValue('new');
+  details_();
+  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('새 인물');
   fireEvent.change(screen.getByRole('textbox',{name:'女優 한국어 이름'}),{target:{value:''}});
-  expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'만들기'})).toBeDisabled();
 });
 it('does not flash an empty inbox while the first list is still loading',async()=>{
   let resolve!:(value:unknown)=>void;const base=mocks.api.getMockImplementation()!;
@@ -128,15 +145,15 @@ it('does not flash an empty inbox while the first list is still loading',async()
 });
 it('keeps the old candidate while walking loads and does not reopen after the user closes it',async()=>{
   list=[inboxFixture.inbox,second];view();fireEvent.click(await screen.findByRole('button',{name:'후보 차례로 보기 2'}));
-  await screen.findByRole('button',{name:'원제로 채우기'});
+  await screen.findByRole('textbox',{name:'이름'});
   let resolve!:(value:unknown)=>void;const base=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((...args)=>args[0]===`/v1/av-inbox/${second.id}`?new Promise(done=>{resolve=done;}):base(...args));
   fireEvent.click(screen.getByRole('button',{name:'나중에'}));
-  expect(screen.getByRole('dialog',{name:'새 AV 컬렉션으로 만들기'})).toHaveTextContent('SSIS-001');
+  expect(screen.getByRole('dialog',{name:'AV 후보 SSIS-001'})).toHaveTextContent('SSIS-001');
   expect(screen.getByRole('button',{name:'나중에'})).toBeDisabled();
-  fireEvent.click(screen.getByRole('button',{name:'새 AV 컬렉션으로 만들기 닫기'}));
+  fireEvent.click(screen.getByRole('button',{name:'AV 후보 SSIS-001 닫기'}));
   resolve(details[second.id]);
-  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'새 AV 컬렉션으로 만들기'})).toBeNull());
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:/AV 후보/})).toBeNull());
 });
 it('keeps a durable pending acknowledgement visible when the server list no longer has the item',async()=>{
   const plan=createInboxPlan(inboxFixture,inboxAuthority,initialChoices(inboxFixture,null));plan.state='waiting';
@@ -156,7 +173,7 @@ it('shows apply cancellation, disables discard and returns a stopped row to cand
   expect(screen.getByText('후보 있음',{selector:'.ui-badge'})).toBeTruthy();
 });
 it('disables rejection while rechecking a stopped plan',()=>{
-  stoppedPlan();chooser();expect(screen.getByRole('button',{name:'거절'})).toBeDisabled();expect(screen.getByRole('status')).toHaveTextContent('바뀐 표지는 유지');
+  stoppedPlan();chooser();expect(screen.getByRole('button',{name:'거절'})).toBeDisabled();expect(screen.getByRole('status')).toHaveTextContent('다시 확인함 · 바뀐 항목 없음');
 });
 it('keeps a dismissed stopped item visible with only apply cancellation',async()=>{
   stoppedPlan();list=[{...inboxFixture.inbox,status:'dismissed'}];details[inboxFixture.inbox.id]={...inboxFixture,candidate:null};view();
@@ -178,7 +195,7 @@ it('offers retry for a pending server acknowledgement and clears its backoff',as
 it('offers an unfinished matching work rather than defaulting to another new collection',()=>{
   const plan=createInboxPlan(inboxFixture,inboxAuthority,initialChoices(inboxFixture,null));
   chooser({...inboxFixture,inbox:{...inboxFixture.inbox,id:'pending-target'}});
-  expect(screen.getByText('기존 컬렉션에 후보 추가')).toBeTruthy();expect(screen.queryByRole('textbox',{name:'새 컬렉션 이름'})).toBeNull();
+  expect(screen.getByRole('radio',{name:/SSIS-001/})).toHaveAttribute('aria-checked','true');expect(screen.queryByRole('textbox',{name:'이름'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'적용'}));expect(readInboxPlans().find(p=>p.id==='pending-target')?.workId).toBe(plan.workId);
 });
 it('requires a target when multiple local pending works match',()=>{
@@ -186,15 +203,15 @@ it('requires a target when multiple local pending works match',()=>{
   const key=Object.keys(localStorage).find(k=>k.startsWith('lakomics.av-inbox.apply.v1.'))!;
   localStorage.setItem(key,JSON.stringify([plan,{...plan,id:'another-plan',workId:'another-work'}]));
   chooser({...inboxFixture,inbox:{...inboxFixture.inbox,id:'pending-target'}});
-  expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();expect(screen.getByText('같은 품번의 컬렉션이 2개 있어요')).toBeTruthy();
+  expect(screen.getByRole('button',{name:'적용'})).toBeDisabled();expect(screen.getAllByRole('radio').length).toBe(3);expect(screen.getByText('넣을 곳을 고르세요')).toBeTruthy();
 });
 it('shows a refreshed manual cover and filled field as keep instead of restoring the old overwrite choice',()=>{
   const state={...inboxAuthority,works:[inboxWork]};const plan=createInboxPlan(inboxFixture,state,initialChoices(inboxFixture,inboxWork));
   plan.state='blocked';plan.choices.surfaces.front='candidate';plan.choices.fields.releaseDate='2025-01-01';
   const key=Object.keys(localStorage).find(k=>k.startsWith('lakomics.av-inbox.apply.v1.'))!;localStorage.setItem(key,JSON.stringify([plan]));
   chooser(inboxFixture,{...state,works:[{...inboxWork,selection:{work:'new-manual'},details:{av:{...inboxWork.details.av,releaseDate:'2026-01-01'}}}]});
-  expect(within(screen.getByRole('group',{name:'앞표지 선택'})).getByRole('button',{name:'유지'})).toHaveAttribute('aria-pressed','true');
-  expect(screen.getByRole('checkbox',{name:'발매일 적용'})).not.toBeChecked();expect(screen.getByRole('status')).toHaveTextContent('앞표지의 현재 선택 · 출시일 바뀜');
+  expect(screen.getByRole('button',{name:'앞표지: 지금 것 유지'})).toBeTruthy();
+  details_();expect(screen.getByRole('checkbox',{name:'발매일 적용'})).not.toBeChecked();expect(screen.getByRole('status')).toHaveTextContent('앞표지의 현재 선택 · 출시일 바뀜');
 });
 
 it('shows a paused inbox in the per-work queue with a Korean reason and cancellation',()=>{
@@ -210,26 +227,37 @@ it('downloads no row thumbnails while privacy mode is enabled',async()=>{
 it('keeps a pending performer linked instead of creating another person for a second inbox candidate',()=>{
   createInboxPlan(inboxFixture,inboxAuthority,initialChoices(inboxFixture,null));
   chooser({...inboxFixture,inbox:{...inboxFixture.inbox,id:'second-with-person'}});
-  expect(screen.getByText(/이미 연결됨/)).toBeTruthy();expect(screen.queryByRole('checkbox',{name:'女優 적용'})).toBeNull();
+  details_();expect(screen.getByText(/이미 연결됨/)).toBeTruthy();expect(screen.queryByRole('checkbox',{name:'女優 넣기'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'적용'}));expect(readInboxPlans().find(p=>p.id==='second-with-person')?.choices.people[0].action).toBe('link');
 });
 
-it('offers only people credited in each role, including people credited in both',()=>{
+it('offers only people credited as a performer, including people credited in both, and ignores directors',()=>{
   const detail={...inboxFixture,candidate:{...inboxFixture.candidate!,directors:[{nameJa:'監督',nameKo:'감독 후보',wikidataId:null,fanzaActressId:null}]}};
   const people=[{personId:'actor',displayName:'출연 전용',nameJa:'女優'},{personId:'director',displayName:'감독 전용',nameJa:'女優'},{personId:'both',displayName:'겸업',nameJa:'兼業'},{personId:'none',displayName:'이력 없음',nameJa:null}];
   const avCredits=[{personId:'actor',role:'performer' as const,order:0},{personId:'director',role:'director' as const,order:0},{personId:'both',role:'performer' as const,order:1},{personId:'both',role:'director' as const,order:1}];
   chooser(detail,{...inboxAuthority,people,works:[{...inboxWork,details:{av:{productCode:'OTHER-1',genres:[]}},avCredits}]});
-  const performer=screen.getByRole('combobox',{name:'女優 인물 연결'}),director=screen.getByRole('combobox',{name:'監督 인물 연결'});
-  expect(within(performer).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','출연 전용 · 女優에 연결','겸업 · 兼業에 연결']);
-  expect(within(director).getAllByRole('option').map(o=>o.textContent)).toEqual(['새 인물','감독 전용 · 女優에 연결','겸업 · 兼業에 연결']);
-  expect(performer).toHaveValue('actor');
-  expect(performer).toHaveClass('ui-text-input');
-  expect(document.getElementById(performer.getAttribute('aria-labelledby')!)).toHaveClass('sr-only');
-  fireEvent.change(director,{target:{value:'director'}});
-  expect(screen.getByRole('textbox',{name:'監督 한국어 이름'})).toHaveValue('감독 전용');
+  details_();
+  expect(screen.queryByRole('button',{name:'監督 인물 연결'})).toBeNull();expect(screen.queryByRole('textbox',{name:'監督 한국어 이름'})).toBeNull();
+  const link=screen.getByRole('button',{name:'女優 인물 연결'});expect(link).toHaveTextContent('기존 인물');
+  expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toHaveValue('출연 전용');
+  fireEvent.click(link);
+  const results=within(screen.getByRole('listbox',{name:'女優 기존 인물 결과'}));
+  expect(results.getAllByRole('option').map(o=>o.textContent)).toEqual(['출연 전용女優','겸업兼業']);
+  fireEvent.click(results.getByRole('option',{name:/겸업/}));
+  expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toHaveValue('겸업');
+  fireEvent.click(screen.getByRole('button',{name:'女優 인물 연결'}));fireEvent.click(screen.getByRole('button',{name:'새 인물로'}));
+  expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toHaveValue('배우');expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toBeEnabled();
 });
 it('does not automatically link a director-only match to a performer',()=>{
   chooser(inboxFixture,{...inboxAuthority,people:[{personId:'director',displayName:'감독',nameJa:'女優'}],works:[{...inboxWork,details:{av:{productCode:'OTHER-1',genres:[]}},avCredits:[{personId:'director',role:'director',order:0}]}]});
-  expect(screen.getByRole('combobox',{name:'女優 인물 연결'})).toHaveValue('new');
+  details_();
+  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('새 인물');
   expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toBeEnabled();
+});
+it('shows genres by Korean name without sale tags and never plans a hidden tag or a director',()=>{
+  const detail={...inboxFixture,candidate:{...inboxFixture.candidate!,fields:{...inboxFixture.candidate!.fields,genres:['痴女','セール対象商品','ハイビジョン']},directors:[{nameJa:'監督',nameKo:null,wikidataId:null,fanzaActressId:null}]}};
+  chooser(detail);details_();
+  expect(screen.getByRole('button',{name:'치녀'})).toHaveAttribute('aria-pressed','true');expect(screen.queryByText('セール対象商品')).toBeNull();expect(screen.getByText('판매·샘플 태그 2개 숨김')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  const plan=readInboxPlans()[0]!;expect(plan.choices.fields.genres).toEqual(['痴女']);expect(plan.choices.people.map(p=>p.role)).toEqual(['performer']);
 });

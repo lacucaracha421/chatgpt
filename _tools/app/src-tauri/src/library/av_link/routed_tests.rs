@@ -1573,6 +1573,22 @@ fn applied_ack_404_stays_pending_until_the_server_accepts() {
 }
 
 #[test]
+fn a_borrowed_spine_carries_its_source_strip_to_the_chooser() {
+    let mut value = detail(ID, json!([]));
+    assert!(routed::parse_detail(&value).unwrap().spine_source.is_none());
+    value["candidate"]["spineSource"] = json!({"address":"https://pics.dmm.co.jp/m.jpg","sha256":SHA,
+        "sizeBytes":1,"contentType":"image/jpeg","x1":382,"x2":418,"width":800,"height":438});
+    let source = routed::parse_detail(&value).unwrap().spine_source.unwrap();
+    assert_eq!(
+        (source.x1, source.x2, source.width, source.height),
+        (382, 418, 800, 438)
+    );
+    // A strip outside its own image is not offered; the apply still works from the server's rule.
+    value["candidate"]["spineSource"]["x2"] = json!(900);
+    assert!(routed::parse_detail(&value).unwrap().spine_source.is_none());
+}
+
+#[test]
 fn chooser_falls_back_to_pending_local_code_matches_without_picking_among_several() {
     let (_temp, library, _) = routed(json!({"works":[]}));
     let server = item_server(ID, json!([]));

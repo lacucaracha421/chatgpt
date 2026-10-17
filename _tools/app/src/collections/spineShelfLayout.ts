@@ -61,7 +61,26 @@ export function packSpineShelf<W extends PackedWork>(groups: ShelfGroup<W>[], av
   return { entries, rows, order, cells, height: top + SPINE_SHELF.bottom };
 }
 
-/** The case in `row` whose centre is nearest `x` (arrow keys up/down and a tablet tap in the row band). */
+/** Hit slop between two neighbouring spines, in px; there is none past the first and last spine. */
+const TOUCH_SLOP = 2;
+
+/**
+ * The case a tablet tap at `x` in the row band means: the spine under it, with a small slop only toward a neighbour.
+ * Empty shelf past the last spine (or before the first) belongs to no case, so it stays empty space.
+ */
+export function cellAtX<W extends PackedWork>(row: PackedRow<W> | undefined, x: number): PackedCell<W> | null {
+  if (!row) return null;
+  const last = row.cells.length - 1;
+  let best: PackedCell<W> | null = null, distance = Infinity;
+  for (const [index, cell] of row.cells.entries()) {
+    if (x < cell.x - (index > 0 ? TOUCH_SLOP : 0) || x > cell.x + cell.width + (index < last ? TOUCH_SLOP : 0)) continue;
+    const gap = Math.abs(cell.x + cell.width / 2 - x);
+    if (gap < distance) { distance = gap; best = cell; }
+  }
+  return best;
+}
+
+/** The case in `row` whose centre is nearest `x` (arrow keys up/down). */
 export function nearestCell<W extends PackedWork>(row: PackedRow<W> | undefined, x: number): PackedCell<W> | null {
   if (!row) return null;
   let best: PackedCell<W> | null = null, distance = Infinity;

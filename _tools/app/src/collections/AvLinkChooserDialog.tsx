@@ -1,429 +1,355 @@
-import {performerName} from "./av/performerName";
-import { BusyLabel } from "../shared/ui/BusyLabel";
-import { displayDate, displayTime } from "../shared/displayDate";
-import { ArrowTopRightOnSquareIcon, ArrowUturnLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { ArrowTopRightOnSquareIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { displayTime } from "../shared/displayDate";
+import { useBackHandler } from "../shared/navigation/BackNavigation";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
-import { Select } from "../shared/ui/Select";
-import { TextField } from "../shared/ui/TextField";
+import { Skeleton } from "../shared/ui/Skeleton";
+import { TextInput } from "../shared/ui/TextInput";
+import { useMotionSurface } from "../shared/ui/useMotionSurface";
 import { avGateway } from "./avClient";
+import { displayAvGenres, hiddenAvGenreCount } from "./avGenreNames";
+import { performerName } from "./av/performerName";
 import type { AvGateway, AvPerson } from "./avTypes";
 import { avLinkClient, type AvLinkApplyRequest, type AvLinkCandidate, type AvLinkFields, type AvLinkPersonChoice, type AvLinkPersonMatch, type AvLinkSurfaceChoice } from "./avLinkClient";
+import { AvCoverStage, AvSurfaceOptionFace, Crop, type SurfaceControl } from "./avReview/AvCoverStage";
+import { AvDestination, AvPickList, NEW_DESTINATION, type DestinationRow } from "./avReview/AvDestination";
+import { AvInfoSection, INFO_KEYS, type AvInfoModel, type InfoKey } from "./avReview/AvInfoSection";
+import { coversChanged, initialSplit, resolveChoices, surfaceBounds, type Split, type Surface } from "./avReview/avReviewModel";
+import "./avReview/avReview.css";
 
-type Surface = "front" | "spine" | "back";
-type FieldKey = "title_ja" | "release_date" | "maker" | "label" | "series";
 type PersonDraft = { action: "skip" | "link" | "new"; personId?: string; displayName: string; nameSource?: AvPerson };
 type AvLinkApi = typeof avLinkClient;
-
-const FIELD_ROWS: Array<{ key: FieldKey; label: string }> = [
-  { key: "title_ja", label: "원제" },
-  { key: "release_date", label: "발매일" },
-  { key: "maker", label: "제작사" },
-  { key: "label", label: "레이블" },
-  { key: "series", label: "시리즈" },
-];
-const SURFACES: Array<{ key: Surface; label: string }> = [
-  { key: "front", label: "앞표지" },
-  { key: "spine", label: "책등" },
-  { key: "back", label: "뒤표지" },
-];
+type PeopleApi = Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
+const SURFACE_KEYS: readonly Surface[] = ["front", "spine", "back"];
+type FieldChecks = Record<InfoKey, boolean>;
 
 export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, peopleApi = avGateway, onClose, onApplied, onDismissed }: {
   inboxId: string;
   collections: CollectionSummary[];
   api?: AvLinkApi;
-  peopleApi?: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
+  peopleApi?: PeopleApi;
   onClose(): void;
   onApplied(collectionId: string): void | Promise<void>;
   onDismissed(): void | Promise<void>;
 }) {
   const { privacyMode } = usePrivacy();
   const [candidate, setCandidate] = useState<AvLinkCandidate | null>(null);
-  const [targetId, setTargetId] = useState<string | undefined>(undefined);
-  const [showPicker, setShowPicker] = useState(false);
-  // Several collections share this code: apply stays off until one is picked, or "new" is chosen on purpose.
-  const [choseNew, setChoseNew] = useState(false);
+  /** A collection id, `new`, or null while several collections match and none was chosen. */
+  const [destination, setDestination] = useState<string | null>(null);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherQuery, setOtherQuery] = useState("");
   const [newName, setNewName] = useState("");
-  const [split, setSplit] = useState({ x1: 1, x2: 2 });
+  const [split, setSplit] = useState<Split>({ x1: 1, x2: 2 });
   const [surfaces, setSurfaces] = useState<Record<Surface, AvLinkSurfaceChoice>>({ front: "candidate", spine: "candidate", back: "candidate" });
-  const [fieldChecks, setFieldChecks] = useState<Record<FieldKey, boolean>>({ title_ja: false, release_date: false, maker: false, label: false, series: false });
-  const [peopleChecks, setPeopleChecks] = useState({ performers: false, directors: false, genres: false });
+  const [fieldChecks, setFieldChecks] = useState<FieldChecks>({ title_ja: false, release_date: false, maker: false, label: false, series: false });
   const [genres, setGenres] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [performers, setPerformers] = useState<Record<string, PersonDraft>>({});
-  const [directors, setDirectors] = useState<Record<string, PersonDraft>>({});
-  const [loading, setLoading] = useState(true);
+  const [details, setDetails] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const jacketRef = useRef<HTMLDivElement>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const live = useRef({ candidate, split, surfaces, fieldChecks, newName });
+  live.current = { candidate, split, surfaces, fieldChecks, newName };
 
-  const resetFromCandidate = useCallback((next: AvLinkCandidate) => {
-    const isNew = !next.current;
-    const normalizedSplit = next.defaultSplit.isWrap ? clampSplit(next.defaultSplit.x1, next.defaultSplit.x2, next.jacketWidth) : { x1: 0, x2: 0 };
-    setSplit(normalizedSplit);
-    setNewName(isNew ? next.inbox.normalizedCode || next.inbox.productCode : "");
-    setSurfaces(Object.fromEntries(SURFACES.map(({ key }) => {
-      const currentId = next.current?.covers[`${key}Id`];
+  const resetChoices = useCallback((next: AvLinkCandidate, current: AvLinkCandidate["current"], keep?: typeof live.current) => {
+    const isNew = !current;
+    const sameJacket = keep?.candidate && keep.candidate.jacketWidth === next.jacketWidth && keep.candidate.jacketHeight === next.jacketHeight;
+    setSplit(sameJacket && keep ? keep.split : initialSplit(next.defaultSplit, next.jacketWidth));
+    setNewName(isNew ? keep?.newName || next.inbox.normalizedCode || next.inbox.productCode : "");
+    const fresh = Object.fromEntries(SURFACE_KEYS.map(key => {
+      const currentId = current?.covers[`${key}Id`];
       if (!next.defaultSplit.isWrap && key !== "front") return [key, currentId ? "keep" : "clear"];
       if (key === "spine" && !next.defaultSplit.useSpine) return [key, currentId ? "keep" : "clear"];
       return [key, isNew || !currentId ? "candidate" : "keep"];
-    })) as Record<Surface, AvLinkSurfaceChoice>);
-    setFieldChecks(Object.fromEntries(FIELD_ROWS.map(({ key }) => [key, hasValue(next.fields[key]) && (isNew || !hasValue(next.current?.fields[key]))])) as Record<FieldKey, boolean>);
-    setPeopleChecks({
-      performers: next.performers.some(person => !person.alreadyLinked),
-      directors: next.directors.some(person => !person.alreadyLinked),
-      genres: Boolean(next.fields.genres?.length) && (isNew || !next.current?.fields.genres?.length),
-    });
-    setGenres(new Set(next.fields.genres ?? []));
-    setPerformers(personDrafts(next.performers));
-    setDirectors(personDrafts(next.directors));
+    })) as Record<Surface, AvLinkSurfaceChoice>;
+    // A reload keeps what the user chose where the destination's image did not change.
+    for (const key of SURFACE_KEYS) {
+      const before = keep?.candidate?.current?.covers[`${key}Id`] ?? null;
+      if (keep && sameJacket && before === (current?.covers[`${key}Id`] ?? null) && (keep.surfaces[key] !== "keep" || before)) fresh[key] = keep.surfaces[key];
+    }
+    setSurfaces(fresh);
+    const checks = Object.fromEntries(INFO_KEYS.map(key => {
+      const value = hasValue(next.fields[key]) && (isNew || !hasValue(current?.fields[key]));
+      const unchanged = keep?.candidate && keep.candidate.fields[key] === next.fields[key] && (keep.candidate.current?.fields[key] ?? null) === (current?.fields[key] ?? null);
+      return [key, unchanged && keep ? keep.fieldChecks[key] : value];
+    })) as FieldChecks;
+    setFieldChecks(checks);
+    const visible = displayAvGenres(next.fields.genres).map(genre => genre.original);
+    setGenres(new Set(isNew || !current?.fields.genres?.length ? visible : []));
+    const people = isNew ? next.performers.map(person => ({ ...person, alreadyLinked: false })) : next.performers;
+    setPerformers(personDrafts(people));
+    setSelected(Object.fromEntries(people.map(person => [person.name_ja, !person.alreadyLinked])));
   }, []);
 
-  const load = useCallback(async (destination?: string) => {
-    setLoading(true); setError(null);
+  const load = useCallback(async (target?: string, keep?: typeof live.current) => {
+    setReloading(true); setLoadError(null);
     try {
-      const raw = await api.getCandidate(inboxId, destination);
-      const eligibleMatches = async (people: AvLinkPersonMatch[], role: "performer" | "director") => Promise.all(people.map(async person => {
+      const raw = await api.getCandidate(inboxId, target && target !== NEW_DESTINATION ? target : undefined);
+      const eligibleMatches = async (people: AvLinkPersonMatch[]) => Promise.all(people.map(async person => {
         if (!person.personId) return person;
         const page = await peopleApi.getPerformer(person.personId).catch(reason => { if (person.alreadyLinked) return null; throw reason; });
         if (!page) return person;
-        const enriched = {...person, ...page.person};
-        return person.alreadyLinked || await hasPersonCredit(peopleApi, person.personId, role, page) ? enriched : { ...person, personId: null, displayName: null, matchBy: null };
+        const enriched = { ...person, ...page.person };
+        return person.alreadyLinked || await hasPerformerCredit(peopleApi, person.personId, page) ? enriched : { ...person, personId: null, displayName: null, matchBy: null };
       }));
-      const [performers, directors] = await Promise.all([eligibleMatches(raw.performers, "performer"), eligibleMatches(raw.directors, "director")]);
-      const current = raw.current ? {...raw.current, people: await Promise.all(raw.current.people.map(async person => ({...person, ...(await peopleApi.getPerformer(person.id).catch(() => null))?.person})))} : null;
-      const next = { ...raw, current, performers, directors };
+      const performers = await eligibleMatches(raw.performers);
+      const current = raw.current ? { ...raw.current, people: await Promise.all(raw.current.people.map(async person => ({ ...person, ...(await peopleApi.getPerformer(person.id).catch(() => null))?.person }))) } : null;
+      const next = { ...raw, current, performers };
+      const chosen = target === NEW_DESTINATION ? NEW_DESTINATION : next.current?.collectionId ?? ((next.matches?.length ?? 0) > 1 ? null : NEW_DESTINATION);
       setCandidate(next);
-      setChoseNew(false);
-      setTargetId(next.current?.collectionId);
-      resetFromCandidate(next);
+      setDestination(chosen);
+      setOtherOpen(false);
+      resetChoices(next, chosen === NEW_DESTINATION ? null : next.current, keep);
     } catch (reason) {
-      setError(errorMessage(reason, "후보를 불러오지 못했습니다."));
-    } finally { setLoading(false); }
-  }, [api, inboxId, peopleApi, resetFromCandidate]);
+      setLoadError(errorMessage(reason, "후보를 불러오지 못했습니다."));
+    } finally { setReloading(false); }
+  }, [api, inboxId, peopleApi, resetChoices]);
   useEffect(() => { void load(); }, [load]);
 
-  const isNew = Boolean(candidate && !candidate.current);
-  const matches = candidate?.matches ?? [];
-  const needsPick = isNew && matches.length > 1 && !choseNew;
-  const spinePercent = candidate ? ((split.x2 - split.x1) / candidate.jacketWidth) * 100 : 0;
-  // A wide jacket with no spine of its own (4:3): the server cuts the spine from the DVD cover instead,
-  // as long as the lines leave less than 1% between them.
-  const borrowedSpine = Boolean(candidate && spineIsBorrowed(candidate.defaultSplit)) && spinePercent < 1;
-  const spineWarning = Boolean(candidate?.defaultSplit.isWrap) && !borrowedSpine && (spinePercent < 1 || spinePercent > 12);
+  const isNew = destination === NEW_DESTINATION;
+  const current = candidate && !isNew && destination !== null ? candidate.current : null;
+  const needsPick = destination === null;
+  const code = candidate ? candidate.inbox.normalizedCode || candidate.inbox.productCode : "";
+  const mismatch = Boolean(current?.productCode?.trim()) && candidate !== null && canonicalCode(current!.productCode!) !== canonicalCode(code);
 
-  function moveLine(line: "x1" | "x2", delta: number) {
-    if (!candidate) return;
-    setSplit(current => line === "x1"
-      ? { ...current, x1: Math.max(1, Math.min(current.x2 - 1, current.x1 + delta)) }
-      : { ...current, x2: Math.min(candidate.jacketWidth - 1, Math.max(current.x1 + 1, current.x2 + delta)) });
-  }
-  function setLine(line: "x1" | "x2", x: number) {
-    if (!candidate) return;
-    setSplit(current => line === "x1"
-      ? { ...current, x1: Math.max(1, Math.min(current.x2 - 1, Math.round(x))) }
-      : { ...current, x2: Math.min(candidate.jacketWidth - 1, Math.max(current.x1 + 1, Math.round(x))) });
-  }
-  function lineKeyDown(line: "x1" | "x2", event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    moveLine(line, (event.shiftKey ? 10 : 1) * (event.key === "ArrowLeft" ? -1 : 1));
-  }
-  function beginDrag(line: "x1" | "x2", event: PointerEvent<HTMLButtonElement>) {
-    if (!candidate) return;
-    event.preventDefault();
-    event.currentTarget.focus();
-    const move = (next: globalThis.PointerEvent) => {
-      const rect = jacketRef.current?.getBoundingClientRect();
-      if (!rect || rect.width <= 0) return;
-      setLine(line, ((next.clientX - rect.left) / rect.width) * candidate.jacketWidth);
-    };
-    const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
+  function chooseDestination(id: string) {
+    if (!candidate || reloading || busy) return;
+    setStale(false); setApplyError(null);
+    if (id === NEW_DESTINATION) {
+      setDestination(NEW_DESTINATION);
+      resetChoices(candidate, null, live.current);
+      return;
+    }
+    if (id === destination) return;
+    void load(id, live.current);
   }
 
-  async function chooseTarget(collectionId: string) {
-    setShowPicker(false);
-    await load(collectionId || undefined);
-  }
   async function apply() {
-    if (!candidate) return;
-    setBusy(true); setError(null);
+    if (!candidate || needsPick) return;
+    setBusy(true); setApplyError(null);
     const fields: AvLinkFields = {};
-    for (const { key } of FIELD_ROWS) if (fieldChecks[key]) fields[key] = candidate.fields[key] ?? null;
-    if (peopleChecks.genres) fields.genres = [...genres];
+    for (const key of INFO_KEYS) if (fieldChecks[key]) fields[key] = candidate.fields[key] ?? null;
+    const chosenGenres = [...genres];
+    // Existing genres (hidden sale tags included) stay; the chosen ones are added.
+    if (chosenGenres.length) fields.genres = isNew ? chosenGenres : [...(current?.fields.genres ?? []), ...chosenGenres.filter(genre => !current?.fields.genres?.includes(genre))];
+    const people = isNew ? candidate.performers.map(person => ({ ...person, alreadyLinked: false })) : candidate.performers;
     const requestBase = {
-      split,
-      surfaces,
-      fields,
-      performers: peopleChecks.performers ? peopleRequest(candidate.performers, performers) : [],
-      directors: peopleChecks.directors ? peopleRequest(candidate.directors, directors) : [],
+      split, surfaces: resolved, fields,
+      performers: peopleRequest(people.filter(person => selected[person.name_ja]), performers),
+      directors: [],
     };
-    const request: AvLinkApplyRequest = candidate.current
-      ? { ...requestBase, collectionId: candidate.current.collectionId, expectedRevision: candidate.current.covers.revision }
+    const request: AvLinkApplyRequest = current
+      ? { ...requestBase, collectionId: current.collectionId, expectedRevision: current.covers.revision }
       : { ...requestBase, newCollectionName: newName.trim() || candidate.inbox.normalizedCode || candidate.inbox.productCode };
     try {
       const result = await api.apply(inboxId, request);
       await onApplied(result.collectionId);
     } catch (reason) {
-      const message = errorMessage(reason, "후보를 적용하지 못했습니다.");
       if (isStale(reason)) {
-        await load(targetId);
-        setError(message);
-      } else setError(message);
+        await load(destination ?? undefined, live.current);
+        setStale(true);
+      } else setApplyError(errorMessage(reason, "후보를 적용하지 못했습니다."));
     } finally { setBusy(false); }
   }
   async function dismiss() {
-    if (!window.confirm("가져온 후보를 거절할까요? 이 후보는 삭제되며 되돌릴 수 없습니다.")) return;
-    setBusy(true); setError(null);
+    setRejecting(false);
+    setBusy(true); setApplyError(null);
     try { await api.dismiss(inboxId); await onDismissed(); }
-    catch (reason) { setError(errorMessage(reason, "후보를 거절하지 못했습니다.")); }
+    catch (reason) { setApplyError(errorMessage(reason, "후보를 거절하지 못했습니다.")); }
     finally { setBusy(false); }
   }
 
-  const coverChanges = Object.values(surfaces).filter(value => value !== "keep" && value !== "clear").length
-    + Object.entries(surfaces).filter(([key, value]) => value === "clear" && Boolean(candidate?.current?.covers[`${key as Surface}Id`])).length;
-  const infoChanges = Object.values(fieldChecks).filter(Boolean).length + Object.values(peopleChecks).filter(Boolean).length;
-  const title = isNew ? "새 AV 컬렉션으로 만들기" : "후보 확인";
+  const locked = busy || reloading;
+  const hasCurrent: Record<Surface, boolean> = { front: Boolean(current?.covers.frontId), spine: Boolean(current?.covers.spineId), back: Boolean(current?.covers.backId) };
+  const currentImages = Object.fromEntries(SURFACE_KEYS.map(key => {
+    const id = current?.covers[`${key}Id`];
+    return [key, id ? workArtworkThumbnailUrl(id) : null];
+  })) as Record<Surface, string | null>;
+  const resolved = candidate ? resolveChoices(surfaces, candidate.defaultSplit, split, candidate.jacketWidth, hasCurrent) : surfaces;
+  const coverCount = coversChanged(resolved, hasCurrent);
 
-  return <Dialog open title={title} variant="workspace" onClose={() => { if (!busy) onClose(); }}>
-    <div className="av-link-chooser">
-      <header className="av-link-chooser__header">
-        <div className="av-link-chooser__heading"><h2>{title}{candidate && <span className="av-link-code">{candidate.inbox.normalizedCode || candidate.inbox.productCode}</span>}</h2>
-          {candidate && (isNew
-            ? matches.length > 1
-              ? <div className="av-link-chooser__matches" role="group" aria-label="같은 품번의 컬렉션">
-                <p>같은 품번의 컬렉션이 <b>{matches.length}</b>개 있어요. 후보를 넣을 곳을 고르세요.</p>
-                <span>{matches.map(match => <Button key={match.collectionId} size="sm" onClick={() => void chooseTarget(match.collectionId)}>{match.name}</Button>)}
-                  <Button size="sm" variant="ghost" aria-pressed={choseNew} onClick={() => setChoseNew(true)}>새 AV 컬렉션으로 만들기</Button></span>
-              </div>
-              : <p>이 품번과 맞는 AV 컬렉션이 없어요. <button type="button" onClick={() => setShowPicker(value => !value)}>기존 컬렉션에 연결…</button></p>
-            : <p>적용할 컬렉션 <b>{candidate.current?.name}</b><span> · AV{candidate.current?.fields.release_date && <> · <span className="numeric">{candidate.current.fields.release_date.slice(0, 4)}</span></>}</span> <button type="button" onClick={() => setShowPicker(value => !value)}>다른 컬렉션 선택</button></p>)}
-          {showPicker && <Select label="연결할 AV 컬렉션" value={targetId ?? ""} onChange={event => void chooseTarget(event.target.value)}>
-            {isNew && <option value="">새 AV 컬렉션으로 만들기</option>}
-            {collections.map(collection => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-          </Select>}
-        </div>
-        {candidate && <div className="av-link-chooser__source"><span>출처 <b>LibreDMM</b> · <span className="numeric">{clockTime(candidate.inbox.fetchedAt || candidate.inbox.receivedAt)}</span> 조회</span>{candidate.inbox.sourceUrl && <Button size="sm" variant="ghost" onClick={() => void openUrl(candidate.inbox.sourceUrl!)}>원본 페이지 열기<ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}</div>}
-        <Button size="icon" variant="ghost" aria-label="후보 창 닫기" disabled={busy} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+  const people = useMemo(() => candidate ? (isNew ? candidate.performers.map(person => ({ ...person, alreadyLinked: false })) : candidate.performers) : [], [candidate, isNew]);
+  const infoModel: AvInfoModel | null = candidate && !needsPick ? {
+    isNew: !current,
+    fields: INFO_KEYS.map(key => ({ key, candidate: candidate.fields[key] ?? null, current: current?.fields[key] ?? null, checked: fieldChecks[key] })),
+    people: people.map(person => {
+      const names = personNames(person);
+      const draft = performers[person.name_ja] ?? defaultPersonDraft(person);
+      return { id: person.name_ja, nameJa: person.name_ja, primary: names.primary, secondary: names.secondary, linked: person.alreadyLinked, newPerson: draft.action === "new", selected: Boolean(selected[person.name_ja]) };
+    }),
+    genres: displayAvGenres(candidate.fields.genres).map(genre => ({ original: genre.original, name: genre.name, selected: genres.has(genre.original) })),
+    currentGenres: displayAvGenres(current?.fields.genres).map(genre => genre.name),
+    hiddenGenres: hiddenAvGenreCount(candidate.fields.genres),
+  } : null;
+  const infoCount = infoModel ? infoModel.fields.filter(field => field.checked).length + infoModel.people.filter(person => !person.linked && person.selected).length + (genres.size ? 1 : 0) : 0;
+  const summary = needsPick ? "넣을 곳을 고르세요" : `표지 ${coverCount}면 · 정보 ${infoCount}개`;
+  const primaryDisabled = busy || reloading || !candidate || needsPick || (isNew && !newName.trim()) || mismatch;
+
+  const rows: DestinationRow[] = candidate ? destinationRows(candidate, collections, destination, mismatch) : [];
+  const otherMatches = useMemo(() => {
+    const needle = otherQuery.trim().toLowerCase();
+    return collections.filter(collection => !needle || collection.name.toLowerCase().includes(needle)).slice(0, 50)
+      .map(collection => ({ id: collection.id, primary: collection.name, secondary: null, thumbUrl: collection.selectedWorkArtworkId ? workArtworkThumbnailUrl(collection.selectedWorkArtworkId) : null }));
+  }, [collections, otherQuery]);
+
+  const front = candidate ? surfaceBounds("front", split, candidate.jacketWidth, candidate.defaultSplit.isWrap) : null;
+  return <Dialog open title={`AV 후보 ${code}`.trim()} variant="workspace" onClose={() => { if (!busy) onClose(); }}>
+    <div className="av-review">
+      <header className="av-review__head">
+        {candidate && <>
+          <span className="av-review__code">{code}</span>
+          <span className="av-review__source">LibreDMM · <span className="numeric">{clockTime(candidate.inbox.fetchedAt || candidate.inbox.receivedAt)}</span></span>
+          {candidate.inbox.sourceUrl && <Button size="icon" variant="quiet" aria-label="LibreDMM 원본 페이지 열기" onClick={() => void openUrl(candidate.inbox.sourceUrl!)}><ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}
+        </>}
       </header>
-      <BusyLabel busy={!!(loading)}><p className="av-link-chooser__loading" role="status">후보를 불러오는 중…</p></BusyLabel>
-      {!loading && candidate && <div className="av-link-chooser__body">
-        <section className="av-link-chooser__cover" aria-labelledby="av-link-cover-title">
-          <SectionHeading id="av-link-cover-title" title="표지" note="펼친 재킷 · 선을 끌어 뒤 | 옆 | 앞 나누기" />
-          <div ref={jacketRef} className="av-link-jacket" style={{ aspectRatio: `${candidate.jacketWidth} / ${candidate.jacketHeight}` }}>
-            {!privacyMode && <img src={candidate.jacketUrl} alt="펼친 재킷 후보" draggable={false} />}
-            {privacyMode && <span className="av-link-jacket__privacy">비공개 모드</span>}
-            <SplitZone label="뒤" left={0} width={split.x1} total={candidate.jacketWidth} pixels={split.x1} />
-            <SplitZone label="옆" left={split.x1} width={split.x2 - split.x1} total={candidate.jacketWidth} />
-            <SplitZone label="앞" left={split.x2} width={candidate.jacketWidth - split.x2} total={candidate.jacketWidth} pixels={candidate.jacketWidth - split.x2} />
-            {candidate.defaultSplit.isWrap && <>
-              <button type="button" role="slider" className="av-link-split" style={{ left: `${(split.x1 / candidate.jacketWidth) * 100}%` }}
-                aria-label="뒤와 옆 사이 선" aria-valuemin={1} aria-valuemax={split.x2 - 1} aria-valuenow={split.x1}
-                onPointerDown={event => beginDrag("x1", event)} onKeyDown={event => lineKeyDown("x1", event)} />
-              <button type="button" role="slider" className="av-link-split" style={{ left: `${(split.x2 / candidate.jacketWidth) * 100}%` }}
-                aria-label="옆과 앞 사이 선" aria-valuemin={split.x1 + 1} aria-valuemax={candidate.jacketWidth - 1} aria-valuenow={split.x2}
-                onPointerDown={event => beginDrag("x2", event)} onKeyDown={event => lineKeyDown("x2", event)} />
-            </>}
-          </div>
-          <div className="av-link-jacket__meta">
-            <span>원본 <b className="numeric">{candidate.jacketWidth} × {candidate.jacketHeight}</b></span>
-            <span>책등 <b className="numeric">{split.x2 - split.x1}px · {spinePercent.toFixed(1)}%</b></span>
-            {spineWarning && <span className="av-link-jacket__warning"><ExclamationTriangleIcon aria-hidden="true" />책등이 너무 넓거나 좁아요 — 선을 확인하세요</span>}
-            {candidate.defaultSplit.isWrap && <Button size="sm" variant="ghost" onClick={() => setSplit(clampSplit(candidate.defaultSplit.x1, candidate.defaultSplit.x2, candidate.jacketWidth))}><ArrowUturnLeftIcon aria-hidden="true" />자동 추정으로</Button>}
-          </div>
-          <div className="av-link-surfaces">{SURFACES.map(({ key, label }) => {
-            const bounds = cropBounds(key, split, candidate.jacketWidth);
-            const currentId = candidate.current?.covers[`${key}Id`] ?? null;
-            const borrowed = key === "spine" && borrowedSpine;
-            return <section key={key} className="av-link-surface" aria-label={label}>
-              <h4>{label}{borrowed ? <small>책등은 DVD 표지에서 가져옴</small> : <small className="numeric">{bounds.width} × {candidate.jacketHeight}</small>}</h4>
-              <div className="av-link-surface__pair">
-                <ArtworkBox label="지금" url={currentId ? workArtworkThumbnailUrl(currentId) : null} privacy={privacyMode} />
-                <ChevronRightIcon aria-hidden="true" />
-                <CropBox candidate={candidate} x={bounds.x} width={bounds.width} privacy={privacyMode} choice={surfaces[key]} borrowed={borrowed} />
-              </div>
-              <div className="av-link-segment" role="group" aria-label={`${label} 선택`}>{([
-                ["candidate", "후보 사용"], ["keep", "유지"], ["clear", "비우기"],
-              ] as const).map(([value, text]) => <button key={value} type="button" aria-pressed={surfaces[key] === value}
-                disabled={(value === "keep" && !currentId) || (value === "candidate" && bounds.width < 1)} onClick={() => setSurfaces(current => ({ ...current, [key]: value }))}>{text}</button>)}</div>
-            </section>;
-          })}</div>
-        </section>
-        <section className="av-link-chooser__info" aria-labelledby="av-link-info-title">
-          <SectionHeading id="av-link-info-title" title="정보" note={`체크한 항목만 ${isNew ? "들어갑니다" : "바뀝니다"}`} />
-          {isNew && <div className="av-link-new-name"><TextField label="새 컬렉션 이름" maxLength={4000} value={newName} onChange={event => setNewName(event.target.value)} />
-            <Button onClick={() => setNewName(candidate.fields.title_ja?.trim() || candidate.inbox.normalizedCode || candidate.inbox.productCode)}>원제로 채우기</Button></div>}
-          <MetadataDiff candidate={candidate} isNew={isNew} checks={fieldChecks} onCheck={(key, value) => setFieldChecks(current => ({ ...current, [key]: value }))}
-            peopleChecks={peopleChecks} onPeopleCheck={(key, value) => setPeopleChecks(current => ({ ...current, [key]: value }))}
-            performers={performers} directors={directors} onPerformers={setPerformers} onDirectors={setDirectors} genres={genres} onGenres={setGenres} peopleApi={peopleApi} />
-        </section>
+      {candidate ? <div className="av-review__body" inert={reloading || undefined}>
+        <div className="av-review__stage">
+          <AvCoverStage
+            code={code} jacketUrl={candidate.jacketUrl} jacketWidth={candidate.jacketWidth} jacketHeight={candidate.jacketHeight}
+            privacy={privacyMode} isWrap={candidate.defaultSplit.isWrap} auto={candidate.defaultSplit} split={split} onSplit={setSplit}
+            choices={resolved} currentImages={currentImages} hasCurrent={hasCurrent} spineSource={candidate.spineSource} disabled={locked}
+            control={props => <SurfaceMenu {...props} disabled={locked} onChoose={(surface, value) => setSurfaces(choices => ({ ...choices, [surface]: value }))} />}
+          />
+        </div>
+        <div className="av-review__side">
+          <AvDestination
+            rows={rows} value={destination} onChange={chooseDestination} newName={newName} onNewName={setNewName} privacy={privacyMode} disabled={locked}
+            otherOpen={otherOpen} onOther={() => setOtherOpen(value => !value)}
+            otherPanel={<OtherPanel open={otherOpen} onClose={() => setOtherOpen(false)}>
+              <AvPickList label="다른 컬렉션" query={otherQuery} onQuery={setOtherQuery} items={otherMatches} privacy={privacyMode} onPick={id => { setOtherOpen(false); chooseDestination(id); }} />
+            </OtherPanel>}
+          />
+          {infoModel && <AvInfoSection
+            model={infoModel} open={details} onToggle={() => setDetails(value => !value)} disabled={locked}
+            onField={(key, checked) => setFieldChecks(checks => ({ ...checks, [key]: checked }))}
+            onPerson={(id, value) => setSelected(state => ({ ...state, [id]: value }))}
+            onGenre={original => setGenres(state => { const next = new Set(state); if (next.has(original)) next.delete(original); else next.add(original); return next; })}
+            personControls={person => {
+              const source = people.find(item => item.name_ja === person.id)!;
+              const draft = performers[person.id] ?? defaultPersonDraft(source);
+              return {
+                name: draft.action === "new"
+                  ? <TextInput aria-label={`${person.nameJa} 한국어 이름`} maxLength={120} value={draft.displayName} disabled={locked} onChange={event => setPerformers(state => ({ ...state, [person.id]: { ...draft, displayName: event.target.value } }))} />
+                  : <span>{draft.nameSource ? performerName(draft.nameSource).primary : person.primary}</span>,
+                link: <PersonLink person={source} draft={draft} peopleApi={peopleApi} disabled={locked} onChange={value => setPerformers(state => ({ ...state, [person.id]: value }))} />,
+              };
+            }}
+          />}
+        </div>
+      </div> : <div className="av-review__body">
+        {loadError
+          ? <div className="av-review__stage"><div className="av-review__error"><span>{loadError}</span><Button size="sm" onClick={() => void load()}>다시 시도</Button></div></div>
+          : <><div className="av-review__stage"><Skeleton className="av-review__skeleton-stage" label="후보를 불러오는 중" /></div>
+            <div className="av-review__side"><Skeleton className="av-review__skeleton-line" label={null} /><Skeleton className="av-review__skeleton-line" label={null} /><Skeleton className="av-review__skeleton-line" label={null} /></div></>}
       </div>}
-      {error && <p className="av-link-chooser__error" role="alert">{error}</p>}
-      <footer className="av-link-chooser__footer">
-        <Button variant="ghost" className="av-link-chooser__reject" disabled={busy || !candidate} onClick={() => void dismiss()}>거절</Button>
-        <span className="av-link-chooser__footer-spacer" />
-        {candidate && <span className="av-link-chooser__summary">표지 <b className="numeric">{coverChanges}</b>면 · 정보 <b className="numeric">{infoChanges}</b>개 바뀜</span>}
+      {candidate && loadError && <p className="av-review__error" role="alert"><span>{loadError}</span><Button size="sm" onClick={() => void load(destination ?? undefined, live.current)}>다시 시도</Button></p>}
+      {applyError && <p className="av-review__error" role="alert"><span>{applyError}</span>{!busy && candidate && <Button size="sm" onClick={() => void apply()}>다시 시도</Button>}</p>}
+      <footer className="av-review__foot">
+        <Button variant="danger" disabled={busy || !candidate} onClick={() => setRejecting(true)}>거절</Button>
+        <span className="av-review__spacer" />
+        {stale && <span className="av-review__summary" role="status">다른 곳에서 바뀌어 다시 읽었어요</span>}
+        {candidate && <span className="av-review__summary">{summary}</span>}
         <Button disabled={busy} onClick={onClose}>나중에</Button>
-        <Button variant="primary" disabled={busy || loading || !candidate || needsPick || (isNew && !newName.trim())} onClick={() => void apply()}>{isNew ? "새 컬렉션 만들기" : "적용"}</Button>
+        <Button variant="primary" disabled={primaryDisabled} onClick={() => void apply()}><BusyLabel busy={busy} idle={isNew ? "만들기" : "적용"} delay={400}>{isNew ? "만드는 중" : "적용하는 중"}</BusyLabel></Button>
       </footer>
     </div>
+    {rejecting && candidate && <Dialog open title="후보를 거절할까요?" onClose={() => setRejecting(false)}
+      heading={<span className="av-reject__title"><span className="av-reject__thumb" aria-hidden="true">{!privacyMode && front && <Crop src={candidate.jacketUrl} sourceWidth={candidate.jacketWidth} x={front.x} width={front.width} height={candidate.jacketHeight} />}</span>후보를 거절할까요?</span>}>
+      <p className="av-reject__note">가져온 후보만 지워져요. 같은 품번을 다시 보내면 다시 찾아요.</p>
+      <div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setRejecting(false)}>취소</Button><Button variant="danger" onClick={() => void dismiss()}>거절</Button></div>
+    </Dialog>}
   </Dialog>;
 }
 
-function SectionHeading({ id, title, note }: { id: string; title: string; note: string }) {
-  return <div className="av-link-section-heading"><h3 id={id}>{title}</h3><span>{note}</span></div>;
+/** A panel opened in place; Esc closes it before the dialog. */
+function OtherPanel({ open, onClose, children }: { open: boolean; onClose(): void; children: ReactNode }) {
+  useBackHandler(() => { onClose(); }, 110, open);
+  return <div className="av-other" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>{children}</div>;
 }
 
-function SplitZone({ label, left, width, total, pixels }: { label: string; left: number; width: number; total: number; pixels?: number }) {
-  return <span className="av-link-zone" style={{ left: `${(left / total) * 100}%`, width: `${(width / total) * 100}%` }}><b>{label}</b>{pixels !== undefined && <small className="numeric">{pixels}px</small>}</span>;
+function SurfaceMenu({ surface, value, face, ariaLabel, options, disabled, onChoose }: SurfaceControl & { disabled: boolean; onChoose(surface: Surface, value: AvLinkSurfaceChoice): void }) {
+  const surfaceRef = useMotionSurface("menu");
+  return <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Trigger asChild><button type="button" className="av-cap" aria-label={ariaLabel} disabled={disabled}>{face}</button></DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content ref={surfaceRef} className={`ui-menu av-cap-menu${surface === "spine" ? " av-cap-menu--spine" : ""}`} aria-label={ariaLabel.split(":")[0]} align="center" sideOffset={4} collisionPadding={12}>
+        <DropdownMenu.RadioGroup value={value} onValueChange={next => onChoose(surface, next as AvLinkSurfaceChoice)}>
+          {options.map(option => <DropdownMenu.RadioItem key={option.value} value={option.value} className="av-cap-menu__item"><AvSurfaceOptionFace option={option} /></DropdownMenu.RadioItem>)}
+        </DropdownMenu.RadioGroup>
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>;
 }
 
-function ArtworkBox({ label, url, privacy }: { label: string; url: string | null; privacy: boolean }) {
-  return <div className="av-link-art-box"><div>{url && !privacy ? <img src={url} alt="현재 표지" /> : <span>{privacy ? "비공개" : "없음"}</span>}</div><small>{label}</small></div>;
-}
-
-/** useSpine on a jacket whose lines enclose nothing: the spine exists, but in another image. */
-function spineIsBorrowed(split: AvLinkCandidate["defaultSplit"]) {
-  return split.isWrap && split.useSpine && split.x1 === split.x2;
-}
-
-function CropBox({ candidate, x, width, privacy, choice, borrowed = false }: { candidate: AvLinkCandidate; x: number; width: number; privacy: boolean; choice: AvLinkSurfaceChoice; borrowed?: boolean }) {
-  if (borrowed) return <div className="av-link-art-box"><div className="av-link-crop"><span>{choice === "candidate" ? "DVD 표지에서" : choice === "keep" ? "지금 것 유지" : "비움"}</span></div><small>후보</small></div>;
-  if (width < 1) return <div className="av-link-art-box"><div className="av-link-crop"><span>후보 없음</span></div><small>후보</small></div>;
-  const style = { "--crop-image-width": `${(candidate.jacketWidth / width) * 100}%`, "--crop-image-left": `${(-x / width) * 100}%`, aspectRatio: `${width} / ${candidate.jacketHeight}` } as CSSProperties;
-  return <div className="av-link-art-box"><div className="av-link-crop" style={style}>{!privacy && <img src={candidate.jacketUrl} alt="후보 표지 자르기" draggable={false} />}
-    {choice !== "candidate" && <span>{choice === "keep" ? "지금 것 유지" : "비움"}</span>}</div><small>후보</small></div>;
-}
-
-function MetadataDiff({ candidate, isNew, checks, onCheck, peopleChecks, onPeopleCheck, performers, directors, onPerformers, onDirectors, genres, onGenres, peopleApi }: {
-  candidate: AvLinkCandidate;
-  isNew: boolean;
-  checks: Record<FieldKey, boolean>;
-  onCheck(key: FieldKey, value: boolean): void;
-  peopleChecks: { performers: boolean; directors: boolean; genres: boolean };
-  onPeopleCheck(key: "performers" | "directors" | "genres", value: boolean): void;
-  performers: Record<string, PersonDraft>;
-  directors: Record<string, PersonDraft>;
-  onPerformers(value: Record<string, PersonDraft>): void;
-  onDirectors(value: Record<string, PersonDraft>): void;
-  genres: Set<string>;
-  onGenres(value: Set<string>): void;
-  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
+/** The one quiet link button of a person who is not yet credited: new person, or an existing one. */
+function PersonLink({ person, draft, peopleApi, disabled, onChange }: {
+  person: AvLinkPersonMatch; draft: PersonDraft; peopleApi: PeopleApi; disabled: boolean; onChange(value: PersonDraft): void;
 }) {
-  return <div className={`av-link-diff${isNew ? " is-new" : ""}`} role="table" aria-label="후보 정보 비교">
-    <div className="av-link-diff__head" role="row"><span /><b role="columnheader">항목</b>{!isNew && <b className="av-link-diff__current" role="columnheader">지금</b>}<b role="columnheader">LibreDMM</b></div>
-    {FIELD_ROWS.map(({ key, label }) => {
-      const current = candidate.current?.fields[key] ?? null;
-      const next = candidate.fields[key] ?? null;
-      const same = !isNew && hasValue(current) && valuesEqual(current, next);
-      const different = !isNew && hasValue(current) && hasValue(next) && !same;
-      const disabled = !hasValue(next) || same;
-      return <div className={`av-link-diff__row${checks[key] ? "" : " is-off"}`} role="row" key={key}>
-        <input type="checkbox" aria-label={`${label} 적용`} checked={checks[key]} disabled={disabled} onChange={event => onCheck(key, event.target.checked)} />
-        <b role="cell">{label}</b>{!isNew && <span className="av-link-diff__current" role="cell">{fieldDisplay(key, current)}</span>}
-        <span role="cell" className="av-link-diff__candidate">{fieldDisplay(key, next)}{same && <em>같음</em>}{different && <em className="is-different">다름</em>}</span>
-      </div>;
-    })}
-    <PeopleRow role="performer" label="출연" checked={peopleChecks.performers} isNew={isNew} current={currentPeople(candidate, "performer")}
-      people={candidate.performers} drafts={performers} onCheck={value => onPeopleCheck("performers", value)} onDrafts={onPerformers} peopleApi={peopleApi} />
-    <PeopleRow role="director" label="감독" checked={peopleChecks.directors} isNew={isNew} current={currentPeople(candidate, "director")}
-      people={candidate.directors} drafts={directors} onCheck={value => onPeopleCheck("directors", value)} onDrafts={onDirectors} peopleApi={peopleApi} />
-    <div className={`av-link-diff__row av-link-diff__row--rich${peopleChecks.genres ? "" : " is-off"}`} role="row">
-      <input type="checkbox" aria-label="장르 적용" checked={peopleChecks.genres} disabled={!candidate.fields.genres?.length} onChange={event => onPeopleCheck("genres", event.target.checked)} />
-      <b role="cell">장르</b>{!isNew && <span className="av-link-diff__current" role="cell">{candidate.current?.fields.genres?.join(" · ") || "—"}</span>}
-      <span role="cell" className="av-link-genres">{candidate.fields.genres?.length ? candidate.fields.genres.map(genre => <button key={genre} type="button" aria-pressed={genres.has(genre)} onClick={() => {
-        const next = new Set(genres); if (next.has(genre)) next.delete(genre); else next.add(genre); onGenres(next);
-      }}>{genre}</button>) : "후보 없음"}</span>
-    </div>
-  </div>;
-}
-
-function PeopleRow({ role, label, checked, isNew, current, people, drafts, onCheck, onDrafts, peopleApi }: {
-  role: "performer" | "director";
-  label: string;
-  checked: boolean;
-  isNew: boolean;
-  current: string;
-  people: AvLinkPersonMatch[];
-  drafts: Record<string, PersonDraft>;
-  onCheck(value: boolean): void;
-  onDrafts(value: Record<string, PersonDraft>): void;
-  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
-}) {
-  return <div className={`av-link-diff__row av-link-diff__row--rich${checked ? "" : " is-off"}`} role="row">
-    <input type="checkbox" aria-label={`${label} 적용`} checked={checked} disabled={!people.some(person => !person.alreadyLinked)} onChange={event => onCheck(event.target.checked)} />
-    <b role="cell">{label}</b>{!isNew && <span className="av-link-diff__current" role="cell">{current}</span>}
-    <span role="cell" className="av-link-people">{people.length === 0 ? "후보 없음" : people.map(person => {
-      const draft = drafts[person.name_ja] ?? defaultPersonDraft(person);
-      const name = personLabel(person);
-      return <span className="av-link-person" key={person.name_ja}><span className="av-link-person__name"><b>{name}</b>{personNames(person).secondary && <small lang="ja">{personNames(person).secondary}</small>}{person.alreadyLinked && <small>이미 연결됨</small>}</span>
-        {!person.alreadyLinked && <PersonChoiceControl role={role} person={person} draft={draft} peopleApi={peopleApi}
-          onChange={value => onDrafts({ ...drafts, [person.name_ja]: value })} />}
-      </span>;
-    })}</span>
-  </div>;
-}
-
-function PersonChoiceControl({ role, person, draft, peopleApi, onChange }: {
-  role: "performer" | "director";
-  person: AvLinkPersonMatch;
-  draft: PersonDraft;
-  peopleApi: Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
-  onChange(value: PersonDraft): void;
-}) {
-  const name = personLabel(person);
-  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AvPerson[]>([]);
+  useBackHandler(() => { setOpen(false); }, 110, open);
   useEffect(() => {
-    if (!searching || !query.trim()) { setResults([]); return; }
+    if (!open || !query.trim()) { setResults([]); return; }
     let live = true;
     const timer = window.setTimeout(() => {
       void peopleApi.searchPeople(query.trim()).then(async value => {
-        const eligible = await Promise.all(value.map(async person => {
-          return await hasPersonCredit(peopleApi, person.id, role) ? person : null;
-        }));
-        if (live) setResults(eligible.filter((person): person is AvPerson => person !== null));
+        const eligible = await Promise.all(value.map(async found => await hasPerformerCredit(peopleApi, found.id) ? found : null));
+        if (live) setResults(eligible.filter((found): found is AvPerson => found !== null));
       }).catch(() => { if (live) setResults([]); });
     }, 180);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [peopleApi, query, searching, role]);
+  }, [peopleApi, query, open]);
+  const name = personNames(person).primary;
   return <>
-    <select aria-label={`${name} 연결 방식`} value={searching ? "search" : draft.action === "link" ? `link:${draft.personId}` : draft.action} onChange={event => {
-      const value = event.target.value;
-      if (value === "search") { setSearching(true); setQuery(person.name_ko || person.name_ja); return; }
-      setSearching(false);
-      onChange(value.startsWith("link:") ? { ...draft, action: "link", personId: value.slice(5) } : { ...draft, action: "new", personId: undefined });
-    }}>
-      {person.personId && <option value={`link:${person.personId}`}>{name}</option>}
-      {draft.action === "link" && draft.personId && draft.personId !== person.personId && <option value={`link:${draft.personId}`}>{performerName(draft.nameSource ?? draft).primary}</option>}
-      <option value="new">새 인물로 추가</option>
-      <option value="search">기존 인물에 연결…</option>
-    </select>
-    {searching && <span className="av-link-person__search"><input autoFocus aria-label={`${name} 기존 인물 검색`} maxLength={120} value={query} onChange={event => setQuery(event.target.value)} />
-      {results.length > 0 && <span role="listbox" aria-label={`${name} 기존 인물 검색 결과`}>{results.map(result => <button type="button" role="option" key={result.id} onClick={() => {
-        onChange({ action: "link", personId: result.id, displayName: result.displayName, nameSource: result }); setSearching(false);
-      }}>{performerName(result).primary}{performerName(result).secondary && <small lang="ja">{performerName(result).secondary}</small>}</button>)}</span>}</span>}
-    {!searching && draft.action === "new" && <input aria-label={`${name} 표시 이름`} maxLength={120} value={draft.displayName} onChange={event => onChange({ ...draft, displayName: event.target.value })} />}
+    <Button size="sm" variant="quiet" aria-expanded={open} aria-label={`${name} 연결`} disabled={disabled} onClick={() => { setOpen(value => !value); setQuery(person.name_ko || person.name_ja); }}>
+      {draft.action === "link" ? "기존 인물" : "새 인물"}<ChevronDownIcon aria-hidden="true" />
+    </Button>
+    {open && <div className="av-person__panel" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); } }}>
+      <AvPickList label={`${name} 기존 인물`} query={query} onQuery={setQuery}
+        items={results.map(result => ({ id: result.id, primary: performerName(result).primary, secondary: performerName(result).secondary }))}
+        onPick={id => {
+          const found = results.find(result => result.id === id);
+          if (found) onChange({ action: "link", personId: found.id, displayName: found.displayName, nameSource: found });
+          setOpen(false);
+        }}
+        footer={<Button size="sm" variant="quiet" onClick={() => { onChange({ action: "new", displayName: person.name_ko || person.name_ja }); setOpen(false); }}>새 인물로</Button>} />
+    </div>}
   </>;
 }
 
-function clampSplit(x1: number, x2: number, width: number) {
-  if (width < 3) return { x1: 0, x2: width };
-  const first = Math.max(1, Math.min(width - 2, Math.round(x1)));
-  return { x1: first, x2: Math.max(first + 1, Math.min(width - 1, Math.round(x2))) };
+function destinationRows(candidate: AvLinkCandidate, collections: CollectionSummary[], destination: string | null, mismatch: boolean): DestinationRow[] {
+  const known = new Map<string, string>();
+  for (const match of candidate.matches ?? []) known.set(match.collectionId, match.name);
+  if (candidate.current) known.set(candidate.current.collectionId, candidate.current.name);
+  return [...known].map(([id, name]) => {
+    const summary = collections.find(collection => collection.id === id);
+    const isCurrent = candidate.current?.collectionId === id;
+    const covers = isCurrent ? [candidate.current!.covers.frontId, candidate.current!.covers.spineId, candidate.current!.covers.backId].filter(Boolean).length : null;
+    const year = (isCurrent ? candidate.current!.fields.release_date : summary?.releaseDate)?.slice(0, 4) || (summary?.year != null ? String(summary.year) : "");
+    const artwork = isCurrent ? candidate.current!.covers.frontId ?? summary?.selectedWorkArtworkId : summary?.selectedWorkArtworkId;
+    return {
+      id, name: name || summary?.name || "이름 없는 AV 컬렉션",
+      meta: [year, covers != null ? `표지 ${covers}면` : ""].filter(Boolean).join(" · ") || null,
+      thumbUrl: artwork ? workArtworkThumbnailUrl(artwork) : null,
+      warning: mismatch && destination === id ? "품번이 다른 컬렉션" : null,
+    };
+  });
 }
 
-function cropBounds(surface: Surface, split: { x1: number; x2: number }, width: number) {
-  if (surface === "back") return { x: 0, width: split.x1 };
-  if (surface === "spine") return { x: split.x1, width: split.x2 - split.x1 };
-  return { x: split.x2, width: width - split.x2 };
+function canonicalCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^([A-Z]+)0+(?=\d)/, "$1");
 }
 
 function personDrafts(people: AvLinkPersonMatch[]) {
@@ -447,28 +373,11 @@ function peopleRequest(people: AvLinkPersonMatch[], drafts: Record<string, Perso
 }
 
 function personNames(person: AvLinkPersonMatch) {
-  return performerName({...person, displayName: person.displayName || person.name_ko || person.name_ja, nameJa: person.nameJa || person.name_ja});
-}
-
-function personLabel(person: AvLinkPersonMatch) {
-  return personNames(person).primary;
-}
-
-function currentPeople(candidate: AvLinkCandidate, role: "performer" | "director") {
-  return candidate.current?.people.filter(person => person.role === role).map(person => [performerName(person).primary, performerName(person).secondary].filter(Boolean).join(" · ")).join(" · ") || "—";
-}
-
-function fieldDisplay(key: FieldKey, value: string | null | undefined) {
-  if (!value) return <span className="av-link-dash">—</span>;
-  return key === "release_date" ? displayDate(value) : value;
+  return performerName({ ...person, displayName: person.displayName || person.name_ko || person.name_ja, nameJa: person.nameJa || person.name_ja });
 }
 
 function hasValue(value: unknown) {
   return Array.isArray(value) ? value.length > 0 : typeof value === "string" ? value.trim().length > 0 : value !== null && value !== undefined;
-}
-
-function valuesEqual(left: unknown, right: unknown) {
-  return Array.isArray(left) && Array.isArray(right) ? left.length === right.length && left.every((value, index) => value === right[index]) : left === right;
 }
 
 function isStale(reason: unknown) {
@@ -487,11 +396,8 @@ function errorMessage(reason: unknown, fallback: string) {
   return typeof reason === "string" && reason.trim() ? reason.trim() : fallback;
 }
 
-async function hasPersonCredit(api: Pick<AvGateway, "getPerformer" | "getDetails">, personId: string, role: "performer" | "director", known?: Awaited<ReturnType<AvGateway["getPerformer"]>>) {
+async function hasPerformerCredit(api: Pick<AvGateway, "getPerformer">, personId: string, known?: Awaited<ReturnType<AvGateway["getPerformer"]>>) {
   const page = known ?? await api.getPerformer(personId);
-  if (page.works.some(work => work.role === role)) return true;
-  if (role === "performer") return false;
-  // Performer pages collapse a dual credit in one work to its performer role.
-  const details = await Promise.all(page.works.map(work => api.getDetails(work.collectionId)));
-  return details.some(work => work.people.some(person => person.id === personId && person.role === role));
+  return page.works.some(work => work.role === "performer");
 }
+

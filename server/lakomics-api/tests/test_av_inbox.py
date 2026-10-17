@@ -295,6 +295,10 @@ class AvInboxTests(unittest.TestCase):
         self.assertEqual((source['address'],source['x1'],source['x2'],source['width'],source['height']),(mono,382,418,800,438))
         self.assertNotEqual(source['sha256'],candidate['jacket']['sha256'])
         self.assertEqual(av.detail(self.get_db,id_)['candidate']['spineSource']['sha256'],source['sha256'])
+        # The PC shows the real strip in its spine menu: the borrowed image is served to a signed-in client.
+        source_image=self.endpoint(av.PREFIX+'/{id_}/spine-source','GET')
+        self.assertEqual(source_image(id_,self.auth).body,png((800,438)))
+        self.code(lambda:source_image(id_,'bad'),'Unauthorized',401)
         fn=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
         def prepare(x1,x2,surfaces=('front','spine','back')):
             return {i['surface']:i for i in asyncio.run(fn(id_,request(dict(x1=x1,x2=x2,surfaces=list(surfaces))),self.auth))['items']}
@@ -328,6 +332,7 @@ class AvInboxTests(unittest.TestCase):
         self.assertTrue(self.worker.process_one())
         candidate=json.loads(self.row(id_)['candidate'])
         self.assertNotIn('spineSource',candidate)
+        self.code(lambda:self.endpoint(av.PREFIX+'/{id_}/spine-source','GET')(id_,self.auth),'avInboxCandidateUnavailable',409)
         self.assertEqual(candidate['defaultSplit'],dict(x1=1092,x2=1092,isWrap=True,useSpine=False))
         fn=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
         self.code(lambda:asyncio.run(fn(id_,request(dict(x1=1092,x2=1092,surfaces=['spine'])),self.auth)),'invalidAvSplit',422)
@@ -360,7 +365,8 @@ class AvInboxTests(unittest.TestCase):
         self.assertEqual(detail['inbox']['attempts'],1)
         self.assertIsNotNone(detail['inbox']['fetchedAt'])
         self.assertEqual(detail['candidate']['performers'][0]['nameKo'],'한국 이름')
-        self.assertEqual(detail['candidate']['directors'][0]['nameJa'],'監督')
+        # Directors are no longer imported: the key stays (empty) for older clients.
+        self.assertEqual(detail['candidate']['directors'],[])
         self.assertEqual(detail['candidate']['jacketUrl'],av.PREFIX+'/'+id_+'/jacket')
         endpoint = self.endpoint(av.PREFIX+'/{id_}/jacket','GET')
         self.assertEqual(endpoint(id_,self.auth).body,png())

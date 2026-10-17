@@ -262,6 +262,7 @@ impl Library {
             jacket_width: candidate.width,
             jacket_height: candidate.height,
             default_split: describe_split(candidate.width, candidate.height, split),
+            spine_source: None,
             inbox: item,
             matches: vec![],
             current,
@@ -352,6 +353,17 @@ impl Library {
         }
         let candidate = stored(&connection, id)?;
         self.read_av_link_jacket(&candidate.path)
+    }
+    /// The DVD cover a borrowed spine is cut from; only the server inbox has one.
+    pub(crate) fn av_link_spine_source(
+        &self,
+        id: &str,
+    ) -> Result<(Vec<u8>, &'static str), AvError> {
+        uuid::Uuid::parse_str(id).map_err(|_| AvError::Invalid)?;
+        if self.av_link_route()? == routed::Route::Server {
+            return self.routed_spine_source(&self.av_inbox_session()?, id);
+        }
+        Err(AvError::Invalid)
     }
     fn read_av_link_jacket(&self, path: &str) -> Result<(Vec<u8>, &'static str), AvError> {
         // Resolve through the same canonical library containment check as WorkArtwork.

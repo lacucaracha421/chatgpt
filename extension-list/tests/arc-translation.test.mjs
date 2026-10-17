@@ -92,7 +92,7 @@ test('single-finger save remains a 500 ms hold, and a second finger during its h
   await f.advance(1); assert.equal(f.mounts.length, 1); assert.equal(f.mounts[0].inputLocked, true);
   assert.equal(f.messages.some(message => message.type === 'translation:settings'), false); f.close();
   const late = await fixture(); late.pointer('pointerdown'); await late.advance(499); late.pointer('pointerdown', 2); await late.advance(1000);
-  assert.equal(late.mounts.length, 0); assert.equal(late.messages.length, 0); late.close();
+  assert.equal(late.mounts.length, 0); assert.equal(late.messages.filter(message => message.type !== 'worker:ping').length, 0); late.close();
 });
 
 test('no arc translation rows or their wiring remain for any input', () => {

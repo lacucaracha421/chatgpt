@@ -378,7 +378,7 @@ export function CollectionBrowser({
   // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
   const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
     onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
-    sizeControl={spineBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
+    sizeControl={spineBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} av={typeFilter === "av"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
     leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
     <CollectionSortSection sort={libraryState.sort} direction={libraryState.direction} onSortChange={next => patchLibraryState(next)}
       grouping={typeFilter === "game" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" ? grouping => patchViewSettings({ grouping }) : undefined} />

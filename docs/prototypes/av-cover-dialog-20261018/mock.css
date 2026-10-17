@@ -1,0 +1,57 @@
+/* Theme for the mockup pages only. The app ships one dark theme (tokens.css). The light values are the planned
+   종이 theme (docs/prototypes/design-foundation-20260928/part4.html), copied from tablet-structure-20261017/page.css.
+   data-theme on <html> overrides the system choice. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f3f1ec; --color-sidebar: #ebe8e1; --color-toolbar: #eeebe5; --color-surface: #ffffff; --color-surface-elevated: #ffffff;
+  --color-surface-raised: #ffffff; --color-surface-hover: #f6f4ef; --color-surface-pressed: #e4e0d7; --color-control: #ffffff;
+  --color-control-hover: #f6f4ef; --color-control-pressed: #e4e0d7; --color-border: #dcd8cf; --color-border-strong: #b9b4a9;
+  --color-filter-selected: #e2ded5; --color-filter-text: #1d1d1b; --color-filter-border: #b9b4a9; --color-text: #1d1d1b;
+  --color-muted: #5f5d57; --color-faint: #8c897f; --color-section-mark: rgba(29, 29, 27, .55);
+  --section-label-rule: linear-gradient(90deg, rgba(29, 29, 27, .25), rgba(29, 29, 27, .04)); --color-selection-echo: rgba(29, 29, 27, .35);
+  --color-accent: #2b2a27; --color-on-accent: #f3f1ec; --color-accent-hover: #3a3935; --color-accent-pressed: #1f1e1c;
+  --color-sidebar-selection: #2b2a27; --color-selected: rgba(29, 29, 27, .08); --color-selection-context: rgba(29, 29, 27, .08);
+  --color-selection-context-hover: rgba(29, 29, 27, .12); --color-selection-context-text: #1d1d1b; --color-sidebar-hover: #e2ded5;
+  --color-danger: #c2413b; --color-success: #2f7d46; --color-focus: #2f6fd6; --color-cover-scrim: rgb(243 241 236 / 86%);
+  --shadow-floating: 0 1px 3px rgba(0, 0, 0, .08), 0 8px 20px rgba(0, 0, 0, .1); --shadow-dialog: 0 3px 10px rgba(0, 0, 0, .1), 0 18px 48px rgba(0, 0, 0, .14);
+  --inset-light: none; --asset-selection-tint: rgb(36 125 137 / 32%);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --color-bg: #f3f1ec; --color-sidebar: #ebe8e1; --color-toolbar: #eeebe5; --color-surface: #ffffff; --color-surface-elevated: #ffffff;
+    --color-surface-raised: #ffffff; --color-surface-hover: #f6f4ef; --color-surface-pressed: #e4e0d7; --color-control: #ffffff;
+    --color-control-hover: #f6f4ef; --color-control-pressed: #e4e0d7; --color-border: #dcd8cf; --color-border-strong: #b9b4a9;
+    --color-filter-selected: #e2ded5; --color-filter-text: #1d1d1b; --color-filter-border: #b9b4a9; --color-text: #1d1d1b;
+    --color-muted: #5f5d57; --color-faint: #8c897f; --color-section-mark: rgba(29, 29, 27, .55);
+    --section-label-rule: linear-gradient(90deg, rgba(29, 29, 27, .25), rgba(29, 29, 27, .04)); --color-selection-echo: rgba(29, 29, 27, .35);
+    --color-accent: #2b2a27; --color-on-accent: #f3f1ec; --color-accent-hover: #3a3935; --color-accent-pressed: #1f1e1c;
+    --color-sidebar-selection: #2b2a27; --color-selected: rgba(29, 29, 27, .08); --color-selection-context: rgba(29, 29, 27, .08);
+    --color-selection-context-hover: rgba(29, 29, 27, .12); --color-selection-context-text: #1d1d1b; --color-sidebar-hover: #e2ded5;
+    --color-danger: #c2413b; --color-success: #2f7d46; --color-focus: #2f6fd6; --color-cover-scrim: rgb(243 241 236 / 86%);
+    --shadow-floating: 0 1px 3px rgba(0, 0, 0, .08), 0 8px 20px rgba(0, 0, 0, .1); --shadow-dialog: 0 3px 10px rgba(0, 0, 0, .1), 0 18px 48px rgba(0, 0, 0, .14);
+    --inset-light: none; --asset-selection-tint: rgb(36 125 137 / 32%);
+  }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+.ph { display: block; background-color: #3a4048; }
+.p1 { background: radial-gradient(circle at 30% 30%, #f2c48d 0 12%, transparent 13%), linear-gradient(160deg, #2c4d6e, #8a5a7a 60%, #d79a7a); }
+.p2 { background: radial-gradient(ellipse at 50% 85%, #2b3a2a 0 35%, transparent 36%), linear-gradient(180deg, #8fb7d4, #cfe0e6 55%, #7f9a72 56%, #4a6545); }
+.p3 { background: radial-gradient(circle at 60% 40%, #f5e6d6 0 18%, transparent 19%), linear-gradient(135deg, #1f1d2e, #5b3f6e 55%, #c06c84); }
+.p4 { background: linear-gradient(200deg, #e8d5b5, #c98f5a 45%, #6b4a3a); }
+.p5 { background: radial-gradient(circle at 70% 25%, #ffe9a8 0 9%, transparent 10%), linear-gradient(180deg, #213a5c, #3f6f8f 50%, #1c2c3c 51%, #10161f); }
+.p6 { background: radial-gradient(circle at 40% 45%, #f0d0c0 0 20%, transparent 21%), linear-gradient(120deg, #5d7e6a, #a9c4a0 60%, #e3ead2); }
+.p7 { background: linear-gradient(160deg, #3a2f45, #7b4f6b 40%, #e0a37b 75%, #f6d7a8); }
+.p8 { background: radial-gradient(ellipse at 50% 100%, #1d2420 0 40%, transparent 41%), linear-gradient(180deg, #c4d6de, #8fa9b8 50%, #55707d); }
+.p9 { background: radial-gradient(circle at 35% 35%, #fbe1e8 0 16%, transparent 17%), linear-gradient(150deg, #f0a6b8, #b57ea8 50%, #5e4a7c); }
+.p10 { background: linear-gradient(180deg, #11131a, #2b3242 45%, #6d7b8f 46%, #a3aeb9); }
+.p11 { background: radial-gradient(circle at 55% 50%, #e9c46a 0 14%, transparent 15%), linear-gradient(135deg, #264653, #2a9d8f 60%, #8ab17d); }
+.p12 { background: linear-gradient(170deg, #ece4d8, #c7b8a3 50%, #8d7b68); }
+
+/* ---------- Mockup frame helpers (not part of the proposal) ---------- */
+/* Dialogs size against the frame, not the page viewport: the frame sets --fw / --fh. */
+.frame .ui-dialog, .frame .ui-dialog__overlay { position: absolute; }
+.frame .ui-dialog--workspace { width: min(82rem, calc(var(--fw) - 48px)); height: min(52rem, calc(var(--fh) - 48px)); max-height: calc(var(--fh) - 48px); }
+.frame .ui-dialog--workspace.av-review-dialog { width: min(80rem, calc(var(--fw) - 48px)); height: min(50rem, calc(var(--fh) - 48px)); }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ui-button svg:not(.i), .av-link-chooser svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

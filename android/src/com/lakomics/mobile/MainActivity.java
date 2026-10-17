@@ -318,7 +318,7 @@ public final class MainActivity extends Activity {
    if("catalogImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
    final boolean catalogCover=cover;
    boolean small=operation.equals("thumbnail")||operation.equals("homeCover")||operation.equals("providerImage");
-   if(operation.equals("collectionArtwork"))try{small="thumbnail".equals(new JSONObject(payload).optString("variant"));}catch(JSONException ignored){}
+   if(operation.equals("collectionArtwork"))try{String variant=new JSONObject(payload).optString("variant");small="thumbnail".equals(variant)||"medium".equals(variant);}catch(JSONException ignored){}
    // Small images use the separate eight-worker thumbnail lane; originals keep four workers.
    final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:small?thumbnailWorkers:mediaWorkers;
    final PerfLog.Op perf=PerfLog.enabled()&&(operation.equals("thumbnail")||operation.equals("media")||catalogCover||operation.equals("collectionArtwork"))?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;

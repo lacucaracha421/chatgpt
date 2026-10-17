@@ -256,7 +256,7 @@ test('new images appear in the open gallery while auto-harvest runs', async () =
   t.$('.lakomics-x-gallery-auto').click();
 });
 
-test('returning to the window refreshes the saved index at most once a minute', async () => {
+test('returning to the window refreshes the saved index at most every ten minutes', async () => {
   const messages = [];
   const t = tab(sharedStorage(), { messages });
   await wait();
@@ -265,7 +265,7 @@ test('returning to the window refreshes the saved index at most once a minute', 
   await wait();
   assert.equal(messages.filter(type => type === 'saved-index:get').length, initial);
   const realNow = t.w.Date.now;
-  t.w.Date.now = () => realNow() + 61_000;
+  t.w.Date.now = () => realNow() + 601_000;
   t.w.dispatchEvent(new t.w.Event('focus'));
   await wait();
   assert.equal(messages.filter(type => type === 'saved-index:get').length, initial + 1);

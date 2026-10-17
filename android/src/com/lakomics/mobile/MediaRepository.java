@@ -291,7 +291,7 @@ final class MediaRepository {
    long permitStarted=System.nanoTime();
    try{while(!(permit=lane.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}}
    finally{if(perf!=null)perf.permit+=System.nanoTime()-permitStarted;}
-   long maximum=variant.equals("thumbnail")?ThumbnailCache.MAX_FILE:MAX_ORIGINAL;
+   long maximum=variant.equals("thumbnail")||variant.equals("medium")?ThumbnailCache.MAX_FILE:MAX_ORIGINAL;
    JSONObject initial=first==null?source.read(false):first;
    long expected=initial.optLong("size_bytes",0);if(expected>maximum)throw new IOException("Original exceeds 512 MiB selection limit");
    long reservation=expected>0?expected:maximum;
@@ -348,7 +348,7 @@ final class MediaRepository {
   return generation+"/"+ThumbnailCache.collectionArtworkKey(account,collection,artwork,"thumbnail",revision,"");
  }
  private JSONObject collectionArtworkVariant(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{
-  Scope scope=scoped(account->ThumbnailCache.collectionArtworkKey(account,collection,artwork,variant,revision,digest));scope.small=variant.equals("thumbnail");scope.kind=ThumbnailCache.Kind.KEEP;
+  Scope scope=scoped(account->ThumbnailCache.collectionArtworkKey(account,collection,artwork,variant,revision,digest));scope.small=variant.equals("thumbnail")||variant.equals("medium");scope.kind=ThumbnailCache.Kind.KEEP;
   PerfLog.Op perf=PerfLog.current.get();
   LockEntry entry=retainLock(scope.key);boolean locked=false;
   try{

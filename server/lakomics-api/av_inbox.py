@@ -556,12 +556,13 @@ class Worker:
                 width=spine['width'], height=spine['height'])
             return manifests[0], width, height, source
         manifest, width, height, spine_source = self.relay.paced('artwork', prepare)
-        mappings = self.names([p['name'] for p in movie['actresses']] + movie['directors'], deadline)
+        # Directors are no longer imported: they are not resolved, and the key stays (empty) for older clients.
+        mappings = self.names([p['name'] for p in movie['actresses']], deadline)
         candidate = dict(metadata=movie, fields=fields, jacket=manifest, jacketWidth=width, jacketHeight=height,
                          defaultSplit=default_split(width, height, spine_source is not None),
                          **({} if spine_source is None else dict(spineSource=spine_source)),
                          performers=[mappings[p['name']] for p in movie['actresses']],
-                         directors=[mappings[n] for n in movie['directors']])
+                         directors=[])
         if len(ca.encode(candidate).encode()) > MAX_JSON:
             raise ValueError('oversized candidate')
         return candidate
@@ -826,6 +827,20 @@ def register(app, get_db, require_client, storage, bucket, *, relay=None):
             if not row['candidate']:
                 wp.fail(409, 'avInboxCandidateUnavailable', '재킷 후보가 없습니다.')
             data, mime = stored_jacket(json.loads(row['candidate']), storage, bucket, deadline)
+            return Response(data, media_type=mime, headers={'Cache-Control': 'private, no-store'})
+        return relay.paced('artwork', preview)
+
+    @app.get(PREFIX + '/{id_}/spine-source')
+    def spine_source(id_: str, authorization: str | None = Header(default=None)):
+        """The image a spine-less jacket borrows its spine from (the PC shows the real strip in its spine menu)."""
+        require_client(authorization)
+        def preview(deadline):
+            with get_db() as db:
+                row = get_row(db, id_)
+            candidate = json.loads(row['candidate']) if row['candidate'] else None
+            if not candidate or not candidate.get('spineSource'):
+                wp.fail(409, 'avInboxCandidateUnavailable', '책등 후보가 없습니다.')
+            data, mime = stored_jacket(candidate, storage, bucket, deadline, 'spineSource')
             return Response(data, media_type=mime, headers={'Cache-Control': 'private, no-store'})
         return relay.paced('artwork', preview)
 

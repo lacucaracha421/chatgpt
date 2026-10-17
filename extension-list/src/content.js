@@ -94,6 +94,18 @@
     });
   }
 
+  // An MV3 worker that was suspended takes a moment to start. A press on a
+  // collectable item may become a hold, so wake the worker now and let the start
+  // overlap the hold delay. Throttled so ordinary pointer traffic stays free.
+  const WORKER_WARM_INTERVAL_MS = 20_000;
+  let workerWarmAt = -Infinity;
+  function warmWorker() {
+    const now = Date.now();
+    if (now - workerWarmAt < WORKER_WARM_INTERVAL_MS) return;
+    workerWarmAt = now;
+    try { chrome.runtime.sendMessage({ type: "worker:ping" }, () => void chrome.runtime?.lastError); } catch {}
+  }
+
   function createInvocationGate() {
     let phase = "idle", pointerId = null;
     return {
@@ -650,6 +662,7 @@
       if (startsOnPlayerControl(event, candidate)) return;
       if (input === "mouse" && startsOnNativeMediaControls(event)) return;
       if (!gate.arm(event.pointerId)) return;
+      warmWorker();
       const origin = point(event);
       active = { id: event.pointerId, input, candidate, origin, latest: origin, href: location.href };
       watcher.watch(departSession);

@@ -1155,6 +1155,46 @@ def shutdown_card_art_medium():
         released()
 
 
+# Medium (768 px) copies of the spine artwork shown on the tablet 책장 (collection_artwork_medium). The operator backfill
+# (collection_artwork_medium_backfill.py) covers the spines that exist; this worker only keeps up with spines published later,
+# so it stays off until the operator switches it on (LAKOMICS_COLLECTION_MEDIUM_WORKER=1).
+import collection_artwork_medium
+import collection_authority
+
+_collection_artwork_medium_worker = None
+
+
+@lifecycle(app).on_startup
+def startup_collection_artwork_medium():
+    global _collection_artwork_medium_worker
+    from r2 import thumbnail_storage_client
+
+    if os.environ.get("LAKOMICS_COLLECTION_MEDIUM_WORKER", "0").strip().lower() not in ("1", "true", "yes", "on"):
+        return
+    if _collection_artwork_medium_worker is None:
+        _collection_artwork_medium_worker = collection_artwork_medium.CollectionArtworkMediumWorker(
+            DB_PATH, thumbnail_storage_client(), R2_BUCKET,
+            wanted=lambda db: collection_artwork_medium.wanted(
+                db, collection_artwork_medium.source_table(collection_authority.served_state(db))),
+            on_change=lambda db: None)
+    _collection_artwork_medium_worker.start()
+
+
+@lifecycle(app).on_shutdown
+def shutdown_collection_artwork_medium():
+    worker = _collection_artwork_medium_worker
+    if worker is None:
+        return
+
+    def released():
+        global _collection_artwork_medium_worker
+        if _collection_artwork_medium_worker is worker:
+            _collection_artwork_medium_worker = None
+
+    if worker.stop(on_stopped=released):
+        released()
+
+
 @lifecycle(app).on_startup
 def startup_library_projection_cache():
     # All component tables now exist. This additive DDL does not backfill data,

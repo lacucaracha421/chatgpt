@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { CasePlatform } from "./case/CollectionCase";
-import { nearestCell, packSpineShelf, SPINE_SHELF, type PackedWork } from "./spineShelfLayout";
+import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, type PackedWork } from "./spineShelfLayout";
 
 const works = (count: number, platform: CasePlatform = "pc", prefix = "w"): PackedWork[] => Array.from({ length: count }, (_, index) => ({ id: `${prefix}${index}`, platform }));
 
@@ -34,4 +34,16 @@ it("finds the nearest case in a row for arrow keys and taps", () => {
   expect(nearestCell(row, 15 * 4 + 7)?.work.id).toBe("w4");
   expect(nearestCell(row, 9999)?.work.id).toBe("w9");
   expect(nearestCell(undefined, 10)).toBeNull();
+});
+
+it("resolves a tap to the spine under it, and to nothing on the bare shelf beyond the first or last spine", () => {
+  const row = packSpineShelf([{ label: "", works: works(10) }], 1000, 1).rows[0];
+  expect(cellAtX(row, 15 * 4 + 7)?.work.id).toBe("w4");
+  expect(cellAtX(row, 0)?.work.id).toBe("w0");
+  const end = row.cells[9].x + row.cells[9].width;
+  expect(cellAtX(row, end)?.work.id).toBe("w9");
+  expect(cellAtX(row, end + 3)).toBeNull();
+  expect(cellAtX(row, 9999)).toBeNull();
+  expect(cellAtX(row, -3)).toBeNull();
+  expect(cellAtX(undefined, 10)).toBeNull();
 });

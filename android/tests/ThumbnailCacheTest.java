@@ -31,6 +31,7 @@ public final class ThumbnailCacheTest {
   check(!key.equals(ThumbnailCache.collectionArtworkKey(account+"b","work","cover","thumbnail",revision,digest)));
   check(!key.equals(ThumbnailCache.collectionArtworkKey(account,"work","spine","thumbnail",revision,digest)));
   check(!key.equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","original",revision,digest)));
+  check(!key.equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","medium",revision,digest)));
   check(!ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",revision,"").equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",next,"")));
   for(String[] fields:new String[][]{{"../work","cover","thumbnail",revision,digest},{"work","../cover","thumbnail",revision,digest},{"work","cover","bad",revision,digest},{"work","cover","thumbnail","bad",digest},{"work","cover","thumbnail",revision,"bad"}}){
    try{ThumbnailCache.collectionArtworkKey(account,fields[0],fields[1],fields[2],fields[3],fields[4]);throw new AssertionError("Invalid artwork accepted");}catch(IllegalArgumentException expected){check(true);}

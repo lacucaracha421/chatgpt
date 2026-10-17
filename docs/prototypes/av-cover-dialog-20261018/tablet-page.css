@@ -1,0 +1,7 @@
+/* Mockup only: one tablet viewport (800 × 1280) inside an iframe of index.html. */
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ui-button svg:not(.i) { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tablet-bg { position: fixed; inset: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 88px 24px; align-content: start; }
+.tablet-bg .ph { height: 132px; }

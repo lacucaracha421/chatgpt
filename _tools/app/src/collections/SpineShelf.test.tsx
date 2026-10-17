@@ -167,6 +167,18 @@ it("on a touch screen a tap anywhere in a row picks the nearest case", () => {
   expect(pressed("작품 3")).toBe("true");
 });
 
+it("on a touch screen a tap on the empty shelf past the last spine is empty space: it picks nothing and puts a pulled-out case back", () => {
+  render(<Shelf works={list(6)} touchTargets />);
+  const row = document.querySelector<HTMLElement>("[data-shelf-row]")!;
+  vi.spyOn(row, "getBoundingClientRect").mockReturnValue({ left: 100, right: 1000, top: 0, bottom: 300, width: 900, height: 300, x: 100, y: 0, toJSON() {} });
+  fireEvent.click(spine("작품 1"));
+  expect(pressed("작품 1")).toBe("true");
+  // The six spines end 95px into the row; 400px in is bare plank.
+  fireEvent.click(row, { clientX: 100 + 400 });
+  expect(pressed("작품 1")).toBe("false");
+  expect(pressed("작품 5")).toBe("false");
+});
+
 it("keeps a spine plastic-only while its artwork is pending, at its final size", () => {
   const { rerender } = render(<Shelf works={[work(0, "sw2", { pending: true }), work(1, "sw2")]} />);
   expect(spine("작품 0").querySelector(".ins")).toBeNull();

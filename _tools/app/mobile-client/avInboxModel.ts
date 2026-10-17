@@ -4,13 +4,14 @@ import {api, native} from './transport';
 import {outboxConnection} from './outboxConnection';
 import {sameAuthority, type AuthorityIdentity, type BlobReceipt} from './collectionCommandOutbox';
 import type {AvCredit, AvDetailFields} from './avEditModel';
+import {candidateAvailable, sameSplit, spineIsBorrowedByDefault} from '../src/collections/avReview/avReviewModel';
 
-export type InboxItem = {id:string;requestId:string;sequence:number;productCode:string;normalizedCode:string|null;receivedAt:string;fetchedAt?:string|null;status:'queued'|'fetching'|'found'|'not_found'|'error'|'dismissed'|'applied';titleJa:string|null;lastError:string|null;appliedWorkId:string|null};
+export type InboxItem = {id:string;requestId:string;sequence:number;productCode:string;normalizedCode:string|null;sourceUrl?:string|null;receivedAt:string;fetchedAt?:string|null;status:'queued'|'fetching'|'found'|'not_found'|'error'|'dismissed'|'applied';titleJa:string|null;lastError:string|null;appliedWorkId:string|null};
 export type Surface = 'front'|'spine'|'back';
 export const SURFACES:Surface[] = ['front','spine','back'];
 export const SURFACE_LABELS:Record<Surface,string> = {front:'앞표지',spine:'책등',back:'뒤표지'};
 export type CandidatePerson = {nameJa:string;nameKo:string|null;wikidataId:string|null;fanzaActressId:string|null};
-export type InboxCandidate = {fields:AvDetailFields; jacketSha256?:string;jacketUrl:string;jacketWidth:number;jacketHeight:number;defaultSplit:{x1:number;x2:number;isWrap:boolean;useSpine:boolean};performers:CandidatePerson[];directors:CandidatePerson[]};
+export type InboxCandidate = {fields:AvDetailFields; jacketSha256?:string;jacketUrl:string;jacketWidth:number;jacketHeight:number;defaultSplit:{x1:number;x2:number;isWrap:boolean;useSpine:boolean};performers:CandidatePerson[];/** Directors are no longer imported; older servers still send them. */directors?:CandidatePerson[];/** The DVD cover a borrowed spine is cut from (`jacketPreview(id, signal, 'spine-source')`). */spineSource?:{width:number;height:number;x1:number;x2:number}|null};
 export type InboxDetail = {inbox:InboxItem;candidate:InboxCandidate|null;matches:{libraryId:string;workId:string;name:string;entityRevision:number}[]};
 export type PreparedArtwork = {surface:Surface;kind:string;provider:string;providerImageId:string;width:number;height:number;language:string|null;original:BlobReceipt;thumbnail:BlobReceipt|null};
 export type InboxWork = {workId:string;type:string;name:string;lifecycle:string;entityRevision:number;selection:Record<string,string|null>;details:{av?:AvDetailFields};avCredits:AvCredit[];avPeople?:InboxPerson[]};
@@ -66,11 +67,18 @@ export async function readInboxAuthority(identity:AuthorityIdentity,signal?:Abor
   rememberPersonNames(result.people, connection);
   return result;
 }
-export async function jacketPreview(id:string,signal:AbortSignal):Promise<string> {
+/** `spine-source`: the DVD cover a borrowed spine is cut from. */
+export async function jacketPreview(id:string,signal:AbortSignal,part:'jacket'|'spine-source'='jacket'):Promise<string> {
   const connection=outboxConnection();if(!connection)throw new Error('서버 연결을 확인해 주세요.');
-  const reply=await native<{url:string}>('providerImage',{path:`${inboxPath(id)}/jacket`,connection},signal);
+  const reply=await native<{url:string}>('providerImage',{path:`${inboxPath(id)}/${part}`,connection},signal);
   return reply.url;
 }
 /** useSpine on a wrap whose lines enclose nothing: the jacket has no spine of its own, the server cuts it from the DVD cover. */
-export const spineBorrowed=(c:InboxCandidate)=>c.defaultSplit.isWrap&&c.defaultSplit.useSpine&&c.defaultSplit.x1===c.defaultSplit.x2;
-export const candidateHasSurface=(c:InboxCandidate,s:Surface)=>s==='front'||c.defaultSplit.isWrap&&(s==='back'?c.defaultSplit.x1>0:c.defaultSplit.useSpine);
+export const spineBorrowed=(c:InboxCandidate)=>spineIsBorrowedByDefault(c.defaultSplit);
+/** The server's own split gives its useSpine rule; lines the user moved give the review's rule (a gap of at least 1%, or a borrowed spine). */
+export const candidateHasSurface=(c:InboxCandidate,s:Surface,split?:{x1:number;x2:number})=>{
+  if(s==='front')return true;
+  if(!c.defaultSplit.isWrap)return false;
+  if(!split||sameSplit(split,c.defaultSplit))return s==='back'?c.defaultSplit.x1>0:c.defaultSplit.useSpine;
+  return candidateAvailable(c.defaultSplit,split,c.jacketWidth,s);
+};

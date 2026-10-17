@@ -1,0 +1,151 @@
+/* PROPOSED CSS for the AV candidate dialog (PC) and sheet (tablet).
+   Would replace the .av-link-chooser* / .av-link-jacket* / .av-link-surface* / .av-link-diff* blocks in
+   src/collections/avLink.css (the inbox row rules there stay). Tablet differences come from the
+   mobile.css size tokens plus the .av-review--sheet block at the end; mobile-client/avInbox.css loses
+   its chooser rules. Foundation only: spacing 4·8·12·16·24·32, the four type roles, token colours. */
+
+/* ---------- Frame ---------- */
+.ui-dialog--workspace.av-review-dialog { width: min(80rem, calc(100vw - var(--space-6))); height: min(50rem, calc(100vh - var(--space-6))); }
+.av-review { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; flex: 1; min-width: 0; min-height: 0; }
+
+.av-review__head { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--color-border); }
+.av-review__code { margin: 0; font-size: var(--type-title); font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.av-review__source { color: var(--color-faint); font-size: var(--type-meta); }
+.av-review__head > .ui-button { margin-left: auto; }
+
+.av-review__body { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 0; }
+/* The stage is one step darker than the dialog so the jacket is the first thing seen (DESIGN §4: lightness before lines). */
+.av-review__stage { display: grid; place-items: center; min-width: 0; min-height: 0; padding: var(--space-6); background: var(--color-bg); overflow: hidden; }
+.av-review__side { display: flex; flex-direction: column; gap: var(--space-6); min-height: 0; padding: var(--space-4) var(--space-6) var(--space-6); overflow: auto; border-left: 1px solid var(--color-border); scrollbar-gutter: stable; }
+
+.av-review__foot { display: flex; align-items: center; gap: var(--space-2); min-height: 64px; padding: 0 var(--space-6); border-top: 1px solid var(--color-border); }
+.av-review__spacer { flex: 1; }
+.av-review__summary { margin-right: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+
+/* ---------- Jacket stage (split editor = hero) ---------- */
+.av-stage { display: grid; justify-items: center; width: 100%; }
+.av-stage__jacket { display: grid; gap: var(--space-2); min-width: 0; }
+.av-split { position: relative; width: 100%; overflow: visible; background: var(--color-surface); user-select: none; -webkit-user-select: none; }
+.av-split > img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.av-split__privacy { position: absolute; inset: 0; background: var(--color-surface); }
+
+/* A surface kept from the current work shows that image inside its zone, so the stage is the result. */
+.av-split__keep { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; overflow: hidden; background: var(--color-surface); }
+.av-split__keep > .av-crop { height: 100%; max-width: 100%; }
+.av-split__keep > .ui-badge { position: absolute; top: var(--space-2); left: var(--space-2); }
+.av-split__off { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--color-bg) 78%, transparent); }
+
+/* Cut lines keep today's white-on-black line (reads on any jacket); the hit area is 12 px on PC, 44 px on the tablet. */
+.av-split__line { position: absolute; z-index: 2; top: -8px; bottom: -8px; width: 12px; margin-left: -6px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.av-split__line::after { content: ""; position: absolute; top: 8px; bottom: 8px; left: 5px; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 85%), 0 0 6px rgb(0 0 0 / 60%); }
+.av-split__line::before { content: ""; position: absolute; top: 0; left: 2px; width: 8px; height: 12px; background: #fff; border: 1px solid rgb(0 0 0 / 85%); box-sizing: border-box; }
+.av-split__line:hover::after, .av-split__line:hover::before, .av-split__line.is-focus::after, .av-split__line.is-focus::before, .av-split__line:focus-visible::after, .av-split__line:focus-visible::before { background: var(--color-accent); }
+.av-split__line:focus-visible, .av-split__line.is-focus { outline: none; }
+.av-split__line.is-focus::after, .av-split__line:focus-visible::after { box-shadow: 0 0 0 1px rgb(0 0 0 / 85%), 0 0 0 3px var(--color-focus); }
+/* Joined line of a jacket without a spine of its own (the spine comes from the DVD cover): a wider cap. */
+.av-split__line.is-joined::before { left: -2px; width: 16px; }
+/* The numbers show only while a line is focused or dragged. */
+.av-split__value { position: absolute; top: 20px; left: 16px; display: inline-flex; align-items: center; height: var(--badge-height); padding: 0 var(--space-2); white-space: nowrap; color: var(--color-text); background: var(--color-surface-elevated); border-radius: var(--radius-mark); box-shadow: var(--shadow-floating); font: 600 var(--type-meta) / 1 var(--font-ui); }
+
+/* Surface labels under their zones: one quiet menu button each (choice = 후보 / 지금 / 없음). */
+.av-caps { position: relative; height: var(--control-height-compact); }
+.av-cap { position: absolute; top: 0; transform: translateX(-50%); display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); white-space: nowrap; color: var(--color-muted); background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1 var(--font-ui); cursor: pointer; }
+.av-cap:hover, .av-cap.is-open { color: var(--color-text); background: var(--color-surface-hover); }
+.av-cap:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+.av-cap.is-off { color: var(--color-faint); }
+.av-cap__state { color: var(--color-text); font-weight: 600; }
+.av-cap__chev { width: 16px; height: 16px; }
+
+/* Opens upward over the jacket (the stage has little room below); in the app it is the shared Menu, portalled and clamped. */
+.av-cap-menu { position: absolute; z-index: 5; bottom: calc(100% + var(--space-1)); transform: translateX(-50%); display: grid; min-width: 240px; padding: var(--space-1); border: 1px solid var(--color-border); background-color: var(--color-surface-elevated); box-shadow: var(--shadow-floating); }
+.av-cap-menu__item { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 64px; padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1.3 var(--font-ui); }
+.av-cap-menu__item:hover { background: var(--color-surface-hover); }
+.av-cap-menu__item.is-current { font-weight: 600; }
+.av-cap-menu__item.is-current::after { content: ""; margin-left: auto; width: 5px; height: 5px; flex: none; background: var(--color-accent); }
+.av-cap-menu__text { display: grid; gap: var(--space-1); }
+.av-cap-menu__text small { color: var(--color-faint); font-size: var(--type-meta); font-weight: 400; }
+.av-menu-thumb { height: var(--thumb-h, 56px); flex: none; }
+.av-menu-thumb--empty { width: 40px; border: 1px dashed var(--color-border-strong); }
+.av-menu-spine { position: relative; display: block; flex: none; overflow: hidden; }
+.av-cap-menu--spine .av-cap-menu__item { min-height: 48px; }
+
+.av-stage__foot { display: flex; align-items: center; justify-content: center; gap: var(--space-3); min-height: var(--control-height-compact); }
+.av-stage__warn { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-danger); font-size: var(--type-meta); }
+.av-stage__warn > svg { width: 16px; height: 16px; }
+.av-stage__size { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+.av-stage__foot > :first-child.av-stage__size { margin-left: auto; }
+
+/* Cropped image helper (same technique as today's CropBox). */
+.av-crop { position: relative; display: block; overflow: hidden; background: var(--color-surface); }
+
+/* ---------- Side: destination ---------- */
+.av-side__section { display: grid; gap: var(--space-2); }
+.av-dest { display: grid; gap: var(--space-1); }
+.av-dest__row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-height-2, 48px); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1.3 var(--font-ui); cursor: pointer; }
+.av-dest__row:hover { background: var(--color-surface-hover); }
+.av-dest__row:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+/* The chosen place: face + weight + the small accent square of a current menu choice (DESIGN §12 Floating surfaces). */
+.av-dest__row.is-current { background: color-mix(in srgb, var(--color-text) 7%, transparent); font-weight: 600; }
+.av-dest__row.is-current::after { content: ""; margin-left: auto; width: 5px; height: 5px; flex: none; background: var(--color-accent); }
+.av-dest__row--other { color: var(--color-muted); }
+.av-dest__thumb { position: relative; display: grid; place-items: center; flex: none; width: 28px; height: 40px; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); color: var(--color-muted); }
+.av-dest__thumb > .av-crop { width: 100%; height: 100%; }
+.av-dest__thumb > .av-crop > img { height: 100% !important; }
+.av-dest__thumb--icon svg { width: 16px; height: 16px; }
+.av-dest__text { display: grid; gap: 2px; min-width: 0; }
+.av-dest__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-dest__text small { color: var(--color-faint); font-size: var(--type-meta); font-weight: 400; }
+.av-dest__name-field { display: flex; align-items: end; gap: var(--space-2); padding: var(--space-1) 0 var(--space-2) 40px; }
+.av-dest__name-field > .ui-field { flex: 1; min-width: 0; }
+.av-dest__name-field .ui-text-input { width: 100%; }
+
+/* ---------- Side: information summary ---------- */
+.av-facts { display: grid; gap: var(--space-2); }
+.av-facts__title { margin: 0 0 var(--space-1); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--type-body); line-height: 1.45; }
+.av-facts__row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; font-size: var(--type-body); line-height: 1.45; }
+.av-facts__label { color: var(--color-faint); font-size: var(--type-meta); }
+.av-facts__value { min-width: 0; overflow-wrap: anywhere; }
+.av-facts__value .ui-badge { vertical-align: 1px; }
+.av-facts__old { color: var(--color-muted); }
+.av-facts__arrow { margin: 0 var(--space-1); color: var(--color-faint); }
+.av-facts__rest { margin: 0; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Side: 자세히 (editable) ---------- */
+.av-fields { display: grid; }
+.av-field { display: grid; grid-template-columns: 24px 48px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); font-size: var(--type-body); line-height: 1.45; cursor: pointer; }
+.av-field > .ui-checkbox { align-self: center; }
+.av-field.is-off .av-field__value > span { color: var(--color-muted); }
+.av-field__label { color: var(--color-faint); font-size: var(--type-meta); }
+.av-field__value { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.av-field__value small { color: var(--color-faint); font-size: var(--type-meta); }
+.av-people { display: grid; }
+.av-person { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; min-height: var(--row-height-2, 48px); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+.av-person__check { display: grid; place-items: center; color: var(--color-faint); }
+.av-person__check svg { width: 16px; height: 16px; }
+.av-person__name { display: grid; gap: 2px; min-width: 0; }
+.av-person__name small { color: var(--color-faint); font-size: var(--type-meta); }
+.av-person__input { width: 100%; }
+.av-person.is-linked .av-person__name > span { color: var(--color-muted); }
+.av-genres { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.av-genre { min-height: var(--control-height-compact); }
+.av-genres__hidden { margin: 0; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Tablet sheet: one column, same pieces ---------- */
+/* The sheet title is the code with the source beside it (BottomSheet heading); 원본 페이지 sits beside ✕. */
+.av-review__sheet-title { display: flex; align-items: baseline; gap: var(--space-3); }
+.av-review__sheet-title .av-review__source { font-weight: 400; }
+.av-review--sheet { display: flex; flex-direction: column; gap: var(--space-6); grid-template-rows: none; }
+.av-review--sheet .av-review__head { min-height: var(--control-height); padding: 0; border-bottom: 0; padding-right: calc(var(--touch-target) + var(--space-2)); }
+.av-review--sheet .av-review__head > .ui-button { margin-left: 0; }
+.av-review--sheet .av-stage { padding: var(--space-6) 0 var(--space-2); background: var(--color-bg); margin-inline: calc(var(--space-6) * -1); width: auto; }
+.av-review--sheet .av-stage__jacket { padding-inline: var(--space-6); width: 100% !important; }
+.av-review--sheet .av-split__line { width: 44px; margin-left: -22px; }
+.av-review--sheet .av-split__line::after { left: 21px; }
+.av-review--sheet .av-split__line::before { left: 16px; width: 12px; height: 16px; }
+.av-review--sheet .av-cap { height: var(--touch-target); }
+.av-review--sheet .av-caps { height: var(--touch-target); }
+.av-review--sheet .av-review__foot { position: sticky; bottom: calc(-1 * var(--space-6)); z-index: 3; margin-inline: calc(var(--space-6) * -1); padding: var(--space-3) var(--space-6); background: var(--color-sidebar); }
+.av-review--sheet .av-dest__thumb { width: 32px; height: 44px; }
+.av-review--sheet .av-dest__name-field { padding-left: 44px; }
+.av-review--sheet .av-facts__row, .av-review--sheet .av-field { grid-template-columns: 56px minmax(0, 1fr); }
+.av-review--sheet .av-field { grid-template-columns: 44px 56px minmax(0, 1fr); }

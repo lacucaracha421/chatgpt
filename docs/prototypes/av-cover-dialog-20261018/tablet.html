@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=800, initial-scale=1">
+<title>AV 표지 창 태블릿</title>
+<!-- One tablet frame (800 × 1280) for index.html; the hash picks the state: #a-before, #a-after, #e-before,
+     #e-after, #b-after. mobile.css imports tokens.css and controls.css, as on the tablet (main.tsx loads it
+     first); library.css holds the bottom-sheet shell, avInbox.css the current chooser. -->
+<link rel="stylesheet" href="app-css/mobile-client/mobile.css">
+<link rel="stylesheet" href="app-css/mobile-client/library.css">
+<link rel="stylesheet" href="app-css/mobile-client/avInbox.css">
+<link rel="stylesheet" href="avcover.css">
+<link rel="stylesheet" href="mock.css">
+<link rel="stylesheet" href="tablet-page.css">
+</head>
+<body>
+<div class="tablet-bg" aria-hidden="true"></div>
+<div id="host"></div>
+<script src="avcover.js"></script>
+<script>
+(() => {
+  const { S, after, tabletBefore, tabletSheet, sheetHeading, sheetActions } = window.AvCover;
+  document.querySelector('.tablet-bg').innerHTML = Array.from({ length: 16 }, (_, i) => `<span class="ph p${(i % 12) + 1}"></span>`).join('');
+  const [key, kind] = (location.hash || '#a-after').slice(1).split('-');
+  const c = S[key] || S.a;
+  const title = c.current ? '후보 확인' : '새 AV 컬렉션으로 만들기';
+  document.getElementById('host').innerHTML = kind === 'before'
+    ? tabletSheet(title, tabletBefore(c))
+    : tabletSheet(c.code, after(c, { tablet: true }), { heading: sheetHeading(c), actions: sheetActions() });
+  const root = document.documentElement;
+  window.addEventListener('message', (e) => { const v = e.data && e.data.avcoverTheme; if (!v) return; if (v === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', v); });
+})();
+</script>
+</body>
+</html>

@@ -23,7 +23,11 @@
   const DISINTEREST_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000;
   const DISINTEREST_MAX_EVENTS = 20;
   const GALLERY_MAX_RETAINED_IMAGES = 1500;
-  const LIBRARY_INDEX_MIN_INTERVAL_MS = 60_000;
+  // Returning to the window refetches up to ~20k saved keys; on a tablet that
+  // resumes often, so it is rare. A save made here updates its markers directly.
+  const LIBRARY_INDEX_MIN_INTERVAL_MS = 10 * 60_000;
+  const SAVED_RESCAN_CHUNK = 24;
+  const SAVED_RESCAN_IDLE_TIMEOUT_MS = 1500;
   const UNDO_MS = 6000;
   const GALLERY_INITIAL_RENDER_ITEMS = 36;
   const GALLERY_RENDER_BATCH_ITEMS = 24;
@@ -638,7 +642,7 @@
     let disinterestEvents = {};
     const renderedCards = new Map();
     const markerQueue = new Set(), photoSignatures = new WeakMap();
-    let markerFlushQueued = false, libraryLoadedAt = 0, undoTimer = null, resetConfirmTimer = null;
+    let markerFlushQueued = false, libraryLoadedAt = 0, savedRescanToken = 0, undoTimer = null, resetConfirmTimer = null;
 
     const ui = createGalleryUi();
     globalThis.LakomicsXGalleryRuntime = { markSaved };
@@ -672,7 +676,7 @@
       [SAVED_STORAGE_KEY]: {
         normalize: (value) => pruneSavedEntries(value),
         current: () => Object.fromEntries(savedMedia),
-        apply: (value) => { replaceMap(savedMedia, value); refreshTimelineSavedMarkers(document); refreshSavedMarkers(); },
+        apply: (value) => { replaceMap(savedMedia, value); scheduleSavedRescan(); },
       },
       [DISMISSED_STORAGE_KEY]: {
         normalize: (value) => pruneSavedEntries(value),
@@ -799,7 +803,7 @@
     updateCounters();
 
     window.addEventListener("popstate", syncRouteState);
-    // Returning to the window refreshes the server's saved index at most once a minute.
+    // Returning to the window refreshes the server's saved index at most every ten minutes.
     window.addEventListener("focus", () => {
       if (document.visibilityState === "hidden" || Date.now() - libraryLoadedAt < LIBRARY_INDEX_MIN_INTERVAL_MS) return;
       void loadLibrarySavedIndex();
@@ -1253,8 +1257,7 @@
           librarySavedKeys.clear();
           for (const key of keys) librarySavedKeys.add(key);
           librarySavedIndexAuthoritative = true;
-          refreshSavedMarkers();
-          refreshTimelineSavedMarkers(document);
+          scheduleSavedRescan();
           return true;
         })
         .catch(() => false)
@@ -1420,6 +1423,32 @@
         ? [root]
         : (root?.querySelectorAll?.(PHOTO_SELECTOR) ?? []);
       for (const image of images) syncTimelineSavedImage(image, onlyMediaUrl);
+    }
+
+    // Re-marks every photo in short idle slices so a large timeline never blocks
+    // the main thread (the tablet froze on resume). A newer request restarts it.
+    function scheduleSavedRescan() {
+      const token = ++savedRescanToken;
+      const idle = globalThis.requestIdleCallback;
+      const later = (work) => typeof idle === "function"
+        ? idle.call(globalThis, work, { timeout: SAVED_RESCAN_IDLE_TIMEOUT_MS })
+        : setTimeout(() => work({ timeRemaining: () => 8 }), 50);
+      later(() => {
+        if (token !== savedRescanToken) return;
+        refreshSavedMarkers();
+        const images = [...document.querySelectorAll(PHOTO_SELECTOR)];
+        let index = 0;
+        const slice = (deadline) => {
+          if (token !== savedRescanToken) return;
+          let handled = 0;
+          while (index < images.length && handled < SAVED_RESCAN_CHUNK && (handled === 0 || deadline?.timeRemaining?.() > 2)) {
+            const image = images[index++]; handled++;
+            if (image.isConnected) syncTimelineSavedImage(image);
+          }
+          if (index < images.length) later(slice);
+        };
+        slice();
+      });
     }
 
     function refreshSavedMarkers() {

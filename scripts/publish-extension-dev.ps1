@@ -1,8 +1,7 @@
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-$extension = Join-Path $repo "extension"
+$extension = Join-Path $repo "extension-list"
 $publishRoot = Join-Path $env:LOCALAPPDATA "Lakomics\ExtensionDev"
-$stage = Join-Path $publishRoot "unpacked"
 $zip = Join-Path $publishRoot "latest.zip"
 $port = 32147
 
@@ -14,18 +13,9 @@ try {
     Pop-Location
 }
 
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-New-Item $stage -ItemType Directory -Force | Out-Null
-Copy-Item (Join-Path $extension "manifest.json") $stage
-Copy-Item (Join-Path $extension "src") $stage -Recurse
-Copy-Item (Join-Path $extension "options") $stage -Recurse
-Copy-Item (Join-Path $extension "icons") $stage -Recurse
-
-Remove-Item $zip -Force -ErrorAction SilentlyContinue
-python (Join-Path $PSScriptRoot "pack-extension-zip.py") $stage $zip
-if ($LASTEXITCODE -ne 0) { throw "Extension ZIP packaging failed." }
+python (Join-Path $PSScriptRoot "build-extension-slim.py") --out $publishRoot
+if ($LASTEXITCODE -ne 0) { throw "Slim extension packaging failed." }
 $manifest = Get-Content (Join-Path $extension "manifest.json") -Raw | ConvertFrom-Json
-$manifest.version_name | Set-Content (Join-Path $publishRoot "version.txt") -Encoding utf8
 
 $tailscaleIp = (& tailscale ip -4 | Select-Object -First 1).Trim()
 if (-not $tailscaleIp) { throw "Tailscale IPv4 address not found." }
@@ -41,5 +31,5 @@ Start-Process -FilePath $python -ArgumentList @(
 ) -WindowStyle Hidden
 
 Start-Sleep -Milliseconds 500
-Write-Host "Published $($manifest.version_name): $zip"
+Write-Host "Published $($manifest.version): $zip"
 Write-Host "Tablet URL: http://${tailscaleIp}:$port/latest.zip"

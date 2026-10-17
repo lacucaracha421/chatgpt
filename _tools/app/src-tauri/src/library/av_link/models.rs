@@ -149,6 +149,18 @@ pub struct CurrentCollection {
     pub covers: AvCoverSet,
     pub people: Vec<AvPersonCredit>,
 }
+/// The image a spine-less jacket borrows its spine from (the server's `spineSource`), and where the
+/// strip is in it. The PC shows it in the spine menu; the server does the cutting on apply.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpineSource {
+    #[serde(default, skip_deserializing)]
+    pub url: String,
+    pub width: u32,
+    pub height: u32,
+    pub x1: u32,
+    pub x2: u32,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
@@ -161,6 +173,7 @@ pub struct Candidate {
     pub jacket_width: u32,
     pub jacket_height: u32,
     pub default_split: DefaultSplit,
+    pub spine_source: Option<SpineSource>,
     pub current: Option<CurrentCollection>,
     pub performers: Vec<PersonMatch>,
     pub directors: Vec<PersonMatch>,

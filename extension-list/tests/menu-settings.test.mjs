@@ -155,6 +155,20 @@ test('older clean local settings pull at most every five minutes and no polling 
   assert.equal(f.timers.size, 0);
 });
 
+test('opening the arc answers from local state while a due settings read is still in flight', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const f = fixture({ remote: { ...empty(), revision: 1, hiddenClassificationIds: ['mingchao'] },
+    menuRequest: async (options, remote) => { await gate; return { ok: true, status: 200, data: copy(remote) }; } });
+  await f.seed();
+  const result = await f.store.getState();
+  assert.equal(result.ok, true);
+  assert.deepEqual(copy(result.state.hiddenClassificationIds), []);
+  release();
+  await f.menu.sync();
+  assert.deepEqual(copy((await f.store.getState()).state.hiddenClassificationIds), ['mingchao']);
+});
+
 test('legacy local settings migrate only when the server has no saved document', async () => {
   const f = fixture();
   await f.seed({ profile: { revision: 1, listOrder: { __root__: ['mingchao'] } } });

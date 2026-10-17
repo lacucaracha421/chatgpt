@@ -68,6 +68,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, String
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import collection_artwork_medium
 import collection_authority
 import conditional
 import collection_bindings
@@ -465,7 +466,8 @@ class Replica(StrictModel):
 
 
 class TicketRequest(StrictModel):
-    variant: Literal["thumbnail", "original"] = "thumbnail"
+    # ``medium`` (768 px WebP, collection_artwork_medium) exists for shelved spines only.
+    variant: Literal["thumbnail", "original", "medium"] = "thumbnail"
 
 
 def artwork_key(digest: str) -> str:
@@ -498,7 +500,7 @@ def stored(item: Collection) -> dict:
     return payload
 
 
-def public_item(item: dict, detail: bool = False, *, include_review=False) -> dict:
+def public_item(item: dict, detail: bool = False, *, include_review=False, medium: dict | None = None) -> dict:
     result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series", "film")}
     if not include_review or result.get("kakaoReview") is None:
         result.pop("kakaoReview", None)
@@ -510,7 +512,19 @@ def public_item(item: dict, detail: bool = False, *, include_review=False) -> di
         result["spineArtworkId"] = spine["id"]
         if visible is not None:
             visible.add(spine["id"])
+    # An AV case prints its stored back cover when it is pulled out of the shelf.
+    backs = [art for art in item["artworks"] if art["kind"] == "back"] if item.get("type") == "av" else []
+    back = next((art for art in backs if art["selected"]), backs[0] if backs else None)
+    if back is not None:
+        result["backArtworkId"] = back["id"]
+        if visible is not None:
+            visible.add(back["id"])
     result["artworkVersions"] = {art["id"]: {variant: (art.get(variant) or {}).get("sha256") for variant in ("thumbnail", "original")} for art in item["artworks"] if visible is None or art["id"] in visible}
+    # Spines with a medium copy name its digest, so a client knows to ask for it (and a new copy changes the list).
+    for art in item["artworks"]:
+        copy = medium and art["kind"] == "spine" and art.get("original") and medium.get(art["original"]["sha256"])
+        if copy and art["id"] in result["artworkVersions"]:
+            result["artworkVersions"][art["id"]]["medium"] = copy
     if detail:
         result["series"] = item.get("series")
         # Replicas published before Film details simply have no film block.
@@ -605,6 +619,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             # explicit publisher activation.
             collection_authority.startup_db(db)
             collection_release_checks.startup_db(db)
+            collection_artwork_medium.install(db)
             # Cover refs carry the published portraits (feature ``portraitImage``).
             home_publications.startup_db(db)
             db.commit()
@@ -895,6 +910,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             total = db.execute(f"SELECT COUNT(*) FROM {source}" + where, parameters).fetchone()[0]
             rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
             payloads = [json.loads(row["payload"]) for row in rows[:limit]]
+            mediums = collection_artwork_medium.digests(db, payloads)
             review_meta = {}
             if active is not None:
                 collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview, av_names=True)
@@ -910,7 +926,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                                                           and item["id"] not in waiting for item in manga)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
-                "items": [public_item(payload, include_review=kakaoReview) for payload in payloads], "nextCursor": next_cursor, **review_meta}
+                "items": [public_item(payload, include_review=kakaoReview, medium=mediums) for payload in payloads], "nextCursor": next_cursor, **review_meta}
 
     @app.get("/v1/collections/status")
     def publication_status(authorization: str | None = Header(default=None)):
@@ -948,13 +964,14 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             revision, _ = state(db, active)
             row = db.execute(f"SELECT payload FROM {read_table(active)} WHERE id=?", (collection_id,)).fetchone()
             payload = None if row is None else finalize(db, active, json.loads(row["payload"]), include_review=kakaoReview)
+            mediums = {} if payload is None else collection_artwork_medium.digests(db, [payload])
             # The work's authority revision: what a client's deleteWork expects (CAS on what it showed).
             entity = None if payload is None or active is None else db.execute(
                 "SELECT entity_revision FROM collection_authority_works WHERE library_id=? AND work_id=?",
                 (active["libraryId"], collection_id)).fetchone()
         if payload is None:
             raise HTTPException(404, "Collection is not published")
-        reply = {"revision": revision, "item": public_item(payload, True, include_review=kakaoReview)}
+        reply = {"revision": revision, "item": public_item(payload, True, include_review=kakaoReview, medium=mediums)}
         if entity is not None:
             reply["entityRevision"] = entity[0]
         return conditional.json_response(reply, if_none_match)
@@ -969,6 +986,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             if row is None:
                 raise HTTPException(404, "Collection is not published")
             art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)
+            if body.variant == "medium":
+                # Only the copy made from this artwork's current original is served; its object was verified when it was made.
+                copy = None if art is None or art["original"] is None else collection_artwork_medium.lookup(db, art["original"]["sha256"])
+                if copy is None:
+                    raise HTTPException(404, "Artwork variant unavailable")
+                return {"url": presign_get(copy["object_key"], 300), "expires_in": 300, "sha256": copy["sha256"],
+                        "content_type": collection_artwork_medium.CONTENT_TYPE, "size_bytes": copy["size_bytes"]}
             if art is None or art[body.variant] is None:
                 raise HTTPException(404, "Artwork variant unavailable")
             blob = ArtworkBlob.model_validate(art[body.variant])

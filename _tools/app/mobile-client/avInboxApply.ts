@@ -3,10 +3,13 @@ import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection'
 import {enqueueInboxCommands, readCommands, releaseInboxCommands, discardInboxCommands, sameAuthority, type Command, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {AV_DETAIL_FIELDS, sameAvValue, validateAvDetails, validateAvCredits, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson} from './avEditModel';
 import {normalizeProductCode} from './avLookup';
+import {displayAvGenres} from '../src/collections/avGenreNames';
 import {candidateHasSurface, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
 
 export type PersonChoice={nameJa:string;role:'performer'|'director';action:'new'|'link'|'skip';displayName:string;personId:string|null};
-export type InboxChoices={workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[]};
+export type InboxChoices={workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[];/** The cut lines the user chose; absent means the server's own split. */split?:{x1:number;x2:number}};
+/** The lines a plan cuts the jacket at. */
+export const planSplit=(plan:Pick<InboxPlan,'choices'|'detail'>)=>plan.choices.split??plan.detail.candidate!.defaultSplit;
 export type InboxPlan={id:string;runId?:string;identity:AuthorityIdentity;detail:InboxDetail;choices:InboxChoices;workId:string;isNew:boolean;base:InboxWork|null;artworkIds:Record<Surface,string>;personIds:Record<string,string>;manifests:PreparedArtwork[];commands:Command[];accepted:string[];dependencies?:string[];state:'preparing'|'sending'|'waiting'|'blocked'|'done';attempts:number;stageAttempts?:Partial<Record<'preparing'|'sending'|'waiting',number>>;reviewedCode:string;reviewedJacketSha256:string;nextAttemptAt:number;doneAt?:number;error?:string};
 export const INBOX_APPLY_EVENT='lakomics-av-inbox-apply';
 const KEY=connectionOutbox('lakomics.av-inbox.apply.v1');
@@ -87,12 +90,13 @@ export function refreshedChoices(detail:InboxDetail,work:InboxWork|null,previous
   next.name=previous.choices.name;
   for(const surface of SURFACES)if((previous.base?.selection[surfaceSlot(surface)]??null)===(work?.selection[surfaceSlot(surface)]??null)
     &&previous.reviewedJacketSha256===c.jacketSha256&&sameAvValue(old.defaultSplit,c.defaultSplit))next.surfaces[surface]=previous.choices.surfaces[surface];
+  if(previous.choices.split&&previous.reviewedJacketSha256===c.jacketSha256&&sameAvValue(old.defaultSplit,c.defaultSplit))next.split=previous.choices.split;
   for(const {key} of AV_DETAIL_FIELDS)if(sameAvValue(old.fields[key],c.fields[key])&&sameAvValue(previous.base?.details.av?.[key]??(key==='genres'?[]:null),work?.details.av?.[key]??(key==='genres'?[]:null))){
     delete next.fields[key];if(key in previous.choices.fields)next.fields[key]=previous.choices.fields[key];
   }
   next.people=next.people.map(p=>{
     const oldPerson=previous.choices.people.find(v=>v.role===p.role&&v.nameJa===p.nameJa);
-    return oldPerson&&sameAvValue(previous.base?.avCredits??[],work?.avCredits??[])&&sameAvValue((p.role==='performer'?old.performers:old.directors).find(v=>v.nameJa===p.nameJa),(p.role==='performer'?c.performers:c.directors).find(v=>v.nameJa===p.nameJa))?oldPerson:p;
+    return oldPerson&&sameAvValue(previous.base?.avCredits??[],work?.avCredits??[])&&sameAvValue(old.performers.find(v=>v.nameJa===p.nameJa),c.performers.find(v=>v.nameJa===p.nameJa))?oldPerson:p;
   });
   return next;
 }
@@ -103,19 +107,22 @@ export function inboxRecheckChanges(detail:InboxDetail,work:InboxWork|null,previ
   for(const surface of SURFACES)if((previous.base?.selection[surfaceSlot(surface)]??null)!==(work?.selection[surfaceSlot(surface)]??null))changes.push(`${SURFACE_LABELS[surface]}의 현재 선택`);
   for(const {key,label} of AV_DETAIL_FIELDS)if(!sameAvValue(previous.detail.candidate?.fields[key],detail.candidate?.fields[key])
     ||!sameAvValue(previous.base?.details.av?.[key]??(key==='genres'?[]:null),work?.details.av?.[key]??(key==='genres'?[]:null)))changes.push(label);
-  if(!sameAvValue(previous.base?.avCredits??[],work?.avCredits??[])||!sameAvValue(previous.detail.candidate?.performers,detail.candidate?.performers)||!sameAvValue(previous.detail.candidate?.directors,detail.candidate?.directors))changes.push('출연·감독');
+  if(!sameAvValue(previous.base?.avCredits??[],work?.avCredits??[])||!sameAvValue(previous.detail.candidate?.performers,detail.candidate?.performers))changes.push('출연');
   return changes;
 }
 export const surfaceSlot=(s:Surface)=>s==='front'?'work':s;
 export function initialChoices(detail:InboxDetail,work:InboxWork|null):InboxChoices{
   const c=detail.candidate!;const fields:AvDetailFields={};
-  for(const [key,value] of Object.entries(c.fields)){
+  for(const [key,entry] of Object.entries(c.fields)){
     const old=work?.details.av?.[key as AvDetailKey];
+    // Sale, sample and distribution tags are not genres: they are never offered from a candidate.
+    const value=key==='genres'&&Array.isArray(entry)?displayAvGenres(entry).map(genre=>genre.original):entry;
     if((old==null||old===''||Array.isArray(old)&&!old.length)&&value!=null&&value!==''&&(!Array.isArray(value)||value.length))fields[key as AvDetailKey]=value;
   }
   return {workId:work?.workId??null,name:detail.inbox.normalizedCode??detail.inbox.productCode,
     surfaces:Object.fromEntries(SURFACES.map(s=>[s,work?.selection[surfaceSlot(s)]?'keep':candidateHasSurface(c,s)?'candidate':work?'keep':'clear'])) as InboxChoices['surfaces'],fields,
-    people:([...c.performers.map(p=>({...p,role:'performer' as const})),...c.directors.map(p=>({...p,role:'director' as const}))]).map(p=>({nameJa:p.nameJa,role:p.role,action:'new',displayName:p.nameKo||p.nameJa,personId:null}))};
+    // Directors are no longer imported.
+    people:c.performers.map(p=>({nameJa:p.nameJa,role:'performer' as const,action:'new' as const,displayName:p.nameKo||p.nameJa,personId:null}))};
 }
 /** The chooser includes preceding FIFO intents over its frozen authority read. */
 export function predictedInboxWork(work:InboxWork,authority:InboxAuthority,inboxId?:string):InboxWork {
@@ -170,10 +177,11 @@ export function composeInboxCommands(plan:InboxPlan,artworks:InboxAuthority['art
     const action=choices.surfaces[surface];if(action==='keep')continue;
     const slot=surfaceSlot(surface),expectedArtworkId=base?.selection[slot]??null;let artworkId:string|null=null;
     if(action==='candidate'){
-      if(!candidateHasSurface(c,surface))throw new Error('이 면의 후보가 없습니다.');
+      if(!candidateHasSurface(c,surface,planSplit(plan)))throw new Error('이 면의 후보가 없습니다.');
       const manifest=plan.manifests.find(m=>m.surface===surface);if(!manifest)throw new PlanStopped('표지 응답을 확인하지 못했어요 · 다시 확인');
       const kind=surface==='front'?'cover':surface;
-      if(manifest.kind!==kind||manifest.provider!=='libredmm'||manifest.providerImageId!==`${plan.reviewedCode}:${plan.reviewedJacketSha256}:${c.defaultSplit.x1}:${c.defaultSplit.x2}:${surface}`)throw new PlanStopped('표지 응답을 확인하지 못했어요 · 다시 확인');
+      const split=planSplit(plan);
+      if(manifest.kind!==kind||manifest.provider!=='libredmm'||manifest.providerImageId!==`${plan.reviewedCode}:${plan.reviewedJacketSha256}:${split.x1}:${split.x2}:${surface}`)throw new PlanStopped('표지 응답을 확인하지 못했어요 · 다시 확인');
       const reused=artworks.find(a=>a.workId===workId&&a.kind===kind&&a.provider==='libredmm'&&a.providerImageId===manifest.providerImageId);
       artworkId=reused?.artworkId??plan.artworkIds[surface];
       if(!reused){const {surface:_,...receipt}=manifest;commands.push({commandType:'addArtwork',workId,artworkId,...receipt});}
@@ -192,7 +200,7 @@ export function composeInboxCommands(plan:InboxPlan,artworks:InboxAuthority['art
     if(p.action==='skip')continue;
     const personId=p.action==='link'?p.personId:plan.personIds[p.nameJa];if(!personId)throw new Error('인물을 선택해 주세요.');
     if(credits.some(credit=>credit.role===p.role&&credit.personId===personId))continue;
-    const allowed=(p.role==='performer'?c.performers:c.directors).some(person=>person.nameJa===p.nameJa);if(!allowed)throw new Error('인물을 다시 확인해 주세요.');
+    const allowed=(p.role==='performer'?c.performers:c.directors??[]).some(person=>person.nameJa===p.nameJa);if(!allowed)throw new Error('인물을 다시 확인해 주세요.');
     if(p.action==='new'&&!people.some(person=>person.personId===personId))people.push({personId,displayName:p.displayName.trim(),nameJa:p.nameJa});
     credits.push({personId,role:p.role,order:credits.filter(v=>v.role===p.role).reduce((max,v)=>Math.max(max,v.order+1),0),creditName:null});
   }
@@ -231,7 +239,7 @@ async function resume(connection:string,identity:AuthorityIdentity){
           throw new PlanStopped('후보가 바뀌었어요 · 다시 확인');
         const wanted=SURFACES.filter(s=>plan.choices.surfaces[s]==='candidate'&&!plan.manifests.some(m=>m.surface===s));
         if(wanted.length){
-          const split=plan.detail.candidate!.defaultSplit;
+          const split=planSplit(plan);
           const reply=await api<{items:PreparedArtwork[]}>(`${inboxPath(plan.id)}/artwork`,undefined,{x1:split.x1,x2:split.x2,surfaces:wanted},'POST',false,connection);
           if(!currentPlan(plan,connection))return;
           if(!Array.isArray(reply?.items)||reply.items.length!==wanted.length||wanted.some(s=>reply.items.filter(m=>m.surface===s).length!==1))throw new PlanStopped('표지 응답을 확인하지 못했어요 · 다시 확인');

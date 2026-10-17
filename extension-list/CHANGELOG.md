@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.5.53 — 2026-10-18
+
+- The save half-circle opens without waiting for the settings check: it answers from
+  stored data at once and refreshes menu settings in the background (changes show on
+  the next open). A press on a collectable item also wakes the background worker early.
+- The startup/update refresh now runs a few seconds after startup so it no longer
+  competes with the first half-circle.
+- X: returning to the tab no longer rescans every photo at once. The saved index is
+  refetched at most every ten minutes and markers are re-applied in idle slices, which
+  stops the freeze on a tablet resume. Saving still marks the photo immediately.
+- Slim package: `python scripts/build-extension-slim.py` writes only the runtime files
+  (no tests, docs or unused fonts), about half the size, for a faster reload.
+
 ## 3.5.50 — 2026-10-16
 
 - Saving an image again after it was deleted in Lakomics (even after emptying the trash)

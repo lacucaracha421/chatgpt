@@ -1,0 +1,206 @@
+/* AV candidate review (PC dialog and tablet sheet): one set of pieces, arranged by each client.
+   Foundation only: spacing 4·8·12·16·24·32, the four type roles, token colours. Tablet differences come from the
+   size tokens in mobile.css plus the .av-review--sheet block at the end. */
+
+/* ---------- Frame (PC dialog) ---------- */
+.ui-dialog--workspace:has(.av-review) { width: min(80rem, calc(100vw - var(--space-6))); height: min(50rem, calc(100vh - var(--space-6))); }
+.av-review { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; flex: 1; min-width: 0; min-height: 0; }
+
+.av-review__head { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--color-border); }
+.av-review__code { margin: 0; font-size: var(--type-title); font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.av-review__source { color: var(--color-faint); font-size: var(--type-meta); }
+.av-review__head > .ui-button { margin-left: auto; }
+
+.av-review__body { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 0; }
+/* The stage is one step darker than the dialog so the jacket is the first thing seen (DESIGN §4: lightness before lines). */
+.av-review__stage { display: grid; place-items: center; min-width: 0; min-height: 0; padding: var(--space-6); background: var(--color-bg); overflow: hidden; }
+.av-review__side { display: flex; flex-direction: column; gap: var(--space-6); min-height: 0; padding: var(--space-4) var(--space-6) var(--space-6); overflow: auto; border-left: 1px solid var(--color-border); scrollbar-gutter: stable; }
+.av-review__stale { flex: none; margin: 0; padding: var(--space-2) var(--space-6) 0; color: var(--color-faint); font-size: var(--type-meta); }
+.av-review__error { display: flex; align-items: center; gap: var(--space-3); flex: none; margin: 0; padding: var(--space-2) var(--space-6); color: var(--color-danger); border-top: 1px solid var(--color-border); font-size: var(--type-meta); }
+.av-review__body[inert] { pointer-events: none; }
+
+.av-review__foot { display: flex; align-items: center; gap: var(--space-2); min-height: 64px; padding: 0 var(--space-6); border-top: 1px solid var(--color-border); }
+.av-review__spacer { flex: 1; }
+.av-review__summary { margin-right: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.av-review__skeleton-stage { width: min(100%, calc(var(--hero-h) * 1.4)); aspect-ratio: 1.4; }
+.av-review__skeleton-line { height: 40px; margin-bottom: var(--space-2); }
+
+/* ---------- Jacket stage (split editor = hero) ---------- */
+.av-stage { --hero-h: min(560px, calc(100vh - 260px)); display: grid; justify-items: center; width: 100%; }
+.av-stage__jacket { display: grid; gap: var(--space-2); min-width: 0; }
+.av-split { position: relative; width: 100%; overflow: visible; background: var(--color-surface); user-select: none; -webkit-user-select: none; }
+.av-split > img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.av-split__privacy { position: absolute; inset: 0; background: var(--color-surface); }
+
+/* A surface kept from the current work shows that image inside its zone, so the stage is the result. */
+.av-split__keep { position: absolute; top: 0; bottom: 0; display: grid; place-items: center; overflow: hidden; background: var(--color-surface); pointer-events: none; }
+.av-split__keep > img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.av-split__keep > .ui-badge { position: absolute; top: var(--space-2); left: var(--space-2); }
+.av-split__off { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--color-bg) 78%, transparent); pointer-events: none; }
+
+/* Cut lines keep the white-on-black line (reads on any jacket); the hit area is 12 px on the PC, 44 px on the tablet. */
+.av-split__line { position: absolute; z-index: 2; top: -8px; bottom: -8px; width: 12px; translate: -50% 0; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.av-split__line::after { content: ""; position: absolute; top: 8px; bottom: 8px; left: 5px; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 85%), 0 0 6px rgb(0 0 0 / 60%); }
+.av-split__line::before { content: ""; position: absolute; top: 0; left: 2px; width: 8px; height: 12px; background: #fff; border: 1px solid rgb(0 0 0 / 85%); box-sizing: border-box; }
+.av-split__line:hover::after, .av-split__line:hover::before, .av-split__line.is-focus::after, .av-split__line.is-focus::before, .av-split__line:focus-visible::after, .av-split__line:focus-visible::before { background: var(--color-accent); }
+.av-split__line:focus-visible, .av-split__line.is-focus { outline: none; }
+.av-split__line.is-focus::after, .av-split__line:focus-visible::after { box-shadow: 0 0 0 1px rgb(0 0 0 / 85%), 0 0 0 3px var(--color-focus); }
+.av-split__line:disabled { cursor: default; }
+/* A jacket without a spine of its own (the spine comes from the DVD cover): one joined line with a wider cap.
+   The two halves only take input; the mark draws the line. */
+.av-split__line.is-joined { width: 6px; }
+.av-split__line.is-joined::before, .av-split__line.is-joined::after { content: none; }
+.av-split__line.is-joined.is-left { translate: -100% 0; }
+.av-split__line.is-joined.is-right { translate: 0 0; }
+.av-split__joined { position: absolute; z-index: 1; top: 0; bottom: 0; width: 0; pointer-events: none; }
+.av-split__joined::after { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 85%), 0 0 6px rgb(0 0 0 / 60%); }
+.av-split__joined::before { content: ""; position: absolute; top: -8px; left: -8px; width: 16px; height: 12px; background: #fff; border: 1px solid rgb(0 0 0 / 85%); box-sizing: border-box; }
+.av-split__joined.is-focus::after, .av-split__joined.is-focus::before { background: var(--color-accent); }
+/* The numbers show only while a line is focused or dragged. */
+.av-split__value { position: absolute; top: 20px; left: 16px; z-index: 3; display: inline-flex; align-items: center; height: var(--badge-height); padding: 0 var(--space-2); white-space: nowrap; color: var(--color-text); background: var(--color-surface-elevated); border-radius: var(--radius-mark); box-shadow: var(--shadow-floating); font: 600 var(--type-meta) / 1 var(--font-ui); pointer-events: none; }
+.av-split__value.is-left { left: auto; right: 16px; }
+.av-split__joined > .av-split__value { top: 20px; left: 12px; }
+.av-split__joined > .av-split__value.is-left { left: auto; right: 12px; }
+
+/* Surface labels under their zones: one quiet chooser button each (choice = 후보 / 지금 / 없음). */
+.av-caps { position: relative; display: flex; align-items: center; min-height: var(--control-height-compact); }
+.av-cap-slot { position: absolute; top: 0; transform: translateX(-50%); }
+.av-cap-slot.is-extra { position: static; transform: none; }
+.av-caps__extra { display: flex; gap: var(--space-1); margin-left: auto; }
+.av-cap { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); white-space: nowrap; color: var(--color-muted); background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1 var(--font-ui); cursor: pointer; }
+.av-cap:hover:not(:disabled), .av-cap[aria-expanded="true"] { color: var(--color-text); background: var(--color-surface-hover); }
+.av-cap:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+.av-cap:disabled { opacity: .5; cursor: default; }
+.av-cap__state { color: var(--color-text); font-weight: 600; }
+.av-cap__chev { width: 16px; height: 16px; }
+
+/* The chooser (PC: the shared menu; tablet: a bottom sheet) lists one row per available choice with its thumbnail. */
+.av-cap-menu { min-width: 240px; padding: var(--space-1); }
+.av-cap-menu__item { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 64px; padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2); color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1.3 var(--font-ui); cursor: pointer; outline: none; }
+.av-cap-menu__item:hover, .av-cap-menu__item[data-highlighted] { background: var(--color-surface-hover); }
+.av-cap-menu__item:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
+.av-cap-menu__item.is-current, .av-cap-menu__item[data-state="checked"] { font-weight: 600; }
+.av-cap-menu__item.is-current::after, .av-cap-menu__item[data-state="checked"]::after { content: ""; margin-left: auto; width: 5px; height: 5px; flex: none; background: var(--color-accent); }
+.av-cap-menu__text { display: grid; gap: var(--space-1); min-width: 0; }
+.av-cap-menu__text small { color: var(--color-faint); font-size: var(--type-meta); font-weight: 400; }
+.av-cap-menu--spine .av-cap-menu__item { min-height: 48px; }
+.av-menu-thumb { display: block; height: 56px; flex: none; }
+.av-menu-thumb--image { position: relative; width: 40px; overflow: hidden; background: var(--color-surface); }
+.av-menu-thumb--image > img { width: 100%; height: 100%; object-fit: contain; }
+.av-menu-thumb--empty { width: 40px; border: 1px dashed var(--color-border-strong); box-sizing: border-box; }
+.av-menu-spine { position: relative; display: block; flex: none; overflow: hidden; background: var(--color-surface); }
+.av-menu-spine--plain { width: 160px; height: 24px; }
+.av-menu-spine--plain > img { width: 100%; height: 100%; object-fit: contain; }
+.av-menu-spine > .av-menu-spine__strip { position: absolute; left: 50%; top: 50%; height: 160px; transform: translate(-50%, -50%) rotate(-90deg); }
+
+.av-stage__foot { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-3); min-height: var(--control-height-compact); }
+.av-stage__warn { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-danger); font-size: var(--type-meta); }
+.av-stage__warn > svg { width: 16px; height: 16px; }
+.av-stage__size { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* Cropped image helper. */
+.av-crop { position: relative; display: block; overflow: hidden; background: var(--color-surface); }
+.av-crop > img { position: absolute; top: 0; height: 100%; max-width: none; max-height: none; }
+.av-menu-thumb.av-crop { width: auto; }
+
+/* ---------- Side: destination ---------- */
+.av-side__section { display: grid; gap: var(--space-2); align-content: start; }
+.av-dest { display: grid; gap: var(--space-1); }
+.av-dest__row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-height-2); padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1.3 var(--font-ui); cursor: pointer; }
+.av-dest__row:hover:not(:disabled) { background: var(--color-surface-hover); }
+.av-dest__row:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+.av-dest__row:disabled { opacity: .5; cursor: default; }
+/* The chosen place: face + weight + the small accent square of a current menu choice (DESIGN §12 Floating surfaces). */
+.av-dest__row.is-current { background: color-mix(in srgb, var(--color-text) 7%, transparent); font-weight: 600; }
+.av-dest__row.is-current::after { content: ""; margin-left: auto; width: 5px; height: 5px; flex: none; background: var(--color-accent); }
+.av-dest__other { justify-self: start; }
+.av-dest__thumb { position: relative; display: grid; place-items: center; flex: none; width: 28px; height: 40px; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); color: var(--color-muted); }
+.av-dest__thumb > img { width: 100%; height: 100%; object-fit: cover; }
+.av-dest__thumb--icon svg { width: 16px; height: 16px; }
+.av-dest__text { display: grid; gap: 2px; min-width: 0; }
+.av-dest__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-dest__text small { color: var(--color-faint); font-size: var(--type-meta); font-weight: 400; }
+.av-dest__text small.av-dest__warning { color: var(--color-danger); }
+.av-dest__name-field { padding: var(--space-1) 0 var(--space-2) calc(var(--space-8) + var(--space-2)); }
+.av-dest__name-field .ui-text-input { width: 100%; }
+
+/* A search field over a short list (another collection, an existing person). */
+.av-pick { display: grid; gap: var(--space-2); }
+.av-pick .ui-text-input { width: 100%; }
+.av-pick__list { display: grid; max-height: 240px; overflow: auto; }
+.av-pick__item { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-height-2); padding: var(--space-1) var(--space-2); color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: var(--radius-control); font: 400 var(--type-body) / 1.3 var(--font-ui); cursor: pointer; }
+.av-pick__item:hover { background: var(--color-surface-hover); }
+.av-pick__item:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
+.av-pick__empty { margin: 0; padding: var(--space-2); color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Side: information summary ---------- */
+.av-facts { display: grid; gap: var(--space-2); }
+.av-facts__title { margin: 0 0 var(--space-1); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--type-body); line-height: 1.45; }
+.av-facts__row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; font-size: var(--type-body); line-height: 1.45; }
+.av-facts__label { color: var(--color-faint); font-size: var(--type-meta); }
+.av-facts__value { min-width: 0; overflow-wrap: anywhere; }
+.av-facts__value .ui-badge { vertical-align: 1px; }
+.av-facts__old { color: var(--color-muted); }
+.av-facts__arrow { margin: 0 var(--space-1); color: var(--color-faint); }
+.av-facts__rest { margin: 0; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Side: 자세히 (editable) ---------- */
+.av-fields { display: grid; }
+.av-field { display: grid; grid-template-columns: 24px 48px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); font-size: var(--type-body); line-height: 1.45; cursor: pointer; }
+.av-field > .ui-checkbox { align-self: center; }
+.av-field.is-off .av-field__value > span { color: var(--color-muted); }
+.av-field__label { color: var(--color-faint); font-size: var(--type-meta); }
+.av-field__value { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.av-field__value small { color: var(--color-faint); font-size: var(--type-meta); }
+.av-people { display: grid; }
+.av-person { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; min-height: var(--row-height-2); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+.av-person__check { display: grid; place-items: center; color: var(--color-faint); }
+.av-person__check svg { width: 16px; height: 16px; }
+.av-person__name { display: grid; gap: 2px; min-width: 0; }
+.av-person__name small { color: var(--color-faint); font-size: var(--type-meta); }
+.av-person__name .ui-text-input { width: 100%; }
+.av-person.is-linked { grid-template-columns: 24px minmax(0, 1fr); }
+.av-person.is-linked .av-person__name > span { color: var(--color-muted); }
+.av-person__panel { grid-column: 1 / -1; padding: var(--space-1) 0 var(--space-2) 32px; }
+.av-genres { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.av-genre { min-height: var(--control-height-compact); }
+.av-genres__hidden { margin: 0; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* ---------- Tablet sheet: one column, same pieces ---------- */
+/* The sheet title is the code with the source beside it (BottomSheet heading); 원본 페이지 sits beside ✕. */
+.av-review__sheet-title { display: flex; align-items: baseline; gap: var(--space-3); }
+.av-review__sheet-title .av-review__source { font-weight: 400; }
+.av-review--sheet { display: flex; flex-direction: column; gap: var(--space-6); grid-template-rows: none; }
+.av-review--sheet .av-stage { --hero-h: min(520px, 46vh); width: auto; margin-inline: calc(var(--space-6) * -1); padding: var(--space-6) 0 var(--space-2); background: var(--color-bg); }
+.av-review--sheet .av-stage__jacket { width: 100% !important; padding-inline: var(--space-6); box-sizing: border-box; }
+.av-review--sheet .av-split__line { width: 44px; }
+.av-review--sheet .av-split__line::after { left: 21px; }
+.av-review--sheet .av-split__line::before { left: 16px; width: 12px; height: 16px; }
+.av-review--sheet .av-split__line.is-joined { width: 22px; }
+.av-review--sheet .av-cap { height: var(--touch-target); }
+.av-review--sheet .av-caps { min-height: var(--touch-target); }
+.av-review--sheet .av-review__foot { position: sticky; bottom: calc(-1 * var(--space-6)); z-index: 3; margin-inline: calc(var(--space-6) * -1); padding: var(--space-3) var(--space-6); background: var(--color-sidebar); }
+.av-review--sheet .av-dest__thumb { width: 32px; height: 44px; }
+.av-review--sheet .av-dest__row { min-height: 64px; }
+.av-review--sheet .av-dest__name-field { padding-left: calc(var(--space-8) + var(--space-3)); }
+.av-review--sheet .av-facts__row { grid-template-columns: 56px minmax(0, 1fr); }
+.av-review--sheet .av-field { grid-template-columns: 44px 56px minmax(0, 1fr); }
+.av-review--sheet .av-person { grid-template-columns: 44px minmax(0, 1fr) auto; min-height: 64px; }
+.av-review--sheet .av-cap-menu__item, .av-sheet-options .av-cap-menu__item { min-height: 64px; }
+
+/* ---------- Narrow windows: one scrolling column, header and footer stay fixed ---------- */
+@media (max-width: 1000px), (max-height: 640px) {
+  .av-review__body { grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; overflow: auto; }
+  .av-review__stage { min-height: auto; overflow: visible; }
+  .av-review__side { overflow: visible; border-left: 0; border-top: 1px solid var(--color-border); }
+  .av-stage { --hero-h: min(560px, 60vh); }
+}
+
+/* ---------- Reject confirmation (shows what it affects) and in-place panels ---------- */
+.av-reject__title { display: inline-flex; align-items: center; gap: var(--space-3); }
+.av-reject__thumb { display: block; flex: none; width: 36px; height: 52px; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.av-reject__thumb > .av-crop { width: 100%; height: 100%; aspect-ratio: auto !important; }
+.av-reject__note { margin: 0 0 var(--space-4); color: var(--color-muted); font-size: var(--type-meta); }
+.av-other { padding: var(--space-2) 0 0; }
+.ui-dialog:has(.av-review--sheet) > .ui-dialog__title { padding-right: calc(var(--touch-target) * 2 + var(--space-4)); }
+.av-sheet-options { display: grid; gap: var(--space-1); }

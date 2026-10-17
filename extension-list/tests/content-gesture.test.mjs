@@ -78,13 +78,14 @@ test('YouTube subtitle buttons and overlay bypass collector capture handlers, ev
 });
 function fixture(menuController = {}) {
   const dom = new JSDOM('<img id="image">', { url: 'https://example.test/', runScripts: 'outside-only' });
-  const w = dom.window, timers = new Map(), mounts = [], requests = [];
+  const w = dom.window, timers = new Map(), mounts = [], requests = [], pings = [];
   let now = 0, counter = 0;
   w.setTimeout = (callback, delay = 0) => { const id = ++counter; timers.set(id, { callback, at: now + delay }); return id; };
   w.clearTimeout = id => timers.delete(id);
   w.LakomicsForumSource = { findGenericCandidate:()=>null, findCandidate: target => target.id === 'image' ? { element: target, type: 'image', mediaUrl: 'https://example.test/image.jpg' } : null };
   w.document.elementFromPoint = () => null;
   w.chrome = { runtime: { sendMessage(message, callback) {
+    if (message.type === 'worker:ping') { pings.push(message); callback?.({ ok: true }); return; }
     requests.push(message);
     // The real worker answers across an async boundary; resolve on a macrotask so
     // a same-task departure is still observable by the session watcher.
@@ -144,7 +145,7 @@ function fixture(menuController = {}) {
     now = Math.max(now, first[1].at); timers.delete(first[0]); first[1].callback();
     return true;
   }
-  return { w, contextCollector: () => contextCollector, pointer, advance, fireNextTimer, mounts, requests, close: () => w.close(), timers: () => timers.size };
+  return { w, contextCollector: () => contextCollector, pointer, advance, fireNextTimer, mounts, requests, pings, close: () => w.close(), timers: () => timers.size };
 }
 
 test('short clicks and early drag releases never request or open a collector later', async () => {
@@ -277,6 +278,13 @@ test('a pushed URL with no popstate is caught by the session liveness poll', asy
   await f.advance(1000);
   assert.equal(f.mounts.length, 0);
   assert.equal(f.requests.filter(request => request.type === 'collector:state').length, 1);
+  f.close();
+});
+
+test('a press that may become a hold wakes the worker once, not on every press', async () => {
+  const f = fixture();
+  f.pointer('pointerdown'); f.pointer('pointerup'); f.pointer('pointerdown'); f.pointer('pointerup');
+  assert.equal(f.pings.length, 1);
   f.close();
 });
 

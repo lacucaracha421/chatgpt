@@ -102,14 +102,15 @@
   }
 
   async function getState({ refreshIfStale = true } = {}) {
-    let state = await readState();
+    const state = await readState();
     if (!state) {
       const refreshed = await refresh();
       return refreshed.ok ? { ok: true, state: refreshed.state, stale: false } : refreshed;
     }
-    await globalThis.LakomicsMenuSettings?.sync();
-    state = await readState();
-    if (!state) return { ok: false, code: "state_missing" };
+    // Answer from local storage at once: a due menu-settings read is a network
+    // round trip that must not hold up the arc. Changed settings land in storage
+    // and apply on the next open.
+    void Promise.resolve(globalThis.LakomicsMenuSettings?.sync()).catch(() => {});
     if (refreshIfStale && Date.now() - state.syncedAt > 30_000) void flush().then(() => refresh()).catch(() => {});
     return { ok: true, state, stale: Date.now() - state.syncedAt > 60_000 };
   }

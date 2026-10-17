@@ -35,6 +35,20 @@ it('adds the spine artwork of a spine-less wide jacket, which the server cuts fr
   plan.manifests=(['front','spine','back'] as const).map(s=>({...manifest(s),providerImageId:`SSIS-001:${spineless.candidate!.jacketSha256}:1092:1092:${s}`}));
   expect(composeInboxCommands(plan).filter(c=>c.commandType==='addArtwork').map(c=>(c as {providerImageId:string}).providerImageId.split(':').pop())).toEqual(['front','spine','back']);
 });
+it('cuts the jacket where the user moved the lines and expects the server to name those lines',async()=>{
+  const choices=initialChoices(inboxFixture,null);choices.split={x1:300,x2:500};choices.surfaces.spine='clear';choices.surfaces.front='clear';
+  const plan=createInboxPlan(inboxFixture,authority,choices);
+  await resumeInboxApplies(inboxIdentity);
+  expect(mocks.api.mock.calls.find(([p])=>p.endsWith('/artwork'))?.[2]).toMatchObject({x1:300,x2:500,surfaces:['back']});
+  // The server's manifest names the lines it was asked for; the default lines would be refused.
+  expect(readInboxPlans()[0]?.state).toBe('blocked');expect(plan.choices.split).toEqual({x1:300,x2:500});
+  const moved=createInboxPlan(inboxFixture,authority,choices);moved.manifests=[{...manifest('back'),providerImageId:`SSIS-001:${inboxFixture.candidate!.jacketSha256}:300:500:back`}];
+  expect(composeInboxCommands(moved).some(c=>c.commandType==='addArtwork')).toBe(true);
+});
+it('plans no director credit even when the candidate carries directors',()=>{
+  const detail={...inboxFixture,candidate:{...inboxFixture.candidate!,directors:[{nameJa:'監督',nameKo:'감독',wikidataId:null,fanzaActressId:null}]}};
+  expect(initialChoices(detail,null).people.map(p=>p.role)).toEqual(['performer']);
+});
 it('keeps manual artwork, sends only chosen surfaces, fills blank code and preserves existing credits',async()=>{
   const base={...inboxWork,details:{av:{genres:[]}},avCredits:[{personId:'old',role:'performer' as const,order:0,creditName:null}]};authority.works=[base];
   const choices=initialChoices(inboxFixture,base);choices.surfaces.spine='keep';choices.people[0].action='link';choices.people[0].personId='known';

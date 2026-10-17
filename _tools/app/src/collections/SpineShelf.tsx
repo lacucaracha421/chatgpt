@@ -5,7 +5,7 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CASE_PLASTIC, CollectionCase, CaseSpine, spineInsertClass, type CaseData } from "./case/CollectionCase";
 import { handOffCaseAngle } from "./case/caseHandoff";
 import { stageForCaseHeight } from "./case/fitCaseStage";
-import { nearestCell, packSpineShelf, SPINE_SHELF, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
+import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
 import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
 
@@ -25,11 +25,15 @@ export type SpineWork = PackedWork & {
  */
 export type SpineArt<W extends SpineWork> = {
   useSpine(work: W, host: RefObject<Element | null>): { url: string | null; pending: boolean };
-  useFront(work: W, host: RefObject<Element | null>): string | null;
+  /**
+   * The images of the one pulled-out case: its faces are held large, so a client may serve them from the full-size artwork
+   * (keeping the smaller image on screen until that is decoded). `pending`: the spine is not read yet.
+   */
+  usePulled(work: W, host: RefObject<Element | null>): { front: string | null; spine: string | null; back: string | null; pending: boolean };
 };
 const WORK_ART: SpineArt<SpineWork> = {
   useSpine: work => ({ url: work.spine, pending: work.pending }),
-  useFront: work => work.front,
+  usePulled: work => ({ front: work.front, spine: work.spine, back: work.back ?? null, pending: work.pending }),
 };
 
 /** Rows within this many viewports above and below the visible part stay mounted. */
@@ -86,7 +90,7 @@ type Props<W extends SpineWork> = {
   /** Also put the `restoredFocusId` case back out (a return from its work screen); otherwise it only gets focus. */
   restorePick?: boolean;
   menu?(id: string): ContextMenuItem[];
-  /** Tablet: a long press on a work (or, with `touchTargets`, the nearest one in the row) asks for its action sheet. */
+  /** Tablet: a long press on a work (or, with `touchTargets`, the spine at that x in the row) asks for its action sheet. */
   onLongPress?(id: string): void;
   art?: SpineArt<W>;
   /** The works near the viewport (the mounted rows and the ones just beyond), when that set changes: a client may read their artwork lazily. */
@@ -330,14 +334,14 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     if (pickedId === id) { open(id); return; }
     setFocusId(id); onPick(id);
   };
-  /** The work under a press: its spine or pulled-out case, else (on touch) the nearest one in the row. */
+  /** The work under a press: its spine or pulled-out case, else (on touch) the spine at that x in the row; empty shelf has none. */
   const workAt = (target: HTMLElement, clientX: number) => {
     const out = target.closest<HTMLElement>(".spine-shelf__out");
     if (out) return out.dataset.id ?? null;
     const spine = target.closest<HTMLElement>(".spine");
     if (spine) return spine.dataset.collectionId ?? null;
     const rowElement = touchTargets ? target.closest<HTMLElement>("[data-shelf-row]") : null;
-    return rowElement ? nearestCell(rows[Number(rowElement.dataset.shelfRow)], clientX - rowElement.getBoundingClientRect().left)?.work.id ?? null : null;
+    return rowElement ? cellAtX(rows[Number(rowElement.dataset.shelfRow)], clientX - rowElement.getBoundingClientRect().left)?.work.id ?? null : null;
   };
   const press = useLongPress({ enabled: Boolean(onLongPress), onLongPress: ({ target, x }) => {
     const id = target instanceof HTMLElement ? workAt(target, x) : null;
@@ -357,10 +361,10 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
     if (spine) { activate(spine.dataset.collectionId!); return; }
     const rowElement = touchTargets ? target.closest<HTMLElement>("[data-shelf-row]") : null;
     if (rowElement) {
-      const nearest = nearestCell(rows[Number(rowElement.dataset.shelfRow)], event.clientX - rowElement.getBoundingClientRect().left);
-      if (nearest) {
+      const under = cellAtX(rows[Number(rowElement.dataset.shelfRow)], event.clientX - rowElement.getBoundingClientRect().left);
+      if (under) {
         // The scroller's put-down must not undo this pick.
-        event.stopPropagation(); activate(nearest.work.id); return;
+        event.stopPropagation(); activate(under.work.id); return;
       }
     }
     onPick(null);
@@ -494,8 +498,7 @@ function pullPose(cell: PackedCell<SpineWork>, row: PackedRow<SpineWork>, availa
  */
 function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, still, privacy, art, onOpen, onShown }: { cell: PackedCell<W>; row: PackedRow<W>; available: number; leaving: boolean; still: boolean; privacy: boolean; art: SpineArt<W>; onOpen(id: string): void; onShown(id: string, shown: boolean): void }) {
   const host = useRef<HTMLDivElement>(null);
-  const front = art.useFront(cell.work, host);
-  const { url: spine, pending: spinePending } = art.useSpine(cell.work, host);
+  const { front, spine, back, pending: spinePending } = art.usePulled(cell.work, host);
   const id = cell.work.id;
   // Painted: the case's images are decoded (or the cap ran out). Until then it is laid out but transparent and the
   // spine stays on the shelf; then both swap in one commit and the pull starts. A case put back before it painted
@@ -522,7 +525,7 @@ function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, sti
   const [pulled, setPulled] = useState(still);
   const [wasLeaving, setWasLeaving] = useState(leaving);
   if (wasLeaving !== leaving) { setWasLeaving(leaving); if (!leaving) setPulled(false); }
-  const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back: cell.work.back ?? null, privacy };
+  const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back, privacy };
   if (leaving && !painted) return null;
   return <div ref={host} className={`spine-shelf__out${!painted ? " is-preparing" : leaving ? " is-leaving" : pulled ? "" : " is-pulling"}`} data-id={id}
     onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "spine-out-pull") setPulled(true); }}

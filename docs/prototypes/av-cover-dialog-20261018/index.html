@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>AV 표지 창 정리</title>
+<!-- The app's real CSS, copied under app-css/ in the repository layout (relative imports keep working):
+     tokens.css (→ fonts.css → Pretendard), shared-*, controls.css (→ surface-motion.css), chrome.css and
+     collections/avLink.css (the current dialog). avcover.css = the proposed CSS. mock.css = light-theme
+     stand-in and frame helpers. page.css = this document. Tablet frames are tablet.html in iframes,
+     because the tablet loads mobile.css instead of the PC base CSS. -->
+<link rel="stylesheet" href="app-css/src/styles/tokens.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-base.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-toolbars.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-states.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-hover.css">
+<link rel="stylesheet" href="app-css/src/styles/controls.css">
+<link rel="stylesheet" href="app-css/src/styles/chrome.css">
+<link rel="stylesheet" href="app-css/src/collections/avLink.css">
+<link rel="stylesheet" href="avcover.css">
+<link rel="stylesheet" href="mock.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+
+<header class="doc-head">
+  <div class="doc-head__row">
+    <h1>AV 표지 창 정리</h1>
+    <div class="theme-switch" role="group" aria-label="화면 테마"><button type="button" data-theme-set="auto">자동</button><button type="button" data-theme-set="dark">어둡게</button><button type="button" data-theme-set="light">밝게</button></div>
+  </div>
+  <p class="lead">받은 품번의 후보를 AV 컬렉션으로 만들거나 기존 컬렉션에 넣는 창(<code>AvLinkChooserDialog</code>, 태블릿 <code>AvInboxChooser</code>)을 정리한 시안이다. 왼쪽이 <b>지금</b>, 오른쪽이 <b>제안</b>이다. 제안은 한 흐름이다: <b>재킷과 나누는 선이 주인공</b>이고, 각 면(뒤표지·책등·앞표지)의 선택은 <b>재킷 아래 이름표</b>에 들어간다. 오른쪽 좁은 칸에는 <b>넣을 곳</b>과 <b>정보 요약</b>만 두고, 하나하나 고르는 것은 <b>자세히</b>를 열어야 나온다. 감독은 더 가져오지 않고, 장르는 <b>한국어</b>로 보인다.</p>
+  <p class="lead">앱의 실제 토큰·컨트롤·AV 창 CSS를 그대로 읽는다. 재킷 그림, 작품 제목, 인물 이름은 임시다(품번만 실제 형식). PC 화면은 1440 × 900 창을 줄여 보인다. <b>실제 크기</b>를 누르면 1:1로 본다.</p>
+  <ul class="toc">
+    <li><a href="#audit"><b>0</b>무엇이 난잡한가</a></li>
+    <li><a href="#a"><b>A</b>보통 재킷</a></li>
+    <li><a href="#b"><b>B</b>책등을 DVD에서</a></li>
+    <li><a href="#c"><b>C</b>작은 재킷 · 같은 품번 2개</a></li>
+    <li><a href="#d"><b>D</b>앞표지만</a></li>
+    <li><a href="#e"><b>E</b>기존 컬렉션에</a></li>
+    <li><a href="#f"><b>F</b>선을 옮길 때</a></li>
+    <li><a href="#g"><b>G</b>태블릿</a></li>
+    <li><a href="#decide">정할 것</a></li>
+    <li><a href="#gaps">확인 못 한 것</a></li>
+  </ul>
+</header>
+
+<section class="variant" id="audit">
+  <h2><span class="key">0</span>무엇이 난잡한가 <small>지금 창을 앱 CSS로 그려 본 결과</small></h2>
+  <ol class="audit">
+    <li><span><b>가장 중요한 결정이 문장 속 밑줄 링크다.</b> “이 품번과 맞는 AV 컬렉션이 없어요. <u>기존 컬렉션에 연결…</u>” — 넣을 곳(새로 / 기존)은 머리 줄의 작은 회색 글 안에 묻혀 있고, 누르면 그 자리에 기본 select가 하나 더 생긴다.</span></li>
+    <li><span><b>같은 그림이 네 번 나온다.</b> 큰 재킷, 그 위의 뒤·옆·앞 구역, 아래 세 칸의 “지금 → 후보” 잘린 그림. 새 컬렉션이면 “지금” 칸 셋은 모두 “없음”이라 빈 상자만 늘어난다.</span></li>
+    <li><span><b>버튼이 한꺼번에 너무 많다.</b> 면마다 후보 사용·유지·비우기 세 개(모두 9개, 새 컬렉션이면 “유지” 셋은 늘 꺼져 있음), 정보 줄마다 체크박스, 인물마다 기본 select와 입력칸, 장르 버튼, 그리고 아래에 거절·나중에·만들기와 위의 ✕·원본 페이지 열기.</span></li>
+    <li><span><b>같은 것을 부르는 말이 셋이다.</b> 재킷 위 “뒤 · 옆 · 앞”, 칸 제목 “뒤표지 · 책등 · 앞표지”, 설명 “뒤 | 옆 | 앞”. 태블릿은 또 “뒤표지/책등/앞표지”.</span></li>
+    <li><span><b>재킷 위에 큰 반투명 글자와 픽셀 숫자.</b> 46px 크기의 “뒤/옆/앞”이 그림을 가리고, 구석마다 “1032px” 같은 숫자 배지, 아래 줄에 “원본 2184 × 1468 · 책등 120px · 5.5%”. 늘 보일 필요가 없는 기술 숫자다.</span></li>
+    <li><span><b>설명 문구가 화면에 늘 떠 있다.</b> “펼친 재킷 · 선을 끌어 뒤 | 옆 | 앞 나누기”, “체크한 항목만 들어갑니다”, 출처 줄, 정보 표의 “LibreDMM” 열 이름. DESIGN §12 Words는 이런 안내를 빼라고 한다.</span></li>
+    <li><span><b>두 칸이 같은 무게로 나란히, 따로 스크롤된다.</b> 표지 칸(왼쪽)이 길어 세 면 선택이 창 아래로 잘리고, 정보 칸(오른쪽)도 따로 스크롤된다. 어디가 먼저인지, 어디를 끝까지 봐야 하는지 알 수 없다.</span></li>
+    <li><span><b>책등을 DVD에서 가져오는 재킷(B)이 가장 헷갈린다.</b> 선 두 개가 1px 간격으로 겹쳐 한 선처럼 보이고, “옆” 구역은 보이지 않으며, 숫자는 “책등 1px · 0.0%”. 책등 칸은 그림 없이 “DVD 표지에서”라는 글만 있다.</span></li>
+    <li><span><b>앞표지만 있는 후보(D)에도 나누기 장치가 남는다.</b> 재킷 왼쪽 끝에 잘린 “뒤 / 옆” 글자, “책등 0px · 0.0%”, 책등·뒤표지 칸의 “후보 없음”과 꺼진 버튼들.</span></li>
+    <li><span><b>정보가 한 번에 다 펼쳐진 표다.</b> 9줄(원제·발매일·제작사·레이블·시리즈·출연·감독·장르)에 체크박스, 같음/다름 배지. 거의 늘 그대로 두는 값인데 결정할 것처럼 보인다. 장르는 일본어 원문 그대로이고 “セール対象商品”, “サンプル動画” 같은 판매 태그까지 장르로 들어간다.</span></li>
+    <li><span><b>앱의 공통 부품이 아닌 것이 섞여 있다.</b> 기본 체크박스·select·input, 자체 세그먼트 버튼, 옛 크기(13·18px 글자, 30·38·46·78px 높이), 확인은 브라우저 <code>window.confirm</code>, 로딩은 “후보를 불러오는 중…” 글.</span></li>
+    <li><span><b>닫는 길이 둘이다.</b> 위 ✕와 아래 “나중에”가 같은 일을 한다. 제목(“새 AV 컬렉션으로 만들기”)도 넣을 곳 선택과 겹친다.</span></li>
+  </ol>
+  <p class="note">태블릿 시트도 같은 문제를 세로로 쌓은 모양이다(G의 “지금”). 받은 품번 목록 줄(“Chrome에서 보낸 품번 · 적용 전”, 상태 설명 두 줄)도 설명이 많지만 이번 범위가 아니다 — 아직 손대지 않은 옛 화면이다.</p>
+</section>
+
+<section class="variant" id="a">
+  <h2><span class="key">A</span>보통 펼친 재킷 → 새 컬렉션 <small>SONE-512 · 2184 × 1468 · 맞는 컬렉션 없음</small></h2>
+  <p class="note">제안: 재킷이 창 왼쪽 큰 칸(한 단계 어두운 면)의 주인공이다. 선은 지금과 같은 흰 선(어떤 재킷에서도 보임)이고, 큰 글자와 픽셀 숫자는 없다. 재킷 바로 아래, 각 구역 가운데에 <b>뒤표지 ⌄ · 책등 ⌄ · 앞표지 ⌄</b> 이름표가 있다. 누르면 그 면의 선택 메뉴가 열린다(기본은 후보 그대로라 상태 말이 붙지 않는다). 오른쪽은 <b>넣을 곳</b>(새 컬렉션이 골라져 있고 이름은 품번, “원제로”)과 <b>정보</b> 요약 — 원제, 발매, 제작, 출연, 장르(한국어)를 읽기만 하는 줄로 보인다. 아래는 거절 · 요약 · 나중에 · <b>만들기</b> 하나.</p>
+  <div class="pair">
+    <figure class="shot" data-render="before" data-state="a"><figcaption>지금: 머리 줄 문장, 두 칸, 9개의 면 버튼, 9줄 정보 표.</figcaption></figure>
+    <figure class="shot" data-render="after" data-state="a"><figcaption>제안: 재킷 → 넣을 곳 → 만들기. 판매 태그는 장르에서 빠진다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="b">
+  <h2><span class="key">B</span>책등이 없는 4:3 재킷 — 책등은 DVD 표지에서 <small>SNOS-130 · 2184 × 1638 · DVD 800 × 438</small></h2>
+  <p class="note">제안: 겹친 두 선 대신 <b>합쳐진 선 하나</b>(위 손잡이가 조금 넓다)를 그린다. 책등 이름표는 <b>책등 DVD ⌄</b>로 어디서 오는지 말하고, 메뉴의 첫 줄은 <b>DVD 표지의 책등 그림</b>을 실제로 보여 준다(지금은 글자뿐). 합쳐진 선을 끌어 벌리면(1% 이상) 이 재킷에서 책등을 자르는 지금 규칙 그대로이고, 이름표의 “DVD”가 사라지고 “자동으로”가 나온다.</p>
+  <div class="pair">
+    <figure class="shot" data-render="before" data-state="b"><figcaption>지금: 1px 간격의 선 둘, “책등 1px · 0.0%”, 그림 없는 “DVD 표지에서”.</figcaption></figure>
+    <figure class="shot" data-render="after" data-state="b" data-opts='{"menu":"spine"}'><figcaption>제안: 책등 이름표를 누른 상태. 후보(DVD 책등) · 비우기.</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="c">
+  <h2><span class="key">C</span>작은 재킷 + 같은 품번 컬렉션이 둘 <small>MIDV-032 · 800 × 538</small></h2>
+  <p class="note">제안: 같은 품번 컬렉션은 <b>넣을 곳 목록에 바로</b> 줄로 나온다(표지 미리보기, 연도, 표지 면 수). 아무것도 골라지지 않은 채 열리고, 아래 요약 자리가 “넣을 곳을 고르세요”, 적용은 꺼져 있다(지금 규칙 그대로). 작은 재킷도 같은 틀이다. 원본 크기는 재킷 오른쪽 아래의 옅은 숫자 하나로만 남는다.</p>
+  <div class="pair">
+    <figure class="shot" data-render="before" data-state="c"><figcaption>지금: 고를 곳이 머리 줄의 작은 버튼 세 개.</figcaption></figure>
+    <figure class="shot" data-render="after" data-state="c"><figcaption>제안: 넣을 곳 목록 — MIDV-032 · MIDV-032 블루레이 · 새 컬렉션 · 다른 컬렉션….</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="d">
+  <h2><span class="key">D</span>앞표지만 있는 후보 <small>FSDSS-701 · 800 × 1135</small></h2>
+  <p class="note">제안: 나눌 것이 없으니 선도, 책등·뒤표지 이름표도 없다. 세로 재킷 아래에 <b>앞표지 ⌄</b> 하나. 기존 컬렉션에 넣을 때만 이름표 줄 오른쪽에 <b>책등 지금 ⌄ · 뒤표지 지금 ⌄</b>가 붙는다(후보에 없는 면은 지금 것 유지 / 비우기만 고른다).</p>
+  <div class="pair">
+    <figure class="shot" data-render="before" data-state="d"><figcaption>지금: 왼쪽 끝에 잘린 “뒤·옆”, 0px, 꺼진 버튼들.</figcaption></figure>
+    <figure class="shot" data-render="after" data-state="d"><figcaption>제안: 앞표지 하나.</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="e">
+  <h2><span class="key">E</span>기존 컬렉션에 적용 <small>IPZZ-118 · 지금 800 px 표지 3면 → 후보 2184 × 1468</small></h2>
+  <p class="note">제안: <b>재킷 위가 곧 결과</b>다. “지금 것 유지”인 면은 그 구역에 지금 표지가 들어가고 구석에 <b>지금</b> 배지가 붙는다. 이름표도 <b>앞표지 지금 ⌄</b>. 메뉴에는 후보와 지금 그림이 크기와 함께 나란히 있어 비교는 메뉴에서 한다. 오른쪽 정보는 <b>바뀌는 것만</b>: 채워질 빈 칸(레이블·시리즈), 다른 값(발매 8.1 → 8.11, 그대로 둠), 더해질 출연·장르, “같음 2개”. <b>자세히</b>를 열면 한 줄씩 체크하고 인물 연결을 고른다(두 번째 그림).</p>
+  <div class="pair">
+    <figure class="shot" data-render="before" data-state="e"><figcaption>지금: 세 칸의 지금 → 후보, 네 열 비교 표.</figcaption></figure>
+    <figure class="shot" data-render="after" data-state="e"><figcaption>제안: 처음 열었을 때(지금 규칙대로 세 면 모두 “지금 것 유지”).</figcaption></figure>
+  </div>
+  <div class="single">
+    <figure class="shot" data-render="after" data-state="e" data-opts='{"surfaces":{"front":"candidate","back":"candidate","spine":"candidate"},"menu":"front","details":true}'><figcaption>제안: 세 면을 후보로 바꾸고 앞표지 메뉴를 연 상태 + 자세히. 메뉴: 후보 1032 × 1468 · 지금 것 유지 378 × 538 · 비우기. 자세히: 줄마다 체크, 지금 값과 같음/다름/빈 칸, 출연(이미 연결됨 · 새 인물), 장르(한국어).</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="f">
+  <h2><span class="key">F</span>선을 옮길 때 <small>숫자는 이때만 보인다</small></h2>
+  <p class="note">선을 누르거나 Tab으로 오면 그 선 위에 <b>뒤표지 1,100 · 책등 20px</b> 같은 작은 배지가 뜨고, 놓거나 포커스가 나가면 사라진다. 방향키 1px, Shift+방향키 10px(지금과 같음). 책등이 1% 미만이거나 12% 넘으면 재킷 아래에 <b>책등이 좁아요 / 넓어요</b> 한 줄, 선을 옮겼으면 <b>자동으로</b>가 나온다.</p>
+  <div class="single">
+    <figure class="shot" data-render="after" data-state="a" data-opts='{"split":{"x1":1100,"x2":1120},"focusLine":"x1"}'><figcaption>왼쪽 선에 키보드 포커스. 책등 20px(0.9%) → 경고 한 줄과 자동으로.</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="g">
+  <h2><span class="key">G</span>태블릿 <small>세로 800 × 1280을 줄여 보임 · 시트 안은 스크롤</small></h2>
+  <p class="note">태블릿은 같은 조각을 한 줄로 쌓는다: 품번 머리 → 재킷(시트 폭 가득, 어두운 면) → 이름표 → 넣을 곳 → 정보 요약 → 바닥에 붙은 버튼 줄. 선 손잡이는 44px로 잡히고, 이름표 메뉴는 아래에서 올라오는 시트로 열린다. 지금 태블릿은 선을 옮길 수 없다(서버 자동 나눔만) — 제안은 PC처럼 옮기게 한다(정할 것).</p>
+  <div class="tablets">
+    <figure class="shot"><div class="shot__label"><span class="tag">지금</span>A 새 컬렉션</div><div class="shot__frame" data-tablet="a-before"></div></figure>
+    <figure class="shot"><div class="shot__label"><span class="tag is-after">제안</span>A 새 컬렉션</div><div class="shot__frame" data-tablet="a-after"></div></figure>
+    <figure class="shot"><div class="shot__label"><span class="tag">지금</span>E 기존 컬렉션</div><div class="shot__frame" data-tablet="e-before"></div></figure>
+    <figure class="shot"><div class="shot__label"><span class="tag is-after">제안</span>E 기존 컬렉션</div><div class="shot__frame" data-tablet="e-after"></div></figure>
+    <figure class="shot"><div class="shot__label"><span class="tag is-after">제안</span>B 책등 DVD</div><div class="shot__frame" data-tablet="b-after"></div></figure>
+  </div>
+</section>
+
+<section class="variant" id="decide">
+  <h2>정할 것과 제안</h2>
+  <div class="table-wrap"><table class="decide">
+    <thead><tr><th>항목</th><th>제안</th><th>다른 선택지</th></tr></thead>
+    <tbody>
+      <tr><td>면 선택 자리</td><td><b>재킷 아래 이름표의 메뉴</b>(후보 / 지금 것 유지 / 비우기, 그림과 크기 포함). 재킷 위에서 결과가 보인다.</td><td class="alt">재킷 아래에 결과 그림 세 칸을 따로 두고 칸마다 고르기</td></tr>
+      <tr><td>기존 컬렉션의 기본값</td><td>지금 규칙 그대로 <b>지금 것 유지</b>.</td><td class="alt">후보가 지금 표지보다 크면(예: 2184 vs 800 px) 기본을 후보로</td></tr>
+      <tr><td>닫기</td><td>위 ✕를 빼고 <b>나중에</b>와 Esc만. 닫는 길이 하나.</td><td class="alt">✕도 유지(지금처럼 둘)</td></tr>
+      <tr><td>거절 확인</td><td>브라우저 확인창 대신 앱 확인 창(재킷 작은 그림 + “후보를 거절할까요?” + <b>거절</b>).</td><td class="alt">확인 없이 거절하고 “되돌리기” 알림(서버가 되살리기를 지원해야 함)</td></tr>
+      <tr><td>감독</td><td><b>가져오지 않는다</b>(사용자 결정). 창에서 감독 줄이 빠지고, 적용할 때도 감독을 보내지 않는다. 이미 연결된 감독은 그대로.</td><td class="alt">—</td></tr>
+      <tr><td>장르 한국어</td><td><b>고정 번역표</b> 하나(PC·태블릿 공용), 돌려 말하지 않는 직역. 표에 없는 태그는 일본어 그대로. 판매·행사·샘플 태그는 숨김.</td><td class="alt">—</td></tr>
+      <tr><td>화질·배급 태그</td><td><code>ハイビジョン</code>, <code>4K</code>, <code>独占配信</code>, <code>配信専用</code>도 장르가 아니라 <b>숨김</b>으로 둔다.</td><td class="alt">번역해서 보이기(고화질, 4K, 독점 배포, 전송 전용)</td></tr>
+      <tr><td>태블릿 선 옮기기</td><td>PC처럼 선을 끌어 옮기게 한다(지금은 서버 자동 나눔만).</td><td class="alt">태블릿은 지금처럼 자동 나눔만, 선은 보기만</td></tr>
+      <tr><td>새 컬렉션 이름</td><td>지금처럼 품번으로 채우고 “원제로” 버튼.</td><td class="alt">처음부터 원제로</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="variant" id="gaps">
+  <h2>확인 못 한 것</h2>
+  <ul class="plain">
+    <li>앱 화면에서 직접 보지 않았다. 지금 창과 제안 모두 앱 CSS를 복사해 읽은 정적 그림이고, 재킷은 임시 그림이다(2026-10-18 CSS).</li>
+    <li>DVD 책등 그림을 PC 창에서 보이려면 PC 후보에 그 그림 주소(서버 <code>spineSource</code>)가 실려 와야 한다. 지금 PC 후보 형식(<code>AvLinkCandidate</code>)에는 없다.</li>
+    <li>밝은 테마는 앱에 없는 ‘종이’ 값을 빌려 이 페이지에서만 보인다.</li>
+    <li>장르 번역표의 낱말은 시안용 일부다. 실제 DMM 장르 목록 전체는 구현 때 모아 채워야 한다.</li>
+    <li>1440 × 900보다 작은 창(예: 800 × 640)과 125% 배율은 그려 보지 않았다(README에 규칙만 있다).</li>
+  </ul>
+</section>
+
+</div>
+<script src="avcover.js"></script>
+<script>
+(() => {
+  const { S, before, after } = window.AvCover;
+  const FW = 1440, FH = 900;
+  const backdrop = `<div class="backdrop"><div class="bd-rail"></div><div class="bd-main">${Array.from({ length: 24 }, (_, i) => `<span class="ph p${(i % 12) + 1}"></span>`).join('')}</div></div>`;
+  const frames = [];
+  document.querySelectorAll('.shot[data-render]').forEach((fig) => {
+    const c = S[fig.dataset.state]; const opts = fig.dataset.opts ? JSON.parse(fig.dataset.opts) : {};
+    const isAfter = fig.dataset.render === 'after';
+    const label = document.createElement('div'); label.className = 'shot__label';
+    label.innerHTML = `<span class="tag${isAfter ? ' is-after' : ''}">${isAfter ? '제안' : '지금'}</span><button type="button" class="shot__zoom">실제 크기</button>`;
+    const box = document.createElement('div'); box.className = 'shot__frame'; box.style.aspectRatio = `${FW} / ${FH}`;
+    box.innerHTML = `<div class="frame" style="width:${FW}px;height:${FH}px;--fw:${FW}px;--fh:${FH}px">${backdrop}${isAfter ? after(c, opts) : before(c)}</div>`;
+    fig.prepend(box); fig.prepend(label);
+    const zoom = label.querySelector('.shot__zoom');
+    zoom.addEventListener('click', () => { const on = fig.classList.toggle('is-actual'); zoom.textContent = on ? '맞춰 보기' : '실제 크기'; box.style.aspectRatio = on ? '' : `${FW} / ${FH}`; scale(); });
+    frames.push({ fig, box });
+  });
+  document.querySelectorAll('[data-tablet]').forEach((box) => {
+    const f = document.createElement('iframe');
+    f.src = `tablet.html#${box.dataset.tablet}`; f.title = `태블릿 ${box.dataset.tablet}`;
+    box.append(f);
+  });
+  function scale() {
+    for (const { fig, box } of frames) { if (!fig.classList.contains('is-actual')) box.style.setProperty('--s', String(box.clientWidth / FW)); }
+    document.querySelectorAll('[data-tablet]').forEach((box) => box.style.setProperty('--s', String(box.clientWidth / 800)));
+  }
+  scale();
+  new ResizeObserver(scale).observe(document.body);
+
+  /* Theme: 자동 / 어둡게 / 밝게, remembered per viewer; tablet frames follow by message. */
+  const root = document.documentElement, buttons = document.querySelectorAll('[data-theme-set]');
+  const send = (value) => document.querySelectorAll('iframe').forEach((f) => { try { f.contentWindow.postMessage({ avcoverTheme: value }, '*'); } catch { /* not loaded yet */ } });
+  const apply = (value) => {
+    if (value === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', value);
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === value)));
+    send(value);
+  };
+  let saved = 'auto'; try { saved = localStorage.getItem('avcover-theme') || 'auto'; } catch { /* storage blocked */ }
+  apply(saved);
+  buttons.forEach((b) => b.addEventListener('click', () => { apply(b.dataset.themeSet); try { localStorage.setItem('avcover-theme', b.dataset.themeSet); } catch { /* storage blocked */ } }));
+  document.querySelectorAll('iframe').forEach((f) => f.addEventListener('load', () => send(root.getAttribute('data-theme') || 'auto')));
+})();
+</script>
+</body>
+</html>

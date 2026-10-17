@@ -64,6 +64,10 @@ importScripts("picker/model.js", "picker/background.js");
       return { ok: true };
     }
     switch (message?.type) {
+      // Cheap wake-up probe: a content script sends it when a press might become
+      // a hold, so a suspended worker is already running when the arc asks for state.
+      case "worker:ping":
+        return { ok: true };
       case "pair:review": {
         if (!globalThis.LakomicsListApi.parsePairing(message.value)) return { ok: false, code: "invalid_pairing" };
         await chrome.tabs.create({ url: chrome.runtime.getURL("options/pairing.html") + "#" + encodeURIComponent(message.value) });
@@ -196,14 +200,23 @@ importScripts("picker/model.js", "picker/background.js");
     void chrome.runtime.openOptionsPage?.();
   });
 
+  // The first arc open after a browser start or an update must not compete with
+  // this refresh, so it runs a few seconds later. If the worker is suspended
+  // before then, the next collector:state refreshes stale data by itself.
+  const STARTUP_REFRESH_DELAY_MS = 4000;
+  function afterStartup(work) {
+    const run = () => { void work().catch(() => {}); };
+    if (typeof globalThis.setTimeout === "function") globalThis.setTimeout(run, STARTUP_REFRESH_DELAY_MS);
+    else run();
+  }
+
   chrome.runtime.onStartup?.addListener(() => {
-    void globalThis.LakomicsProfileStore.flush()
-      .then(() => globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }))
-      .catch(() => {});
+    afterStartup(() => globalThis.LakomicsProfileStore.flush()
+      .then(() => globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true })));
   });
 
   chrome.runtime.onInstalled?.addListener(() => {
-    void globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }).catch(() => {});
+    afterStartup(() => globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }));
     chrome.contextMenus?.remove?.(AV_LOOKUP_MENU_ID, () => void chrome.runtime.lastError);
     if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_SEND_MENU_ID, title: "표지 찾기: “%s”", contexts: ["selection"], documentUrlPatterns: ["https://*/*"] }, () => void chrome.runtime.lastError);
   });

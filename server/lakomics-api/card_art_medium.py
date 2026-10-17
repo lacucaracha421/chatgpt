@@ -105,7 +105,7 @@ class MediumError(Exception):
         self.transient = transient
 
 
-def make(s3, bucket, row, *, encoder_script=None, stop=None):
+def make(s3, bucket, row, *, encoder_script=None, stop=None, prefix=PREFIX):
     """Encode and publish one original. Returns ``(sha256, size_bytes, key)``; does not touch SQLite.
 
     The thumbnail worker's download (size, digest and time bound) and encode (child process in its
@@ -132,7 +132,7 @@ def make(s3, bucket, row, *, encoder_script=None, stop=None):
     try:
         thumbs.validate_webp(payload)
         key = thumbs.publish_buffer(s3, bucket, payload, digest, deadline=time.monotonic() + 60,
-                                    key=object_key(digest))
+                                    key=prefix + digest + ".webp")
     except Exception:
         raise MediumError("storageWriteFailed", True) from None
     return digest, len(payload), key
@@ -166,6 +166,8 @@ class CardArtMediumWorker:
     ``on_change(db)`` runs after a copy was recorded (the cards signal bump).
     """
 
+    thread_name = "card-art-medium"
+
     def __init__(self, db_path, s3, bucket, wanted, on_change, *, poll_seconds=120.0, batch=3, delay=2.0):
         self.db_path, self.s3, self.bucket = str(db_path), s3, bucket
         self.wanted, self.on_change = wanted, on_change
@@ -179,7 +181,7 @@ class CardArtMediumWorker:
         if thread is not None and thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, name="card-art-medium", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=self.thread_name, daemon=True)
         self._thread.start()
 
     def stop(self, timeout=5.0, on_stopped=None):

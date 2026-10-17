@@ -349,9 +349,11 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
-    if let Some(id) = path.strip_prefix("/av-link-jacket/") {
+    if let Some(rest) = path.strip_prefix("/av-link-jacket/") {
+        // `<id>` is the jacket; `<id>/spine` is the DVD cover a borrowed spine is cut from.
+        let (id, spine) = match rest.strip_suffix("/spine") { Some(id) => (id, true), None => (rest, false) };
         if uuid::Uuid::parse_str(id).is_err() { return empty_response(StatusCode::BAD_REQUEST); }
-        return no_store(match library.and_then(|lib| lib.av_link_jacket(id).ok()) {
+        return no_store(match library.and_then(|lib| (if spine { lib.av_link_spine_source(id) } else { lib.av_link_jacket(id) }).ok()) {
             Some((bytes, mime)) => Response::builder().status(StatusCode::OK)
                 .header(CONTENT_TYPE, mime).header(CONTENT_LENGTH, bytes.len().to_string())
                 .body(bytes).expect("AV jacket response is valid"),

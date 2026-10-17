@@ -7,7 +7,7 @@
 import {createContext, useContext, useEffect, useRef, useState, type RefObject} from 'react';
 import {native} from './transport';
 import {mediaTicket} from './media';
-import {artworkVariant, collectionCover, type CollectionSummary} from './collectionModel';
+import {artworkSize, collectionCover, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
 import {beginShelfForeground} from './shelfWarmActivity';
 
@@ -27,8 +27,8 @@ function queued(run:()=>Promise<Ticket>,signal:AbortSignal,queue=artworkQueue):P
     signal.addEventListener('abort',cancel,{once:true}); if(queue.active<queue.limit)start();else queue.pending.push(start);
   }).finally(finish);
 }
-export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
-  const variant=artworkVariant(item,artworkId,original);
+export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal, medium=false):Promise<Ticket> {
+  const variant=artworkSize(item,artworkId,original,medium);
   const read=()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant,revision,digest:item.artworkVersions?.[artworkId]?.[variant]??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
   if(original){const finish=beginShelfForeground();return read().finally(finish);}
   return queued(read,signal);
@@ -38,11 +38,11 @@ export function artworkTicket(item:CollectionSummary, artworkId:string|undefined
  * cache by it, so a publication revision alone (every personal edit, such as Showcase, bumps it)
  * is not a new image. Without a digest the revision is the only version there is.
  */
-export function artworkVersion(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return id?item.artworkVersions?.[id]?.[artworkVariant(item,id,original)]||revision:'';
+export function artworkVersion(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean,medium=false) {
+  return id?item.artworkVersions?.[id]?.[artworkSize(item,id,original,medium)]||revision:'';
 }
-export function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return JSON.stringify([item.id,id??null,item.coverAssetId??null,artworkVariant(item,id,original),artworkVersion(item,id,revision,original)]);
+export function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean,medium=false) {
+  return JSON.stringify([item.id,id??null,item.coverAssetId??null,artworkSize(item,id,original,medium),artworkVersion(item,id,revision,original,medium)]);
 }
 /** Resolves once `url` is decoded (or cannot be), so a replacement never blanks the old image. */
 export async function decoded(url:string) {
@@ -67,12 +67,12 @@ export class ArtworkMemory {
   /** A pre-decode of `source` still under way, if any. */
   pending(source:string){return this.loads.get(source)??null;}
   /** Join the first visible request too, so the list and Showcase do not fetch the same cover twice. */
-  request(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean,signal:AbortSignal):Promise<Ticket>{
-    const source=artworkSource(item,id,revision,original),remembered=this.get(source);
+  request(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean,signal:AbortSignal,medium=false):Promise<Ticket>{
+    const source=artworkSource(item,id,revision,original,medium),remembered=this.get(source);
     if(remembered)return Promise.resolve({url:remembered});
     let load=this.loads.get(source);
     if(!load){
-      load=artworkTicket(item,id,revision,original,signal).then(async ticket=>{
+      load=artworkTicket(item,id,revision,original,signal,medium).then(async ticket=>{
         if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
         await decoded(ticket.url);this.put(source,ticket);return ticket.url;
       }).finally(()=>{if(this.loads.get(source)===load)this.loads.delete(source);});
@@ -113,10 +113,13 @@ export type Retries={source:string;failed:number;busy:number};
  * A list cover as a plain URL for the shared shelf case (`LightCase`). Like the grid's
  * `Artwork`: requested only while `host` is near the viewport, shared with the screen's memory
  * of decoded covers, retried on the same budget, and the shown URL stays until the next decodes.
+ * `want.medium`: the server's medium copy where the publication names one, the thumbnail where it
+ * does not or where it cannot be loaded. `want.original`: the full-size artwork.
  */
-export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revision:string,active:boolean,host:RefObject<Element|null>):string|null {
+export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revision:string,active:boolean,host:RefObject<Element|null>,want:{original?:boolean;medium?:boolean}={}):string|null {
   const memory=useContext(ArtworkMemoryContext);
-  const source=artworkSource(item,id,revision,false);
+  const original=!!want.original,medium=!!want.medium;
+  const source=artworkSource(item,id,revision,original,medium);
   const [shown,setShown]=useState<LoadedArtwork|null>(()=>{const url=memory?.get(source);return url?{source,url}:null;});
   const [visible,setVisible]=useState(false),[attempt,setAttempt]=useState(0);
   const retries=useRef<Retries>({source,failed:0,busy:0}),timer=useRef(0);
@@ -132,9 +135,11 @@ export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revi
     if(!active||!visible){retries.current={source,failed:0,busy:0};return;}
     if((!id&&!item.coverAssetId)||shown?.source===source)return;
     const controller=new AbortController();
-    const request=memory?.request(item,id,revision,false,controller.signal)??artworkTicket(item,id,revision,false,controller.signal).then(async ticket=>{
+    const load=(sized:boolean)=>memory?.request(item,id,revision,original,controller.signal,sized)??artworkTicket(item,id,revision,original,controller.signal,sized).then(async ticket=>{
       if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');await decoded(ticket.url);return ticket;
     });
+    // A medium copy that cannot be loaded (made after the list, or gone) is the thumbnail again: never a blank.
+    const request=artworkSize(item,id,original,medium)==='medium'?load(true).catch(error=>{if(controller.signal.aborted)throw error;return load(false);}):load(false);
     void request.then(ticket=>{if(!controller.signal.aborted)setShown({source,url:ticket.url});}).catch(error=>{
       if(controller.signal.aborted)return;
       if(artworkMissing(error))return;
@@ -149,6 +154,17 @@ export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revi
   },[source,revision,active,visible,attempt]);// eslint-disable-line react-hooks/exhaustive-deps
   // A work without any cover shows the case's own material; one whose cover changed keeps the old one until the new decodes.
   return !id&&!item.coverAssetId?null:shown?.url??null;
+}
+
+/**
+ * One face of the pulled-out case: the image the shelf already has (the thumbnail, or the medium copy for a spine) first, then the
+ * full-size artwork, which replaces it only once decoded. The full-size one is requested after the small one has shown, so it
+ * never delays it; a face that has no full-size artwork keeps the small one.
+ */
+export function useFaceUrl(item:CollectionSummary,id:string|null|undefined,revision:string,active:boolean,host:RefObject<Element|null>,medium=false):string|null {
+  const small=useCoverUrl(item,id,revision,active,host,{medium});
+  const full=useCoverUrl(item,id,revision,active&&small!==null,host,{original:true});
+  return full??small;
 }
 
 /** `asset`: without an artwork id, fall back to the work's cover asset (an older publication). */

@@ -15,7 +15,7 @@ export type AvPerson = ProfilePerson & {id:string;name:string;nameJa?:string|nul
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
   kakaoReview?: import('../src/library/types').KakaoReview | null;
-  artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;
+  artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null;/** Spine artwork only, from a server that made the medium (768 px) copy. */medium?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;
   av?:AvInfo|null;
   avPeople?: (ProfilePerson & {personId: string})[];
@@ -31,6 +31,8 @@ export type CollectionSummary = {
   ownedPlatform?:string|null;
   /** From an upgraded server: the work's selected (else first) spine artwork, ticketed like the cover. */
   spineArtworkId?:string|null;
+  /** From an upgraded server: the work's selected (else first) back artwork, ticketed like the cover. AV cases print it on their back. */
+  backArtworkId?:string|null;
   showcase:boolean; showcaseOrder?:number|null; volumes?:CollectionVolume[];
   /** Manga only, from an upgraded PC: 신간 알림 state (`available` = an Aladin/Kakao binding). */
   releaseWatch?:{enabled:boolean;available:boolean}|null;
@@ -103,6 +105,14 @@ export function artworkVariant(item:CollectionSummary,artworkId:string|null|unde
   const versions=artworkId?item.artworkVersions?.[artworkId]:undefined;
   // Only a published `null` digest says there is no thumbnail; an absent one says nothing.
   return original||(versions?.thumbnail===null&&!!versions.original)?'original':'thumbnail';
+}
+/**
+ * What a surface asks for: `artworkVariant`, or the server's medium copy when the surface wants it and the publication names one
+ * (`artworkVersions[id].medium`); a work without a published medium digest keeps its thumbnail.
+ */
+export function artworkSize(item:CollectionSummary,artworkId:string|null|undefined,original=false,medium=false):'original'|'medium'|'thumbnail' {
+  const variant=artworkVariant(item,artworkId,original);
+  return variant==='thumbnail'&&medium&&artworkId&&item.artworkVersions?.[artworkId]?.medium?'medium':variant;
 }
 export function collectionCover(item:CollectionSummary) { return item.selectedWorkArtworkId ?? [...(item.volumes ?? [])].sort((a,b)=>a.editionIndex-b.editionIndex || a.volumeNumber-b.volumeNumber).find(v=>v.coverArtworkId)?.coverArtworkId; }
 

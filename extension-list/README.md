@@ -5,6 +5,12 @@ extension. After updating it, reload the extension and the collecting page so th
 new content scripts are active. The existing connection and portable profile are
 retained.
 
+For a lighter reload (for example on a tablet), build the slim package with
+`python scripts/build-extension-slim.py` from the repository root. It writes
+`%LOCALAPPDATA%\Lakomics\ExtensionDev\unpacked` (load this folder) and `latest.zip`
+with only the runtime files; `scripts/publish-extension-dev.ps1` runs the tests, builds
+it and serves the zip over Tailscale.
+
 ## YouTube subtitles (personal use)
 
 On `https://www.youtube.com/*`, the player AI button cleans Korean captions or

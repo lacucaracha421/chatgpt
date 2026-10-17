@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_capture_api_stub import fake_s3
 import app as api_app
+import collection_artwork_medium
 import head_cache
 import mobile_collections
 from fastapi.testclient import TestClient
@@ -685,6 +686,42 @@ class MobileCollectionsTests(unittest.TestCase):
         self.assertEqual(self.client.get("/v1/collections/first", headers=AUTH).json()["item"]["spineArtworkId"], "spine-1")
         self.assertEqual(self.client.post("/v1/collections/selected/artworks/spine-b/media-ticket",
                                           headers=AUTH, json={}).status_code, 200)
+
+    def test_av_back_cover_and_spine_medium_copies_are_listed_and_ticketed(self):
+        cover, spine, back = blob(b"cover"), blob(b"spine"), blob(b"back")
+        def art(id, kind, selected, media):
+            return {"id": id, "kind": kind, "selected": selected, "thumbnail": media, "original": media}
+        arts = [art("cover", "cover", True, cover), art("spine", "spine", True, spine), art("back", "back", False, back)]
+        av = {**work("av", type="av"), "selectedWorkArtworkId": "cover", "artworks": arts}
+        game = {**work("game", type="game"), "selectedWorkArtworkId": "cover", "artworks": arts}
+        for media, body in ((cover, b"cover"), (spine, b"spine"), (back, b"back")):
+            fake_s3.objects[media["objectKey"]] = {"body": body, "content_type": "image/webp"}
+        self.assertEqual(self.publish([av, game]).status_code, 200)
+        listed = {row["id"]: row for row in self.listing().json()["items"]}
+        # Only an AV case prints a stored back, and the list names its digest like the spine's.
+        self.assertEqual(listed["av"]["backArtworkId"], "back")
+        self.assertEqual(listed["av"]["artworkVersions"]["back"]["original"], back["sha256"])
+        self.assertNotIn("backArtworkId", listed["game"])
+        self.assertNotIn("medium", listed["av"]["artworkVersions"]["spine"])
+        ticket = lambda variant: self.client.post("/v1/collections/av/artworks/spine/media-ticket", headers=AUTH, json={"variant": variant})
+        self.assertEqual(ticket("medium").status_code, 404)
+
+        medium = hashlib.sha256(b"medium").hexdigest()
+        with api_app.get_db() as db:
+            collection_artwork_medium.record(db, {"sha256": spine["sha256"]}, medium, 6, "derived/collection-medium/v1/" + medium + ".webp")
+        listed = {row["id"]: row for row in self.listing().json()["items"]}
+        self.assertEqual(listed["av"]["artworkVersions"]["spine"]["medium"], medium)
+        self.assertEqual(listed["game"]["artworkVersions"]["spine"]["medium"], medium)
+        self.assertNotIn("medium", listed["av"]["artworkVersions"]["cover"])
+        self.assertEqual(self.client.get("/v1/collections/av", headers=AUTH).json()["item"]["artworkVersions"]["spine"]["medium"], medium)
+        reply = ticket("medium")
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual((reply.json()["sha256"], reply.json()["size_bytes"], reply.json()["content_type"]), (medium, 6, "image/webp"))
+        self.assertIn(medium, reply.json()["url"])
+        # The other variants and other artwork are unaffected; a cover has no medium copy.
+        self.assertEqual(ticket("thumbnail").json()["sha256"], spine["sha256"])
+        self.assertEqual(self.client.post("/v1/collections/av/artworks/cover/media-ticket", headers=AUTH, json={"variant": "medium"}).status_code, 404)
+        self.assertEqual(self.client.post("/v1/collections/av/artworks/spine/media-ticket", json={"variant": "medium"}).status_code, 401)
 
     # Portrait images (feature ``portraitImage``).
 

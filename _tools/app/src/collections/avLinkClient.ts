@@ -41,8 +41,12 @@ export interface AvLinkCandidate {
   inbox: AvLinkInboxItem; matches?: AvLinkMatch[]; metadata: AvLinkMovie; fields: AvLinkFields;
   jacketUrl: string; jacketWidth: number; jacketHeight: number;
   defaultSplit: { x1: number; x2: number; isWrap: boolean; useSpine: boolean };
-  current: AvLinkCurrentCollection | null; performers: AvLinkPersonMatch[]; directors: AvLinkPersonMatch[];
+  /** Set when the jacket has no spine of its own: the strip of another (DVD) image the server cuts it from. */
+  spineSource?: AvLinkSpineSource | null;
+  current: AvLinkCurrentCollection | null; performers: AvLinkPersonMatch[];
 }
+/** The image a borrowed spine comes from, and where the strip is in it (pixels of that image). */
+export interface AvLinkSpineSource { url: string; width: number; height: number; x1: number; x2: number }
 export type AvLinkPersonChoice =
   | { name_ja: string; action: "link"; personId: string }
   | { name_ja: string; action: "new"; displayName: string };
@@ -57,7 +61,9 @@ export type AvLinkApplyRequest = (
 ) & {
   split: { x1: number; x2: number };
   surfaces: { front: AvLinkSurfaceChoice; spine: AvLinkSurfaceChoice; back: AvLinkSurfaceChoice };
-  fields: AvLinkFields; performers: AvLinkPersonChoice[]; directors: AvLinkPersonChoice[];
+  fields: AvLinkFields; performers: AvLinkPersonChoice[];
+  /** Directors are no longer imported: always empty. */
+  directors: AvLinkPersonChoice[];
 };
 export interface AvLinkApplyResult { collectionId: string; covers: AvLinkCoverSet }
 
@@ -67,7 +73,10 @@ export const avLinkClient = {
   /** collectionId previews an explicitly chosen destination, including its revision. */
   getCandidate: async (inboxId: string, collectionId?: string): Promise<AvLinkCandidate> => {
     const result = await invoke<AvLinkCandidate>("get_av_link_candidate", { inboxId, collectionId });
-    return { ...result, jacketUrl: nativeMediaUrl(result.jacketUrl) };
+    return {
+      ...result, jacketUrl: nativeMediaUrl(result.jacketUrl),
+      spineSource: result.spineSource ? { ...result.spineSource, url: nativeMediaUrl(result.spineSource.url) } : null,
+    };
   },
   retry: (inboxId: string) => invoke<void>("retry_av_link", { inboxId }),
   fixCode: (inboxId: string, code: string) => invoke<void>("fix_av_link_code", { inboxId, code }),
