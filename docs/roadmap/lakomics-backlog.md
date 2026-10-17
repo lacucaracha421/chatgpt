@@ -8,7 +8,8 @@ Reconciled 2026-10-13 against `main` at `2e751573`, using current source, Git hi
 
 Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped outside this list: TRANSFER-001 S1–S6, SIM-ORIGINAL-001, diet batches A–F, test cleanup and split, card trash, text-only calendar, NL search paused. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
 
-0. **`FOLDER-NAV-001`** — next: implement the approved folder navigation design (accordion tree, recent-folder chips, follow current location); PC first, tablet chips in the same round (see [section](#folder-nav-001)).
+0. **`TABLET-STRUCT-001`** — next: bring the PC's structural conveniences to the tablet (long-press action sheets, recent destinations, folder drawer, folder pins, selection, swipe-down close, history Back); approved 2026-10-17 (see [section](#tablet-struct-001)).
+0. **`FOLDER-NAV-001`** — PC delivered (`7e5d3678`); tablet chip rows are replaced by the TABLET-STRUCT-001 drawer (see [section](#folder-nav-001)).
 0. **`CHAR-CLAUDE-001`** — slice 3: experiment on identifying series members in images without a character or recommendation; retiring the tablet 캐릭터 확인 screen and its review feed is low priority (see [section](#char-claude-001)).
 1. **`COLLECTOR-MENU-SCOPE-001`** — `PARTIAL`: 3.5.35 (`0f578b44`) delivered HTTP pages, frames, media and touch hold; inventory sites that still swallow the menu, investigate the PDF viewer, and retain the later save-X-post/link/page idea (see [section](#collector-menu-scope-001)).
 2. **`COLLECTOR-TABLET-001`** — remaining selection chip "번역" and touch-menu slice; the 3.5.35 link/selection hold is delivered (see [section](#collector-tablet-001--tablet-translation-chip-and-touch-menu)).
@@ -25,6 +26,21 @@ Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped ou
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
 - Nothing open (the user confirmed Collections motion with 항상 켜기 and the "<name> 아님" button on 2026-10-13).
+
+<a id="tablet-struct-001"></a>
+## TABLET-STRUCT-001 — PC conveniences in tablet form (2026-10-17)
+
+Status: `OPEN` — design approved, not started. User: "모바일 앱 쪽에서 구조적으로 PC의 편리함을 따라갈 수 있을 만한 곳을 찾아보자". Mockup and spec: `docs/prototypes/tablet-structure-20261017/` (README is the spec; artifact https://claude.ai/artifact/LYfYL4Sg6MYu24GWEVJS4L). Decisions on 2026-10-17: "최근칩은 다시 없애고 사이드바를 적용하는걸로 하자. 나머지 추천대로. 폴더 고정도 넣고".
+- **Remove** the tablet recent-chip rows (asset root and folder 종류 bar) built for FOLDER-NAV-001; keep the per-device recent history, which feeds the drawer and the batch sheets.
+- **A. Long-press action sheets** for folder cards, album rows, collection covers/spines, artists, drawer rows; images keep long-press = selection and gain a ⋯ in the selection bar. Items mirror the PC context menus from one shared action list, minus PC-only items (folder move/delete, 분류함으로 쓰기, artist merge, album move, video compare).
+- **C. Recent destinations** chip row at the top of the 분류/앨범 batch sheets and the viewer classification editor; one tap applies, done state, sheet closes after 0.9 s, selection kept; already-full destinations dimmed.
+- **B. Folder drawer** from a ☰ button at the top-bar left (no edge swipe): 빠른 보기 → 고정 → 최근 → folder tree (one open path, FOLDER-NAV-001 rules) → 앨범; tap navigates and closes. Reverses the earlier "tablet: chips only" decision.
+- **Folder pins on the tablet** (needs a server write path) and folder icon/colour editing.
+- **D. Selection:** 전체 선택 covers the whole list including unloaded pages; long-press then drag to range-select, starting on a selected tile deselects, auto-scroll in 96 px edges.
+- **E. Swipe down to close** the unzoomed viewer from below the top bar; closes at 120 px into the tile with the existing close zoom.
+- **F. Back = visit history** for both Android Back and the on-screen ← (option 1); parent folder stays on the breadcrumb.
+- Foundations: one shared action list for PC menus and tablet sheets, one long-press hook (450 ms, 10 px everywhere), one destination model (tree, recent, pins).
+- Wording: "이름 바꾸기" everywhere (PC folder/album menus say "이름 변경"); collection delete reads "휴지통으로".
 
 <a id="folder-nav-001"></a>
 ## FOLDER-NAV-001 — Find folders in a deep sidebar without search (2026-10-17)

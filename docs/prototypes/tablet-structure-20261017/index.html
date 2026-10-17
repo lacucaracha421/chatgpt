@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>태블릿 구조 시안</title>
+<!-- The app's real CSS, copied under app-css/ with its folder layout so relative imports keep working:
+     mobile.css imports tokens.css (with fonts.css → Pretendard) and controls.css (with surface-motion.css).
+     tablet-structure.css = the proposed CSS. page.css = mockup frame, light-theme stand-in, stand-in pictures. -->
+<link rel="stylesheet" href="app-css/mobile-client/mobile.css">
+<link rel="stylesheet" href="app-css/mobile-client/library.css">
+<link rel="stylesheet" href="app-css/mobile-client/home.css">
+<link rel="stylesheet" href="app-css/mobile-client/folderCounts.css">
+<link rel="stylesheet" href="app-css/mobile-client/moreSheet.css">
+<link rel="stylesheet" href="app-css/src/assets/recentFolders.css">
+<link rel="stylesheet" href="app-css/mobile-client/recentFolders.css">
+<link rel="stylesheet" href="app-css/mobile-client/ClassificationBatchSheet.css">
+<link rel="stylesheet" href="app-css/src/assets/SelectionBar.css">
+<link rel="stylesheet" href="tablet-structure.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+
+<header class="doc-head">
+  <div class="doc-head__row">
+    <h1>태블릿 구조 시안</h1>
+    <div class="theme-switch" role="group" aria-label="화면 테마"><button type="button" data-theme-set="auto">자동</button><button type="button" data-theme-set="dark">어둡게</button><button type="button" data-theme-set="light">밝게</button></div>
+  </div>
+  <p class="lead">PC의 오른쪽 클릭·사이드바·여러 장 고르기를 태블릿 손가락 동작으로 옮기는 여섯 가지를 우선순위대로 그렸다. 모두 <b>이미 있는 부품</b>(아래에서 올라오는 시트, 왼쪽 분류 편집 패널, 최근 칩, 선택 바, 뷰어 닫기 줌)을 다시 쓰고, 새로 만드는 것은 그 부품을 잇는 동작뿐이다. 화면은 세로 800 × 1280 태블릿을 줄여 보인다. 각 화면의 <b>크게</b>를 누르면 넓게 본다.</p>
+  <p class="lead">앱의 실제 토큰·컨트롤·태블릿 CSS를 그대로 읽는다. 그림과 이름은 임시 데이터다. 하늘색 원과 빗금은 손가락 위치와 영역을 보여 주는 표시일 뿐 앱 화면이 아니다. 밝은 테마는 앱에 아직 없는 ‘종이’ 테마 값을 빌려 이 페이지에서만 보인다.</p>
+  <ul class="toc">
+    <li><a href="#a"><b>A</b>길게 눌러 동작 시트</a></li>
+    <li><a href="#c"><b>C</b>최근 목적지 한 번 탭</a></li>
+    <li><a href="#b"><b>B</b>폴더 서랍</a></li>
+    <li><a href="#d"><b>D</b>선택 강화</a></li>
+    <li><a href="#e"><b>E</b>뷰어 아래로 쓸어 닫기</a></li>
+    <li><a href="#f"><b>F</b>뒤로 = 방문 기록</a></li>
+    <li><a href="#base">바탕 세 가지</a></li>
+    <li><a href="#decide">정할 것</a></li>
+  </ul>
+</header>
+
+<section class="variant" id="a">
+  <h2><span class="key">A</span>길게 눌러 동작 시트 <small>PC 오른쪽 클릭 메뉴와 같은 항목</small></h2>
+  <p class="note">폴더 카드, 앨범, 컬렉션 표지·책등, 작가, 최근 칩을 <b>길게 누르면</b> 아래에서 시트가 올라온다. 첫 줄은 <b>무엇에 대한 메뉴인지</b>(그림 + 이름 + 한 줄 정보)이고, 그 아래는 PC에서 같은 것을 오른쪽 클릭했을 때와 <b>같은 항목, 같은 순서, 같은 낱말</b>이다. 사용자가 PC 전용으로 정한 것(폴더 이동·삭제, 캐릭터 지정, 깊은 캐릭터 정리)만 빠진다. 지우는 항목은 맨 아래에 선으로 떼어 빨갛게 둔다. 시트 모양은 지금의 더보기 시트(<code>BottomSheet</code> + <code>MoreSheet</code> 줄)를 그대로 쓴다. 이미지는 지금처럼 길게 누르면 <b>선택 모드</b>가 되고, 선택 바에 새로 생기는 <b>⋯</b>가 이미지 메뉴를 연다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="a-folder"></div><figcaption><b>폴더 카드를 길게</b> → 고정, 하위 폴더 만들기, 이름 바꾸기, 아이콘 및 색상.<span class="step">PC 폴더 트리 메뉴와 같음. 분류함으로 쓰기·폴더 이동·삭제는 PC 전용이라 없음.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="a-album"></div><figcaption><b>앨범을 길게</b> → 하위 앨범 만들기, 이름 바꾸기, 아이콘 및 색상, 삭제.<span class="step">지금 ⋯ → 앨범 관리 안에 있는 것을 카드에서 바로. 앨범 이동은 태블릿에 아직 없음.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="a-collection"></div><figcaption><b>컬렉션 표지·책등을 길게</b> → 편집, 쇼케이스에 추가, 휴지통으로.<span class="step">PC 컬렉션 메뉴와 같음. 낱말은 ‘휴지통으로’로 맞춤(30일 되살리기가 되므로).</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="a-artist"></div><figcaption><b>작가를 길게</b> → 고정, 이름 바꾸기, 숨기기.<span class="step">‘다른 작가와 합치기’는 PC 전용으로 남김.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="a-chip"></div><figcaption><b>최근 칩을 길게</b> → 최근에서 빼기.<span class="step">PC 칩 오른쪽 클릭과 같음. 첫 줄에 전체 경로가 보여 같은 이름 칩도 구분된다.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="a-images"></div><figcaption><b>이미지</b>: 길게 = 선택 모드(지금 그대로). <b>선택 바의 ⋯</b> → 출처 복사, 앨범에 추가, 정보 열기, 휴지통으로.<span class="step">PC 이미지 메뉴와 같은 목록. 앨범 안에서는 ‘이 앨범에서 빼기’가 더해진다.</span></figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li>누르는 동안 카드는 지금의 눌림 표시(살짝 어두워짐)만 보이고 커지거나 흔들리지 않는다. 0.45초가 차면 짧은 진동과 함께 시트가 올라온다(140 ms, 지금 시트와 같은 움직임).</li>
+    <li>시트는 아래로 쓸기, 바깥 탭, 닫기, 안드로이드 뒤로로 닫힌다. 항목을 누르면 시트가 닫히고 그 일을 한다(이름 바꾸기처럼 입력이 필요하면 지금의 입력 시트가 이어서 뜬다).</li>
+    <li>폴더 안 <b>폴더 선반 카드</b>를 길게 누르면 위 폴더 항목 뒤에 PC 선반 메뉴의 <b>앞으로 · 뒤로 · 맨 앞으로 · 맨 뒤로</b>가 한 묶음 더 붙는다. 캐릭터 그룹 카드는 정리 항목이 모두 PC 전용이라 시트를 열지 않는다.</li>
+  </ul>
+</section>
+
+<section class="variant" id="c">
+  <h2><span class="key">C</span>최근 목적지 한 번 탭 <small>분류 시트 · 앨범 시트 · 뷰어 분류 편집</small></h2>
+  <p class="note">여러 장을 고른 뒤 <b>분류</b>나 <b>앨범에 추가</b>를 열면 맨 위에 <b>최근</b> 칩 줄이 있다. 칩 하나를 누르면 <b>바로 적용</b>된다(적용 버튼 없음). 누른 칩이 그 자리에서 초록으로 잠깐 물들고 아이콘이 체크로 바뀐 뒤, 시트가 0.9초 뒤 스스로 닫힌다. 성공 알림 창은 따로 띄우지 않는다(DESIGN §12). 칩은 폴더 칩과 같은 부품이다. 고른 사진이 모두 이미 들어 있는 곳은 흐리게 두어 누를 수 없다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="c-class"></div><figcaption><span class="tag">눌러 보기</span><b>분류 변경 (12개)</b> 시트 맨 위의 최근. 칩을 누르면 적용 → 그 자리 완료 → 저절로 닫힘.<span class="step">아래 트리와 적용 버튼은 지금 그대로(최근에 없는 곳을 고를 때).</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="c-class-done"></div><figcaption><b>누른 직후</b>: 칩이 체크로 바뀌고 한 줄 결과(12/12개 분류 변경 · 하우징)가 칩 아래에 뜬다.<span class="step">실패가 있으면 지금처럼 한 줄 오류와 ‘다시 시도’, 시트는 닫히지 않는다.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="c-album"></div><figcaption><b>앨범에 추가</b> 시트 맨 위의 최근 앨범. 한 번 탭으로 추가.<span class="step">최근 앨범은 내가 사진을 넣은 앨범만 센다(최근 폴더 칩에는 앨범이 안 들어가는 규칙 그대로).</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="c-viewer"></div><figcaption><b>뷰어의 분류</b>(왼쪽 편집 패널) 검색 칸 위에 같은 최근 줄.<span class="step">지금도 한 번 누르면 바로 적용되고 닫히는 패널이라, 칩도 같은 방식.</span></figcaption></figure>
+  </div>
+  <p class="readout" id="c-readout"></p>
+</section>
+
+<section class="variant" id="b">
+  <h2><span class="key">B</span>폴더 서랍 <small>PC 사이드바에 해당</small> <span class="flag">사용자 확인 필요</span></h2>
+  <p class="note">에셋 화면 상단바 왼쪽의 <b>☰ 버튼으로만</b> 연다. 화면 가장자리를 밀어 여는 방식은 안드로이드 제스처 뒤로가기와 겹쳐서 쓰지 않는다. 서랍은 뷰어의 분류 편집에 쓰는 <b>왼쪽 전체 높이 패널</b>을 그대로 쓰고, 안의 순서는 PC 사이드바와 같다: <b>빠른 보기 → 고정 → 최근 → 폴더 트리 → 앨범</b>. 트리는 FOLDER-NAV-001 규칙대로 <b>지금 위치의 경로 하나만</b> 펼쳐 있고, ▸로 다른 갈래를 펼치면 같은 단계의 갈래는 접힌다. 이름을 누르면 그곳으로 가고 서랍이 닫힌다.</p>
+  <p class="note"><b>이전 결정을 뒤집는 제안이다.</b> 2026-10-17 폴더 탐색 시안에서 태블릿은 ‘트리 없이 칩만’으로 정했다. 서랍을 넣으려면 사용자의 허락이 먼저다. 허락이 없으면 B 없이 C·D·E만 진행해도 된다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="b-button"></div><figcaption><b>☰ 버튼</b>: 뒤로(←) 오른쪽, 경로·제목 왼쪽. 에셋 화면에만 있다.<span class="step">첫 화면에서는 로고 자리에 놓인다.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="b-drawer"></div><figcaption><span class="tag">눌러 보기</span><b>서랍을 연 상태</b>(하우징 안). ▸로 펼치고 접기, 이름을 누르면 이동하고 닫힘, ☰로 다시 열기.<span class="step">줄 높이 48, 누르는 영역 44 이상, 지금 위치는 PC와 같은 상아색 면 + 오른쪽 작은 네모 + 3px 그림자 선.</span></figcaption></figure>
+  </div>
+  <p class="readout" id="b-readout"></p>
+</section>
+
+<section class="variant" id="d">
+  <h2><span class="key">D</span>선택 강화 <small>전체 선택 · 길게 눌러 끌어 범위 선택</small></h2>
+  <p class="note">선택 바의 개수 바로 뒤에 <b>전체 선택</b>이 생긴다. 지금 보고 있는 목록 전체(아직 안 불러온 부분 포함, 예: 1,284개)를 고르고, 다 골라진 동안에는 탭처럼 굵게 보인다. 그리고 <b>길게 누른 뒤 손을 떼지 않고 끌면</b> 처음 타일부터 손가락 아래 타일까지가 한 번에 골라진다(구글 포토 방식). 이미 고른 타일에서 시작하면 반대로 <b>빼기</b>가 된다. 손가락이 화면 위·아래 가장자리 96px 안에 들어가면 목록이 스스로 스크롤되고, 깊이 들어갈수록 빨라진다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="d-all"></div><figcaption><b>전체 선택</b>: 개수 뒤에 놓인 조용한 버튼. ⋯는 A의 이미지 메뉴.<span class="step">좁아지면 지금처럼 라벨이 먼저 줄고 아이콘만 남는다.</span></figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="d-range"></div><figcaption><span class="tag">눌러 보기</span><b>범위 선택</b>: 0.45초 누른 뒤 끌기. 아래 빗금(가장자리)에 닿으면 자동 스크롤.<span class="step">마우스로 해 볼 수 있다. 실제 기기에서는 손가락을 떼지 않고 바로 끌면 된다.</span></figcaption></figure>
+  </div>
+  <p class="readout" id="d-readout"></p>
+</section>
+
+<section class="variant" id="e">
+  <h2><span class="key">E</span>뷰어 아래로 쓸어 닫기</h2>
+  <p class="note">확대하지 않은 사진을 <b>아래로 끌면</b> 사진이 손가락을 따라 내려오며 조금 작아지고, 검은 바탕이 옅어져 뒤의 목록이 비친다. <b>120px 넘게</b> 내리거나 빠르게 튕기고 놓으면 지금 쓰는 <b>닫기 줌</b>(사진이 원래 타일로 줄어드는 320 ms 움직임)으로 닫힌다. 덜 내리고 놓으면 되튐 없이 제자리로 돌아간다. <b>상단바에서 시작한 끌기는 해당 없다</b>(상단바 버튼, 안드로이드 알림창과 겹치므로). 확대한 사진은 지금처럼 끌면 사진 안을 움직인다. 위로 쓸기(필름 띠 키우기)와 좌우 넘기기는 그대로다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="e-rest"></div><figcaption><span class="tag">끌어 보기</span><b>시작</b>: 사진 위 어디서나 아래로. 상단바(빗금)에서 시작하면 닫히지 않는다.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="e-drag"></div><figcaption><b>끄는 중</b>: 사진이 따라오고 작아지며 상단바·필름 띠는 사라진다. 뒤의 목록이 비친다.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="e-close"></div><figcaption><b>놓은 뒤</b>: 지금의 닫기 줌이 손가락이 놓은 자리에서 시작해 그 사진의 타일로 들어간다.</figcaption></figure>
+  </div>
+  <p class="readout" id="e-readout"></p>
+</section>
+
+<section class="variant" id="f">
+  <h2><span class="key">F</span>뒤로 = 방문 기록 <span class="flag">사용자 결정 필요</span></h2>
+  <p class="note">지금 태블릿의 뒤로(안드로이드 뒤로와 상단바 ←)는 <b>상위 폴더</b>로 올라간다. 아래로 하나씩 들어간 경우에는 그게 곧 온 곳이라 문제가 없다. 차이는 <b>건너뛰었을 때</b>다: 최근 칩, 찾기, 서랍, 고정, 홈 바로가기로 멀리 간 뒤 뒤로를 누르면, 지금은 처음 보는 상위 폴더가 나온다. 제안은 PC의 마우스 뒤로가기처럼 <b>온 곳으로 돌아가기</b>(그곳의 스크롤 위치까지)이고, 상위 폴더는 상단바 경로를 눌러 간다.</p>
+  <div class="trail" aria-label="예시 이동">
+    <span class="place">게헨나 <small>캐릭터 › 블루 아카이브</small></span><span class="go">— 최근 칩 →</span>
+    <span class="place">하우징 <small>게임 스크린샷 › 파이널 판타지 XIV</small></span><span class="go">— 뒤로 →</span>
+    <span class="place">지금: 파이널 판타지 XIV</span><span class="go">/</span><span class="place">제안: 게헨나</span>
+  </div>
+  <div class="shots">
+    <figure class="shot"><div class="shot__frame" data-frame="f-start"></div><figcaption><b>출발</b>: 게헨나에서 최근 칩으로 하우징에 왔다. 여기서 뒤로.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="f-now"></div><figcaption><span class="tag now">지금</span><b>상위 폴더</b> 파이널 판타지 XIV로 올라간다. 방금 있던 게헨나로 돌아가려면 다시 찾아가야 한다.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-frame="f-proposed"></div><figcaption><span class="tag">제안</span><b>온 곳</b> 게헨나로, 보던 스크롤 위치 그대로. 파이널 판타지 XIV는 하우징 화면 상단 경로로 간다.</figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li>기록은 지금 탭(에셋) 안에서만 쌓는다. 다른 탭으로 가는 것은 기록에 넣지 않는다(DESIGN §9와 같음). 기록이 없으면 지금처럼 상위 폴더, 맨 위에서는 홈으로.</li>
+    <li>선택 모드, 시트, 서랍, 뷰어가 열려 있으면 뒤로는 그것부터 하나씩 닫는다(지금과 같음).</li>
+    <li>고를 수 있는 길: ① 안드로이드 뒤로와 ← 모두 방문 기록(권함, PC와 같은 뜻) ② 안드로이드 뒤로만 기록, ←는 상위 폴더(안드로이드의 ‘위로’ 관례) ③ 지금 그대로.</li>
+  </ul>
+</section>
+
+<section class="variant" id="base">
+  <h2>바탕 세 가지 <small>위 여섯 가지를 받치는 공용 부분</small></h2>
+  <div class="cards">
+    <div class="card"><h3>동작 목록 하나</h3><p>대상별 항목(아이디, 낱말, 아이콘, 위험 여부, PC 전용 여부)을 한 모듈에 둔다. PC 오른쪽 클릭 메뉴와 태블릿 시트가 같은 목록을 읽고, 태블릿은 <b>PC 전용</b> 표시가 붙은 항목만 거른다. 낱말이 한 곳에서 정해지므로 지금의 ‘이름 변경 / 이름 바꾸기’, ‘삭제 / 컬렉션 삭제’ 같은 엇갈림이 사라진다. 자리: <code>src/shared/</code>(규칙과 낱말은 늘 공용, DESIGN §12).</p></div>
+    <div class="card"><h3>길게 누르기 하나</h3><p>한 훅이 시간과 허용 흔들림을 정한다: <b>0.45초, 10px</b>(지금 갤러리 값). 찰 때 짧은 진동, 스크롤이 시작되면 취소, 뒤따르는 탭은 무시, 시스템 메뉴는 막는다. 지금 제각각인 값(갤러리 450 ms, 카탈로그 고정 500 ms)을 하나로 맞춘다. PC 선반 끌어 옮기기의 250 ms는 마우스용이라 따로 둔다.</p></div>
+    <div class="card"><h3>목적지 하나</h3><p>폴더·캐릭터 그룹·앨범을 같은 모양(종류, 아이디, 이름, 아이콘, 색, 경로)으로 다룬다. 이 하나가 최근 칩(간 곳), 시트의 최근(넣은 곳), 서랍, 뒤로 기록(간 곳 + 스크롤), 찾기 결과를 함께 먹인다. 지운 폴더는 빠지고 이름을 바꾸면 따라간다(최근 폴더 규칙 그대로).</p></div>
+  </div>
+  <div class="table-wrap">
+  <table class="grid">
+    <thead><tr><th>길게 누르는 대상</th><th>PC 오른쪽 클릭 메뉴 (출처)</th><th>태블릿 시트</th></tr></thead>
+    <tbody>
+      <tr><td>폴더</td><td>분류함으로 쓰기, 고정, 하위 폴더 만들기, 이름 변경, 아이콘 및 색상, 폴더 이동, 삭제 (<code>ClassificationSidebar.tsx</code>)</td><td><span class="new">고정</span>, 하위 폴더 만들기, 이름 바꾸기, <span class="new">아이콘 및 색상</span> · <span class="off">분류함으로 쓰기</span> <span class="off">폴더 이동</span> <span class="off">삭제</span> (PC 전용)</td></tr>
+      <tr><td>폴더 선반 카드</td><td>앞으로, 뒤로, 맨 앞으로, 맨 뒤로 (<code>shelfOrder.ts</code>)</td><td>폴더 항목 + 같은 네 가지 순서 항목</td></tr>
+      <tr><td>캐릭터 그룹</td><td>그룹 열기, 그룹 편집, 위로/아래로 이동</td><td>시트 없음 (캐릭터 정리는 PC 전용)</td></tr>
+      <tr><td>앨범</td><td>하위 앨범 만들기, 이름 변경, 아이콘 및 색상, 앨범 이동, 삭제</td><td>하위 앨범 만들기, 이름 바꾸기, 아이콘 및 색상, 삭제 · <span class="off">앨범 이동</span> (태블릿에 없음, 정할 것)</td></tr>
+      <tr><td>컬렉션 작품</td><td>편집, 쇼케이스에 추가/빼기, 삭제 (<code>CollectionBrowser.tsx</code>)</td><td>편집, 쇼케이스에 추가/빼기, <span class="new">휴지통으로</span>(낱말 맞춤)</td></tr>
+      <tr><td>작가</td><td>고정, 이름 바꾸기, 다른 작가와 합치기, 숨기기 (<code>ArtistHub.tsx</code>)</td><td>고정, 이름 바꾸기, 숨기기 · <span class="off">합치기</span> (PC 전용)</td></tr>
+      <tr><td>최근 칩</td><td>최근에서 빼기 (<code>RecentFolderChips.tsx</code>)</td><td>최근에서 빼기</td></tr>
+      <tr><td>이미지 (선택 ⋯)</td><td>N개 선택, 선택한 영상 비교, 출처 복사, 앨범에 추가, 이 앨범에서 빼기, 이 컬렉션에서 빼기, 대표 이미지로 지정, 정보 열기, 휴지통으로 (<code>libraryContextItems.ts</code>, <code>AssetBrowser.tsx</code>)</td><td>출처 복사, 앨범에 추가, 이 앨범에서 빼기, 이 컬렉션에서 빼기, 대표 이미지로 지정, 정보 열기(1장일 때), 휴지통으로 · <span class="off">선택한 영상 비교</span> (정할 것)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">굵은 글씨는 태블릿에 새로 필요한 것: 폴더 <b>고정</b>은 지금 PC 설정이 태블릿에 읽기로만 넘어가므로 쓰기 길(서버)이 필요하고, 폴더 <b>아이콘 및 색상</b>은 태블릿에서 앨범에만 있다.</p>
+</section>
+
+<section class="variant" id="decide">
+  <h2>정할 것</h2>
+  <div class="table-wrap">
+  <table class="grid">
+    <thead><tr><th>항목</th><th>제안</th><th>다른 선택지</th></tr></thead>
+    <tbody>
+      <tr><td>B 폴더 서랍</td><td><b>‘태블릿은 칩만’ 결정을 뒤집는다.</b> ☰ 버튼으로만 여는 왼쪽 서랍을 넣는다.</td><td class="alt">넣지 않고 칩(C)만 / 첫 화면에만 트리</td></tr>
+      <tr><td>☰ 위치</td><td>상단바 왼쪽(← 다음, 첫 화면에서는 로고 자리). 왼쪽 서랍과 같은 쪽이라 방향이 맞는다.</td><td class="alt">오른쪽 버튼 무리(찾기 앞)</td></tr>
+      <tr><td>F 뒤로</td><td>안드로이드 뒤로와 ← 모두 <b>방문 기록</b>, 상위 폴더는 상단 경로. PC 마우스 뒤로가기와 같은 뜻.</td><td class="alt">시스템 뒤로만 기록, ←는 상위 / 지금 그대로</td></tr>
+      <tr><td>C 한 번 탭 뒤</td><td>완료 표시 0.9초 뒤 시트가 저절로 닫히고, 선택은 남긴다.</td><td class="alt">시트를 열어 둠 / 선택도 해제</td></tr>
+      <tr><td>D 전체 선택 범위</td><td>지금 목록 <b>전체</b>(서버 개수, 안 불러온 부분 포함). 작업은 지금처럼 100개씩 나눠 보낸다.</td><td class="alt">불러온 것만</td></tr>
+      <tr><td>낱말 맞춤</td><td>‘이름 바꾸기’로 통일(PC 폴더·앨범 메뉴의 ‘이름 변경’을 바꿈). 컬렉션 지우기는 ‘휴지통으로’(30일 되살리기).</td><td class="alt">‘이름 변경’으로 통일</td></tr>
+      <tr><td>태블릿에 새로 넣을 것</td><td>폴더 고정(서버 쓰기 길 필요), 폴더 아이콘 및 색상.</td><td class="alt">시트에서 빼고 PC에서만</td></tr>
+      <tr><td>PC에만 둘지</td><td>앨범 이동, 선택한 영상 비교는 일단 PC에만.</td><td class="alt">태블릿에도</td></tr>
+      <tr><td>길게 누르기 시간</td><td>모두 0.45초(카탈로그 고정 0.5초도 맞춤).</td><td class="alt">0.5초</td></tr>
+      <tr><td>E 닫기 기준</td><td>120px 또는 빠른 튕김, 상단바에서 시작하면 제외.</td><td class="alt">화면 높이의 15%</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="variant">
+  <h2>확인하지 못한 것</h2>
+  <ul class="plain">
+    <li>헤드리스 Edge의 정지 화면과 마우스 동작으로만 봤다. 손가락 느낌(0.45초, 120px, 자동 스크롤 속도)은 실제 태블릿에서 맞춰야 한다.</li>
+    <li>안드로이드 제스처 뒤로가기가 화면 양쪽 가장자리에서 시작한다는 전제로 가장자리 밀기를 뺐다. 이 태블릿의 탐색 설정(제스처/버튼)은 확인하지 않았다.</li>
+    <li>폴더 고정을 태블릿에서 쓰는 서버 길이 없다는 것은 코드(PC 설정을 태블릿에 게시만 함)에서 읽은 것이고, 서버 쪽은 보지 않았다.</li>
+    <li>태블릿에 ‘이 컬렉션에서 빼기 / 대표 이미지로 지정’이 필요한 이미지 컬렉션 화면이 있는지는 확인하지 않았다.</li>
+    <li>밝은 테마는 앱에 없는 ‘종이’ 값을 이 페이지에서만 빌렸다. 앱은 어두운 테마 하나뿐이다.</li>
+  </ul>
+</section>
+
+</div>
+<script src="tablet-structure.js"></script>
+</body>
+</html>

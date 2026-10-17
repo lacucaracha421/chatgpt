@@ -1,0 +1,10 @@
+/* The tablet's recent-folder row: the shared chip (src/assets/recentFolders.css) in one scrolling line.
+   Chips are 36 high with the 44 touch area from the shared quiet button. */
+.recent-section { min-width:0; }
+.recent-section.is-entering { animation:recent-section-in var(--motion-small) var(--ease-standard) both; }
+@keyframes recent-section-in { from { opacity:0; } }
+.recent-section > .ui-section-label { margin:var(--space-4) 0 var(--space-2); }
+.section-shade-extra .recent-section > .ui-section-label { margin-top:var(--space-1); }
+.recent-row { display:flex; align-items:center; gap:var(--space-1); min-height:var(--touch-target); overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+.recent-row::-webkit-scrollbar { display:none; }
+@media (prefers-reduced-motion: reduce) { .recent-section.is-entering { animation:none; } }

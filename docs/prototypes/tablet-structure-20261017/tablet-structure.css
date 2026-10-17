@@ -1,0 +1,88 @@
+/* Proposed tablet CSS (2026-10-17). Each block names the app file it would join.
+   Everything else the frames show is the app's real CSS (app-css/) or mockup context (page.css). */
+
+/* ---------- A. Long-press action sheet → mobile-client/moreSheet.css ----------
+   The sheet is the existing BottomSheet + MoreSheet rows (.tablet-more .workspace-index-link).
+   New: the first row names the target (thumb + name + one meta line) in place of the text title. */
+.ui-dialog__title.action-sheet__target { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-height-2); margin: 0 0 var(--space-2); padding: 0 var(--space-3) var(--space-3); border-bottom: 1px solid var(--color-border); font-size: var(--type-body); font-weight: 400; }
+.action-sheet__thumb { position: relative; flex: none; width: 48px; height: 48px; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.action-sheet__thumb > .ph { position: absolute; inset: 0; }
+.action-sheet__thumb--icon { display: grid; place-items: center; color: var(--folder-color, var(--color-muted)); }
+.action-sheet__thumb--icon svg { width: 24px; height: 24px; }
+/* A selection shows up to two overlapping thumbnails, as the destructive dialog does. */
+.action-sheet__thumb--stack { overflow: visible; background: none; }
+.action-sheet__thumb--stack > .ph { width: 38px; height: 38px; border-radius: var(--radius-mark); box-shadow: 0 0 0 2px var(--color-sidebar); }
+.action-sheet__thumb--stack > .ph:first-child { inset: auto auto 0 0; }
+.action-sheet__thumb--stack > .ph:last-child { inset: 0 0 auto auto; }
+.action-sheet__text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.action-sheet__name { overflow: hidden; color: var(--color-text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.action-sheet__meta { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The destructive item sits apart under a hairline, as on the PC menu. */
+.tablet-more .more-panel__navigation--danger { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.tablet-more .more-panel__navigation + .more-panel__navigation--danger { margin-top: var(--space-2); }
+/* The state an item toggles (고정됨, 쇼케이스) reads as faint meta at the right. */
+.tablet-more .more-panel__state { color: var(--color-faint); font-size: var(--type-meta); }
+/* While the finger holds, the card answers with the shared press face (no scaling, DESIGN §12). */
+.library-folder.is-pressing .home-cover-group, .is-pressing > .ph, .recent-folders__chip.is-pressing { opacity: .8; }
+
+/* ---------- C. Recent destinations in the sheets → mobile-client/recentFolders.css ----------
+   The same chip row as the folder history, at the top of the 분류 and 앨범 sheets and the viewer's 분류 editor. */
+.recent-destinations { min-width: 0; margin: 0 0 var(--space-4); }
+.recent-destinations > .ui-section-label { margin: 0 0 var(--space-1); }
+.recent-destinations .recent-row { margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
+/* A destination every selected image is already in cannot be picked. */
+.recent-folders__chip[aria-disabled="true"] { opacity: .4; }
+/* Done in place (DESIGN §12 Toasts): the chip tints toward success and fades back, the icon becomes a check. */
+.recent-folders__chip.is-done { color: var(--color-success); font-weight: 600; animation: recent-chip-done 1400ms var(--ease-out) both; }
+.recent-folders__chip.is-done > svg { color: var(--color-success); }
+@keyframes recent-chip-done { from { background: color-mix(in srgb, var(--color-success) 24%, transparent); } to { background: transparent; } }
+.recent-destinations__status { min-height: calc(var(--type-meta) * 1.5); margin: var(--space-1) 0 0; color: var(--color-success); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.recent-destinations__status:empty { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .recent-folders__chip.is-done { animation: none; } }
+
+/* ---------- B. Folder drawer → mobile-client/folderDrawer.css (new) ----------
+   Reuses the left full-height editor shell (.ui-dialog:has(.classification-index), mobile.css) and its
+   slide (library.css: --surface-x: -100%). Rows take the PC tree look at tablet sizes. */
+.folder-drawer { gap: 0; }
+.folder-drawer .dialog-header { min-height: var(--touch-target); font-size: var(--type-title); font-weight: 600; }
+.folder-drawer__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(var(--space-6) * -1); padding: 0 var(--space-4) var(--space-6); scrollbar-width: none; }
+.folder-drawer .ui-section-label { margin: var(--space-6) var(--space-2) var(--space-2); }
+.folder-drawer .ui-section-label:first-child { margin-top: var(--space-2); }
+/* 빠른 보기: one-line rows (48), icon 20, the count only on the current row. */
+.folder-drawer__quick { display: flex; flex-direction: column; }
+.folder-drawer__link { position: relative; display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-height); padding: 0 var(--space-3); border: 0; border-radius: 0; background: transparent; color: var(--color-text); font: inherit; text-align: left; }
+.folder-drawer__link > svg { width: 20px; height: 20px; color: var(--color-muted); }
+.folder-drawer__link > span { flex: 1; min-width: 0; }
+.folder-drawer__link small { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.folder-drawer__link:active { background: var(--color-surface-pressed); }
+/* Pins keep the PC's bordered chip; 36 high with a 44 hit area. */
+.folder-drawer__pins { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0 var(--space-2); }
+.folder-drawer__pin { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: var(--control-height-compact); padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-tile); background: transparent; color: var(--color-text); font: inherit; }
+.folder-drawer__pin::before { content: ""; position: absolute; inset: -4px 0; }
+.folder-drawer__pin > svg { width: 14px; height: 14px; color: var(--color-muted); }
+.folder-drawer__pin > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-drawer .recent-row { padding: 0 var(--space-2); }
+/* Tree: the tablet's .tree-row idiom at body size and 48 rows; one open path (FOLDER-NAV-001). */
+.folder-drawer .classification-tree { overflow: visible; min-height: 0; }
+.folder-drawer .tree-row { min-height: var(--row-height); }
+.folder-drawer .tree-expander, .folder-drawer .tree-leaf { width: var(--touch-target); min-width: var(--touch-target); height: var(--row-height); }
+.folder-drawer .tree-expander svg { width: 16px; height: 16px; color: var(--color-muted); transition: transform var(--motion-medium) var(--ease-standard); }
+.folder-drawer .tree-expander[aria-expanded="true"] svg { transform: rotate(90deg); }
+.folder-drawer .tree-leaf::before { left: calc(var(--touch-target) / 2 - 1px); }
+.folder-drawer .tree-select { gap: var(--space-3); min-height: 40px; padding: 0 var(--space-3); font-size: var(--type-body); border-radius: 0; }
+.folder-drawer .tree-select > svg { width: 20px; height: 20px; opacity: 1; color: var(--folder-color, var(--color-muted)); }
+.folder-drawer .tree-select > .numeric { display: none; color: var(--color-muted); font-size: var(--type-meta); opacity: 1; }
+/* The current place: the PC slab with its dark mark at the right end and the 3px echo (DESIGN §6). */
+.folder-drawer .tree-row.selected .tree-select, .folder-drawer__link[aria-current="page"] { position: relative; padding-right: calc(var(--space-3) + var(--selection-mark-size) + var(--space-2)); background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.folder-drawer .tree-row.selected .tree-select::after, .folder-drawer__link[aria-current="page"]::after { content: ""; position: absolute; top: 50%; right: var(--space-3); width: var(--selection-mark-size); height: var(--selection-mark-size); margin-top: calc(var(--selection-mark-size) / -2); background: var(--color-on-accent); }
+.folder-drawer .tree-row.selected .tree-select > svg, .folder-drawer__link[aria-current="page"] > svg { color: inherit; }
+.folder-drawer .tree-row.selected .tree-select > .numeric, .folder-drawer__link[aria-current="page"] small { display: inline; color: inherit; opacity: .7; }
+/* Branches fold with the PC's reveal: height via grid rows, no fade of the text. */
+.folder-drawer__branch { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--motion-medium) var(--ease-standard); }
+.folder-drawer__branch[data-open="false"] { grid-template-rows: 0fr; }
+.folder-drawer__branch > div { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .folder-drawer__branch, .folder-drawer .tree-expander svg { transition: none; } }
+
+/* ---------- D. Selection → src/assets/SelectionBar.css (shared) ---------- */
+/* 전체 선택 sits right after the count; pressed (all selected) it reads like a selected tab. */
+.asset-selection-bar__all[aria-pressed="true"] { color: var(--color-text); font-weight: 600; }

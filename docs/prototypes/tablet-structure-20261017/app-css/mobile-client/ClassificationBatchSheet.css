@@ -1,0 +1,16 @@
+.classification-batch-sheet .tree-select,
+.classification-batch-sheet .tree-expander {
+  min-height: var(--touch-target);
+}
+.classification-batch-sheet .tree-expander {
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+}
+.classification-batch-sheet .classification-tree {
+  max-height: 45dvh;
+  overflow-y: auto;
+}
+.mobile-app .asset-selection-bar .ui-button {
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
+}
