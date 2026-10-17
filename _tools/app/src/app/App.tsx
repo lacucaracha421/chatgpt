@@ -15,7 +15,7 @@ import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { HomeAssetDestination } from "../home/HomeAssetDestination";
 import { applyInitialCountOrder, reorderFolders, withFolderSiblingOrder } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
-import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
 import { FolderPrefetchContext, invalidateFolderPrefetch, type FolderPrefetchPlan } from "../assets/folderPrefetch";
 import { planFolderPrefetch } from "./folderPrefetchPlan";
@@ -69,6 +69,7 @@ import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
+import { RecentFoldersContext, useRecentFolderHistory } from "../assets/recentFolders";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
 import { confirmLeaveVaultRecovery } from "../external-vault/vaultRecoveryGuard";
@@ -186,6 +187,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useAlbumAuthoritySync(gateway, libraryRoot);
   useClassificationAuthoritySync(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
+  const [recentCatalogReady, setRecentCatalogReady] = useState(false);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [collectionsRead, setCollectionsRead] = useState<{ gateway: typeof gateway; root: string } | null>(null);
@@ -244,6 +246,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return ()=>{live=false;unlisten?.();};
   },[]);
   const characterHub = useCharacterHub(assetRefresh);
+  const recentTargets = useMemo(() => [...characterHub.targets, ...characterHub.extras], [characterHub.targets, characterHub.extras]);
+  const recentFolders = useRecentFolderHistory({ libraryRoot, view, classifications: entries,
+    groups: characterHub.groups, targets: recentTargets,
+    pinnedIds: preferences.pinnedClassificationIds, ready: recentCatalogReady, onOpen: next => navigateView(next) });
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
@@ -283,6 +289,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     const next = await gateway.listClassifications();
     // An unchanged list keeps its identity: a new array would drop every folder prefetch and cache.
     setEntries(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    setRecentCatalogReady(true);
   }, [gateway]);
   const refreshAlbums = useCallback(async () => {
     setAlbums(await gateway.listAlbums());
@@ -306,6 +313,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       classifications, albums, collectionRead,
     ]);
     setEntries(nextEntries);
+    setRecentCatalogReady(true);
     setAlbums(nextAlbums);
   }, [gateway, libraryRoot]);
   const refreshReviewCount = useCallback(async () => {
@@ -424,7 +432,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     enabled: dropEnabled,
     classificationId: dropClassificationId,
     libraryRoot,
-    ingestMedia: gateway.ingestMedia,
+    ingestMedia: async (request) => {
+      const result = await gateway.ingestMedia(request);
+      if (request.classificationId && result.status === "added" && result.asset.media.kind === "image") {
+        recentFolders.record({ kind: "classification", classificationId: request.classificationId });
+      }
+      return result;
+    },
     onIngested: handleIngested,
     onFatalError: setMessage,
     onNativeDragEvent: handleNativeDragEvent,
@@ -698,6 +712,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           await gateway.patchAssetAlbums({ assetIds: payload.assetIds, addAlbumIds: [target.entryId], removeAlbumIds: [] });
         } else {
           await gateway.setAssetClassification({ assetIds: payload.assetIds, classificationId: target.entryId });
+          recentFolders.record({ kind: "classification", classificationId: target.entryId });
         }
         setAssetRefresh((current) => current + 1);
         refreshMembershipCounts();
@@ -756,6 +771,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   return (
     <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={(nsfwFilter) => updatePreferences({nsfwFilter})} privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
+      <RecentFoldersContext.Provider value={recentFolders}>
       <FaultGameProvider>
       <FolderPrefetchContext.Provider value={folderPrefetchPlan}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
@@ -970,6 +986,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </FolderPrefetchContext.Provider>
       {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} artist={mangaViewer.artist} onClose={() => setMangaViewer(null)} /></Suspense>}
       </FaultGameProvider>
+      </RecentFoldersContext.Provider>
     </PrivacyProvider>
   );
 }

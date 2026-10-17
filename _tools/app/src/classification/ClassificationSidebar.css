@@ -4,8 +4,13 @@
 .classification-sidebar__tree-toggle-mark, .classification-sidebar__tree-heading > svg { transition: transform calc(var(--motion-medium) * .7) var(--spring-gentle); }
 .classification-sidebar__tree-toggle-mark[data-state="expanded"], .classification-sidebar__tree-heading[aria-expanded="true"] > svg { transform: rotate(90deg); transition-duration: var(--motion-medium); }
 @media (prefers-reduced-motion: reduce) {
-  /* Commit height in one step: closing paint remains visible for its opacity fade. */
-  .classification-sidebar__reveal { transition: grid-template-rows var(--motion-micro) step-end, opacity var(--motion-micro) var(--ease-out); }
-  .classification-sidebar__reveal[data-open="true"] { transition: grid-template-rows var(--motion-micro) step-start, opacity var(--motion-micro) var(--ease-out); }
+  .classification-sidebar__reveal, .classification-sidebar__reveal[data-open="true"] { transition: none; }
   .classification-sidebar__tree-toggle-mark, .classification-sidebar__tree-heading > svg { transition: none; }
+}
+
+.workspace-index__scroll, .classification-sidebar { overflow-anchor: none; }
+.classification-sidebar[data-measuring="true"] .classification-sidebar__reveal { transition: none; }
+.classification-sidebar__tree-row[data-holds-current="true"] > .classification-sidebar__tree-surface {
+  background: var(--color-selection-context);
+  color: var(--color-selection-context-text);
 }

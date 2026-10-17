@@ -104,7 +104,7 @@ const { nativeInvoke } = vi.hoisted(() => ({
       ? probe.characterStatus
       : { ...probe.characterStatus, historyRefreshes: [] };
     if (command === "exchange_snapshot") return (await import("../exchange/exchangeStore")).EMPTY_EXCHANGE;
-    if (command === "list_character_targets" || command === "character_series") return [];
+    if (command === "list_character_targets" || command === "character_series" || command === "all_character_groups") return [];
     if (command === "character_review_pending_map") return {};
     if (command === "browse_character_assets") return { items: [], nextCursor: null, totalCount: 0 };
     return undefined;

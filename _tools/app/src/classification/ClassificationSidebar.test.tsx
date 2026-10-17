@@ -11,6 +11,11 @@ import { FOLDER_PREFETCH_DWELL_MS, FolderPrefetchContext, resetFolderPrefetch, t
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
 const entries: ClassificationEntry[] = [
   { id: "root", kind: "root", name: "Games", parentId: null, iconKey: null, colorKey: null },
   { id: "work", kind: "work", name: "Blue Archive", parentId: "root", iconKey: null, colorKey: null },
@@ -391,9 +396,6 @@ describe("ClassificationSidebar", () => {
     await user.click(within(pins).getByRole("button", { name: "Arona" }));
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work"]);
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "tag" });
-    await user.click(screen.getByRole("button", { name: "폴더 보기 옵션" }));
-    await user.click(await screen.findByRole("menuitem", { name: "현재 위치만 펼치기" }));
-    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work", "tag"]);
     fireEvent.contextMenu(within(pins).getByRole("button", { name: "Arona" }));
     await user.click(screen.getByRole("menuitem", { name: "고정 해제" }));
     expect(screen.queryByRole("navigation", { name: "고정 폴더" })).not.toBeInTheDocument();
@@ -651,22 +653,22 @@ describe("ClassificationSidebar", () => {
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
 
     await user.click(screen.getByRole("button", { name: "Games 접기" }));
-    expect(onExpandedIdsChange).toHaveBeenCalledWith(["work"]);
+    expect(onExpandedIdsChange).toHaveBeenCalledWith([]);
     expect(onViewChange).not.toHaveBeenCalled();
     expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Games 펼치기" }));
-    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root"]);
   });
 
-  it("selects a classification row without toggling its expansion", async () => {
+  it("opens a classification row with exactly its path expanded", async () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
 
     await user.click(screen.getByRole("treeitem", { name: /Blue Archive/ }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: "work" });
-    expect(onExpandedIdsChange).not.toHaveBeenCalled();
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work"]);
   });
 
   it("counts top-level folders and renders custom icon and connector colors", () => {
@@ -1090,9 +1092,9 @@ describe("ClassificationSidebar", () => {
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
 
     await user.keyboard("{Enter}");
-    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work"]);
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith([]);
     await user.keyboard(" ");
-    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root"]);
     expect(onViewChange).not.toHaveBeenCalled();
   });
 
@@ -1220,4 +1222,92 @@ it("keeps counts quiet but available for the selected, hovered or focused row", 
   menu.focus();
   await userEvent.keyboard("{Enter}");
   expect(screen.getByRole("menuitem", { name: "모든 폴더 접기" })).toBeInTheDocument();
+});
+
+
+describe("folder navigation accordion", () => {
+  afterEach(cleanup);
+  const branches: ClassificationEntry[] = [
+    { id: "a", parentId: null, kind: "root", name: "A", iconKey: null, colorKey: null },
+    { id: "a1", parentId: "a", kind: "tag", name: "A1", iconKey: null, colorKey: null },
+    { id: "a2", parentId: "a1", kind: "tag", name: "A2", iconKey: null, colorKey: null },
+    { id: "b", parentId: null, kind: "root", name: "B", iconKey: null, colorKey: null },
+    { id: "b1", parentId: "b", kind: "tag", name: "B1", iconKey: null, colorKey: null },
+  ];
+
+  it.each(["classification", "album"] as const)("folds sibling subtrees in the %s tree, with Ctrl and * escape hatches", kind => {
+    renderSidebar(gateway(), kind === "album" ? {
+      albums: branches, expandedAlbumIds: ["a", "a1"], view: { kind: "albums" },
+    } : { entries: branches, expandedIds: ["a", "a1"] });
+    fireEvent.click(screen.getByRole("button", { name: "B 펼치기" }));
+    expect(screen.getByRole("treeitem", { name: "A" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("treeitem", { name: "A2" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "A 펼치기" }), { ctrlKey: true });
+    expect(screen.getByRole("treeitem", { name: "B" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "A1" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "A 접기" }));
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: "A" }), { key: "*" });
+    expect(screen.getByRole("treeitem", { name: "A" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "B" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: "A1" }), { key: "Enter" });
+    expect(screen.getByRole("treeitem", { name: "A1" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "B" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("marks the nearest visible ancestor when the current folder is folded away and leaves the tree alone for 전체", () => {
+    renderSidebar(gateway(), { entries: branches, expandedIds: ["a", "a1"], view: { kind: "classification", classificationId: "a2" } });
+    fireEvent.click(screen.getByRole("button", { name: "A1 접기" }));
+    expect(screen.getByRole("treeitem", { name: "A1" })).toHaveAttribute("data-holds-current", "true");
+    expect(screen.getByRole("treeitem", { name: "A1" })).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(screen.getByRole("button", { name: "A 접기" }));
+    expect(screen.getByRole("treeitem", { name: "A" })).toHaveAttribute("data-holds-current", "true");
+    fireEvent.click(screen.getByRole("button", { name: "전체" }));
+    expect(screen.getByRole("treeitem", { name: "A" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("treeitem", { name: "A" })).not.toHaveAttribute("data-holds-current");
+  });
+
+  it("defers folds above a clicked row when scrolling cannot keep it under the pointer", () => {
+    renderSidebar(gateway(), { entries: branches, expandedIds: ["a", "a1"] });
+    const sidebar = screen.getByRole("complementary", { name: "분류" });
+    const a = screen.getByRole("treeitem", { name: "A" });
+    const b = screen.getByRole("treeitem", { name: "B" });
+    const bounds = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 200, width: 200, x: 0, y: top, toJSON: () => ({}) });
+    vi.spyOn(b, "getBoundingClientRect").mockReturnValue(bounds(100, 30));
+    vi.spyOn(a.closest("li")!.querySelector(":scope > .classification-sidebar__reveal")!, "getBoundingClientRect").mockReturnValue(bounds(30, 60));
+    fireEvent.click(screen.getByRole("button", { name: "B 펼치기" }), { detail: 1 });
+    expect(a).toHaveAttribute("aria-expanded", "true");
+    expect(b).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerLeave(sidebar);
+    expect(a).toHaveAttribute("aria-expanded", "false");
+    expect(b).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it.each([true, false])("follows a pin's final path and scrolls only when needed (already visible: %s)", visible => {
+    vi.mocked(window.matchMedia).mockReturnValue({ matches: true } as MediaQueryList);
+    renderSidebar(gateway(), { entries: branches, expandedIds: ["a", "a1"], pinnedIds: ["b1"] });
+    const sidebar = screen.getByRole("complementary", { name: "분류" });
+    Object.defineProperties(sidebar, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+    sidebar.scrollTop = 30;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    let measuredFinalPath = false;
+    const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("role") === "treeitem" && this.getAttribute("aria-label") === "B1") {
+        measuredFinalPath ||= sidebar.dataset.measuring === "true"
+          && screen.getByRole("treeitem", { name: "A" }).getAttribute("aria-expanded") === "false"
+          && screen.getByRole("treeitem", { name: "B" }).getAttribute("aria-expanded") === "true";
+        const top = visible ? 40 : 400;
+        return { top, bottom: top + 30, height: 30, left: 0, right: 200, width: 200, x: 0, y: top, toJSON: () => ({}) };
+      }
+      return original.call(this);
+    });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "고정 폴더" })).getByRole("button", { name: "B1" }));
+    expect(measuredFinalPath).toBe(true);
+    expect(screen.getByRole("treeitem", { name: "B1" })).toHaveAttribute("aria-selected", "true");
+    if (visible) expect(sidebar.scrollTop).toBe(30);
+    else expect(sidebar.scrollTop).toBeGreaterThan(30);
+    geometry.mockRestore();
+  });
 });

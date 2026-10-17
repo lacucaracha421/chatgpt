@@ -154,6 +154,10 @@ export function ClassificationSidebar({
     : view.kind === "album"
       ? albumEntries.find((entry) => entry.id === view.albumId) ?? null
       : null;
+  const contextVisible = selected?.treeKind === "album" ? visibleAlbumNodes : visibleNodes;
+  const contextEntries = selected?.treeKind === "album" ? albumEntries : classificationEntries;
+  const contextRow = selected ? nearestVisibleTreeRowId(selected.id, contextEntries, contextVisible) : null;
+  const contextId = contextRow !== selected?.id ? contextRow : null;
   const classificationMode = view.kind === "classification" || view.kind === "unsorted";
   const albumMode = view.kind === "albums" || view.kind === "album";
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -183,27 +187,149 @@ export function ClassificationSidebar({
     return path;
   };
   const setExpandedIds = (next: string[]) => onExpandedIdsChange(next);
-  const openPinned = (id: string) => {
-    setFoldersOpen(true);
-    setExpandedIds([...new Set([...expandedIds, ...folderPath(id).slice(0, -1).map((entry) => entry.id)])]);
-    onViewChange({ kind: "classification", classificationId: id });
-  };
-  // Reveal the current location when it changes from outside the tree (찾기, back, breadcrumbs):
-  // open collapsed ancestors like a pinned folder does, then bring the row into view.
-  const selectedId = selected?.treeKind === "classification" ? selected.id : null;
-  useEffect(() => {
-    if (!selectedId) return;
-    const path = folderPath(selectedId).map((item) => item.id);
-    const wanted = path.slice(0, -1);
-    const opened = [...new Set([...expandedIds, ...wanted])];
-    const next = opened;
-    if (next.length !== expandedIds.length || next.some((id) => !expandedIds.includes(id))) {
-      if (wanted.some((id) => !expandedIds.includes(id))) setFoldersOpen(true);
-      onExpandedIdsChange(next);
+  const motionFrame = useRef<number | null>(null);
+  const pendingFold = useRef<{ kind: SidebarTreeEntry["treeKind"]; ids: string[] } | null>(null);
+  const treeOpenedId = useRef<string | null>(null);
+  const pendingMotion = useRef<{
+    id: string;
+    kind: SidebarTreeEntry["treeKind"];
+    ids: string[];
+    top?: number;
+    before: Map<HTMLElement, string | undefined>;
+  } | null>(null);
+  const scroller = () => embedded ? sidebarRef.current?.closest<HTMLElement>(".workspace-index__scroll") : sidebarRef.current;
+  const scopedEntries = (entry: SidebarTreeEntry) => entry.treeKind === "album" ? albumEntries : classificationEntries;
+  const scopedExpanded = (entry: SidebarTreeEntry) => entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
+  const changeExpanded = (kind: SidebarTreeEntry["treeKind"], ids: string[]) =>
+    kind === "album" ? onExpandedAlbumIdsChange(ids) : onExpandedIdsChange(ids);
+  const entryPath = (entry: SidebarTreeEntry) => {
+    const items = scopedEntries(entry);
+    const path = [entry];
+    let parent = items.find(item => item.id === entry.parentId);
+    while (parent) {
+      path.unshift(parent);
+      parent = items.find(item => item.id === parent!.parentId);
     }
-    const frame = requestAnimationFrame(() => rowRefs.current.get(selectedId)?.scrollIntoView?.({ block: "nearest" }));
-    return () => cancelAnimationFrame(frame);
+    return path;
+  };
+  const openPath = (entry: SidebarTreeEntry) => entryPath(entry)
+    .filter(item => scopedEntries(entry).some(child => child.parentId === item.id)).map(item => item.id);
+  const revealElements = () => [...(sidebarRef.current?.querySelectorAll<HTMLElement>(".classification-sidebar__reveal") ?? [])];
+
+  function applyTreeExpansion(entry: SidebarTreeEntry, ids: string[], anchor = false) {
+    pendingFold.current = null;
+    if (motionFrame.current !== null) cancelAnimationFrame(motionFrame.current);
+    const row = rowRefs.current.get(entry.id);
+    const scroll = scroller();
+    const top = anchor ? row?.getBoundingClientRect().top : undefined;
+    let next = ids;
+    if (top !== undefined && scroll) {
+      const items = scopedEntries(entry);
+      const closing = scopedExpanded(entry).filter(id => !ids.includes(id));
+      // Count only outer folds; a descendant's height is already in its parent's reveal.
+      const outer = closing.filter(id => !items.some(item => item.id === id && closing.includes(item.parentId ?? "")));
+      const above = outer.filter(id => {
+        const reveal = rowRefs.current.get(id)?.closest("li")?.querySelector<HTMLElement>(":scope > .classification-sidebar__reveal");
+        const rect = reveal?.getBoundingClientRect();
+        return rect && rect.height > 0 && rect.bottom <= top + 1;
+      });
+      const height = above.reduce((sum, id) => sum + (rowRefs.current.get(id)?.closest("li")?.querySelector(":scope > .classification-sidebar__reveal")?.getBoundingClientRect().height ?? 0), 0);
+      if (height > scroll.scrollTop + 1) {
+        const retained = scopedExpanded(entry).filter(id => {
+          const item = items.find(candidate => candidate.id === id);
+          return item && entryPath(item).some(ancestor => above.includes(ancestor.id));
+        });
+        next = [...new Set([...ids, ...retained])];
+        pendingFold.current = { kind: entry.treeKind, ids };
+      }
+    }
+    pendingMotion.current = { id: entry.id, kind: entry.treeKind, ids: next, top, before: new Map(revealElements().map(el => [el, el.dataset.open])) };
+    changeExpanded(entry.treeKind, next);
+  }
+
+  function openTreeEntry(entry: SidebarTreeEntry, pointer = false) {
+    treeOpenedId.current = entry.id;
+    applyTreeExpansion(entry, openPath(entry), pointer);
+    onViewChange(treeEntryView(entry));
+  }
+
+  const openPinned = (id: string) => {
+    const entry = classificationEntries.find(item => item.id === id);
+    if (!entry) return;
+    setFoldersOpen(true);
+    applyTreeExpansion(entry, openPath(entry));
+    treeOpenedId.current = id;
+    onViewChange(treeEntryView(entry));
+  };
+  const selectedId = selected ? `${selected.treeKind}:${selected.id}` : null;
+  useLayoutEffect(() => {
+    if (!selected) { treeOpenedId.current = null; return; }
+    if (treeOpenedId.current === selected.id) { treeOpenedId.current = null; return; }
+    treeOpenedId.current = null;
+    if (selected.treeKind === "album") setAlbumsOpen(true);
+    else setFoldersOpen(true);
+    applyTreeExpansion(selected, openPath(selected));
   }, [selectedId]);
+
+  // React has now mounted any newly disclosed rows. Measure the final layout, rewind
+  // the reveals synchronously, and start the fold and scroll together before paint.
+  useLayoutEffect(() => {
+    const motion = pendingMotion.current;
+    if (!motion) return;
+    const current = motion.kind === "album" ? expandedAlbumIds : expandedIds;
+    if (current.length !== motion.ids.length || motion.ids.some(id => !current.includes(id))) return;
+    if (motion.kind === "album" ? !albumsOpen : !foldersOpen) return;
+    pendingMotion.current = null;
+    const sidebar = sidebarRef.current;
+    const scroll = scroller();
+    const row = rowRefs.current.get(motion.id);
+    if (!sidebar || !scroll || !row) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const from = scroll.scrollTop;
+    let to = from;
+    if (motion.top === undefined) {
+      const reveals = revealElements();
+      const final = new Map(reveals.map(el => [el, el.dataset.open]));
+      sidebar.dataset.measuring = "true";
+      void scroll.offsetHeight;
+      const rect = row.getBoundingClientRect();
+      const viewport = scroll.getBoundingClientRect();
+      const y = rect.top - viewport.top + scroll.scrollTop;
+      const visible = y >= from + 8 && y + rect.height <= from + scroll.clientHeight - 8;
+      to = visible ? from : Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, y - scroll.clientHeight * .35));
+      if (!reduced) {
+        reveals.forEach(el => { el.dataset.open = motion.before.get(el) ?? "false"; });
+        void scroll.offsetHeight;
+      }
+      delete sidebar.dataset.measuring;
+      void scroll.offsetHeight;
+      reveals.forEach(el => { el.dataset.open = final.get(el); });
+      scroll.scrollTop = from;
+    }
+    const start = performance.now();
+    const step = (now: number) => {
+      const progress = reduced ? 1 : Math.min(1, (now - start) / 320);
+      if (motion.top !== undefined) scroll.scrollTop += row.getBoundingClientRect().top - motion.top;
+      else scroll.scrollTop = from + (to - from) * (1 - Math.pow(1 - progress, 3));
+      if (!reduced && now - start < (motion.top === undefined ? 320 : 420)) motionFrame.current = requestAnimationFrame(step);
+      else motionFrame.current = null;
+    };
+    step(start);
+  });
+
+  useEffect(() => {
+    const scroll = scroller();
+    const flush = () => {
+      const pending = pendingFold.current;
+      if (!pending) return;
+      pendingFold.current = null;
+      if (motionFrame.current !== null) cancelAnimationFrame(motionFrame.current);
+      changeExpanded(pending.kind, pending.ids);
+    };
+    scroll?.addEventListener("pointerleave", flush);
+    return () => scroll?.removeEventListener("pointerleave", flush);
+  });
+  useEffect(() => () => { if (motionFrame.current !== null) cancelAnimationFrame(motionFrame.current); }, []);
   const togglePin = (entry: SidebarTreeEntry) => onPinnedIdsChange(pinnedIds.includes(entry.id) ? pinnedIds.filter((id) => id !== entry.id) : [...pinnedIds, entry.id]);
   useEffect(() => {
     const sidebar = sidebarRef.current;
@@ -222,9 +348,12 @@ export function ClassificationSidebar({
     return () => scroller.removeEventListener("scroll", update);
   }, [embedded, entries, expandedIds, foldersOpen]);
   const treeViewActions: MenuItem[] = [
-    { id: "collapse-all", label: "모든 폴더 접기", onSelect: () => onExpandedIdsChange([]) },
-    { id: "reveal-current", label: "현재 위치만 펼치기", disabled: selected?.treeKind !== "classification",
-      onSelect: () => { setFoldersOpen(true); onExpandedIdsChange(folderPath(selected?.id ?? null).map((entry) => entry.id)); } },
+    { id: "collapse-all", label: "모든 폴더 접기", onSelect: () => {
+      pendingFold.current = null;
+      pendingMotion.current = null;
+      if (motionFrame.current !== null) cancelAnimationFrame(motionFrame.current);
+      onExpandedIdsChange([]);
+    } },
   ];
   const allEntries = [...classificationEntries, ...albumEntries];
   // Each role="tree" keeps its own roving tabindex stop: the focused row when
@@ -375,10 +504,17 @@ export function ClassificationSidebar({
     }
   }
 
-  function toggleExpanded(entry: SidebarTreeEntry) {
-    const expanded = entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
-    const setExpanded = entry.treeKind === "album" ? onExpandedAlbumIdsChange : setExpandedIds;
-    setExpanded(expanded.includes(entry.id) ? expanded.filter((id) => id !== entry.id) : [...expanded, entry.id]);
+  function toggleExpanded(entry: SidebarTreeEntry, keepSiblings = false, pointer = false) {
+    const expanded = scopedExpanded(entry);
+    const items = scopedEntries(entry);
+    const closing = expanded.includes(entry.id);
+    const roots = closing ? [entry.id] : keepSiblings ? [] : items.filter(item => item.parentId === entry.parentId && item.id !== entry.id).map(item => item.id);
+    const next = expanded.filter(id => {
+      const item = items.find(candidate => candidate.id === id);
+      return !item || !entryPath(item).some(ancestor => roots.includes(ancestor.id));
+    });
+    if (!closing) next.push(entry.id);
+    applyTreeExpansion(entry, next, pointer);
   }
 
   function registerTreeRow(id: string, element: HTMLDivElement | null) {
@@ -471,10 +607,16 @@ export function ClassificationSidebar({
           focusTreeRow(parentId);
         }
         break;
+      case "*": {
+        event.preventDefault();
+        const siblings = scopedEntries(node.entry).filter(item => item.parentId === parentId && scopedEntries(node.entry).some(child => child.parentId === item.id));
+        applyTreeExpansion(node.entry, [...new Set([...scopedExpandedIds, ...siblings.map(item => item.id)])]);
+        break;
+      }
       case "Enter":
       case " ":
         event.preventDefault();
-        onViewChange(treeEntryView(node.entry));
+        openTreeEntry(node.entry);
         break;
     }
   }
@@ -572,7 +714,8 @@ export function ClassificationSidebar({
               inlineEdit={inlineEdit}
               editName={name}
               editError={editError}
-              onViewChange={onViewChange}
+              contextId={contextId}
+              onViewChange={openTreeEntry}
               onToggleExpanded={toggleExpanded}
               onRowFocus={setFocusedId}
               onRowKeyDown={handleTreeKeyDown}
@@ -625,7 +768,8 @@ export function ClassificationSidebar({
                 inlineEdit={inlineEdit}
                 editName={name}
                 editError={editError}
-                onViewChange={onViewChange}
+                contextId={contextId}
+                onViewChange={openTreeEntry}
                 onToggleExpanded={toggleExpanded}
                 onRowFocus={setFocusedId}
                 onRowKeyDown={handleTreeKeyDown}
@@ -721,7 +865,8 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   );
 }
 
-function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onContainer, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, selectedGroupId = null, onEditGroup, onMoveGroup, canMoveGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onContainer, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, contextId, selectedGroupId = null, onEditGroup, onMoveGroup, canMoveGroup, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+  contextId?: string | null;
   pinnedIds?: string[];
   onTogglePin?: (entry: SidebarTreeEntry) => void;
   activeRowId: string | null;
@@ -742,8 +887,8 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   onRename: (entry: SidebarTreeEntry) => void;
   onRowFocus: (id: string) => void;
   onRowKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, node: SidebarTreeNode) => void;
-  onToggleExpanded: (entry: SidebarTreeEntry) => void;
-  onViewChange: (view: AssetView) => void;
+  onToggleExpanded: (entry: SidebarTreeEntry, keepSiblings?: boolean, pointer?: boolean) => void;
+  onViewChange: (entry: SidebarTreeEntry, pointer?: boolean) => void;
   registerTreeRow: (id: string, element: HTMLDivElement | null) => void;
   view: AssetView;
   /** The group whose row is selected; its series row is then not selected itself. */
@@ -790,7 +935,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   return (
     <li className="classification-sidebar__tree-item" data-has-next-sibling={hasNextSibling ? "true" : undefined}>
       <ContextMenu items={virtualEntry ? [
-        { id: "open-group", label: "그룹 열기", onSelect: () => onViewChange(treeEntryView(node.entry)) },
+        { id: "open-group", label: "그룹 열기", onSelect: () => onViewChange(node.entry) },
         ...(onEditGroup ? [{ id: "edit-group", label: "그룹 편집", onSelect: () => onEditGroup(node.entry.characterGroupId!) }] : []),
         ...(onMoveGroup && canMoveGroup?.(node.entry.characterGroupId!, -1) ? [{ id: "move-group-up", label: "위로 이동", onSelect: () => onMoveGroup(node.entry.characterGroupId!, -1) }] : []),
         ...(onMoveGroup && canMoveGroup?.(node.entry.characterGroupId!, 1) ? [{ id: "move-group-down", label: "아래로 이동", onSelect: () => onMoveGroup(node.entry.characterGroupId!, 1) }] : []),
@@ -802,6 +947,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           }}
           className="classification-sidebar__tree-row"
           data-classification-id={node.entry.treeKind === "classification" && !virtualEntry ? node.entry.id : undefined}
+          data-holds-current={node.entry.id === contextId ? "true" : undefined}
           data-character-group-id={node.entry.characterGroupId}
           data-series-id={node.entry.characterGroupId ? node.entry.seriesId : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
@@ -813,7 +959,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           aria-expanded={hasChildren ? expanded : undefined}
           tabIndex={node.entry.id === activeRowId ? 0 : -1}
           {...(node.entry.treeKind === "classification" && !virtualEntry ? folderIntent(treeEntryView(node.entry)) : {})}
-          onClick={() => onViewChange(treeEntryView(node.entry))}
+          onClick={(event) => onViewChange(node.entry, event.detail > 0)}
           onFocus={() => onRowFocus(node.entry.id)}
           onKeyDown={(event) => {
             if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
@@ -839,7 +985,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           onPointerCancel={onPointerDragCancel}
         >
           {hasChildren ? (
-            <Button type="button" size="icon" variant="ghost" className="classification-sidebar__tree-toggle" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry); }} onKeyDown={(event) => event.stopPropagation()}>
+            <Button type="button" size="icon" variant="ghost" className="classification-sidebar__tree-toggle" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry, event.ctrlKey, event.detail > 0); }} onKeyDown={(event) => event.stopPropagation()}>
               <ChevronRightIcon className="classification-sidebar__tree-toggle-mark" data-state={expanded ? "expanded" : "collapsed"} aria-hidden="true" />
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
@@ -869,7 +1015,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
               : "var(--color-sidebar-connector)",
           } as CSSProperties}
         >
-          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onContainer={onContainer} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} onMoveGroup={onMoveGroup} canMoveGroup={canMoveGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} contextId={contextId} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onContainer={onContainer} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} selectedGroupId={selectedGroupId} onEditGroup={onEditGroup} onMoveGroup={onMoveGroup} canMoveGroup={canMoveGroup} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       </div>}
