@@ -84,7 +84,7 @@ pub(crate) fn source_transport_error(error: ureq::Error) -> LibraryError {
     }
 }
 
-/// 일본 VPS를 통한 동일 본문 전송. PC는 k-hentai에 닿을 필요가 없다.
+/// VPS를 통한 동일 본문 전송. PC는 k-hentai에 닿을 필요가 없다.
 pub(crate) struct VpsCatalogSource {
     base_url: url::Url,
     agent: ureq::Agent,

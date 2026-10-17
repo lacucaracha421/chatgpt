@@ -327,9 +327,9 @@ thumbnail_uploads.register(app, sys.modules[__name__])
 
 # --- Online catalog transport v1 (PC -> VPS -> k-hentai) --------------------
 # PC searches the local VCK catalog (catalogs/kdata.db) without any network.
-# Only two operations need k-hentai reachability, and Korean networks cannot
-# reach k-hentai reliably, so the PC asks this VPS (Japan) to fetch on its
-# behalf. The endpoints accept only numeric ids; clients can never make the
+# Only two operations need k-hentai reachability, and home networks cannot
+# reach k-hentai reliably, so the PC asks this VPS to fetch on its behalf
+# (the Seoul VPS reaches it directly as of 2026-10-17). The endpoints accept only numeric ids; clients can never make the
 # VPS fetch an arbitrary URL (no open proxy / no SSRF surface).
 
 KHENTAI_ORIGIN = "https://k-hentai.org"

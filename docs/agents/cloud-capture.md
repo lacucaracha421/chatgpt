@@ -276,6 +276,8 @@ Preserve these invariants when changing either side:
 
 Android/Titanium에서 Cloud Capture에 접근할 때는 Tailscale Serve HTTPS 경로를 사용한다. 운영 주소는 `https://laku-tokyo.tail0aa1a3.ts.net:8443`이며, health check는 `https://laku-tokyo.tail0aa1a3.ts.net:8443/health`다.
 
+Since 2026-10-17 this address is served by the Vultr Seoul VPS (public IP 141.164.62.204). It took over the Tailscale node name `laku-tokyo` and IP `100.76.119.29` so no client setting changed, which is why the name still says tokyo. The former Tokyo node is `laku-tokyo-old` (100.76.119.200) with its services stopped. Seoul reaches k-hentai, LibreDMM, DMM/MGStage jackets, Pixiv, X images, MangaDex and StashDB.
+
 현재 운영 라우팅은 다음과 같다.
 
 - Tailscale Serve `:8443` -> `http://127.0.0.1:32147`
