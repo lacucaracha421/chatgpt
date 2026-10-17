@@ -32,11 +32,12 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 <a id="perf-20261018"></a>
 ## PERF-20261018 — Cards, small screens, tablet motion, Home first load (2026-10-18)
 
-Status: `OPEN`. User: "카드 가챠 쪽 성능 최적화, 작은 화면일 때 기존 카드 요소들이 너무 일그러지지 않는지(특히 태블릿), 컬렉션 모델링과 각종 애니메이션이 태블릿에서 부드럽게 돌아갈 때까지 최적화, 홈 화면 불러오기가 초기에 느림".
+Status: `PARTIAL` — item 4 delivered 2026-10-18 (2b12d7ee; Home data ready 11–16 s → 1.6 s, startup DB holds split and deferred; wishlist/calendar 6.5–10 s → 3.6 s); item 2 first pass (packs, reveal rows, viewer, album names); item 3 first pass (device oversampling, no per-move renders). User: "카드 가챠 쪽 성능 최적화, 작은 화면일 때 기존 카드 요소들이 너무 일그러지지 않는지(특히 태블릿), 컬렉션 모델링과 각종 애니메이션이 태블릿에서 부드럽게 돌아갈 때까지 최적화, 홈 화면 불러오기가 초기에 느림".
 1. Card gacha (pack opening, reveal, album) performance on PC and tablet — measure frame times and long tasks first.
 2. Card elements on small windows and the tablet: no squashed or distorted cards, text or frames.
 3. Collections 3D models and animations on the tablet until smooth (device-measured; 0.9.123 already oversamples 1x and turns without per-move renders).
 4. Home first load is slow — measure where the time goes (PC timing log LAKOMICS_PERF, tablet startupPerf) before changing.
+5. Recorded 2026-10-18 (user: fix after the quota refills ~01:50 KST): on the tablet work screen, turning the 3D model often scrolls the page down by mistake; game/film/AV cases stutter when turned while zoomed in; on small card screens the text (cost, count, the right-side "Lakomics 카드 컬렉션" print) leaves its place or is too large; some album card images are low resolution.
 
 <a id="home-cal-001"></a>
 ## HOME-CAL-001 — Home month calendar, day memo and ledger (2026-10-17)
