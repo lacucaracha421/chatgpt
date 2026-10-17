@@ -151,6 +151,16 @@
   right: var(--space-4);
 }
 
+/* Invisible window-drag strip; earlier in the DOM than the close button, so the button stays on top. */
+.manga-cover-viewer__drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  pointer-events: auto;
+}
+
 .manga-cover-viewer__position {
   grid-column: 2;
   display: flex;

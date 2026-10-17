@@ -106,6 +106,21 @@ describe("MangaCoverViewer", () => {
     await user.click(document.querySelector<HTMLElement>(".manga-cover-viewer__backdrop")!);
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("has an invisible window-drag strip that does not close the viewer or hide the close button", () => {
+    const onClose = vi.fn();
+    render(<MangaCoverViewer workTitle="던전밥" volumes={volumes} activeVolumeId="v1" onActiveVolumeChange={() => undefined} onClose={onClose} />);
+
+    const strip = document.querySelector<HTMLElement>(".manga-cover-viewer__drag-strip")!;
+    expect(strip).toHaveAttribute("data-tauri-drag-region", "deep");
+    expect(strip).toHaveAttribute("aria-hidden", "true");
+    fireEvent.pointerDown(strip, { button: 0, pointerId: 1 });
+    fireEvent.click(strip);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "표지 감상 닫기" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });
 
 

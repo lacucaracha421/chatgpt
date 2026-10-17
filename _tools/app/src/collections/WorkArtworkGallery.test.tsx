@@ -38,4 +38,21 @@ describe("WorkArtworkGallery", () => {
     fireEvent.click(document.querySelector(".manga-cover-viewer__backdrop")!);
     expect(screen.queryByRole("dialog", { name: "Astral Chain 스크린샷 감상" })).not.toBeInTheDocument();
   });
+
+  it("has an invisible window-drag strip that does not close the viewer or hide the close button", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<WorkArtworkGallery workTitle="Astral Chain" artworks={[{ id: "shot-1", kind: "screenshot", selected: false }]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "스크린샷 크게 보기" }));
+    const strip = document.querySelector<HTMLElement>(".manga-cover-viewer__drag-strip")!;
+    expect(strip).toHaveAttribute("data-tauri-drag-region", "deep");
+    expect(strip).toHaveAttribute("aria-hidden", "true");
+    fireEvent.pointerDown(strip, { button: 0, pointerId: 1 });
+    fireEvent.click(strip);
+    expect(screen.getByRole("dialog", { name: "Astral Chain 스크린샷 감상" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "아트웍 감상 닫기" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });

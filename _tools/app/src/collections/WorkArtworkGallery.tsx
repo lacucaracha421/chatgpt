@@ -7,6 +7,7 @@ import type { WorkArtworkSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
+import { CoverViewerDragStrip } from "./CoverViewerDragStrip";
 
 type WorkArtworkGalleryProps = {
   workTitle: string;
@@ -83,6 +84,7 @@ export function WorkArtworkGallery({ workTitle, artworks, initialActiveId, viewe
               <RadixDialog.Title className="manga-cover-viewer__title">
                 {workTitle} {KIND_LABEL[active.kind] ?? "아트웍"} 감상
               </RadixDialog.Title>
+              <CoverViewerDragStrip />
               <RadixDialog.Close asChild>
                 <button type="button" className="manga-cover-viewer__control manga-cover-viewer__close" aria-label="아트웍 감상 닫기">
                   <XMarkIcon aria-hidden="true" />
