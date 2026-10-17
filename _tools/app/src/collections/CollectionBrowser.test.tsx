@@ -1,3 +1,9 @@
+// Counts how often each card renders (the real card is rendered underneath).
+const cardRenders = vi.hoisted(() => new Map<string, number>());
+vi.mock("./CollectionCard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./CollectionCard")>();
+  return { ...actual, CollectionCard: (props: Parameters<typeof actual.CollectionCard>[0]) => { cardRenders.set(props.collection.id, (cardRenders.get(props.collection.id) ?? 0) + 1); return actual.CollectionCard(props); } };
+});
 // Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
 vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
@@ -728,6 +734,22 @@ describe("CollectionBrowser", () => {
     expect(onOpenWork).toHaveBeenLastCalledWith("key-8", works.map(work => work.id));
     await user.dblClick(first);
     expect(onOpenWork).toHaveBeenLastCalledWith("key-0", works.map(work => work.id));
+  });
+
+  it("picking a case re-renders only the card picked and the one it replaces", async () => {
+    const works = Array.from({ length: 40 }, (_, index) => ({ ...sample, id: `key-${index}`, name: `작품 ${index}` }));
+    renderBrowser({ collections: works, typeFilter: "game", showcase: false });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^작품 0 / }));
+    expect(screen.getByRole("button", { name: /^작품 0 / })).toHaveAttribute("aria-selected", "true");
+    const mounted = [...cardRenders.keys()].length;
+    expect(mounted).toBeGreaterThan(8);
+    const before = new Map(cardRenders);
+    await user.click(screen.getByRole("button", { name: /^작품 1 / }));
+    expect(screen.getByRole("button", { name: /^작품 1 / })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /^작품 0 / })).toHaveAttribute("aria-selected", "false");
+    const rerendered = [...cardRenders].filter(([id, count]) => count !== before.get(id)).map(([id]) => id).sort();
+    expect(rerendered).toEqual(["key-0", "key-1"]);
   });
 
   it("puts shelf cases down on planks, gaps and list margins, preserves controls and opens on double-click", async () => {

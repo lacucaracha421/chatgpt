@@ -1,7 +1,8 @@
 /* The Collections 만화 list as shelves: one row per work, the work screen's bookcase (collectionWork.css)
    left-aligned under the work's title. Spines, the thin plank and the picked cover keep their own look. */
 .manga-shelf-list { display: flex; flex-direction: column; padding: var(--space-4) 0 var(--space-8); }
-.manga-shelf-row { min-width: 0; }
+/* Rows below the fold skip style, layout and paint until they near the viewport. 188px = the 20px label line + the 168px shelf; `auto` keeps a row's real height once seen. content-visibility implies paint containment, so the clip margin keeps the title's focus ring from being cut at the row edge. */
+.manga-shelf-row { min-width: 0; content-visibility: auto; contain-intrinsic-block-size: auto 188px; overflow-clip-margin: 8px; }
 .manga-shelf-row__label { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; padding: 0 var(--space-6); }
 .manga-shelf-row__title { min-width: 0; padding: 0; overflow: hidden; color: var(--color-text); font: inherit; font-size: var(--type-body); font-weight: 600; line-height: var(--line-ui); text-align: left; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; cursor: pointer; }
 .manga-shelf-row__title:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }

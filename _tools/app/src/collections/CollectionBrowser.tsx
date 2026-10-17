@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
+import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CollectionVolumeRangeInput, CreateCollection, ReleaseInboxItem, UpdateCollection } from "../library/types";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useInWorkspaceChrome } from "../layout/WorkspaceChromeContext";
@@ -28,7 +28,6 @@ import type { MangaShelfPick } from "./MangaShelfRow";
 import { requestMangaVolume } from "./work/mangaVolumeRequest";
 import { TextInput } from "../shared/ui/TextInput";
 import { bindMenuItems, collectionActionDefs } from "../shared/contextActions";
-import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
@@ -36,7 +35,7 @@ import { useSectionDrop } from "../shared/ui/useSectionDrop";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { useCollectionCoverPerf } from "./collectionPerf";
-import { CollectionCard } from "./CollectionCard";
+import { ShelfCollectionCard } from "./ShelfCollectionCard";
 import { exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
@@ -47,7 +46,7 @@ import { KakaoReviewScreen, useKakaoReviews } from "./KakaoReviewScreen";
 import { kakaoReviewSegment } from "./kakaoReviewModel";
 import { LinkIcon } from "@heroicons/react/24/outline";
 import { ReleaseCalendarView } from "./ReleaseCalendarView";
-import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
+import { groupInbox, localDay } from "./releaseCaption";
 import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
@@ -58,6 +57,8 @@ import "../styles/collectionSpines.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = KIND_LABEL;
 const TYPES: CollectionType[] = ["game", "manga", "movie", "av"];
+/** One shared empty list, so a card without release events keeps the same prop and stays memoised. */
+const NO_INBOX: ReleaseInboxItem[] = [];
 /** Shelves whose first appearance has played this session; revisits, sorts and filters do not animate. */
 const enteredSpineShelves = new Set<string>();
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
@@ -291,29 +292,15 @@ export function CollectionBrowser({
   useEffect(() => { if (spineBookcase) enteredSpineShelves.add(spineShelfKey); }, [spineBookcase, spineShelfKey]);
   const board = releases.data?.board;
   const viewLayout = viewSettings.layout;
+  const openFromCard = useCallback((collection: CollectionSummary) => latest.current.openCollection(collection), []);
   const renderCollection = useCallback((collection: CollectionSummary) => {
     // 쇼케이스 is laid out on the same shelf as the library (user, 2026-10-05): the paged exhibition wall
     // squeezed its cards until the names ran into the covers.
     const shelf = showcase || viewLayout === "shelf";
-    const work = collection.type !== "manga" || shelf;
-    const open = () => latest.current.openCollection(collection);
-    return <ContextMenu
-              key={collection.id}
-              items={collectionMenu(collection)}
-            >
-              <CollectionCard
-                collection={collection}
-                coverUrl={collectionCoverUrl(collection)}
-                selected={pickedId === collection.id}
-                lightCase
-                shelf={shelf}
-                releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
-                onClick={() => { if (work) setPickedId(collection.id); else latest.current.openCollection(collection); }}
-                onDoubleClick={() => { if (work) open(); }}
-                onKeyDown={event => { if (work && event.key === "Enter") { event.preventDefault(); open(); } }}
-              />
-            </ContextMenu>;
-  }, [collectionMenu, pickedId, showcase, viewLayout, typeFilter, board, inboxByWork, today, libraryRoot]);
+    return <ShelfCollectionCard key={collection.id} collection={collection} coverUrl={collectionCoverUrl(collection)} picked={pickedId === collection.id}
+      shelf={shelf} work={collection.type !== "manga" || shelf} boardEntry={board?.get(collection.id)} inbox={inboxByWork.get(collection.id) ?? NO_INBOX}
+      today={today} menu={collectionMenu} onPick={setPickedId} onOpen={openFromCard} />;
+  }, [collectionMenu, pickedId, showcase, viewLayout, typeFilter, board, inboxByWork, today, libraryRoot, openFromCard]);
 
   const collectionActions = (
           <>
