@@ -213,6 +213,7 @@ use std::{
 };
 
 use error::LibraryError;
+pub(crate) use aladin_flow::MAX_BOUND_GROUPS;
 pub(crate) use ingestion::MAX_IMAGE_BYTES;
 use lock::LibraryLease;
 use models::{

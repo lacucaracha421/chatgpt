@@ -899,5 +899,39 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertEqual([e["volume_number"] for e in self.events() if e["kind"] == "new_volume"], [3])
 
 
+class ManySeriesBindingTests(unittest.TestCase):
+    """A publisher that registers every volume as its own series needs more than 10 groups."""
+
+    def items(self, count):
+        items = []
+        for n in range(1, count + 1):
+            title = f"리브네스 시리즈{chr(0xAC00 + n)} 1"
+            number, base = bindings.classify_product(title)
+            items.append({"itemId": f"i{n}", "title": title, "author": "작가", "publisher": "리브네스", "isbn13": None,
+                          "publicationDate": "2026-01-01", "itemUrl": None, "raw": {"id": f"i{n}"},
+                          "volumeNumber": number, "baseTitle": base, "thumbnail": None})
+        return items
+
+    def test_bind_and_refresh_keep_every_group_up_to_the_shared_limit(self):
+        count = bindings.MAX_KAKAO_GROUPS
+        items = self.items(count)
+        groups = [{"anchorItemId": g["candidate"]["anchorItemId"], "groupFingerprint": g["candidate"]["groupFingerprint"]}
+                  for g in bindings.grouped_kakao(items)]
+        self.assertEqual(len(groups), count)
+        self.assertGreater(rc.MAX_BOUND_GROUPS, 10)
+        self.assertEqual(rc.MAX_BOUND_GROUPS, bindings.MAX_KAKAO_GROUPS)
+        plan = rc.plan_bind(choice={"query": "리브네스", "groups": groups}, items=items, checked_at="2026-10-17T00:00:00+09:00",
+                            stored_config=None, existing_sources={}, existing_slots=set())
+        self.assertEqual(len(plan["config"]["groups"]), count)
+        self.assertEqual(len(rc.parse_config(plan["config"], plan["externalId"])["groups"]), count)
+        refreshed = rc.plan_refresh(stored_config=plan["config"], external_id=plan["externalId"], items=items,
+                                    checked_at="2026-10-18T00:00:00+09:00", existing_sources={}, existing_slots=set(),
+                                    gating={"releaseWatch": False, "tracksOwnership": False}, previous_checked_at=None)
+        self.assertEqual(len(refreshed["config"]["groups"]), count)
+        # One crawl serves every group: the page budget does not depend on the group count.
+        too_many = {**plan["config"], "groups": plan["config"]["groups"] + [plan["config"]["groups"][0]]}
+        self.assertIsNone(rc.parse_config(too_many, plan["externalId"]))
+
+
 if __name__ == "__main__":
     unittest.main()

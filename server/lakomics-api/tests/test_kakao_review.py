@@ -12,6 +12,16 @@ class KakaoReviewTests(unittest.TestCase):
                 actual = review('work', case['name'], case['bindings'], case['highestOwnedVolume'], case['ownedCount'], case['range'])
                 self.assertEqual({key: actual[key] for key in case['expected']}, case['expected'])
 
+    def test_review_of_a_binding_with_many_groups_is_published(self):
+        import collection_bindings
+        from kakao_review import validated_review
+        count = collection_bindings.MAX_KAKAO_GROUPS
+        groups = [{"anchorItemId": f"i{n}", "groupFingerprint": f"{n:064x}", "knownItemIds": []} for n in range(count)]
+        bindings = {"kakao": {"config": {"version": 2, "query": "리브네스", "groups": groups}, "snapshot": None}}
+        value = validated_review("work", "리브네스", bindings, 11, 11, {})
+        self.assertEqual(len(value["groupFingerprints"]), count)
+        self.assertGreater(count, 10)
+
     def test_query_is_clipped(self):
         self.assertEqual(len(review('work', 'Title', {'kakao': {'config': {'query': '가' * 2001}}}, 0, 0, {})['query']), 2000)
 

@@ -67,7 +67,7 @@ impl Library {
     fn apply_server_kakao_with(&self, request: AladinApplyRequest,
         post: &dyn Fn(&Value) -> Result<Value, LibraryError>,
         pull: &dyn Fn() -> Result<(), LibraryError>) -> Result<KakaoOperationResult, LibraryError> {
-        if request.groups.is_empty() || request.groups.len() > 10 || request.query.trim().chars().count() < 2 {
+        if request.groups.is_empty() || request.groups.len() > super::MAX_BOUND_GROUPS || request.query.trim().chars().count() < 2 {
             return Err(LibraryError::InvalidAladinResponse);
         }
         let choice = json!({"query":request.query,"groups":request.groups,"title":request.query});

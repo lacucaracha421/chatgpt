@@ -715,7 +715,7 @@ fn snapshot_from_transaction(root: &Path, transaction: &rusqlite::Transaction<'_
             let collection = ReplicaCollection {
                 kakao_review: if features.kakao_review && summary.collection_type == crate::library::models::CollectionType::Manga {
                     crate::library::kakao_review::load(&transaction, &summary.id).ok()
-                        .filter(|review| review.volumes.len() <= 9999 && review.group_fingerprints.len() <= 10)
+                        .filter(|review| review.volumes.len() <= 9999 && review.group_fingerprints.len() <= crate::library::MAX_BOUND_GROUPS)
                 } else { None },
                 series,
                 film,

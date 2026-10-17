@@ -58,6 +58,11 @@ fn kakao_review_replica_feature_carries_query_binding_and_range_without_cropping
     assert_eq!(item(&clipped,"m")["kakaoReview"]["query"].as_str().unwrap().chars().count(), 2000);
     library.connection().unwrap().execute("UPDATE collection_external_bindings SET provider_config_json=?1 WHERE collection_id='m' AND provider='kakao'",
         [json!({"groups":(0..11).map(|n|json!({"groupFingerprint":n.to_string()})).collect::<Vec<_>>()} ).to_string()]).unwrap();
+    // A series-per-volume binding with more than ten groups is still published.
+    let many: Value = serde_json::from_str(&body(&library, ReplicaFeatures { kakao_review:true, ..ALL })).unwrap();
+    assert_eq!(item(&many,"m")["kakaoReview"]["groupFingerprints"].as_array().unwrap().len(), 11);
+    library.connection().unwrap().execute("UPDATE collection_external_bindings SET provider_config_json=?1 WHERE collection_id='m' AND provider='kakao'",
+        [json!({"groups":(0..=crate::library::MAX_BOUND_GROUPS).map(|n|json!({"groupFingerprint":n.to_string()})).collect::<Vec<_>>()} ).to_string()]).unwrap();
     let omitted: Value = serde_json::from_str(&body(&library, ReplicaFeatures { kakao_review:true, ..ALL })).unwrap();
     assert!(item(&omitted,"m").get("kakaoReview").is_none());
     assert_eq!(omitted["collections"].as_array().unwrap().len(), new["collections"].as_array().unwrap().len());

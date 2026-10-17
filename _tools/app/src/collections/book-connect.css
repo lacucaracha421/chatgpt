@@ -25,6 +25,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.8fr);
   min-height: 20rem;
+  /* Up to 40 series can be picked: the two lists scroll inside instead of pushing the buttons away. */
+  max-height: max(20rem, 55vh);
+  grid-template-rows: minmax(0, 1fr);
   border: var(--border-width) solid var(--color-border);
 }
 
@@ -51,6 +54,10 @@
 }
 
 .book-connect__result:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.book-connect__result[data-previewing="true"]:not([aria-pressed="true"]) {
   background: var(--color-surface-hover);
 }
 

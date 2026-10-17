@@ -1,6 +1,6 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { KakaoSeriesCandidate, KakaoSyncResult } from "../library/types";
@@ -8,6 +8,8 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
+import { applySelectionGesture } from "../assets/selection";
+import { MAX_KAKAO_GROUPS } from "./kakaoGroupLimit";
 import { normalizeKakaoTitle } from "./kakaoReviewModel";
 import { StableImage } from "../shared/ui/StableImage";
 import { usePendingBindRecheck } from "./usePendingBindRecheck";
@@ -36,10 +38,17 @@ export function KakaoConnectDialog({
   const [query, setQuery] = useState(initialQuery);
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [results, setResults] = useState<KakaoSeriesCandidate[] | null>(null);
-  // Fingerprints of the picked groups; a row click picks only that group, the checkbox
-  // adds or removes groups Kakao split off the same series (imprint change, 완결, 신장판).
+  // Fingerprints of the picked groups. The checkbox, Ctrl/Cmd+click and Space add or remove groups
+  // Kakao split off the same series (imprint change, 완결, 신장판); Shift+click adds a range.
+  // A plain row click never clears checks: it picks the row only when nothing is checked yet.
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [anchorKey, setAnchorKey] = useState<string | null>(null);
+  // The row being looked at; it shows in the preview even while unchecked.
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [limitHit, setLimitHit] = useState(false);
+  const orderedKeys = (results ?? []).map((candidate) => candidate.groupFingerprint);
   const selected = (results ?? []).filter((candidate) => selectedKeys.includes(candidate.groupFingerprint));
+  const previewed = (results ?? []).filter((candidate) => selectedKeys.includes(candidate.groupFingerprint) || candidate.groupFingerprint === focusKey);
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -53,13 +62,63 @@ export function KakaoConnectDialog({
     return () => { searchGeneration.current++; };
   }, [open, collectionId]);
 
-  function toggle(fingerprint: string) {
-    if (working) return;
+  function beginEdit() {
     recheck.cancel();
     setPending(false);
-    setSelectedKeys((keys) =>
-      keys.includes(fingerprint) ? keys.filter((key) => key !== fingerprint) : [...keys, fingerprint],
-    );
+    setError(null);
+  }
+
+  /** Checks or unchecks one row, refusing to go past the group limit. */
+  function toggle(fingerprint: string) {
+    if (working) return;
+    beginEdit();
+    const on = selectedKeys.includes(fingerprint);
+    if (!on && selectedKeys.length >= MAX_KAKAO_GROUPS) { setLimitHit(true); return; }
+    setLimitHit(false);
+    setSelectedKeys(on ? selectedKeys.filter((key) => key !== fingerprint) : [...selectedKeys, fingerprint]);
+    setAnchorKey(fingerprint);
+    setFocusKey(on ? (focusKey === fingerprint ? null : focusKey) : fingerprint);
+  }
+
+  /** Adds the wanted rows to the current checks in list order, up to the group limit. */
+  function addUpToLimit(wanted: ReadonlySet<string>) {
+    const room = Math.max(0, MAX_KAKAO_GROUPS - selectedKeys.length);
+    const fresh = orderedKeys.filter((key) => wanted.has(key) && !selectedKeys.includes(key));
+    setLimitHit(fresh.length > room);
+    setSelectedKeys([...selectedKeys, ...fresh.slice(0, room)]);
+  }
+
+  function clickRow(event: MouseEvent, fingerprint: string) {
+    if (working) return;
+    if (event.ctrlKey || event.metaKey) { toggle(fingerprint); return; }
+    beginEdit();
+    if (event.shiftKey) {
+      const next = applySelectionGesture(
+        { ids: new Set(selectedKeys), anchorId: anchorKey, focusId: focusKey },
+        orderedKeys, fingerprint, { toggle: true, range: true },
+      );
+      addUpToLimit(next.ids);
+      setAnchorKey(next.anchorId);
+      setFocusKey(fingerprint);
+      return;
+    }
+    setLimitHit(false);
+    setAnchorKey(fingerprint);
+    setFocusKey(fingerprint);
+    if (selectedKeys.length === 0) setSelectedKeys([fingerprint]);
+  }
+
+  function rowKeyDown(event: KeyboardEvent, fingerprint: string) {
+    if (event.key !== " " || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    toggle(fingerprint);
+  }
+
+  function listKeyDown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "a" || working) return;
+    event.preventDefault();
+    beginEdit();
+    addUpToLimit(new Set(orderedKeys));
   }
 
   function close() {
@@ -89,7 +148,8 @@ export function KakaoConnectDialog({
       const rank = (candidate: KakaoSeriesCandidate) => initialGroupFingerprints.includes(candidate.groupFingerprint) ? 0 : normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed) ? 1 : 2;
       const exact = nextResults.filter(candidate => normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed));
       setResults(autoSearch ? [...nextResults].sort((a, b) => rank(a) - rank(b)) : nextResults);
-      setSelectedKeys(autoSearch ? nextResults.filter(candidate => initialGroupFingerprints.includes(candidate.groupFingerprint) || (exact.length === 1 && candidate === exact[0])).slice(0, MAX_GROUPS).map(candidate => candidate.groupFingerprint) : []);
+      setAnchorKey(null); setFocusKey(null); setLimitHit(false);
+      setSelectedKeys(autoSearch ? nextResults.filter(candidate => initialGroupFingerprints.includes(candidate.groupFingerprint) || (exact.length === 1 && candidate === exact[0])).slice(0, MAX_KAKAO_GROUPS).map(candidate => candidate.groupFingerprint) : []);
     } catch (searchError) {
       if (generation !== searchGeneration.current) return;
       setError(commandErrorMessage(searchError, "카카오에서 검색하지 못했습니다."));
@@ -161,6 +221,7 @@ export function KakaoConnectDialog({
 
         {error && <p className="book-connect__error" role="alert">{error}</p>}
         {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
+        {(limitHit || selectedKeys.length >= MAX_KAKAO_GROUPS) && <p className="book-connect__note" role="status">한 번에 최대 {MAX_KAKAO_GROUPS}개 시리즈까지 연결할 수 있습니다.</p>}
         <p className="book-connect__note">국내 출판 제목으로 검색하세요. 출판사별 권 목록과 발매 정보를 연결합니다.</p>
         {(results?.[0]?.unparsedCount ?? 0) > 0 && (
           <p className="book-connect__note">권 번호를 알 수 없거나 세트·가이드라서 제외된 상품 {results?.[0]?.unparsedCount}개</p>
@@ -168,7 +229,7 @@ export function KakaoConnectDialog({
         {busy === "search" && results === null && <Skeleton className="book-connect__loading" label="카카오 검색 중" />}
 
         <div className="book-connect__body">
-          <div className="book-connect__results" aria-label="카카오 검색 결과">
+          <div className="book-connect__results" aria-label="카카오 검색 결과" onKeyDown={listKeyDown}>
             {results?.length === 0 && <EmptyState inline className="book-connect__empty" title="검색 결과 없음" />}
             {results?.map((candidate) => {
               const checked = selectedKeys.includes(candidate.groupFingerprint);
@@ -179,15 +240,18 @@ export function KakaoConnectDialog({
                     className="book-connect__check"
                     aria-label={`${candidate.title} ${volumeRange(candidate)} 함께 연결`}
                     checked={checked}
-                    disabled={working || (!checked && selectedKeys.length >= MAX_GROUPS)}
-                    onChange={() => { toggle(candidate.groupFingerprint); setError(null); }}
+                    disabled={working || (!checked && selectedKeys.length >= MAX_KAKAO_GROUPS)}
+                    onChange={() => toggle(candidate.groupFingerprint)}
                   />
                   <button
                     type="button"
                     className="book-connect__result"
                     aria-pressed={checked}
+                    data-previewing={candidate.groupFingerprint === focusKey || undefined}
                     disabled={working}
-                    onClick={() => { recheck.cancel(); setSelectedKeys([candidate.groupFingerprint]); setError(null); setPending(false); }}
+                    onClick={(event) => clickRow(event, candidate.groupFingerprint)}
+                    onKeyDown={(event) => rowKeyDown(event, candidate.groupFingerprint)}
+                    onKeyUp={(event) => { if (event.key === " ") event.preventDefault(); }}
                   >
                     <strong>{candidate.title}</strong>
                     <small>{[candidate.author, candidate.publisher, volumeSummary(candidate)].filter(Boolean).join(" · ")}</small>
@@ -198,12 +262,13 @@ export function KakaoConnectDialog({
           </div>
 
           <div className="book-connect__preview" aria-label="선택한 시리즈 권 목록">
-            {selected.length > 0 ? (
-              selected.map((candidate) => (
+            {previewed.length > 0 ? (
+              previewed.map((candidate) => (
                 <section key={candidate.groupFingerprint} className="book-connect__preview-group">
                   <div className="book-connect__preview-header">
                     <strong>{candidate.title}</strong>
-                    {selected.length > 1 && <small>{[candidate.publisher, volumeRange(candidate)].filter(Boolean).join(" · ")}</small>}
+                    {previewed.length > 1 && <small>{[candidate.publisher, volumeRange(candidate)].filter(Boolean).join(" · ")}</small>}
+                    {!selectedKeys.includes(candidate.groupFingerprint) && <small>체크하지 않아 연결되지 않습니다</small>}
                     {candidate.ignoredCount > 0 && <small>같은 권이 겹쳐 제외된 상품 {candidate.ignoredCount}개</small>}
                   </div>
                   <ul>
@@ -240,7 +305,6 @@ export function KakaoConnectDialog({
   );
 }
 
-const MAX_GROUPS = 10;
 
 function volumeRange(candidate: KakaoSeriesCandidate) {
   if (candidate.volumes.length === 0) return "0권";

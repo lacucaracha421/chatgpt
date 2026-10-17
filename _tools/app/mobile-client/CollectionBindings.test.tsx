@@ -268,6 +268,21 @@ it('toggles several Kakao groups and joins them in volume order into one request
   expect(row('카카오').textContent).toContain('밤의 도서관 · 1–15권 · 2개 묶음');
 });
 
+it('joins more than ten single-volume series into one request', async () => {
+  const perVolume = Array.from({length: 12}, (_, index) => ({...kakaoItems[0], anchorItemId: `k-${index + 1}`, groupFingerprint: index.toString(16).padStart(64, '0'),
+    title: `리브네스 ${index + 1}`, volumeCount: 1, firstVolume: 1, lastVolume: 1, thumbnailUrl: null}));
+  routes.kakao = {version: 1, provider: 'kakao', query: '밤의 도서관', items: perVolume};
+  await renderArea();
+  const sheet = await openSheet('카카오');
+  const results = await within(sheet).findByRole('list', {name: '카카오 검색 결과'});
+  for (const box of within(results).getAllByRole('checkbox')) fireEvent.click(box);
+  expect(within(results).getAllByRole('checkbox').every(box => (box as HTMLInputElement).checked && !(box as HTMLInputElement).disabled)).toBe(true);
+  fireEvent.click(within(sheet).getByRole('button', {name: '12개 묶음 연결'}));
+  fireEvent.click(within(await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'})).getByRole('button', {name: '연결 요청'}));
+  await waitFor(() => expect(posts()).toHaveLength(1));
+  expect(((posts()[0].choice as {groups: unknown[]}).groups)).toHaveLength(12);
+});
+
 it('clears the Kakao selection on a new search', async () => {
   routes.kakao = {version: 1, provider: 'kakao', query: '밤의 도서관', items: splitItems};
   await renderArea();

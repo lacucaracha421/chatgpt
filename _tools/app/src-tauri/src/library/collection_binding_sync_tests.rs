@@ -984,15 +984,25 @@ fn kakao_targets_read_groups_and_the_legacy_single_form() {
     repeated["groups"][1] = first;
     let mut empty = split_groups_choice();
     empty["groups"] = json!([]);
-    let mut eleven = split_groups_choice();
-    eleven["groups"] = Value::Array(
-        (0..11)
-            .map(|n| json!({"anchorItemId":format!("a{n}"),"groupFingerprint":format!("{n:064x}")}))
-            .collect(),
-    );
+    let many_groups = |count: usize| {
+        let mut choice = split_groups_choice();
+        choice["groups"] = Value::Array(
+            (0..count)
+                .map(|n| json!({"anchorItemId":format!("a{n}"),"groupFingerprint":format!("{n:064x}")}))
+                .collect(),
+        );
+        choice
+    };
+    // A publisher may register every volume as its own series: more than ten groups bind.
+    let Ok(Target::Kakao(full)) = target(&bind_item(many_groups(MAX_BOUND_GROUPS))) else {
+        panic!("the full group limit refused");
+    };
+    assert!(full.groups.len() > 10);
+    assert_eq!(full.groups.len(), MAX_BOUND_GROUPS);
+    let over_limit = many_groups(MAX_BOUND_GROUPS + 1);
     let mut bad_fingerprint = split_groups_choice();
     bad_fingerprint["groups"][0]["groupFingerprint"] = json!("X".repeat(64));
-    for choice in [repeated, empty, eleven, bad_fingerprint] {
+    for choice in [repeated, empty, over_limit, bad_fingerprint] {
         assert!(target(&bind_item(choice)).is_err());
     }
 }

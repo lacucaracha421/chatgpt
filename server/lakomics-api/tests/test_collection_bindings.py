@@ -639,7 +639,7 @@ class BindRequests(Base):
         self.code(self.kakao(query=" 스틸 "), 422, "invalidBindRequest")
         self.code(self.kakao(extra=1), 422, "invalidBindRequest")
         body = {"version": 1, "operationId": str(uuid.uuid4()), "collectionId": "m1", "provider": "mangadex",
-                "choice": {"mangaId": MANGA_ID, "title": "x" * 20_000}}
+                "choice": {"mangaId": MANGA_ID, "title": "x" * (bindings.MAX_REQUEST_BODY_BYTES + 1)}}
         self.code(self.client.post(PREFIX + "/requests", json=body, headers=self.auth), 413, "bindRequestTooLarge")
         self.assertEqual(self.mangadex(headers=self.publisher).status_code, 200)  # publisher may use client routes
         self.assertEqual(self.client.post(PREFIX + "/requests", json={}).status_code, 401)
@@ -678,8 +678,10 @@ class BindRequests(Base):
     def test_kakao_groups_bounds_and_uniqueness(self):
         def group(n):
             return {"anchorItemId": f"isbn13:{n}", "groupFingerprint": f"{n:064x}"}
-        self.assertEqual(len(self.ok(self.kakao_groups([group(n) for n in range(10)]))["request"]["choice"]["groups"]), 10)
-        self.code(self.kakao_groups([group(n) for n in range(11)]), 422, "invalidBindRequest")
+        limit = bindings.MAX_KAKAO_GROUPS
+        self.assertGreater(limit, 10)  # a publisher may register every volume as its own series
+        self.assertEqual(len(self.ok(self.kakao_groups([group(n) for n in range(limit)]))["request"]["choice"]["groups"]), limit)
+        self.code(self.kakao_groups([group(n) for n in range(limit + 1)]), 422, "invalidBindRequest")
         self.code(self.kakao_groups([]), 422, "invalidBindRequest")
         self.code(self.kakao_groups([group(1), {**group(1), "anchorItemId": "isbn13:other"}]), 422,
                   "invalidBindRequest")
@@ -689,6 +691,14 @@ class BindRequests(Base):
         self.assertEqual(stored, [group(1)])
         self.code(self.kakao_groups([{**group(1), "extra": 1}]), 422, "invalidBindRequest")
         self.code(self.kakao_groups([{"groupFingerprint": "c" * 64}]), 422, "invalidBindRequest")
+
+    def test_kakao_full_group_selection_with_titles_fits_the_request_body(self):
+        # The tablet sends a title (up to 500 characters) and the volume range for every group.
+        groups = [{"anchorItemId": f"isbn13:97911384{n:05d}", "groupFingerprint": f"{n:064x}", "title": "가" * 60,
+                   "firstVolume": n + 1, "lastVolume": n + 1, "volumeCount": 1}
+                  for n in range(bindings.MAX_KAKAO_GROUPS)]
+        request = self.ok(self.kakao_groups(groups))["request"]
+        self.assertEqual(len(request["choice"]["groups"]), bindings.MAX_KAKAO_GROUPS)
 
     def test_newer_request_replaces_pending_per_provider(self):
         first = self.ok(self.kakao())["request"]

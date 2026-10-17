@@ -43,7 +43,7 @@ export type MangaDexChoice = {mangaId: string; title: string; coverUrl: string |
 export type KakaoGroupChoice = {anchorItemId: string; groupFingerprint: string; title?: string; firstVolume?: number; lastVolume?: number; volumeCount?: number};
 export type KakaoChoice = {query: string; groups: KakaoGroupChoice[]; title: string; author: string | null; publisher: string | null; volumeCount: number | null; thumbnailUrl: string | null};
 /** A bind may join at most this many groups of one search (the server enforces the same). */
-export const MAX_KAKAO_GROUPS = 10;
+export {MAX_KAKAO_GROUPS} from '../src/collections/kakaoGroupLimit';
 export type BindCommand = {version: 1; operationId: string; collectionId: string; provider: BindProvider; choice: MangaDexChoice | KakaoChoice; expected?: {externalId: null}};
 
 /**

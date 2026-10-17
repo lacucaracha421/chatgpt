@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { KakaoSeriesCandidate, LibraryGateway } from "../library/types";
 import { KakaoConnectDialog } from "./KakaoConnectDialog";
+import { MAX_KAKAO_GROUPS } from "./kakaoGroupLimit";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -168,6 +169,103 @@ describe("KakaoConnectDialog", () => {
         { anchorItemId: "isbn13:0010", groupFingerprint: "fingerprint-somi" },
         { anchorItemId: "isbn13:1150", groupFingerprint: "fingerprint-s" },
       ],
+    });
+  });
+
+  it("connects more than ten series when a publisher registered every volume as its own series", async () => {
+    const user = userEvent.setup();
+    const perVolume: KakaoSeriesCandidate[] = Array.from({ length: 12 }, (_, index) => ({
+      anchorItemId: `isbn13:${index + 1}`, groupFingerprint: `fingerprint-${index + 1}`, title: `리브네스 ${index + 1}`,
+      author: "작가", publisher: "리브네스", ignoredCount: 0,
+      volumes: [{ volumeNumber: 1, providerItemId: `isbn13:${index + 1}`, title: `리브네스 ${index + 1}`, publicationDate: null, isbn13: null }],
+    }));
+    const { gateway } = renderDialog({ searchKakao: vi.fn().mockResolvedValue(perVolume) });
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    for (const candidate of perVolume) {
+      await user.click(await screen.findByRole("checkbox", { name: `${candidate.title} 1권 함께 연결` }));
+    }
+    expect(screen.getByRole("checkbox", { name: "리브네스 12 1권 함께 연결" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "12개 연결" }));
+    expect(gateway.applyKakao).toHaveBeenCalledWith({
+      collectionId: "collection-1",
+      query: "던전밥",
+      groups: perVolume.map(({ anchorItemId, groupFingerprint }) => ({ anchorItemId, groupFingerprint })),
+    });
+  });
+
+  describe("multi-select on the row title", () => {
+    const series = (count: number): KakaoSeriesCandidate[] => Array.from({ length: count }, (_, index) => ({
+      anchorItemId: `isbn13:${index + 1}`, groupFingerprint: `fp-${index + 1}`, title: `리브네스 ${index + 1}`,
+      author: "작가", publisher: "리브네스", ignoredCount: 0,
+      volumes: [{ volumeNumber: 1, providerItemId: `isbn13:${index + 1}`, title: `리브네스 ${index + 1} 1권`, publicationDate: null, isbn13: null }],
+    }));
+    const box = (n: number) => screen.getByRole("checkbox", { name: `리브네스 ${n} 1권 함께 연결` });
+    const title = (n: number) => within(screen.getByLabelText("카카오 검색 결과")).getByText(`리브네스 ${n}`, { selector: "strong" }).closest("button") as HTMLButtonElement;
+    async function open(count: number) {
+      const user = userEvent.setup();
+      const view = renderDialog({ searchKakao: vi.fn().mockResolvedValue(series(count)) });
+      await user.click(screen.getByRole("button", { name: "검색" }));
+      await screen.findByRole("checkbox", { name: "리브네스 1 1권 함께 연결" });
+      return { user, ...view };
+    }
+
+    it("keeps checked rows when a title is clicked plainly and only previews it", async () => {
+      const { user } = await open(4);
+      await user.click(box(1)); await user.click(box(2));
+      await user.click(title(3));
+      expect(box(1)).toBeChecked(); expect(box(2)).toBeChecked(); expect(box(3)).not.toBeChecked();
+      expect(screen.getByText("리브네스 3 1권")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "2개 연결" })).toBeEnabled();
+    });
+
+    it("checks the clicked title when nothing is checked yet", async () => {
+      const { user } = await open(3);
+      await user.click(title(2));
+      expect(box(2)).toBeChecked(); expect(box(1)).not.toBeChecked();
+    });
+
+    it("adds and removes rows with Ctrl+click and keeps the others", async () => {
+      const { user } = await open(4);
+      await user.click(box(1));
+      await user.keyboard("{Control>}");
+      await user.click(title(3));
+      expect(box(1)).toBeChecked(); expect(box(3)).toBeChecked();
+      await user.click(title(1));
+      await user.keyboard("{/Control}");
+      expect(box(1)).not.toBeChecked(); expect(box(3)).toBeChecked();
+    });
+
+    it("adds the range from the last clicked row with Shift+click", async () => {
+      const { user } = await open(6);
+      await user.click(box(2));
+      await user.keyboard("{Shift>}");
+      await user.click(title(5));
+      await user.keyboard("{/Shift}");
+      expect([1, 2, 3, 4, 5, 6].map((n) => (box(n) as HTMLInputElement).checked)).toEqual([false, true, true, true, true, false]);
+    });
+
+    it("toggles the focused row with Space and checks all with Ctrl+A", async () => {
+      const { user } = await open(3);
+      title(2).focus();
+      await user.keyboard(" ");
+      expect(box(2)).toBeChecked();
+      await user.keyboard(" ");
+      expect(box(2)).not.toBeChecked();
+      await user.keyboard("{Control>}a{/Control}");
+      expect([1, 2, 3].every((n) => (box(n) as HTMLInputElement).checked)).toBe(true);
+    });
+
+    it("never goes past the group limit and says so", async () => {
+      const { user } = await open(MAX_KAKAO_GROUPS + 3);
+      title(1).focus();
+      await user.keyboard("{Control>}a{/Control}");
+      expect(screen.getAllByRole("checkbox").filter((item) => (item as HTMLInputElement).checked)).toHaveLength(MAX_KAKAO_GROUPS);
+      expect(screen.getByText(`한 번에 최대 ${MAX_KAKAO_GROUPS}개 시리즈까지 연결할 수 있습니다.`)).toBeInTheDocument();
+      await user.keyboard("{Control>}");
+      await user.click(title(MAX_KAKAO_GROUPS + 1));
+      await user.keyboard("{/Control}");
+      expect(box(MAX_KAKAO_GROUPS + 1)).not.toBeChecked();
+      expect(screen.getByRole("button", { name: `${MAX_KAKAO_GROUPS}개 연결` })).toBeEnabled();
     });
   });
 

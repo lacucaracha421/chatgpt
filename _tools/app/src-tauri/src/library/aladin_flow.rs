@@ -92,8 +92,9 @@ struct GroupedSeries {
     member_ids: Vec<String>,
 }
 
-/// At most this many groups of one search may be bound together.
-pub(crate) const MAX_BOUND_GROUPS: usize = 10;
+/// At most this many groups of one search may be bound together (a publisher may register every
+/// volume as its own series). Keep in step with the server's `MAX_KAKAO_GROUPS` and the clients.
+pub(crate) const MAX_BOUND_GROUPS: usize = 40;
 
 /// One bound group as stored: refresh re-finds it by its anchor item, or by its fingerprint
 /// together with an item it already provided.

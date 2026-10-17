@@ -84,10 +84,10 @@ redirects, no proxy environment, per-request timeouts, response size caps).
 
 4. ``POST /v1/collections/bindings/requests`` (client)
    Body ``{"version": 1, "operationId": <UUID>, "collectionId": id, "provider":
-   "mangadex"|"kakao", "choice": {...}, "expected": {"externalId": str|null}?}`` (<= 16 KiB).
+   "mangadex"|"kakao", "choice": {...}, "expected": {"externalId": str|null}?}`` (<= 32 KiB).
    * MangaDex choice: ``{"mangaId": <UUID>, "title": str(1-500), "coverUrl": str|null?}``.
      The PC runs ``apply_mangadex`` with ``target = existing collectionId``.
-   * Kakao choice: ``{"query": str(2-100, trimmed), "groups": [Group] (1-10, unique by
+   * Kakao choice: ``{"query": str(2-100, trimmed), "groups": [Group] (1-40, unique by
      groupFingerprint), "title": str(1-500), "author": str|null?, "publisher": str|null?,
      "volumeCount": int|null?, "thumbnailUrl": str|null?}``, Group = ``{"anchorItemId":
      str(1-128), "groupFingerprint": 64 lowercase hex, "title": str(1-500)?, "firstVolume":
@@ -191,6 +191,7 @@ PREFIX = "/v1/collections/bindings"
 KAKAO_KEY_ENV = "LAKOMICS_KAKAO_REST_KEY"
 MAX_CURSOR = 9_007_199_254_740_991
 MAX_BODY_BYTES = 16 * 1024
+MAX_REQUEST_BODY_BYTES = 32 * 1024  # a 40-group Kakao bind with titles is about 12-25 KB
 MAX_PENDING = 1_000
 RESOLVED_DAYS = 30
 RESOLVED_MAX = 2_000
@@ -998,7 +999,10 @@ class MangaDexChoice(Strict):
     coverUrl: Url | None = None
 
 
-MAX_KAKAO_GROUPS = 10
+# One bind may join this many series of one Kakao search (some publishers register every volume as
+# its own series). Shared by the bind request, the stored binding config, the release check and the
+# published review; the PC (aladin_flow::MAX_BOUND_GROUPS) and the clients keep the same number.
+MAX_KAKAO_GROUPS = 40
 
 
 class KakaoGroup(Strict):
@@ -1294,7 +1298,7 @@ def register(app, get_db, require_client, require_publisher):
     @app.post(PREFIX + "/requests")
     async def post_request(request: Request, authorization: str | None = Header(default=None)):
         require_client(authorization)
-        body = await _bounded(request, MAX_BODY_BYTES, "bindRequestTooLarge", "연결 요청이 너무 큽니다.")
+        body = await _bounded(request, MAX_REQUEST_BODY_BYTES, "bindRequestTooLarge", "연결 요청이 너무 큽니다.")
         try:
             command = BindCommand.model_validate_json(body)
         except (ValidationError, ValueError):

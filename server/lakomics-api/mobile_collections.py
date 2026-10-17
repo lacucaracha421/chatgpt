@@ -376,7 +376,7 @@ class KakaoReview(CollectionVolumeRange):
     highestOwnedVolume: Annotated[StrictInt, Field(ge=0)]
     ownedCount: Annotated[StrictInt, Field(ge=0)]
     partialDismissed: StrictBool
-    groupFingerprints: list[str] = Field(max_length=10)
+    groupFingerprints: list[str] = Field(max_length=collection_bindings.MAX_KAKAO_GROUPS)
 
 
 class Collection(StrictModel):
