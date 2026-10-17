@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitCollectionCase, fitFlatJacket } from "./fitCaseStage";
+import { fitCollectionCase, fitFlatJacket, stageForCaseHeight } from "./fitCaseStage";
 
 describe("work stage fitting", () => {
   it.each([
@@ -26,5 +26,9 @@ describe("work stage fitting", () => {
       expect(fit.height).toBeLessThanOrEqual(box.height - 96 + .001);
     }
     expect(fitFlatJacket({ width: 1580, height: 912 }, .71)).toEqual({ height: 520, spine: 40 });
+  });
+
+  it("draws a shelf's pulled-out case at its asked height, also above the 520px model (AV 아주 크게)", () => {
+    for (const height of [300, 766]) expect(fitCollectionCase(stageForCaseHeight(height), 135 / 190, false).height).toBeCloseTo(height);
   });
 });

@@ -1,4 +1,5 @@
-export type StageBox = { width: number; height: number };
+/** `exact`: draw the case at the size the box asks for, even above its 520px model (a shelf's pulled-out case). */
+export type StageBox = { width: number; height: number; exact?: boolean };
 const CASE_HEIGHT = 520;
 const CASE_DEPTH = 34;
 const FLAT_SPINE = 40;
@@ -9,7 +10,7 @@ const PROJECTION_ROOM = 1.25;
 
 export function fitCollectionCase(box: StageBox, ratio: number, open: boolean) {
   const width = CASE_HEIGHT * ratio * (open ? 2 : 1) + CASE_DEPTH;
-  const scale = Math.max(0, Math.min(1, (box.width - EDGE_TARGETS) / (width * PROJECTION_ROOM), (box.height - VERTICAL_SPACE) / (CASE_HEIGHT * PROJECTION_ROOM)));
+  const scale = Math.max(0, Math.min(box.exact ? Infinity : 1, (box.width - EDGE_TARGETS) / (width * PROJECTION_ROOM), (box.height - VERTICAL_SPACE) / (CASE_HEIGHT * PROJECTION_ROOM)));
   return { height: CASE_HEIGHT * scale, scale };
 }
 
@@ -20,5 +21,5 @@ export function fitFlatJacket(box: StageBox, ratio: number) {
 
 /** The stage in which `fitCollectionCase` draws the closed case exactly `height` pixels tall (a shelf's pulled-out case). */
 export function stageForCaseHeight(height: number): StageBox {
-  return { width: Number.MAX_SAFE_INTEGER, height: height * PROJECTION_ROOM + VERTICAL_SPACE };
+  return { width: Number.MAX_SAFE_INTEGER, height: height * PROJECTION_ROOM + VERTICAL_SPACE, exact: true };
 }
