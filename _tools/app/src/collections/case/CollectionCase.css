@@ -22,7 +22,12 @@
 /* Scale the entire reference object, including paper, type and media, as one unit.
    The fit scale lives on the snapshot boundary, outside the transitioned `transform`: the model appears at its
    size instead of growing and shrinking while the stage and cover proportions settle (user, 2026-10-03). */
-.collection-case--fitted .collection-case-object { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: var(--case-scale); perspective: calc(2200px / var(--case-scale)); }
+.collection-case--fitted .collection-case-object { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: calc(var(--case-scale) / 2); perspective: calc(2200px / var(--case-scale)); }
+/* The model is drawn at twice its size and scaled back by half, so the same on-screen size and motion hold. The browser paints
+   a 3D-tilted face into a bitmap at its layout size and resamples that bitmap when it is rotated; a face painted at 2x keeps
+   the cover and print as sharp as the flat image (user, 2026-10-17: the cover lost quality on the 3D model). `zoom` doubles
+   every length inside (case, depth, perspective, borders, type), so no other value needs to change. */
+.collection-case--fitted .collection-case-object { zoom: 2; }
 .collection-case .k-hinge, .collection-case .k-lid { transition-duration: 560ms; }
 /* Opening refits the model (the open case is twice as wide). While it opens or closes, the fit scale and the
    floor shadows move on the same 560 ms curve as the rotation and lid, so the model never snaps smaller first. */
