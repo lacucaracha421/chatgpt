@@ -14,7 +14,7 @@
 
 .card-viewer .ui-button { min-height:44px; }
 .card-viewer .ui-icon-button { min-width:44px; }
-.card-viewer__bar { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-4); pointer-events:none; }
+.card-viewer__bar { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-4); pointer-events:auto; }
 .card-viewer__bar > * { pointer-events:auto; }
 .card-viewer__count { margin-right:auto; color:var(--color-muted); font-size:var(--type-meta); font-variant-numeric:tabular-nums; }
 .card-viewer__art-toggle svg { width:18px; height:18px; margin-right:var(--space-1); }

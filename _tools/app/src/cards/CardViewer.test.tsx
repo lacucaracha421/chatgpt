@@ -55,6 +55,29 @@ it("closes with the close button and with Escape", async () => {
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" }); expect(onClose).toHaveBeenCalledTimes(2);
 });
 
+it("isolates window dragging on the bar and keeps its buttons working", async () => {
+  const onClose = vi.fn();
+  const pointer = vi.fn();
+  render(<div onPointerDown={pointer} onPointerMove={pointer} onPointerUp={pointer} onPointerCancel={pointer}>
+    <Host start={1} onClose={onClose} />
+  </div>); await settle();
+  const bar = screen.getByRole("button", { name: "그림 보기" }).closest("header")!;
+  expect(bar).toHaveAttribute("data-tauri-drag-region", "deep");
+  fireEvent.pointerEnter(bar);
+  flick(bar, 300, 120);
+  fireEvent.pointerMove(bar, { clientX: 120 });
+  fireEvent.pointerCancel(bar);
+  await settle(3000);
+  expect(pointer).not.toHaveBeenCalled();
+  expect(shownName()).toContain("미카");
+  expect(screen.getByLabelText("카드 정보")).toHaveAttribute("data-open", "true");
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "그림 보기" }));
+  expect(screen.getByRole("button", { name: "카드 보기" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
 it("steps through the list with the arrow keys and the buttons, and stops at both ends", async () => {
   render(<Host />); await settle();
   const dialog = screen.getByRole("dialog");

@@ -53,6 +53,15 @@ it("centres the profile column on the portrait, identity, facts and editable mem
   fireEvent.click(screen.getByRole("button", { name: "작품으로 돌아가기" })); expect(back).toHaveBeenCalledOnce();
   expect(container.querySelector(".av-performer-page__main")).toContainElement(screen.getByRole("group", { name: "배우 작품 선반" }));
 });
+it("lets the top line move the window while the back button keeps working", async () => {
+  const back = vi.fn(); render(page(gateway(), { onBack: back }));
+  const backButton = await screen.findByRole("button", { name: "작품으로 돌아가기" });
+  const bar = backButton.parentElement!;
+  expect(bar).toHaveAttribute("data-tauri-drag-region", "deep");
+  fireEvent.pointerDown(bar, { button: 0, pointerId: 1 });
+  expect(back).not.toHaveBeenCalled();
+  fireEvent.click(backButton); expect(back).toHaveBeenCalledOnce();
+});
 it("uses the shared per-row menu and plank rows without remounting covers; filters solo and joint roles", async () => {
   const { container } = render(page(gateway())); const user = userEvent.setup();
   const shelf = await screen.findByRole("group", { name: "배우 작품 선반" });

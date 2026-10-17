@@ -139,7 +139,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   };
   const markProps = {person, onSave: saveProfile, onEdit: () => setProfileEditing(true), disabled: profileRefused};
   return <article className="av-performer-page" aria-label="AV 배우 상세">
-    <div className="av-performer-page__topline">
+    <div className="av-performer-page__topline" data-tauri-drag-region="deep">
       <Button size="icon" variant="ghost" aria-label="작품으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button>
       <span>AV › 배우</span>
       <Menu label="배우 관리" align="end" triggerClassName="av-performer-page__manage" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[

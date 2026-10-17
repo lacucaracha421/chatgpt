@@ -40,6 +40,20 @@ it.each(["av", "game", "movie"] as const)("uses only AV's shown case front for t
 function view(data = value(), actions = callbacks()) {
   return { actions, ...render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={data} pending={false} actions={actions} /></PrivacyProvider>) };
 }
+it("lets the top bar move the window while its buttons keep working", () => {
+  const { actions } = view();
+  const bar = screen.getByRole("heading", { level: 1 }).closest("header")!;
+  expect(bar).toHaveAttribute("data-tauri-drag-region", "deep");
+  fireEvent.pointerDown(bar, { button: 0, pointerId: 1 });
+  fireEvent.pointerUp(bar, { pointerId: 1 });
+  expect(actions.onClose).not.toHaveBeenCalled();
+  const info = within(bar).getByRole("button", { name: "정보" });
+  const pressed = info.getAttribute("aria-pressed");
+  fireEvent.click(info);
+  expect(info).not.toHaveAttribute("aria-pressed", pressed);
+  fireEvent.click(within(bar).getByRole("button", { name: "목록으로" }));
+  expect(actions.onClose).toHaveBeenCalledOnce();
+});
 it('closes only an open case from empty stage layers, preserves closed rotation/zoom, and leaves case and controls working', () => {
   const { container, actions } = view();
   const object = screen.getByRole('group', { name: '케이스' });

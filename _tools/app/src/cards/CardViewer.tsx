@@ -124,7 +124,11 @@ export function CardViewer({ cards, index, onIndexChange, onClose, onOpenAsset, 
           <div key={`in:${shown.id}`} className="card-viewer__layer card-viewer__layer--in"><div className="card-viewer__card" data-viewer-card><TradingCard card={shown} /></div></div>
         </>}
       </div>
-      <header className="card-viewer__bar">
+      <header className="card-viewer__bar" data-tauri-drag-region="deep"
+        onPointerDown={event => event.stopPropagation()}
+        onPointerMove={event => event.stopPropagation()}
+        onPointerUp={event => event.stopPropagation()}
+        onPointerCancel={event => event.stopPropagation()}>
         <span className="card-viewer__count" aria-live="polite">{position + 1} / {cards.length}</span>
         <Button className="card-viewer__art-toggle" variant="quiet" aria-pressed={art} onClick={() => setArt(value => !value)}><PhotoIcon aria-hidden="true" />{art ? "카드 보기" : "그림 보기"}</Button>
         <IconButton className="card-viewer__close" label="닫기" icon={XMarkIcon} onClick={onClose} />

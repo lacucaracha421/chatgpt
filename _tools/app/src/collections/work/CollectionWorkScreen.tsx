@@ -67,7 +67,7 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable],.ui-menu,.work-stars,.work-record-menu"))) return;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); if (!waiting) actions.onStep(event.key === "ArrowLeft" ? -1 : 1); }
     }}>
-    <header className="asset-viewer__topbar">
+    <header className="asset-viewer__topbar" data-tauri-drag-region="deep">
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ArrowLeftIcon /></Button>
       <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : workMeta(visible.collection, visible.case.platform, visible.av)}</small></span>
       <span className="asset-viewer__spacer" />
