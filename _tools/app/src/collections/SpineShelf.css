@@ -57,21 +57,25 @@
 .spine-shelf__out .collection-case::before, .spine-shelf__out .collection-case .floor-shadow { display: none; }
 .spine-shelf__out .collection-case--fitted .collection-case-object { --cd: var(--out-depth); }
 .spine-shelf__out::before { content: ""; position: absolute; left: 4%; right: 4%; bottom: calc(var(--lift) * -1 - 8px); height: 16px; border-radius: 50%; background: radial-gradient(ellipse closest-side, rgba(0, 0, 0, .5), rgba(0, 0, 0, 0)); pointer-events: none; }
+/* The floor shadow is as wide as the case looks: it narrows to the spine with the turn and fades with it, so an
+   edge-on case never stands over a cover-wide shadow (user, 2026-10-18: a shadow flashed on the plank at the end of
+   a put-back). `--shadow-edge` is the spine's share of the shadow's width. */
 /* One move: the case slides forward and up out of its slot while it turns from edge-on to its front. The turn starts a
    moment later, as a real case clears its neighbours first; putting back, it turns edge-on before it reaches the slot. */
 .spine-shelf__out.is-pulling { animation: spine-out-pull 520ms var(--ease-sheet) both; }
 .spine-shelf__out.is-pulling .kase { animation: spine-case-turn 460ms var(--ease-sheet) 60ms both; }
-.spine-shelf__out.is-pulling::before { animation: spine-out-shadow 520ms var(--ease-sheet) both; }
+.spine-shelf__out.is-pulling::before { animation: spine-out-shadow 460ms var(--ease-sheet) 60ms both; }
 .spine-shelf__out.is-leaving { pointer-events: none; animation: spine-out-home 440ms var(--ease-sheet) both; }
 .spine-shelf__out.is-leaving .kase { animation: spine-case-home 360ms var(--ease-sheet) both; }
-.spine-shelf__out.is-leaving::before { animation: spine-out-shadow-away 440ms var(--ease-sheet) both; }
+.spine-shelf__out.is-leaving::before { animation: spine-out-shadow-away 360ms var(--ease-sheet) both; }
 @keyframes spine-out-pull { from { transform: var(--from); } }
 @keyframes spine-out-home { to { transform: var(--from); } }
 /* The same function list as the case's own transform, so the browser turns it angle by angle. */
 @keyframes spine-case-turn { from { transform: rotateX(0deg) rotateY(90deg) translateX(0px); } }
 @keyframes spine-case-home { to { transform: rotateX(0deg) rotateY(var(--ry-home, 90deg)) translateX(0px); } }
-@keyframes spine-out-shadow { from { opacity: 0; } }
-@keyframes spine-out-shadow-away { to { opacity: 0; } }
+/* At the slot the case stands on the plank, not above it: the shadow stays on the plank instead of sinking with it. */
+@keyframes spine-out-shadow { from { opacity: 0; transform: translateY(calc(var(--lift) * -1)) scaleX(var(--shadow-edge, .1)); } }
+@keyframes spine-out-shadow-away { to { opacity: 0; transform: translateY(calc(var(--lift) * -1)) scaleX(var(--shadow-edge, .1)); } }
 
 /* First appearance only: rows rise 8px and settle, staggered by row. */
 .spine-shelf__row.is-entering { animation: spine-row-in 560ms var(--ease-spring) both; animation-delay: calc(var(--i, 0) * 24ms); }

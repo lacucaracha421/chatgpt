@@ -225,7 +225,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
         event.preventDefault(); event.stopPropagation();
       }}>
       <span className="k-back"><span className="ins">{!data.back && !data.privacy && data.platform !== "book" ? <CaseBack data={data} content={backContent} /> : face(data.back, "뒷면")}</span></span>
-      <span className="k-floor"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} holdable={holdable} holding={discHolding} />{!data.privacy && note && <div className="note">{note}</div>}</span>
+      <span className="k-floor"><span className="k-floor-print"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} holdable={holdable} holding={discHolding} />{!data.privacy && note && <div className="note">{note}</div>}</span></span>
       <TrayWalls tray="base" /><span className="k-ridge" aria-hidden="true" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />

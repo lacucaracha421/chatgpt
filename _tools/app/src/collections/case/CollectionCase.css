@@ -42,12 +42,18 @@
 .collection-case .k-front, .collection-case .k-back, .collection-case .k-spine { background: var(--case-material); }
 .collection-case .k-front, .collection-case .k-inner { inset: 0; border-radius: var(--case-front-radius); }
 .collection-case .k-back { inset: 0; border-radius: 6px 3px 3px 6px; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
-.collection-case .k-floor { inset: 0; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + var(--t))); background-color: #111213; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 24px rgba(0,0,0,.85); }
+/* The tray floor turns half a circle in its own plane: WebView2's GPU draws a face whose transform is only translateZ()
+   displaced near edge-on angles, and this dark floor then showed beside the case as a passing shadow while it turned
+   (user, 2026-10-18, putting a case back on the 책장). Its print turns back, so nothing looks different. */
+.collection-case .k-floor { inset: 0; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + var(--t))) rotateZ(180deg); background-color: #111213; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 24px rgba(0,0,0,.85); }
+.collection-case .k-floor-print { position: absolute; inset: 0; display: block; rotate: 180deg; }
 .collection-case .k-inner { border-radius: 3px; transform: translateZ(calc(var(--t) * -1)) rotateY(180deg); background-color: #161719; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 20px rgba(0,0,0,.6); }
 .collection-case .k-spine, .collection-case .k-spine-in { inset: 0; }
 /* The inner hinge meets both tray floors at their material thickness when unfolded. */
 .collection-case .k-spine-in { transform: translateZ(calc(var(--t) * -1)) rotateY(180deg); background-color: #161719; box-shadow: inset 2px 0 3px rgba(0,0,0,.6), inset -2px 0 3px rgba(0,0,0,.6); }
 .collection-case .k-floor, .collection-case .k-inner, .collection-case .k-spine-in { background-image: var(--grain), linear-gradient(160deg, rgba(255,255,255,.035), rgba(0,0,0,.18)), linear-gradient(var(--plastic), var(--plastic)); background-blend-mode: normal, normal, multiply; }
+/* The turned floor keeps the same light: its sheen runs the other way round. */
+.collection-case .k-floor { background-image: var(--grain), linear-gradient(340deg, rgba(255,255,255,.035), rgba(0,0,0,.18)), linear-gradient(var(--plastic), var(--plastic)); }
 .collection-case .k-spine-in::before, .collection-case .k-spine-in::after { content: ""; position: absolute; top: 2%; bottom: 2%; width: 2px; background: rgba(0,0,0,.55); box-shadow: 1px 0 0 rgba(255,255,255,.05); }
 .collection-case .k-spine-in::before { left: 22%; }
 .collection-case .k-spine-in::after { right: 22%; }

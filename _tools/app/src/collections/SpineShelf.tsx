@@ -528,7 +528,7 @@ function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, sti
     onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "spine-out-pull") setPulled(true); }}
     style={{ left: pose.left, "--out-w": `${pose.width}px`, "--out-h": `${pose.height}px`, "--lift": `${pose.lift}px`, "--from": pose.from,
       // The model keeps the package's real thickness (CASE_MM), so edge-on it is exactly the spine it replaces.
-      "--out-depth": `${(520 * cell.width / cell.height).toFixed(2)}px` } as CSSProperties}>
+      "--out-depth": `${(520 * cell.width / cell.height).toFixed(2)}px`, "--shadow-edge": (cell.width / (pose.width * .92 * cell.height / pose.height)).toFixed(4) } as CSSProperties}>
     <CollectionCase data={data} open={false} stageBox={stage} onOpenChange={() => onOpen(id)} onReady={() => { if (!pendingRef.current) setPainted(true); }} />
   </div>;
 }
