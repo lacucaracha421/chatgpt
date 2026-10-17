@@ -8,6 +8,7 @@ Reconciled 2026-10-13 against `main` at `2e751573`, using current source, Git hi
 
 Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped outside this list: TRANSFER-001 S1–S6, SIM-ORIGINAL-001, diet batches A–F, test cleanup and split, card trash, text-only calendar, NL search paused. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
 
+0. **`PERF-20261018`** — next: card gacha performance, card layouts on small screens (tablet), smooth Collections models and animations on the tablet, slow first Home load; measure first (see [section](#perf-20261018)).
 0. **`HOME-CAL-001`** — next: Home month calendar with day memo and a small ledger, 링크 보관 off Home, 전송 and 빠른 메모 in the right column; PC first, tablet follows; mockup first (see [section](#home-cal-001)).
 0. **`TABLET-STRUCT-001`** — next: bring the PC's structural conveniences to the tablet (long-press action sheets, recent destinations, folder drawer, folder pins, selection, swipe-down close, history Back); approved 2026-10-17 (see [section](#tablet-struct-001)).
 0. **`FOLDER-NAV-001`** — PC delivered (`7e5d3678`); tablet chip rows are replaced by the TABLET-STRUCT-001 drawer (see [section](#folder-nav-001)).
@@ -28,10 +29,19 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 
 - Nothing open (the user confirmed Collections motion with 항상 켜기 and the "<name> 아님" button on 2026-10-13).
 
+<a id="perf-20261018"></a>
+## PERF-20261018 — Cards, small screens, tablet motion, Home first load (2026-10-18)
+
+Status: `OPEN`. User: "카드 가챠 쪽 성능 최적화, 작은 화면일 때 기존 카드 요소들이 너무 일그러지지 않는지(특히 태블릿), 컬렉션 모델링과 각종 애니메이션이 태블릿에서 부드럽게 돌아갈 때까지 최적화, 홈 화면 불러오기가 초기에 느림".
+1. Card gacha (pack opening, reveal, album) performance on PC and tablet — measure frame times and long tasks first.
+2. Card elements on small windows and the tablet: no squashed or distorted cards, text or frames.
+3. Collections 3D models and animations on the tablet until smooth (device-measured; 0.9.123 already oversamples 1x and turns without per-move renders).
+4. Home first load is slow — measure where the time goes (PC timing log LAKOMICS_PERF, tablet startupPerf) before changing.
+
 <a id="home-cal-001"></a>
 ## HOME-CAL-001 — Home month calendar, day memo and ledger (2026-10-17)
 
-Status: `OPEN` — mockup approved 2026-10-17 ("시안쪽은 추천대로 하자"): `docs/prototypes/home-calendar-20261017/` (README is the spec; artifact https://claude.ai/artifact/FHRQ8p432HcLqbNnQwBLqH). Recommended answers taken: the ledger reuses the existing 메모 ledger notes (encrypted sync, tablet already reads and writes); day memos ride the same encrypted note sync as a hidden per-month note, so no new server store or deploy; past releases stay visible; privacy mode hides amounts only; 링크 보관 opens from 더보기 and 찾기; a cell click only selects the day; the day panel is always visible. Implementation next, PC first. User: "홈 화면에서 캘린더를 한달치로 바꾸고 진짜 달력처럼 쓸 수 있게 하고, 링크 보관은 잘 안 써서 일단 제외해 놓고 전송과 빠른 메모를 우측에 몰아넣기, 달력에다가 간단한 메모, 가계부 기능". Decisions on 2026-10-17 ("1,2,3 모두 그렇게 하자"):
+Status: `DONE` 2026-10-17 (PC 5232ec47, tablet 2b450958) — mockup approved 2026-10-17 ("시안쪽은 추천대로 하자"): `docs/prototypes/home-calendar-20261017/` (README is the spec; artifact https://claude.ai/artifact/FHRQ8p432HcLqbNnQwBLqH). Recommended answers taken: the ledger reuses the existing 메모 ledger notes (encrypted sync, tablet already reads and writes); day memos ride the same encrypted note sync as a hidden per-month note, so no new server store or deploy; past releases stay visible; privacy mode hides amounts only; 링크 보관 opens from 더보기 and 찾기; a cell click only selects the day; the day panel is always visible. Implementation next, PC first. User: "홈 화면에서 캘린더를 한달치로 바꾸고 진짜 달력처럼 쓸 수 있게 하고, 링크 보관은 잘 안 써서 일단 제외해 놓고 전송과 빠른 메모를 우측에 몰아넣기, 달력에다가 간단한 메모, 가계부 기능". Decisions on 2026-10-17 ("1,2,3 모두 그렇게 하자"):
 - The release calendar becomes a month grid (Monday first) with month paging and 오늘; day cells show compact markers only (collected image count, one release line, payment amount, memo dot, "+N" overflow). Tapping a day opens a day detail where memo and ledger are written.
 - 링크 보관 leaves Home (feature kept, reachable elsewhere). Right column: 오늘의 카드 (smaller) → 오늘 할 것 → 전송 → 빠른 메모.
 - Day memo: one short note per day, separate from 메모.
