@@ -176,6 +176,54 @@ class AvInboxTests(unittest.TestCase):
         self.assertFalse(av.default_split(119,100)['isWrap'])
         self.assertEqual(av.default_split(3,2)['x1'],1)
 
+    def test_defaults_fit_the_wide_digital_jacket(self):
+        self.assertEqual(av.default_split(2184,1468),dict(x1=1032,x2=1152,isWrap=True,useSpine=True))
+        # 4:3 wraps have no recognisable spine; the split stays valid and the confirmation UI adjusts it.
+        split = av.default_split(2184,1638)
+        self.assertEqual((split['x1'],split['x2'],split['useSpine']),(1092,1092,False))
+
+    def test_digital_cid_candidates_pad_prefix_and_come_from_sample_urls(self):
+        base='https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/%s/%spl.jpg'
+        def urls(code,**raw):
+            return av.hires_addresses(code,raw)
+        # Mono/DVD cover (k9ssis001) carries no cid; the sample images do.
+        mono=dict(cover_image_url='https://pics.dmm.co.jp/mono/movie/adult/k9ssis001/k9ssis001pl.jpg',
+                  sample_image_urls=['https://pics.dmm.co.jp/digital/video/ssis00001/ssis00001jp-1.jpg'])
+        self.assertEqual(urls('SSIS-001',**mono),[base%(c,c) for c in ('ssis00001','1ssis00001','118ssis00001')])
+        # Unpadded number is padded to five digits; the record's own prefix is tried last.
+        self.assertEqual(urls('STARS-100',sample_image_urls=['https://pics.dmm.co.jp/digital/video/1stars100/1stars100jp-1.jpg']),
+                         [base%(c,c) for c in ('stars00100','1stars00100','118stars00100')])
+        self.assertEqual(urls('FNS-001',sample_image_urls=['https://x/digital/video/h_1074fns00001/h_1074fns00001jp-1.jpg']),
+                         [base%(c,c) for c in ('fns00001','1fns00001','118fns00001','h_1074fns00001')])
+        # The cover itself may already be a digital path; other titles' cids and cid-less records give nothing.
+        self.assertEqual(len(urls('SSIS-001',cover_image_url='https://pics.dmm.co.jp/digital/video/ssis00001/ssis00001pl.jpg')),3)
+        self.assertEqual(urls('SSIS-001',sample_image_urls=['https://pics.dmm.co.jp/digital/video/abw00001/abw00001jp-1.jpg']),[])
+        self.assertEqual(urls('SSIS-001',cover_image_url='https://pics.dmm.co.jp/jacket.jpg'),[])
+        self.assertEqual(urls('FC2-PPV-123',sample_image_urls=['https://x/digital/video/fc2ppv123/a.jpg']),[])
+
+    def test_worker_takes_the_first_wider_digital_jacket_else_the_cover(self):
+        samples=['https://pics.dmm.co.jp/digital/video/1stars100/1stars100jp-1.jpg']
+        raw=lambda:Response({**movie(),'normalized_id':'STARS-100','sample_image_urls':samples})
+        # none (404) -> same 800 px image (not wider) -> wide jacket: the third address wins.
+        id_=self.new('stars100')
+        self.open.side_effect=[raw(),Response({},status=404),Response(png(),'image/png'),Response(png((1000,672)),'image/png'),Response(wiki())]
+        self.assertTrue(self.worker.process_one())
+        asked=[call.args[0].full_url for call in self.open.call_args_list]
+        self.assertEqual([u.rsplit('/',1)[1] for u in asked[1:4]],['stars00100pl.jpg','1stars00100pl.jpg','118stars00100pl.jpg'])
+        candidate=json.loads(self.row(id_)['candidate'])
+        self.assertEqual((candidate['jacketWidth'],candidate['jacketHeight']),(1000,672))
+        self.assertEqual(candidate['defaultSplit'],av.default_split(1000,672))
+        # Every digital address 404s: the cover path is used exactly as before.
+        id_=self.new('stars100')
+        self.open.side_effect=[raw(),*[Response({},status=404) for _ in range(3)],Response(png(),'image/png'),Response(wiki())]
+        self.assertTrue(self.worker.process_one())
+        self.assertEqual(json.loads(self.row(id_)['candidate'])['jacketWidth'],800)
+        # A CDN that errors out costs one request, not the lookup.
+        id_=self.new('stars100')
+        self.open.side_effect=[raw(),Response({},status=503),Response(png(),'image/png'),Response(wiki())]
+        self.assertTrue(self.worker.process_one())
+        self.assertEqual(json.loads(self.row(id_)['candidate'])['jacketWidth'],800)
+
     def test_name_mapping_escaping_ambiguity_and_cache(self):
         values = wiki(['日本名'])
         self.assertEqual(av.parse_names(json.dumps(values).encode(),['日本名'])[0]['fanzaActressId'],'123')

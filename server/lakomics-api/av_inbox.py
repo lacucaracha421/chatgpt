@@ -26,6 +26,13 @@ MAX_JACKET = 8 * 1024 * 1024
 MAX_PIXELS = 16_000_000
 READY_SECONDS = 600
 IDLE_SECONDS = 60
+#: DMM's digital CDN serves the full wrap jacket (about 2184 px wide) for many titles; the
+#: LibreDMM cover is the 800 px image. A candidate must be wider than this to beat the fallback.
+HIRES_MIN_WIDTH = 800
+HIRES_MAX_TRIES = 5
+HIRES_SECONDS = 8
+HIRES_URL = 'https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/{cid}/{cid}pl.jpg'
+DIGITAL_CID = re.compile(r'/digital/video/([a-z0-9_]{3,40})/')
 NAME_TTL = 30 * 86400
 DDL = """
 CREATE TABLE IF NOT EXISTS av_inbox (
@@ -149,6 +156,67 @@ def jacket_address(raw):
     return urlunsplit(('https', u.netloc, u.path, u.query, ''))
 
 
+def hires_addresses(code, raw):
+    """Digital-CDN jacket URLs worth trying for a LibreDMM record, best first.
+
+    The digital cid comes from the record's own URLs (a mono/DVD cover such as ``k9ssis001``
+    carries none, but its sample images do). The number is padded to five digits
+    (``1stars100`` -> ``1stars00100``) and tried under the common prefixes, then under
+    the prefix the record itself used (``h_1074`` ...). Nothing is guessed without a cid.
+    """
+    if not isinstance(raw, dict) or not isinstance(code, str) or '-' not in code:
+        return []
+    label = code.rsplit('-', 1)[0].lower()
+    if not re.fullmatch(r'[a-z0-9]+', label):
+        return []
+    pattern = re.compile(r'(h_[0-9]+|[0-9]+)?' + re.escape(label) + r'([0-9]{1,8})')
+    samples = raw.get('sample_image_urls')
+    urls = [raw.get('cover_image_url')] + (samples[:60] if isinstance(samples, list) else [])
+    prefixes, number = ['', '1', '118'], None
+    for url in urls:
+        found = DIGITAL_CID.search(url) if isinstance(url, str) and len(url) <= 2048 else None
+        parts = pattern.fullmatch(found[1]) if found else None
+        if parts is None:
+            continue
+        number = int(parts[2]) if number is None else number
+        if parts[1] and parts[1] not in prefixes:
+            prefixes.append(parts[1])
+    if number is None:
+        return []
+    core = label + str(number).zfill(5)
+    return [HIRES_URL.format(cid=prefix + core) for prefix in prefixes[:HIRES_MAX_TRIES]]
+
+
+def fetch_hires(addresses, deadline, pace=lambda: None):
+    """First digital-CDN jacket wider than the fallback, as (data, mime, width, height); else None.
+
+    A 404 or a placeholder moves on to the next address; anything else (timeout, server
+    error) gives up at once, so the 800 px fallback is never delayed by a sick CDN.
+    """
+    for address in addresses:
+        try:
+            pace()
+            data, mime = wp.outbound(jacket_address(address), deadline=deadline, limit=MAX_JACKET, image=True,
+                                     headers={'User-Agent': 'Lakomics/0.2'})
+            frame = decode_jacket(data, mime)
+            width, height = frame.size
+            frame.close()
+        except wp.UpstreamStatus as exc:
+            if exc.status in (403, 404, 410):
+                continue
+            return None
+        except HTTPException as exc:
+            code = exc.detail.get('code') if isinstance(exc.detail, dict) else None
+            if code == 'avInboxStopping':
+                raise
+            if code in ('providerImageInvalid', 'providerResponseTooLarge'):
+                continue
+            return None
+        if width > HIRES_MIN_WIDTH:
+            return data, mime, width, height
+    return None
+
+
 def japanese(name):
     return dict(nameJa=name, nameKo=None, wikidataId=None, fanzaActressId=None)
 
@@ -259,6 +327,7 @@ class Worker:
         self.lane = threading.Lock()
         self.next_libredmm = 0.0
         self.next_wikidata = 0.0
+        self.next_dmm = 0.0
 
     def start(self):
         if self.thread is not None and self.thread.is_alive():
@@ -304,7 +373,7 @@ class Worker:
         return IDLE_SECONDS if earliest is None else min(IDLE_SECONDS, max(0, earliest - self.clock()))
 
     def pace(self, provider, deadline):
-        attr, seconds = ('next_libredmm', 2) if provider == 'libredmm' else ('next_wikidata', 1)
+        attr, seconds = {'libredmm': ('next_libredmm', 2), 'dmm': ('next_dmm', .5)}.get(provider, ('next_wikidata', 1))
         wait = max(0, getattr(self, attr) - time.monotonic())
         if time.monotonic() + wait >= deadline:
             wp.fail(504, 'providerTimeout', '후보 조회 시간이 초과되었습니다.')
@@ -354,9 +423,14 @@ class Worker:
                 raise LookupStatus(exc.status) from None
             raise
         movie, fields = parse_movie(data, code)
-        address = jacket_address(movie['cover_image_url'])
-        data, mime = wp.outbound(address, deadline=deadline, limit=MAX_JACKET, image=True,
-                                 headers={'User-Agent': 'Lakomics/0.2'})
+        hires = fetch_hires(hires_addresses(code, json.loads(data)), min(deadline, time.monotonic() + HIRES_SECONDS),
+                            lambda: self.pace('dmm', deadline))
+        if hires is not None:
+            data, mime = hires[:2]
+        else:
+            address = jacket_address(movie['cover_image_url'])
+            data, mime = wp.outbound(address, deadline=deadline, limit=MAX_JACKET, image=True,
+                                     headers={'User-Agent': 'Lakomics/0.2'})
         # Decoding/storage shares the interactive provider artwork admission lane.
         def prepare(_):
             frame = decode_jacket(data, mime)
@@ -510,6 +584,24 @@ def change(get_db, id_, action, body, wake=None):
     return detail(get_db, id_)
 
 
+def render_surface(frame, box):
+    """One surface of a jacket as the stored JPEG (q88) plus its thumbnail bytes."""
+    with frame.crop(box) as crop:
+        output = io.BytesIO()
+        crop.save(output, 'JPEG', quality=88)
+        encoded = output.getvalue()
+        if not 0 < len(encoded) <= wp.MAX_ARTWORK_BYTES:
+            wp.fail(413, 'providerResponseTooLarge', '분할 이미지가 너무 큽니다.')
+        return dict(encoded=encoded, thumbnail=wp.artwork_thumbnail(encoded), width=crop.width, height=crop.height)
+
+
+def store_surface(get_db, storage, bucket, rendered, deadline):
+    blobs = [(rendered['encoded'], 'image/jpeg')]
+    if rendered['thumbnail']:
+        blobs.append((rendered['thumbnail'], wp.ARTWORK_THUMBNAIL_MIME))
+    return confirm_blobs(get_db, storage, bucket, blobs, deadline)
+
+
 def prepare_artwork(get_db, id_, body, deadline, storage, bucket):
     with get_db() as db:
         row = get_row(db, id_)
@@ -534,21 +626,12 @@ def prepare_artwork(get_db, id_, body, deadline, storage, bucket):
     prepared = []
     try:
         for surface in surfaces:
-            with frame.crop(boxes[surface]) as crop:
-                output = io.BytesIO()
-                crop.save(output, 'JPEG', quality=88)
-                encoded = output.getvalue()
-                if not 0 < len(encoded) <= wp.MAX_ARTWORK_BYTES:
-                    wp.fail(413, 'providerResponseTooLarge', '분할 이미지가 너무 큽니다.')
-                thumb_data = wp.artwork_thumbnail(encoded)
-                blobs = [(encoded, 'image/jpeg')]
-                if thumb_data:
-                    blobs.append((thumb_data, wp.ARTWORK_THUMBNAIL_MIME))
-                receipts = confirm_blobs(get_db, storage, bucket, blobs, deadline)
-                prepared.append(dict(surface=surface, kind='cover' if surface=='front' else surface,
-                    provider='libredmm', providerImageId=f"{row['normalized_code']}:{candidate['jacket']['sha256']}:{x1}:{x2}:{surface}",
-                    original=receipts[0], thumbnail=receipts[1] if len(receipts)>1 else None,
-                    width=crop.width, height=crop.height, language='ja'))
+            rendered = render_surface(frame, boxes[surface])
+            receipts = store_surface(get_db, storage, bucket, rendered, deadline)
+            prepared.append(dict(surface=surface, kind='cover' if surface=='front' else surface,
+                provider='libredmm', providerImageId=f"{row['normalized_code']}:{candidate['jacket']['sha256']}:{x1}:{x2}:{surface}",
+                original=receipts[0], thumbnail=receipts[1] if len(receipts)>1 else None,
+                width=rendered['width'], height=rendered['height'], language='ja'))
     finally:
         frame.close()
     # Don't return preparation for a candidate replaced/dismissed during storage.
