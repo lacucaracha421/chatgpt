@@ -1,0 +1,144 @@
+/* The Library root sits under the shared top bar (see mobile.css `.top-bar`). */
+.library-root { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.library-root-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior-y:contain; padding:0 var(--mobile-gutter) 24px; }
+.library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
+.library-segments { width:100%; margin:var(--space-3) 0 var(--space-2); }
+.library-segments .ui-segmented__cell { min-height:var(--touch-target); }
+/* Asset galleries and their shade share the screen gutter. */
+.library-main { --section-shade-gutter:var(--mobile-gutter); }
+.library-root { --section-shade-gutter:var(--mobile-gutter); }
+.library-search { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--color-border); margin-bottom:16px; }
+.library-search svg { width:20px; color:var(--color-muted); }
+.library-search input { flex:1; min-width:0; min-height:48px; border:0; background:transparent; color:inherit; font:inherit; }
+.library-folder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr)); gap:20px 14px; }
+.library-folder { display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; min-width:0; border:0; background:transparent; text-align:left; padding:0; }
+.library-folder .home-cover-group { width:100%; flex-shrink:0; height:auto; aspect-ratio:4/3; border-radius:3px; overflow:hidden; }
+.folder-caption { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:36px; }
+.folder-caption strong { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.library-folder small,.result-name small { display:block; color:var(--color-muted); font-size:12px; }
+.library-children { display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; }
+.library-children .library-folder { flex:0 0 clamp(130px,24vw,190px); }
+.library-children .library-folder small { display:none; }
+.library-children .home-cover-group { display:block; }
+.library-children .home-cover-group>.home-cover:not(:first-child) { display:none; }
+.library-breadcrumb { display:flex; align-items:center; overflow:auto; scrollbar-width:none; }
+.library-breadcrumb>span { display:flex; align-items:center; flex-shrink:0; color:var(--color-muted); }
+.library-breadcrumb button { min-height:44px; padding:0 6px; border:0; background:none; color:var(--color-muted); font-size:12px; }
+.library-all,.library-result { width:100%; display:flex; align-items:center; gap:12px; min-height:76px; text-align:left; background:transparent; border:0; border-bottom:1px solid var(--color-border); padding:12px 0; }
+.library-all { margin:18px 0; }
+.library-all>svg,.library-result>svg { width:18px; flex-shrink:0; color:var(--color-muted); }
+.all-covers { display:flex; gap:2px; width:112px; height:52px; flex-shrink:0; overflow:hidden; border-radius:2px; }
+.result-name { flex:1; min-width:0; }
+.result-name strong { display:block; font-weight:500; }
+.result-name small { margin-top:5px; }
+.library-result>.home-cover { width:48px; height:56px; flex-shrink:0; }
+.library-results mark { color:var(--color-text); background:var(--color-surface); text-decoration:underline; text-underline-offset:3px; }
+.filter-chips { display:flex; gap:8px; padding:16px 0; overflow-x:auto; }
+/* PC control face (global.css `ui-button--secondary`); a set filter uses the PC's neutral grey
+   filter face with its count instead of a white slab. The ::before extends the 36px face to a
+   44px touch target. */
+.filter-chip { position:relative; display:flex; align-items:center; gap:7px; height:36px; min-height:36px; margin:4px 0; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:var(--radius-sm); white-space:nowrap; color:var(--color-text); font-size:14px; }
+.filter-chip::before { content:''; position:absolute; inset:-4px 0; }
+.filter-chip svg { width:14px; color:var(--color-muted); }
+.filter-chip:active:not(:disabled) { background:var(--color-surface-pressed); }
+.filter-chip.selected, .filter-chip[aria-pressed="true"] { background:var(--color-filter-selected); color:var(--color-filter-text); font-weight:600; }
+.filter-chip.selected:active:not(:disabled), .filter-chip[aria-pressed="true"]:active:not(:disabled) { background:var(--color-surface-pressed); }
+.filter-chip:focus:not(:focus-visible) { outline:none; }
+.filter-chip.selected svg { color:var(--color-filter-text); }
+.filter-chip__default { font:500 12px var(--font-ui); color:var(--color-muted); }
+.filter-chip:disabled { opacity:.4; cursor:default; }
+/* Toolbar filters are quiet until selected; the pseudo element keeps the tablet hit area at 44px. */
+.filter-chips--toolbar { flex:none; align-items:center; gap:0; padding:0; overflow:visible; }
+.filter-chips--toolbar .filter-chip--toolbar { height:36px; min-height:36px; margin:0; padding:0 8px; background:transparent; border-color:transparent; box-shadow:none; color:var(--color-muted); font-size:var(--type-body); font-weight:400; }
+.filter-chips--toolbar .filter-chip--toolbar svg { width:16px; height:16px; color:var(--color-muted); }
+.filter-chips--toolbar .filter-chip--toolbar.selected { background:var(--color-filter-selected); border-color:transparent; color:var(--color-filter-text); font-weight:600; }
+.filter-chips--toolbar .filter-chip--toolbar.selected svg { color:var(--color-filter-text); }
+.filter-chips--toolbar .filter-chip--toolbar:active:not(:disabled) { background:var(--color-surface-pressed); color:var(--color-text); }
+.filter-chips--toolbar .filter-chip--toolbar.selected:active:not(:disabled) { background:var(--color-surface-pressed); color:var(--color-text); }
+/* A chip row that sticks under a title bar keeps a short fading gap above the content it covers. */
+.collection-chips,.catalog-chips { position:sticky; top:0; z-index:1; margin:0 0 -8px; padding:8px 0 22px; background:linear-gradient(var(--color-bg) calc(100% - 12px), transparent); }
+.ui-dialog:has(>.library-sheet) { top:auto; bottom:0; left:50%; transform:translateX(-50%); width:min(640px,100%); max-height:85dvh; padding:20px 20px calc(20px + env(safe-area-inset-bottom)); border-radius:4px 4px 0 0; box-shadow:none; }
+.sheet-option { display:flex; align-items:center; justify-content:space-between; width:100%; min-height:52px; padding:12px 4px; background:transparent; border:0; border-bottom:1px solid var(--color-border); text-align:left; }
+.radio-dot { width:18px; height:18px; border:1px solid var(--color-muted); border-radius:50%; }
+.sheet-option[aria-checked="true"] .radio-dot { border:5px solid var(--color-text); }
+.library-sheet>.ui-button { margin-top:12px; }
+/* A sheet whose action shares the row with 닫기: a hairline, then two equal 44 px buttons (same recipe as the collection forms' action row). */
+.library-sheet__actions { display:flex; gap:var(--space-2); margin-top:var(--space-3); padding-top:var(--space-4); border-top:1px solid var(--color-border); }
+.library-sheet__actions .ui-button { flex:1; min-height:var(--touch-target); }
+/* Pull to refresh: a zero-height sticky anchor with a floating pill, so the list never moves. */
+.pull-refresh { position:sticky; top:0; z-index:6; height:0; overflow:visible; pointer-events:none; }
+.pull-refresh__pill { position:absolute; left:50%; top:0; display:flex; align-items:center; gap:8px; min-height:36px; padding:0 14px 0 12px; white-space:nowrap; color:var(--color-text); font-size:12px; background:var(--color-sidebar); border:1px solid var(--color-border); border-radius:18px; box-shadow:0 4px 14px #0007; }
+.pull-refresh__pill svg { width:16px; height:16px; color:var(--color-muted); }
+.pull-refresh__pill.is-ready svg { color:var(--color-accent); }
+.pull-refresh__pill.is-refreshing { transition:transform var(--motion-standard) var(--ease-standard); }
+.pull-refresh__pill.is-refreshing svg { color:var(--color-accent); animation:pull-spin var(--motion-refresh-cycle) linear infinite; }
+@keyframes pull-spin { to { transform:rotate(360deg); } }
+.library-main button:focus-visible,.library-search input:focus-visible,.sheet-option:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
+/* Character, group and folder cards share one row, so they share one cover shape. */
+.character-browser .character-card .character-card-image { height:auto; aspect-ratio:3/4; }
+.character-browser .character-cards { align-items:start; }
+@media(prefers-reduced-motion:reduce) { .library-main *, .library-sheet * { animation:none!important; transition:none!important; } }
+
+.all-covers>.home-cover { flex:1; }
+
+.home-brand { display:flex; align-items:center; gap:10px; color:var(--color-accent); font-size:12px; letter-spacing:2px; }
+@media(max-width:600px) { .home-brand>span { display:none; } }
+
+.album-result-cover { width:48px; height:56px; flex-shrink:0; overflow:hidden; }
+.album-result-cover .home-cover-group { height:100%; }
+
+/* Motion and stability.
+   Status and error rows float over the bottom of the content instead of being inserted above
+   it, so a failed or pending load never shifts the list. */
+.floating-notices { position:absolute; left:12px; right:12px; bottom:12px; z-index:8; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+.floating-notices:empty { display:none; }
+.floating-notices>* { pointer-events:auto; margin:0; border:1px solid var(--color-border); border-radius:var(--radius-sm); box-shadow:0 6px 18px #0008; }
+.floating-notices>.error-message { padding:10px 16px; background:var(--color-surface); }
+.floating-notices>.inline-error { padding:6px 6px 6px 16px; }
+/* The previous level stays on screen, quieted, while a character folder loads. */
+.gallery-scroll.is-stale { pointer-events:none; }
+.gallery-scroll[aria-busy="true"] { cursor:progress; }
+/* Folder move, shared with the PC's FolderMove (src/assets/FolderWave.tsx): the old folder's decoded
+   images stay on screen while the new tiles decode (first viewport, capped), then the new folder
+   replaces them in one step, without animation. The intro rows stay put above the old images. */
+.gallery-scroll { position:relative; }
+.gallery-scroll > .asset-gallery__folder-snapshot { position:absolute; z-index:0; overflow:hidden; pointer-events:none; }
+.gallery-scroll > .asset-gallery__folder-snapshot * { animation:none !important; transition:none !important; }
+.gallery-scroll[data-folder-move] > .gallery-intro { position:relative; z-index:2; background:var(--color-bg); }
+.gallery-scroll[data-folder-move="pending"] > .gallery-canvas { visibility:hidden; }
+@media (prefers-reduced-motion:no-preference) {
+  .floating-notices>* { animation:notice-enter var(--motion-small) var(--ease-standard); }
+  .ui-dialog__overlay:not([data-motion]) { animation:overlay-enter var(--motion-small) var(--ease-out); }
+}
+@keyframes notice-enter { from { opacity:0; transform:translateY(6px); } }
+@keyframes overlay-enter { from { opacity:0; } }
+/* Pressed feedback, so a tap that starts a network load is acknowledged at once. */
+.library-folder:active .home-cover-group, .library-result:active, .library-all:active, .home-folder:active .home-cover-group { opacity:.8; }
+.bottom-nav button:not(.active):active { color:var(--color-text); }
+
+/* Library root: one screen, one conclusion. `.is-fit` is set when the covers were sized from the
+   real viewport so the first screen ends on a whole row; scrolling then settles on row ends. */
+.library-root .section-label { margin:16px 0 12px; }
+.library-root .library-all { margin:0; }
+.library-root-folders .library-folder small { display:none; }
+.library-root.is-fit .library-root-folders .library-folder .home-cover-group { aspect-ratio:auto; height:var(--root-cover-height); }
+.library-root.is-fit .library-root-scroll { scroll-snap-type:y proximity; scroll-padding-bottom:32px; padding-bottom:0; }
+.library-root.is-fit .library-root-folders { padding-bottom:24px; }
+.library-root.is-fit .library-root-folders .library-folder { scroll-snap-align:end; }
+.library-root.is-fit .library-root-scroll > .ui-section-bar--inline { scroll-snap-align:start; }
+/* Sticks to the bottom of the first screen and covers the gap where the next row would begin. */
+.library-end-line { position:sticky; bottom:0; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px; height:32px; margin:0; font-size:12px; color:var(--color-muted); background:var(--color-bg); }
+.library-end-line svg { width:14px; height:14px; }
+
+/* Character folders (series, groups, characters) read apart from asset folders: the PC's squared
+   people/person glyph before the name and an ivory hairline under the cover. */
+.character-glyph { width:15px; height:15px; flex:none; color:var(--color-accent); opacity:.85; }
+.folder-caption .character-glyph { margin-right:6px; }
+.folder-caption:has(.character-glyph) strong { flex:1; min-width:0; }
+.library-folder.is-character .home-cover-group { position:relative; }
+.result-name strong .character-glyph { width:14px; height:14px; margin-right:6px; vertical-align:-2px; }
+.top-bar h1 .character-glyph { width:17px; height:17px; margin-right:2px; align-self:center; }
+
+/* Shared dialog presence, with edge travel measured in the sheet own height. */
+.ui-dialog[data-motion]:has(>.library-sheet) { --surface-y: 100%; --surface-scale: 1; }
+.ui-dialog[data-motion]:has(.classification-index) { --surface-x: -100%; --surface-y: 0px; --surface-scale: 1; }

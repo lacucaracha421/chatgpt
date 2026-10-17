@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=800, initial-scale=1">
+<title>홈 달력 태블릿</title>
+<!-- One tablet frame (800 × 1280) for index.html; the hash picks the state: #home, #sheet, #private.
+     mobile.css imports tokens.css and controls.css, as on the tablet (mobile-client/main.tsx loads it first).
+     The tablet Home loads the PC Home CSS too (mobile-client/Home.tsx imports src/home/home.css). -->
+<link rel="stylesheet" href="app-css/mobile-client/mobile.css">
+<link rel="stylesheet" href="app-css/mobile-client/library.css">
+<link rel="stylesheet" href="app-css/mobile-client/avInbox.css">
+<link rel="stylesheet" href="app-css/src/home/home.css">
+<link rel="stylesheet" href="app-css/src/home/homeAttention.css">
+<link rel="stylesheet" href="app-css/src/home/homeCalendar.css">
+<link rel="stylesheet" href="app-css/src/home/homeTools.css">
+<link rel="stylesheet" href="app-css/src/notes/ledger/ledger.css">
+<link rel="stylesheet" href="app-css/mobile-client/home.css">
+<link rel="stylesheet" href="app-css/mobile-client/homeTablet/homeTablet.css">
+<link rel="stylesheet" href="app-css/mobile-client/cards/tabletCards.css">
+<link rel="stylesheet" href="homecal.css">
+<link rel="stylesheet" href="mock.css">
+<link rel="stylesheet" href="tablet-page.css">
+</head>
+<body>
+<div class="tablet" id="tablet"></div>
+<script src="homecal.js"></script>
+<script>
+(() => {
+  const { TODAY, tabletScreen, wire } = window.HomeCal;
+  const key = (location.hash || '#home').slice(1);
+  const presets = {
+    home: { selected: TODAY },
+    sheet: { selected: '2026-10-15', sheet: true },
+    private: { selected: TODAY, privacy: true },
+  };
+  const st = { month: TODAY.slice(0, 7), selected: TODAY, privacy: false, editing: null, sheet: false, tabletMode: true, ...(presets[key] || presets.home) };
+  const host = document.getElementById('tablet');
+  const render = () => {
+    const old = host.querySelector('[data-scroll]'); const top = old ? old.scrollTop : 0;
+    host.innerHTML = tabletScreen(st);
+    const scroller = host.querySelector('[data-scroll]'); if (scroller) scroller.scrollTop = top;
+  };
+  render();
+  wire(host, st, render);
+  // Follow the parent page's theme switch.
+  window.addEventListener('message', (event) => {
+    const value = event.data && event.data.homecalTheme;
+    if (!value) return;
+    if (value === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', value);
+  });
+})();
+</script>
+</body>
+</html>

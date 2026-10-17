@@ -8,6 +8,7 @@ Reconciled 2026-10-13 against `main` at `2e751573`, using current source, Git hi
 
 Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped outside this list: TRANSFER-001 S1–S6, SIM-ORIGINAL-001, diet batches A–F, test cleanup and split, card trash, text-only calendar, NL search paused. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [latest 2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--pc-feedback-jobs-reference-editor-and-resize).
 
+0. **`HOME-CAL-001`** — next: Home month calendar with day memo and a small ledger, 링크 보관 off Home, 전송 and 빠른 메모 in the right column; PC first, tablet follows; mockup first (see [section](#home-cal-001)).
 0. **`TABLET-STRUCT-001`** — next: bring the PC's structural conveniences to the tablet (long-press action sheets, recent destinations, folder drawer, folder pins, selection, swipe-down close, history Back); approved 2026-10-17 (see [section](#tablet-struct-001)).
 0. **`FOLDER-NAV-001`** — PC delivered (`7e5d3678`); tablet chip rows are replaced by the TABLET-STRUCT-001 drawer (see [section](#folder-nav-001)).
 0. **`CHAR-CLAUDE-001`** — slice 3: experiment on identifying series members in images without a character or recommendation; retiring the tablet 캐릭터 확인 screen and its review feed is low priority (see [section](#char-claude-001)).
@@ -26,6 +27,17 @@ Updated 2026-10-13 against `main` at `2e751573`; 2026-10-17 additions shipped ou
 User rule (2026-10-12): a device/native check the user does not mention afterwards counts as passed. The checks listed here on 2026-10-12 (AV interactions, 더보기/휴지통, tablet Collections header and live Kakao, tablet similarity apply, Windows natural-language search, tablet content search after nightly captioning, character candidate-group output) are therefore treated as accepted; reopen one only when the user reports a problem.
 
 - Nothing open (the user confirmed Collections motion with 항상 켜기 and the "<name> 아님" button on 2026-10-13).
+
+<a id="home-cal-001"></a>
+## HOME-CAL-001 — Home month calendar, day memo and ledger (2026-10-17)
+
+Status: `OPEN` — mockup approved 2026-10-17 ("시안쪽은 추천대로 하자"): `docs/prototypes/home-calendar-20261017/` (README is the spec; artifact https://claude.ai/artifact/FHRQ8p432HcLqbNnQwBLqH). Recommended answers taken: the ledger reuses the existing 메모 ledger notes (encrypted sync, tablet already reads and writes); day memos ride the same encrypted note sync as a hidden per-month note, so no new server store or deploy; past releases stay visible; privacy mode hides amounts only; 링크 보관 opens from 더보기 and 찾기; a cell click only selects the day; the day panel is always visible. Implementation next, PC first. User: "홈 화면에서 캘린더를 한달치로 바꾸고 진짜 달력처럼 쓸 수 있게 하고, 링크 보관은 잘 안 써서 일단 제외해 놓고 전송과 빠른 메모를 우측에 몰아넣기, 달력에다가 간단한 메모, 가계부 기능". Decisions on 2026-10-17 ("1,2,3 모두 그렇게 하자"):
+- The release calendar becomes a month grid (Monday first) with month paging and 오늘; day cells show compact markers only (collected image count, one release line, payment amount, memo dot, "+N" overflow). Tapping a day opens a day detail where memo and ledger are written.
+- 링크 보관 leaves Home (feature kept, reachable elsewhere). Right column: 오늘의 카드 (smaller) → 오늘 할 것 → 전송 → 빠른 메모.
+- Day memo: one short note per day, separate from 메모.
+- Ledger v1: per-day entries (amount + memo) and a month total; subscription payments appear automatically, read-only, so nothing is entered twice; amounts hidden in privacy mode.
+- Memo and ledger sync to the tablet through the existing encrypted note sync (superseding the first idea of a new server store).
+- The tablet Home follows the same structure after the PC design is settled; the earlier 링크 보관/전송 swap request was withdrawn.
 
 <a id="tablet-struct-001"></a>
 ## TABLET-STRUCT-001 — PC conveniences in tablet form (2026-10-17)

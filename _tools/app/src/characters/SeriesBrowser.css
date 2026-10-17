@@ -92,7 +92,9 @@
 
 .character-group-members { display: flex; flex-direction: column; gap: var(--space-2); max-height: 40vh; overflow: auto; margin-block: var(--space-3); }
 .view-toolbar:has(.series-header-actions) { display: flex; justify-content: flex-start; flex-wrap: nowrap; min-height: var(--toolbar-height); height: var(--toolbar-height); flex-shrink: 0; }
-.view-toolbar:has(.series-header-actions) > h2 { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; }
+.view-toolbar:has(.series-header-actions) > h2 { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; }
+/* The title keeps its own width (recent folder chips follow it); the actions stay at the right edge. */
+.view-toolbar:has(.series-header-actions) > .series-header-actions, .view-toolbar:has(.series-header-actions) > :has(> .series-header-actions) { margin-left: auto; }
 .series-breadcrumb > span { color: var(--color-text); font-weight: 600; }
 .view-toolbar:has(.series-header-actions) > .chrome-context-status { flex: 0 0 auto; margin-left: 0; }
 

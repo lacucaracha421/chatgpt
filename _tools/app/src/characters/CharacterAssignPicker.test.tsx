@@ -217,3 +217,67 @@ it("opens the group that holds the current character", async () => {
   expect(await screen.findByRole("button", { name: /^스칼렛\/바이올렛/ })).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByRole("option", { name: /^네모 · 현재/ })).toBeVisible();
 });
+
+const gameSeries: ClassificationEntry[] = [
+  ...series,
+  { id: "etc-game", kind: "work", name: "기타 게임", parentId: null, iconKey: null, colorKey: null },
+];
+const gameGroups = [
+  ...groups,
+  { id: "mihoyo", seriesId: "etc-game", name: "미호요", revision: 1, targetIds: [], extrasTargetId: "extras-mihoyo" },
+  { id: "empty", seriesId: "etc-game", name: "빈 그룹", revision: 1, targetIds: [] },
+];
+const mihoyoExtras = { ...fixtureTarget("extras-mihoyo", "미호요 기타"), seriesClassificationId: "etc-game", role: "extras" as const, extrasGroupId: "mihoyo" };
+
+it("finds another series' group that holds only a 기타 and assigns to its existing bucket", async () => {
+  const user = userEvent.setup();
+  const onAssign = vi.fn();
+  const ensureExtras = vi.fn();
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={gameGroups} classifications={gameSeries} counts={{ ...counts, "extras-mihoyo": 5 }}
+    scopeSeriesId="blue" privacyMode={false} onAssign={onAssign} onClose={vi.fn()} extras={[mihoyoExtras]} ensureExtras={ensureExtras}
+    loadSuggestions={vi.fn().mockResolvedValue([])} />);
+  // The scoped default view stays on the open series.
+  await screen.findByRole("group", { name: "방과후 스위츠부" });
+  expect(screen.queryByRole("group", { name: "미호요" })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "블루 아카이브 범위 빼기" }));
+  await user.type(screen.getByRole("searchbox", { name: "캐릭터 찾기" }), "미호요");
+  expect(screen.queryByText("검색 결과 없음")).not.toBeInTheDocument();
+  const group = screen.getByRole("group", { name: "미호요" });
+  await user.click(within(group).getByRole("option", { name: "기타 · 5" }));
+  await waitFor(() => expect(onAssign).toHaveBeenCalledWith([expect.objectContaining({ id: "extras-mihoyo" })]));
+  expect(ensureExtras).not.toHaveBeenCalled();
+});
+
+it("lists another series' empty group with a 기타 row that is created when chosen", async () => {
+  const user = userEvent.setup();
+  const onAssign = vi.fn();
+  const ensureExtras = vi.fn(async (seriesId: string, groupId: string | null) => ({
+    ...fixtureTarget("extras-created", "빈 그룹 기타"), seriesClassificationId: seriesId, role: "extras" as const, extrasGroupId: groupId,
+  }));
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={gameGroups} classifications={gameSeries} counts={counts}
+    scopeSeriesId="blue" privacyMode={false} onAssign={onAssign} onClose={vi.fn()} extras={[]} ensureExtras={ensureExtras}
+    loadSuggestions={vi.fn().mockResolvedValue([])} />);
+  // Searching inside the scope falls through to the other series' results.
+  await user.type(await screen.findByRole("searchbox", { name: "캐릭터 찾기" }), "빈 그룹");
+  expect(screen.getByText("기타 게임 · 폴더 옮김")).toBeVisible();
+  await user.click(screen.getByRole("option", { name: /^기타/ }));
+  await waitFor(() => expect(ensureExtras).toHaveBeenCalledWith("etc-game", "empty"));
+  await waitFor(() => expect(onAssign).toHaveBeenCalledWith([expect.objectContaining({ id: "extras-created" })]));
+});
+
+it("finds a group's 기타 by the group name when opened from a container such as 게임", async () => {
+  const user = userEvent.setup();
+  const onAssign = vi.fn();
+  const containerSeries: ClassificationEntry[] = [
+    { id: "games", kind: "root", name: "게임", parentId: null, iconKey: null, colorKey: null, isContainer: true },
+    ...gameSeries.map(entry => entry.parentId ? entry : { ...entry, parentId: "games" }),
+  ];
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={gameGroups} classifications={containerSeries} counts={{ ...counts, "extras-mihoyo": 5 }}
+    scopeSeriesId="games" privacyMode={false} onAssign={onAssign} onClose={vi.fn()} extras={[mihoyoExtras]} ensureExtras={vi.fn()}
+    loadSuggestions={vi.fn().mockResolvedValue([])} />);
+  await user.type(await screen.findByRole("searchbox", { name: "캐릭터 찾기" }), "미호요");
+  expect(screen.queryByText("검색 결과 없음")).not.toBeInTheDocument();
+  await user.click(screen.getAllByRole("option", { name: /^기타/ })[0]);
+  await waitFor(() => expect(onAssign).toHaveBeenCalledWith([expect.objectContaining({ id: "extras-mihoyo" })]));
+});

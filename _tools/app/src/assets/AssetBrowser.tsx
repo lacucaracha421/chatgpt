@@ -167,7 +167,9 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   const plainFolderId = view.kind === "classification" && view.classificationId && !view.characterId && !view.characterGroupId ? view.classificationId : null;
   const creationFolder = plainFolderId ? classifications.find(entry => entry.id === plainFolderId) : undefined;
   const scopeSeriesId = creationFolder?.isContainer ? creationFolder.id : characterPickerSeriesId(view, classifications, characterSeries);
-  const seriesExtras = useMemo(() => scopeSeriesId && !creationFolder?.isContainer ? characterExtras.filter(target => target.seriesClassificationId === scopeSeriesId) : undefined, [characterExtras, scopeSeriesId, creationFolder?.isContainer]);
+  // All series' 기타 buckets (inside a series or a container such as 게임), so the picker finds another series' group
+  // and its existing 기타 once the scope is cleared.
+  const seriesExtras = useMemo(() => scopeSeriesId ? characterExtras : undefined, [characterExtras, scopeSeriesId]);
   const folderChildren = useMemo(() => plainFolderId
     ? sortFolders(classifications.filter(entry => entry.parentId === plainFolderId), classificationOrderIds)
     : [], [classifications, plainFolderId, classificationOrderIds]);
@@ -712,7 +714,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       <div className="asset-browser__gallery">
         {shownResults}
         {artistScope?.panel}
-        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={scopeSeriesId ? characterExtrasApi.ensure : undefined} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [...selectedIds] }) : undefined} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onRemoveFromCollection={() => removeFromCollection()} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
+        <SelectionBar view={view} onAssignArtist={gateway.artists ? () => setAssignOpen(true) : undefined} selectedCount={selectedIds.length} batchPending={batchPending} characterOpen={characterOpen} onCharacterToggle={toggleCharacterPicker} characterPicker={<CharacterAssignPicker assetIds={[...selectedIds]} targets={characterTargets} extras={seriesExtras} ensureExtras={characterExtrasApi.ensure} scopeSeriesId={scopeSeriesId} groups={characterGroups} classifications={classifications} counts={characterCounts} privacyMode={privacyMode} busy={batchPending} onCreate={creationFolder ? name => setNewCharacter({ name, assetIds: [...selectedIds] }) : undefined} onAssign={assignCharacters} onClose={() => setCharacterOpen(false)} />} onRemoveFromCollection={() => removeFromCollection()} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>

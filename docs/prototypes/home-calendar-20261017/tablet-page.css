@@ -1,0 +1,20 @@
+/* Mockup frame only: fake tablet chrome (status bar, bottom nav) around the tablet Home. Not part of the proposal. */
+html, body { width: 800px; height: 1280px; margin: 0; overflow: hidden; background: var(--color-bg); }
+.tablet { position: relative; width: 800px; height: 1280px; overflow: hidden; background: var(--color-bg); color: var(--color-text); }
+.tablet .mobile-app { height: 100%; padding-top: 0; position: relative; }
+svg.i { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.t-status { display: flex; align-items: center; justify-content: space-between; height: 28px; flex: none; padding: 0 24px; background: var(--color-sidebar); color: var(--color-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.t-status span:last-child { letter-spacing: 2px; }
+.t-mark { display: block; width: 22px; height: 26px; background: currentColor; clip-path: polygon(50% 0, 100% 22%, 100% 78%, 50% 100%, 0 78%, 0 22%); }
+.t-date { font-size: var(--type-meta); }
+.t-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.t-nav { display: flex; justify-content: center; height: var(--mobile-nav); flex: none; padding: 3px 0; border-top: 1px solid var(--color-border); background: var(--color-sidebar); }
+.t-nav span { position: relative; flex: 1 1 0; max-width: 122px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-radius: 2px; color: var(--color-muted); font-size: 11px; line-height: 1.2; }
+.t-nav span svg.i { width: 22px; height: 22px; }
+.t-nav span.on { background: var(--color-accent); color: var(--color-on-accent); }
+.t-nav span.on::after { content: ""; position: absolute; top: 6px; right: 6px; width: 5px; height: 5px; background: currentColor; }
+/* App dialogs are fixed to the window; inside the frame they sit in the frame. */
+.tablet .ui-dialog__overlay, .tablet .ui-dialog { position: absolute; }
+.tablet .ui-dialog__overlay { background: rgba(0, 0, 0, .6); }
+.tablet .ui-dialog__title .muted { font-weight: 400; }
+textarea { user-select: text; -webkit-user-select: text; }

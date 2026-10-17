@@ -1,0 +1,77 @@
+/* Accepted ledger pieces use foundation roles; hosts only arrange the frame. */
+.ledger { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ledger-page { flex: 1; min-height: 0; overflow: auto; padding: var(--space-4); }
+.ledger-monthrow { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-6); }
+.ledger-monthrow h2 { margin: 0; font-size: var(--type-title); white-space: nowrap; }
+.ledger-monthrow svg { width: 16px; height: 16px; }
+.ledger-spacer { flex: 1; }
+.ledger-content { display: flex; flex-direction: column; gap: var(--space-2); }
+.ledger-budget { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-2); }
+.ledger-budget dt { font-size: var(--type-meta); color: var(--color-muted); margin-bottom: var(--space-1); }
+.ledger-budget dd { margin: 0; font-size: var(--type-number); font-weight: 600; font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
+.ledger-budget-meter { display: flex; height: 8px; overflow: hidden; background: var(--color-surface); }
+.ledger-budget-meter i { flex: none; }
+.ledger-budget-meter__fixed { background: var(--color-muted); }
+.ledger-budget-meter__spent { background: var(--color-text); }
+.ledger-budget-meter__plan { background: repeating-linear-gradient(135deg, var(--color-accent) 0 2px, transparent 2px 4px); }
+.ledger-meter-key { display: flex; flex-wrap: wrap; gap: var(--space-4); font-size: var(--type-meta); color: var(--color-faint); margin-bottom: var(--space-4); }
+.ledger-meter-key span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: var(--space-1); background: var(--color-muted); }
+.ledger-meter-key span:nth-child(2)::before { background: var(--color-text); }
+.ledger-meter-key span:nth-child(3)::before { background: repeating-linear-gradient(135deg, var(--color-accent) 0 2px, transparent 2px 4px); }
+.ledger-timeline { display: flex; overflow-x: auto; list-style: none; padding: 0; margin: var(--space-2) 0 var(--space-6); }
+.ledger-timeline li { flex: 0 0 auto; border-right: 1px solid var(--color-border); }
+.ledger-timeline button { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-4); min-height: var(--control-height); border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); text-align: left; cursor: pointer; }
+.ledger-timeline button strong { color: var(--color-text); font-size: var(--type-body); font-weight: 500; }
+.ledger-timeline button > span:first-child { display: flex; align-items: center; gap: var(--space-2); }
+.ledger-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-8); }
+.ledger-right { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
+.ledger-items, .ledger-day ul { padding: 0; margin: 0; list-style: none; }
+.ledger-items > li, .ledger-entry { border-bottom: 1px solid var(--color-border); }
+.ledger-subscription { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); width: 100%; padding: var(--space-3) 0; min-height: var(--control-height); border: 0; background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.ledger-subscription strong, .ledger-wish strong { font-weight: 500; overflow-wrap: anywhere; }
+.ledger-value { text-align: right; font-variant-numeric: tabular-nums; }
+.ledger-pills { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.ledger-next { text-align: right; font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-next small { display: block; font: inherit; margin-top: var(--space-1); }
+.ledger-wish__main { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); width: 100%; min-height: var(--control-height); padding: var(--space-3) 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ledger-priority { color: var(--color-muted); font-size: var(--type-meta); align-self: center; }
+.ledger-wish__main small { grid-column: 2 / -1; color: var(--color-muted); font-size: var(--type-meta); }
+.ledger-wish__expanded { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-bottom: var(--space-3); }
+.ledger-wish__expanded > span { flex: 1; font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-wish__expanded b { color: var(--color-text); white-space: nowrap; }
+.ledger-empty { margin: var(--space-4) 0; padding: 0; }
+.ledger-problem, .ledger-quick > p { color: var(--color-danger); font-size: var(--type-meta); margin: var(--space-2) 0; }
+.ledger-review, .ledger-conflict { font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-day { margin-top: var(--space-2); }
+.ledger-day__head { padding: var(--space-2) 0; color: var(--color-muted); font-size: var(--type-meta); border-bottom: 1px solid var(--color-border); }
+.ledger-entry__main, .ledger-spending-row { display: flex; gap: var(--space-2); align-items: center; width: 100%; min-height: var(--control-height); padding: var(--space-2) 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ledger-entry__name, .ledger-spending-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 400; }
+.ledger-entry__icon svg { width: 16px; height: 16px; }
+.ledger-entry__tag, .ledger-spending-row > span:first-child { font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-entry__amount { white-space: nowrap; }
+.is-derived { color: var(--color-muted); }
+.ledger-quick { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.ledger-quick > .ui-text-input { flex: 1; min-width: 0; }
+.ledger-quick > p { flex-basis: 100%; }
+.ledger-editor { display: flex; flex-direction: column; gap: var(--space-3); }
+.ledger-editor-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ledger-editor-field > span:first-child { flex-basis: 100%; font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-editor-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); }
+.ledger-price-history { margin: 0; font-size: var(--type-meta); color: var(--color-muted); }
+.ledger-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.ledger-form, .ledger-entry-form { padding: var(--space-3) 0; }
+.ledger-entry-form__row, .ledger-form__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ledger-entry-form__date { width: 80px; }
+.ledger-entry-form__name { flex: 1; min-width: 120px; }
+.ledger-amount-input { display: inline-flex; gap: var(--space-1); align-items: center; }
+.ledger-amount-input input { width: 100px; min-width: 0; height: var(--control-height); padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.ledger-input { height: var(--control-height); background: var(--color-surface); color: var(--color-text); border: 0; border-radius: var(--radius-control); padding: 0 var(--space-2); font: inherit; }
+.ledger-input:focus { outline: 2px solid var(--color-focus); }
+.ledger-kind, .ledger-text-button { border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.ledger-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); }
+.ledger-income-day { display: flex; align-items: center; gap: var(--space-2); }
+.ledger-income-day input { width: 64px; }
+.ledger-fork { display: flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); }
+.ledger-link { color: var(--color-muted); font-size: var(--type-meta); }
+.ledger-subscription:hover, .ledger-wish__main:hover, .ledger-entry__main:hover, .ledger-spending-row:hover, .ledger-timeline button:hover { background: var(--color-surface-hover); }
+@media (max-width: 760px) { .ledger-columns { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); } .ledger-budget { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

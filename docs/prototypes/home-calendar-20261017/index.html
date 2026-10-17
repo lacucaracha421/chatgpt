@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>홈 달력 시안</title>
+<!-- The app's real CSS, copied under app-css/ with its folder layout so relative imports keep working:
+     tokens.css (→ fonts.css → Pretendard), shared-*, controls.css (→ surface-motion.css), chrome.css, the Home and ledger CSS.
+     homecal.css = the proposed CSS. mock.css = light-theme stand-in and stand-in pictures. page.css = document and fake PC window.
+     The tablet frames are tablet.html in iframes, because the tablet loads mobile.css instead of the PC base CSS. -->
+<link rel="stylesheet" href="app-css/src/styles/tokens.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-base.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-toolbars.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-states.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-hover.css">
+<link rel="stylesheet" href="app-css/src/styles/controls.css">
+<link rel="stylesheet" href="app-css/src/styles/chrome.css">
+<link rel="stylesheet" href="app-css/src/home/home.css">
+<link rel="stylesheet" href="app-css/src/home/homeAttention.css">
+<link rel="stylesheet" href="app-css/src/home/homeCalendar.css">
+<link rel="stylesheet" href="app-css/src/home/homeTools.css">
+<link rel="stylesheet" href="app-css/src/cards/album.css">
+<link rel="stylesheet" href="app-css/src/notes/ledger/ledger.css">
+<link rel="stylesheet" href="homecal.css">
+<link rel="stylesheet" href="mock.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+
+<header class="doc-head">
+  <div class="doc-head__row">
+    <h1>홈 달력 시안</h1>
+    <div class="theme-switch" role="group" aria-label="화면 테마"><button type="button" data-theme-set="auto">자동</button><button type="button" data-theme-set="dark">어둡게</button><button type="button" data-theme-set="light">밝게</button></div>
+  </div>
+  <p class="lead">홈 왼쪽의 2주 발매 캘린더를 <b>한 달 달력</b>으로 바꾸고, 날마다 <b>짧은 메모 하나</b>와 <b>가계부 기록</b>을 적게 한다. 칸에는 표시만 작게 둔다: 저장한 이미지 수, 발매 한 줄(+N), 구독 결제, 메모 표시, 그날 쓴 돈. 날을 고르면 달력 옆(좁은 창에서는 아래)의 <b>날 패널</b>이 그날을 보여 준다. 패널은 늘 그 자리에 있고 처음에는 오늘을 보여 준다. 오른쪽 열은 <b>오늘의 카드(작게) → 오늘 할 것 → 전송 → 빠른 메모</b>이고, 링크 보관은 홈에서 빠진다.</p>
+  <p class="lead">앱의 실제 토큰·컨트롤·홈·가계부 CSS를 그대로 읽는다. 이름·금액·그림은 임시 데이터다. 오늘은 <b>2026년 10월 17일(토)</b>로 둔다. 첫 화면(A)은 직접 눌러 볼 수 있다: 날 고르기, ‹ › 달 넘기기, 오늘, 방향키로 날 옮기기, 가계부 빠른 입력(“점심 8000” 후 Enter), 기록 눌러 고치기. PC 화면은 1920 × 1080 창을 줄여 보인다. <b>실제 크기</b>를 누르면 그 자리에서 옆으로 넘겨 본다.</p>
+  <ul class="toc">
+    <li><a href="#a"><b>A</b>오늘</a></li>
+    <li><a href="#b"><b>B</b>날을 고름</a></li>
+    <li><a href="#c"><b>C</b>빈 날</a></li>
+    <li><a href="#d"><b>D</b>발매가 많은 날</a></li>
+    <li><a href="#e"><b>E</b>비공개 모드</a></li>
+    <li><a href="#f"><b>F</b>좁은 창</a></li>
+    <li><a href="#g"><b>G</b>태블릿</a></li>
+    <li><a href="#decide">정할 것</a></li>
+    <li><a href="#gaps">확인 못 한 것</a></li>
+  </ul>
+</header>
+
+<section class="variant" id="a">
+  <h2><span class="key">A</span>PC 홈 — 오늘 <small>1920 × 1080 · 직접 눌러 볼 수 있음</small></h2>
+  <p class="note">달력은 <b>월요일부터</b> 여섯 줄로 늘 같은 높이다(달을 넘겨도 화면이 출렁이지 않는다). 머리에는 <b>10월</b>, ‹ 오늘 ›, 이번 달 <b>쓴 돈</b>과 <b>예정</b>(남은 구독 결제), 그리고 지금의 <b>발매 캘린더</b> 화면으로 가는 링크가 있다. 오늘은 지금처럼 날짜 뒤의 채운 사각형으로만 표시하고, 이번 주는 일곱 칸에 옅은 면을 깐다. <b>고른 날</b>은 앱의 현재 위치 표시(상아색 면, 3px 메아리, 오른쪽 위 작은 검은 사각형)를 쓴다. 다른 달의 날은 흐리게 보이고, 눌러도 달이 넘어가지 않는다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-17"}'><figcaption><span class="tag">기본</span>처음 열면 오늘이 골라져 있다. 패널: 저장한 이미지 11장 → 메모 → 가계부(점심, 빠른 입력).</figcaption></figure>
+</section>
+
+<section class="variant" id="b">
+  <h2><span class="key">B</span>날을 고름 — 메모와 기록 셋 <small>10월 15일</small></h2>
+  <p class="note">칸을 누르면 그 칸이 골라지고 <b>패널의 내용만 한 번에 바뀐다</b>(패널은 움직이지 않고 비지도 않는다). 발매는 표지와 함께 줄로 나오고, 누르면 지금처럼 작품이나 발매 정보가 열린다. <b>저장한 이미지</b> 줄은 에셋 전체를 그날 날짜 머리로 연다. 메모는 빠른 메모와 같은 입력칸이고 쓰는 대로 저장된다. 가계부는 메모 탭 가계부의 <b>같은 기록 줄과 같은 빠른 입력</b>(“예: 점심 8000”)을 쓴다. 줄을 누르면 그 자리에서 고치기 줄(날짜·금액·이름·저장·취소·삭제)로 바뀐다. 섹션 머리 오른쪽은 그날 합계다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-15"}'><figcaption><span class="tag">10.15</span>NEW 발매 한 권, 저장 30장, 메모, 기록 셋(₩25,800).</figcaption></figure>
+</section>
+
+<section class="variant" id="c">
+  <h2><span class="key">C</span>빈 날 <small>10월 22일</small></h2>
+  <p class="note">아무것도 없는 날은 칸이 비어 있고, 패널에는 <b>빈 메모 칸</b>과 “기록 없음” 한 줄, 빠른 입력만 남는다. 앞날에도 메모와 기록을 적을 수 있다(예: 24일의 생일 메모). 설명 문구는 넣지 않는다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-22"}'><figcaption><span class="tag">10.22</span>빈 날. 오늘이 아니므로 패널 머리에 ‘오늘로’ 링크가 있다.</figcaption></figure>
+</section>
+
+<section class="variant" id="d">
+  <h2><span class="key">D</span>한 날에 발매가 많을 때 <small>10월 30일 · 다섯 개</small></h2>
+  <p class="note">칸에는 <b>첫 발매 한 줄 + “+4”</b>만 둔다(NEW가 있으면 NEW가 먼저). 전체는 패널에 표지와 함께 다섯 줄로 나온다. 앞날의 발매가 있는 칸에는 지금처럼 D-day가 붙는다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-30"}'><figcaption><span class="tag">10.30</span>칸: 메트로이드 프라임 4 +4 · D-13. 패널: 발매 5.</figcaption></figure>
+</section>
+
+<section class="variant" id="e">
+  <h2><span class="key">E</span>비공개 모드 <small>10월 21일 · 구독 결제가 있는 날</small></h2>
+  <p class="note">비공개 모드에서는 <b>모든 금액이 ••••</b>로 바뀐다(암호 메모가 값을 가리는 방식). 달력 칸, 달 합계, 패널 기록, 오늘 할 것의 구독 줄까지 같다. 발매 표지는 지금처럼 가림 면이 된다. 이름과 메모 글은 그대로 보인다(정할 것 참고). 구독 결제는 <b>자동으로 나오는 읽기 전용 줄</b>(고정·구독 자동)이라 홈에서 다시 적을 일이 없다. 확정과 건너뛰기는 메모 › 가계부에서 한다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-21","privacy":true}'><figcaption><span class="tag">비공개</span>클로드 결제 예정 줄은 누를 수 없다. 기록을 누르면 고치기가 열리지 않는다(금액이 보이게 되므로).</figcaption></figure>
+</section>
+
+<section class="variant" id="f">
+  <h2><span class="key">F</span>좁은 창 <small>1440 × 900 · 패널이 달력 아래 · 기록 고치기</small></h2>
+  <p class="note">왼쪽 영역이 1100px보다 좁으면 패널은 달력 <b>아래</b>로 가고, 넓은 폭을 살려 <b>발매·이미지 | 메모 | 가계부</b>를 나란히 놓는다. 칸 높이는 136에서 112로 줄어든다. 패널이 화면 밖에 있을 때 날을 고르면 패널이 보이도록 부드럽게 내려간다(이미 보이면 그대로). 이 화면은 그렇게 내려간 상태이고, 택시 기록을 고치는 중이다.</p>
+  <figure class="shot" data-state='{"selected":"2026-10-15","editing":"e9","w":1440,"h":900,"scroll":"panel"}'><figcaption><span class="tag">좁은 창</span>고치기 줄은 메모 탭 가계부의 것과 같다. Enter로 저장, Esc로 취소.</figcaption></figure>
+</section>
+
+<section class="variant" id="g">
+  <h2><span class="key">G</span>태블릿 <small>세로 800 × 1280을 줄여 보임 · 직접 눌러 볼 수 있음</small></h2>
+  <p class="note">태블릿은 PC를 따른다. 위에 같은 한 달 달력(칸은 PC와 같은 부품, 글자 13·누르는 영역 44), 그 아래에 오른쪽 열 순서 그대로 <b>오늘의 카드 | 오늘 할 것</b>, <b>전송 | 빠른 메모</b>를 두 칸씩 놓는다. 날을 누르면 같은 내용이 <b>아래에서 올라오는 시트</b>로 열린다(아래로 쓸기·바깥 탭·닫기·뒤로로 닫힘, 지금의 더보기 시트와 같은 모양). 가계부 기록 추가와 고치기는 태블릿 가계부의 기존 입력 시트를 그 위에 띄운다. 지금의 이번 주 / 다음 주 넘기기는 ‹ › 달 넘기기로 바뀌고, 좌우로 쓸어도 달이 넘어간다.</p>
+  <div class="tablets">
+    <figure class="shot"><div class="shot__frame" data-tablet="home"></div><figcaption><span class="tag">홈</span>달력 + 두 칸씩 네 부품.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-tablet="sheet"></div><figcaption><span class="tag">날 시트</span>10.15를 누른 상태: 발매 → 저장한 이미지 → 메모 → 가계부.</figcaption></figure>
+    <figure class="shot"><div class="shot__frame" data-tablet="private"></div><figcaption><span class="tag">비공개</span>금액은 ••••, 표지는 가림 면.</figcaption></figure>
+  </div>
+</section>
+
+<section class="variant" id="decide">
+  <h2>정할 것과 제안</h2>
+  <div class="table-wrap"><table class="decide">
+    <thead><tr><th>항목</th><th>제안</th><th>다른 선택지</th></tr></thead>
+    <tbody>
+      <tr><td>가계부를 어디에 적나</td><td><b>메모 탭의 가계부와 같은 기록</b>으로 적는다. 홈의 날 패널은 그 가계부의 그날 기록을 보여 주고, 빠른 입력은 그 가계부의 그달 기록에 더한다. 메모 탭에서도 바로 보이고, 이미 서버에 암호화되어 동기화되며 태블릿도 읽고 쓴다(새 서버 저장소와 배포가 필요 없다).</td><td class="alt">홈 전용 가계부를 서버에 새로 만들기(같은 돈을 두 곳에 적게 됨)</td></tr>
+      <tr><td>날 메모 저장</td><td>가계부의 달 메모처럼 <b>숨은 메모 한 장에 한 달치</b>를 담아 기존 메모 동기화로 보낸다(암호화, 기기 사이 충돌 처리 그대로).</td><td class="alt">서버에 날 메모 표를 새로 만들기(배포 필요, 서버가 글을 봄)</td></tr>
+      <tr><td>가계부가 여러 개면</td><td>구독이 있는 가계부 하나를 홈 가계부로 쓴다. 둘 이상이면 설정에서 고른다.</td><td class="alt">모든 가계부를 합쳐 보기</td></tr>
+      <tr><td>고른 날 표시</td><td>현재 위치 표시(상아색 면 + 메아리 + 작은 사각형). 한 화면에 하나뿐이라 눈에 바로 띈다.</td><td class="alt">옅은 면(부모 틴트)과 굵은 날짜만</td></tr>
+      <tr><td>날 패널 자리</td><td>늘 보이는 패널, 처음엔 오늘. 넓은 창은 달력 옆, 좁은 창은 아래.</td><td class="alt">누를 때만 여는 옆 시트 / 칸에 붙는 팝오버</td></tr>
+      <tr><td>칸의 발매를 누르면</td><td>그날이 골라진다(발매는 패널에서 연다). 한 칸에 누를 곳이 하나라 헷갈리지 않는다.</td><td class="alt">지금처럼 칸 안의 발매를 바로 열기</td></tr>
+      <tr><td>지난날의 발매</td><td><b>계속 보인다</b>(진짜 달력처럼). 지금은 지난 발매가 NEW일 때만 보이고, 열면 사라진다.</td><td class="alt">지금 규칙 유지</td></tr>
+      <tr><td>비공개 모드</td><td>금액만 가린다. 이름·메모 글은 보인다. 오늘 할 것의 “구독 이번 달” 금액도 가린다(지금은 안 가림).</td><td class="alt">메모 글도 가리기</td></tr>
+      <tr><td>금액 표기</td><td>칸은 지금 달력처럼 “159,000원”, 패널은 가계부 줄 그대로 “₩159,000”.</td><td class="alt">둘 다 ₩ 또는 둘 다 원으로 맞추기</td></tr>
+      <tr><td>링크 보관</td><td>홈에서 빼고, 기능과 저장된 링크는 그대로. <b>더보기</b>의 이동 목록과 <b>찾기</b>(Ctrl+Q)에 ‘링크 보관’을 넣어 지금의 전체 화면을 연다. 원본은 메모 탭의 ‘링크 보관’ 메모로도 남아 있다.</td><td class="alt">메모 탭의 메모로만 남기기</td></tr>
+      <tr><td>태블릿 저장 이미지 수</td><td>PC처럼 칸에 보이게 서버에서 날짜별 수를 읽는다(새 읽기 필요).</td><td class="alt">태블릿 칸에는 이미지 수 없음(지금과 같음)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="variant" id="gaps">
+  <h2>확인 못 한 것</h2>
+  <ul class="plain">
+    <li>앱 화면에서 직접 보지 않았다. 이 페이지는 앱 CSS를 복사해 읽은 정적 시안이고, 오늘의 카드 팩 그림과 표지는 임시 그림이다.</li>
+    <li>밝은 테마는 앱에 없는 ‘종이’ 값을 빌려 이 페이지에서만 보인다.</li>
+    <li>한 달치 저장 이미지 수(42일)를 한 번에 읽는 비용, 지난 발매를 계속 보이게 할 때의 자료(관심 목록의 발매된 작품, 지난 권)는 구현 때 재야 한다.</li>
+    <li>태블릿 Home 파일은 다른 작업이 지금 고치는 중이라 그 시점의 CSS를 복사해 그렸다. 합칠 때 다시 맞춰야 한다.</li>
+  </ul>
+</section>
+
+</div>
+<script src="homecal.js"></script>
+<script>
+(() => {
+  const { TODAY, pcWindow, wire } = window.HomeCal;
+  const frames = [];
+  document.querySelectorAll('.shot[data-state]').forEach((fig) => {
+    const opts = JSON.parse(fig.dataset.state);
+    const st = { month: (opts.selected || TODAY).slice(0, 7), selected: TODAY, privacy: false, editing: null, w: 1920, h: 1080, ...opts };
+    const box = document.createElement('div'); box.className = 'shot__frame'; box.style.aspectRatio = `${st.w} / ${st.h}`;
+    const bar = document.createElement('div'); bar.className = 'shot__bar';
+    const zoom = document.createElement('button'); zoom.type = 'button'; zoom.className = 'shot__zoom'; zoom.textContent = '실제 크기';
+    bar.append(zoom);
+    fig.prepend(bar); fig.prepend(box);
+    const render = () => {
+      const old = box.querySelector('[data-scroll]'); const top = old ? old.scrollTop : null;
+      box.innerHTML = pcWindow(st);
+      const scroller = box.querySelector('[data-scroll]');
+      if (top !== null) scroller.scrollTop = top;
+    };
+    render();
+    if (st.scroll === 'panel') requestAnimationFrame(() => { const s = box.querySelector('[data-scroll]'); s.scrollTop = s.scrollHeight; });
+    wire(box, st, render);
+    zoom.addEventListener('click', () => { const on = fig.classList.toggle('is-actual'); zoom.textContent = on ? '맞춰 보기' : '실제 크기'; box.style.aspectRatio = on ? '' : `${st.w} / ${st.h}`; scale(); });
+    frames.push({ fig, box, st });
+  });
+  document.querySelectorAll('[data-tablet]').forEach((box) => {
+    const f = document.createElement('iframe');
+    f.src = `tablet.html#${box.dataset.tablet}`; f.title = `태블릿 ${box.dataset.tablet}`; f.loading = 'lazy';
+    box.append(f);
+  });
+  function scale() {
+    for (const { fig, box, st } of frames) { if (!fig.classList.contains('is-actual')) box.style.setProperty('--s', String(box.clientWidth / st.w)); }
+    document.querySelectorAll('[data-tablet]').forEach((box) => box.style.setProperty('--s', String(box.clientWidth / 800)));
+  }
+  scale();
+  new ResizeObserver(scale).observe(document.body);
+
+  /* Theme: 자동 / 어둡게 / 밝게, saved per viewer; the tablet frames follow by message. */
+  const root = document.documentElement, buttons = document.querySelectorAll('[data-theme-set]');
+  const send = (value) => document.querySelectorAll('iframe').forEach((f) => { try { f.contentWindow.postMessage({ homecalTheme: value }, '*'); } catch { /* not loaded yet */ } });
+  const apply = (value) => {
+    if (value === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', value);
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === value)));
+    send(value);
+  };
+  let saved = 'auto';
+  try { saved = localStorage.getItem('home-calendar-theme') || 'auto'; } catch { /* storage unavailable */ }
+  apply(saved);
+  document.querySelectorAll('iframe').forEach((f) => f.addEventListener('load', () => send(root.getAttribute('data-theme') || 'auto')));
+  buttons.forEach((b) => b.addEventListener('click', () => { apply(b.dataset.themeSet); try { localStorage.setItem('home-calendar-theme', b.dataset.themeSet); } catch { /* ignore */ } }));
+})();
+</script>
+</body>
+</html>

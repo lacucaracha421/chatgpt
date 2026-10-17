@@ -281,8 +281,13 @@ function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[
   const groupByTarget = new Map<string, CharacterGroup>();
   groups.forEach(group => group.targetIds.forEach(id => groupByTarget.set(id, group)));
   const bySeries = new Map<string, CharacterTarget[]>();
-  // With 기타 offered, the open series is listed even when it has no character yet.
-  if (extras && scopeSeriesId) bySeries.set(scopeSeriesId, []);
+  // With 기타 offered, the open series is listed even when it has no character yet, and so is every
+  // other series that has a group or a 기타 bucket (its characters may all be in the 기타).
+  if (extras) {
+    if (scopeSeriesId) bySeries.set(scopeSeriesId, []);
+    groups.forEach(group => { if (!bySeries.has(group.seriesId)) bySeries.set(group.seriesId, []); });
+    extras.forEach(target => { if (target.seriesClassificationId && !bySeries.has(target.seriesClassificationId)) bySeries.set(target.seriesClassificationId, []); });
+  }
   targets.forEach(target => {
     if (!target.seriesClassificationId) return;
     const members = bySeries.get(target.seriesClassificationId) ?? [];
