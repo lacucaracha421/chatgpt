@@ -684,6 +684,11 @@ impl Library {
                     }
                 }
             };
+            // Work skipped for the launch grace is retried when it ends, not at the safety timeout.
+            let deadline = match crate::workload::startup_background_remaining() {
+                Some(left) => deadline.min(Instant::now() + left),
+                None => deadline,
+            };
             wake.wait(seen, deadline, interrupted(restricted));
         }
     }
@@ -1177,7 +1182,13 @@ impl Library {
             .pop_front();
         // Observations live in memory, so a restart or a settings change drops them.
         // Characters 학습 인식 places depend on the score for their membership: recover recent images.
+        // The catch-up reads the learning overview and reference rosters; it waits for the
+        // launch grace (the owner loop wakes when it ends) so Home's first reads are not
+        // competing with it.
         let pending = pending.or_else(|| {
+            if !crate::workload::startup_background_ready() {
+                return None;
+            }
             self.s36_catch_up(config).unwrap_or_else(|error| {
                 eprintln!("S36 catch-up skipped: {error}");
                 None
@@ -1213,14 +1224,19 @@ impl Library {
             .ok_or(Error::Stale)?
             .to_string();
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(14)).to_rfc3339();
-        let c = self.connection()?;
-        let mut recent = c
-            .prepare(
-                "SELECT asset_id FROM character_autotag_jobs
-                 WHERE state='completed' AND updated_at>=?1 ORDER BY updated_at DESC LIMIT 500",
-            )?
-            .query_map([&cutoff], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Each database step below borrows the library briefly: the learning overview and the
+        // reference checks take seconds after a start, and one long hold queued Home's reads.
+        let mut recent = {
+            let c = self.connection()?;
+            let recent = c
+                .prepare(
+                    "SELECT asset_id FROM character_autotag_jobs
+                     WHERE state='completed' AND updated_at>=?1 ORDER BY updated_at DESC LIMIT 500",
+                )?
+                .query_map([&cutoff], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            recent
+        };
         {
             let engine = self
                 .character_incremental
@@ -1279,12 +1295,16 @@ impl Library {
             }
             let overview = match learning.take() {
                 Some(overview) => overview,
-                None => self.learning_overview(&c)?,
+                None => self.learning_overview()?,
             };
             let (owned, owned_series) = learning.insert(overview);
             // Series without such a character occur in the same recent-job window. Resolve
             // their folder scope before loading reference rosters that cannot be scored here.
-            let scope = super::character_scope::resolve_character_scope(&c, &asset)?;
+            let scope = {
+                let c = self.connection()?;
+                let scope = super::character_scope::resolve_character_scope(&c, &asset)?;
+                scope
+            };
             if owned.is_empty()
                 || !scope.is_some_and(|scope| {
                     scope
@@ -1295,7 +1315,7 @@ impl Library {
             {
                 continue;
             }
-            let Some(pending) = self.character_shadow_candidate_on(&c, &asset)? else {
+            let Some(pending) = self.character_shadow_candidate(&asset)? else {
                 continue;
             };
             if !pending.outcomes.keys().any(|target| owned.owns(target)) {

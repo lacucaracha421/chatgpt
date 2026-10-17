@@ -76,6 +76,14 @@ impl Worker {
     }
 }
 
+/// The characters lane builds the whole tablet review feed (the 확인 lists), which is heavy
+/// right after a start; it waits for the launch grace and is dispatched on the next tick
+/// after it (the lane has not run, so its dispatch history still marks it due). Other lanes
+/// are light and run as soon as the launch has settled.
+fn lane_waits_for_launch(kind: &str, background_ready: bool) -> bool {
+    kind == "characters" && !background_ready
+}
+
 /// Run both steps, then report the first error.
 fn both(
     first: impl FnOnce() -> Result<(), LibraryError>,
@@ -189,6 +197,7 @@ impl Library {
         ]
         {
             if !due[slot]
+                || lane_waits_for_launch(kind, crate::workload::startup_background_ready())
                 || (self.sync_held(&endpoint)
                     && matches!(
                         kind,
@@ -428,6 +437,25 @@ mod tests {
         library
             .run_mobile_publication_lane("releases", "https://fixture.invalid")
             .unwrap();
+    }
+    #[test]
+    fn only_the_characters_lane_waits_for_the_launch_grace() {
+        for kind in [
+            "collections",
+            "visibility",
+            "similarity",
+            "catalogDuplicates",
+            "releases",
+            "bindings",
+            "metadata",
+            "autoTags",
+            "upcoming",
+            "artists",
+        ] {
+            assert!(!super::lane_waits_for_launch(kind, false), "{kind}");
+        }
+        assert!(super::lane_waits_for_launch("characters", false));
+        assert!(!super::lane_waits_for_launch("characters", true));
     }
     use crate::library::Library;
     #[test]

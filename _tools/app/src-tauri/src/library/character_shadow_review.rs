@@ -13,7 +13,7 @@ use super::{
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     io::Read,
     path::Path,
     sync::{Arc, Mutex, PoisonError},
@@ -321,117 +321,190 @@ fn row_pairs_json(rows: &[ShadowRow]) -> Result<String> {
     )?)
 }
 
+/// Rows per library borrow in the row-dependent reads. A review list covers tens of
+/// thousands of scored pairs; one borrow per batch keeps every hold short so other readers
+/// (Home at startup) are not queued behind the whole list. Each batch answers its own
+/// pairs/assets, so the merged result equals one big query.
+const READ_BATCH_ROWS: usize = 2000;
+/// Characters per library borrow in the per-character reads (their decisions, the taggers'
+/// readings). Each is an indexed read of a few rows per character, so a batch stays short.
+const READ_BATCH_TARGETS: usize = 64;
+
 fn latest_decisions(
-    connection: &Connection,
+    reader: &impl ReviewRead,
     rows: &[ShadowRow],
     manual: bool,
 ) -> Result<BTreeMap<(String, String), (String, String)>> {
-    if rows.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let pairs = row_pairs_json(rows)?;
     let origin = if manual {
         "d.origin='manual'"
     } else {
         "d.origin<>'manual'"
     };
-    let mut statement = connection.prepare(&format!(
-        "SELECT d.target_id,d.source_asset_id,d.decision,d.created_at
-         FROM character_decisions d
-         JOIN json_each(?1) requested
-           ON d.target_id=json_extract(requested.value,'$[0]')
-          AND d.source_asset_id=json_extract(requested.value,'$[1]')
-         WHERE {origin}
-         ORDER BY d.target_id,d.source_asset_id,d.sequence DESC"
-    ))?;
     let mut decisions = BTreeMap::new();
-    for row in statement.query_map([pairs], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    })? {
-        let (target_id, asset_id, decision, created_at) = row?;
-        decisions
-            .entry((target_id, asset_id))
-            .or_insert((decision, created_at));
+    if rows.len() > READ_BATCH_ROWS {
+        // A list this long (the doubtful list covers every scored pair) asks about far more pairs
+        // than the table holds decisions of one kind: read those once, newest first, and keep the
+        // first of each wanted pair, instead of probing thousands of pairs batch after batch.
+        let wanted = rows
+            .iter()
+            .map(|row| (row.target_id.as_str(), row.asset_id.as_str()))
+            .collect::<HashSet<_>>();
+        return reader.read(|connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT d.target_id,d.source_asset_id,d.decision,d.created_at
+                 FROM character_decisions d
+                 WHERE {origin}
+                 ORDER BY d.sequence DESC"
+            ))?;
+            let mut newest = BTreeMap::new();
+            for found in statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })? {
+                let (target_id, asset_id, decision, created_at) = found?;
+                if wanted.contains(&(target_id.as_str(), asset_id.as_str())) {
+                    newest
+                        .entry((target_id, asset_id))
+                        .or_insert((decision, created_at));
+                }
+            }
+            Ok(newest)
+        });
+    }
+    for batch in rows.chunks(READ_BATCH_ROWS) {
+        let pairs = row_pairs_json(batch)?;
+        let found = reader.read(|connection| {
+            let mut statement = connection.prepare(&format!(
+                "SELECT d.target_id,d.source_asset_id,d.decision,d.created_at
+                 FROM character_decisions d
+                 JOIN json_each(?1) requested
+                   ON d.target_id=json_extract(requested.value,'$[0]')
+                  AND d.source_asset_id=json_extract(requested.value,'$[1]')
+                 WHERE {origin}
+                 ORDER BY d.target_id,d.source_asset_id,d.sequence DESC"
+            ))?;
+            let found = statement
+                .query_map([pairs], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(found)
+        })?;
+        for (target_id, asset_id, decision, created_at) in found {
+            decisions
+                .entry((target_id, asset_id))
+                .or_insert((decision, created_at));
+        }
     }
     Ok(decisions)
 }
 
+/// Distinct asset ids of the rows, in batches of [`READ_BATCH_ROWS`].
+fn asset_id_batches(rows: &[ShadowRow]) -> Vec<Vec<&str>> {
+    let ids = rows
+        .iter()
+        .map(|row| row.asset_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    ids.chunks(READ_BATCH_ROWS).map(<[&str]>::to_vec).collect()
+}
+
 fn eligible_assets(
-    connection: &Connection,
+    reader: &impl ReviewRead,
     rows: &[ShadowRow],
 ) -> Result<BTreeMap<(String, String), (String, i64, i64)>> {
-    if rows.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let requested = serde_json::to_string(
-        &rows
-            .iter()
-            .map(|row| &row.asset_id)
-            .collect::<BTreeSet<_>>(),
-    )?;
-    let mut statement = connection.prepare(
-        "SELECT id,content_hash,original_name,width,height FROM assets
-         WHERE id IN (SELECT value FROM json_each(?1))
-           AND status='normal' AND media_kind='image'",
-    )?;
     let mut assets = BTreeMap::new();
-    for row in statement.query_map([requested], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, i64>(4)?,
-        ))
-    })? {
-        let (asset_id, content_hash, original_name, width, height) = row?;
-        assets.insert((asset_id, content_hash), (original_name, width, height));
+    for batch in asset_id_batches(rows) {
+        let requested = serde_json::to_string(&batch)?;
+        let found = reader.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT id,content_hash,original_name,width,height FROM assets
+                 WHERE id IN (SELECT value FROM json_each(?1))
+                   AND status='normal' AND media_kind='image'",
+            )?;
+            let found = statement
+                .query_map([requested], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(found)
+        })?;
+        for (asset_id, content_hash, original_name, width, height) in found {
+            assets.insert((asset_id, content_hash), (original_name, width, height));
+        }
     }
     Ok(assets)
 }
 
-fn retain_in_character_scope(connection: &Connection, rows: &mut Vec<ShadowRow>) -> Result<()> {
-    if super::character_scope::broad_folder_scope_enabled(connection)? {
+fn retain_in_character_scope(reader: &impl ReviewRead, rows: &mut Vec<ShadowRow>) -> Result<()> {
+    let covered = reader.read(|connection| {
+        if super::character_scope::broad_folder_scope_enabled(connection)? {
+            return Ok(None);
+        }
+        Ok(Some(super::character_scope::series_covered_folders(
+            connection,
+        )?))
+    })?;
+    let Some(covered) = covered else {
         return Ok(());
-    }
-    let covered = super::character_scope::series_covered_folders(connection)?;
-    let asset_ids = serde_json::to_string(
-        &rows
-            .iter()
-            .map(|row| row.asset_id.as_str())
-            .collect::<BTreeSet<_>>(),
-    )?;
+    };
     let covered = serde_json::to_string(&covered)?;
-    let inside = connection
-        .prepare(
-            "SELECT DISTINCT asset_id FROM asset_classifications
-             WHERE asset_id IN (SELECT value FROM json_each(?1))
-               AND classification_id IN (SELECT value FROM json_each(?2))",
-        )?
-        .query_map(params![asset_ids, covered], |row| row.get::<_, String>(0))?
-        .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+    let mut inside = BTreeSet::new();
+    for batch in asset_id_batches(rows) {
+        let asset_ids = serde_json::to_string(&batch)?;
+        inside.extend(reader.read(|connection| {
+            Ok(connection
+                .prepare(
+                    "SELECT DISTINCT asset_id FROM asset_classifications
+                     WHERE asset_id IN (SELECT value FROM json_each(?1))
+                       AND classification_id IN (SELECT value FROM json_each(?2))",
+                )?
+                .query_map(params![asset_ids, covered], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?)
+        })?);
+    }
     rows.retain(|row| inside.contains(&row.asset_id));
     Ok(())
 }
 
-fn enabled_target_names(
-    connection: &Connection,
+/// [`super::character_claude::settled_pairs`] in batches of rows.
+fn settled_pairs(
+    reader: &impl ReviewRead,
     rows: &[ShadowRow],
+) -> Result<BTreeSet<(String, String)>> {
+    let mut settled = BTreeSet::new();
+    for batch in rows.chunks(READ_BATCH_ROWS) {
+        let pairs = row_pairs_json(batch)?;
+        settled.extend(reader.read(|c| super::character_claude::settled_pairs(c, &pairs))?);
+    }
+    Ok(settled)
+}
+
+fn enabled_target_names<'a>(
+    connection: &Connection,
+    target_ids: impl Iterator<Item = &'a str>,
 ) -> Result<BTreeMap<String, String>> {
-    if rows.is_empty() {
+    let target_ids = target_ids.collect::<BTreeSet<_>>();
+    if target_ids.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let target_ids = serde_json::to_string(
-        &rows
-            .iter()
-            .map(|row| row.target_id.as_str())
-            .collect::<BTreeSet<_>>(),
-    )?;
+    let target_ids = serde_json::to_string(&target_ids)?;
     Ok(connection
         .prepare(
             "SELECT id,display_name FROM character_targets
@@ -617,37 +690,58 @@ fn prepare_read(
         return Ok(Prepared::default());
     };
     let (version, all) = &**rows;
-    let mut rows = match series_id {
-        Some(series_id) => {
-            let in_series = c.read(|c| Ok(c
-                .prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1")?
-                .query_map([series_id], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<BTreeSet<_>, _>>()?))?;
-            all.iter()
-                .filter(|row| in_series.contains(&row.target_id))
-                .cloned()
-                .collect()
-        }
-        None => all.clone(),
+    let in_series = match series_id {
+        Some(series_id) => Some(c.read(|c| Ok(c
+            .prepare("SELECT id FROM character_targets WHERE role='character' AND series_classification_id=?1")?
+            .query_map([series_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?))?),
+        None => None,
+    };
+    let scoped = in_series.as_ref().map(|in_series| {
+        all.iter()
+            .filter(|row| in_series.contains(&row.target_id))
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let source = scoped.as_deref().unwrap_or(all.as_slice());
+    // The doubtful list keeps only pairs the native pass accepted, a few thousand among tens of
+    // thousands of scored ones. Whether a pair is one does not depend on the filters below, so
+    // apply it first and run those on the few rows left; the result is the same.
+    let accepted_natively = |native: &BTreeMap<(String, String), (String, String)>,
+                             row: &ShadowRow| {
+        native
+            .get(&(row.target_id.clone(), row.asset_id.clone()))
+            .is_some_and(|(decision, _)| decision == "accepted")
+    };
+    let (mut rows, early_native) = if doubtful {
+        let native = latest_decisions(c, source, false)?;
+        let rows = source
+            .iter()
+            .filter(|row| accepted_natively(&native, row))
+            .cloned()
+            .collect::<Vec<_>>();
+        (rows, Some(native))
+    } else {
+        (source.to_vec(), None)
     };
     // With the broad-folder rule off, scores of images filed outside every registered
     // series stay in the cache but are not offered (turning the rule on shows them again).
-    c.read(|c| retain_in_character_scope(c, &mut rows))?;
+    retain_in_character_scope(c, &mut rows)?;
     // A pair Claude already decided automatically needs no person (a later manual decision
     // replaces it as the newest decision, and the pair is judged like any other).
-    let settled =
-        c.read(|c| super::character_claude::settled_pairs(c, &row_pairs_json(&rows)?))?;
+    let settled = settled_pairs(c, &rows)?;
     rows.retain(|row| !settled.contains(&(row.target_id.clone(), row.asset_id.clone())));
     // Pairs the native pass already accepted automatically come after new findings
     // and are labelled as such; each group keeps the stable pseudo-random order.
     // (Backfill rows recorded "none" as the native outcome for them.)
     let rows = {
-        let native = c.read(|c| latest_decisions(c, &rows, false))?;
+        let native = match early_native {
+            Some(native) => native,
+            None => latest_decisions(c, &rows, false)?,
+        };
         let mut keyed = Vec::with_capacity(rows.len());
         for (index, mut row) in rows.into_iter().enumerate() {
-            let classified = native
-                .get(&(row.target_id.clone(), row.asset_id.clone()))
-                .is_some_and(|(decision, _)| decision == "accepted");
+            let classified = accepted_natively(&native, &row);
             if classified && row.native_outcome == "none" {
                 row.native_outcome = "accepted_automatic".into();
             }
@@ -659,8 +753,8 @@ fn prepare_read(
         keyed.sort_by_key(|(key, _)| *key);
         keyed.into_iter().map(|(_, row)| row).collect::<Vec<_>>()
     };
-    let manual = c.read(|c| latest_decisions(c, &rows, true))?;
-    let assets = c.read(|c| eligible_assets(c, &rows))?;
+    let manual = latest_decisions(c, &rows, true)?;
+    let assets = eligible_assets(c, &rows)?;
     let policy = if doubtful {
         ListPolicy::default()
     } else {
@@ -914,31 +1008,50 @@ fn confirm_totals_of_read(
     tags: Vec<(String, String, String)>,
     series_id: Option<&str>,
 ) -> Result<ConfirmTotals> {
-    // Pairs still waiting in one shadow list whose character exists and is enabled, with
-    // whether the overview folds them.
-    let pending =
-        |rows: Option<&ShadowRows>, doubtful: bool| -> Result<Vec<(String, String, bool)>> {
-            let prepared = prepare_read(connection, cache, rows, doubtful, series_id)?;
-            let folded = prepared
+    let recognition = prepare_read(connection, cache, candidates, false, series_id)?;
+    let recheck = prepare_read(connection, cache, doubtful, true, series_id)?;
+    confirm_totals_from(connection, cache, &recognition, &recheck, tags)
+}
+
+/// Pairs still waiting in one prepared list whose character exists and is enabled, with whether
+/// the overview folds them.
+fn pending_pairs(
+    connection: &impl ReviewRead,
+    prepared: &Prepared,
+) -> Result<Vec<(String, String, bool)>> {
+    let enabled = connection.read(|c| {
+        enabled_target_names(
+            c,
+            prepared
                 .pending
                 .iter()
-                .map(|pending| pending.folded)
-                .collect::<Vec<_>>();
-            let rows = prepared
-                .pending
-                .into_iter()
-                .map(|pending| pending.row)
-                .collect::<Vec<_>>();
-            let enabled = connection.read(|c| enabled_target_names(c, &rows))?;
-            Ok(rows
-                .into_iter()
-                .zip(folded)
-                .filter(|(row, _)| enabled.contains_key(&row.target_id))
-                .map(|(row, folded)| (row.target_id, row.asset_id, folded))
-                .collect())
-        };
-    let recognition = pending(candidates, false)?;
-    let recheck_by_recognition = pending(doubtful, true)?;
+                .map(|pending| pending.row.target_id.as_str()),
+        )
+    })?;
+    Ok(prepared
+        .pending
+        .iter()
+        .filter(|pending| enabled.contains_key(&pending.row.target_id))
+        .map(|pending| {
+            (
+                pending.row.target_id.clone(),
+                pending.row.asset_id.clone(),
+                pending.folded,
+            )
+        })
+        .collect())
+}
+
+/// [`confirm_totals_of`] from the prepared lists, so a caller that keeps them can reuse them.
+fn confirm_totals_from(
+    connection: &impl ReviewRead,
+    cache: Option<&Connection>,
+    recognition: &Prepared,
+    recheck: &Prepared,
+    tags: Vec<(String, String, String)>,
+) -> Result<ConfirmTotals> {
+    let recognition = pending_pairs(connection, recognition)?;
+    let recheck_by_recognition = pending_pairs(connection, recheck)?;
     // 0 tag, 1 recognition, 2 recheck: a pair takes the highest kind any list gives it.
     let mut kinds = BTreeMap::<(String, String), u8>::new();
     let agreed = agreed_pairs_read(
@@ -1009,15 +1122,15 @@ impl Library {
             });
         };
         let mut rows = shared.1.clone();
-        let connection = self.connection()?;
-        retain_in_character_scope(&connection, &mut rows)?;
-        let manual = latest_decisions(&connection, &rows, true)?;
-        let settled =
-            super::character_claude::settled_pairs(&connection, &row_pairs_json(&rows)?)?;
+        // Each read borrows the library only for one batch of rows.
+        retain_in_character_scope(self, &mut rows)?;
+        let manual = latest_decisions(self, &rows, true)?;
+        let settled = settled_pairs(self, &rows)?;
         rows.retain(|row| !settled.contains(&(row.target_id.clone(), row.asset_id.clone())));
-        let assets = eligible_assets(&connection, &rows)?;
-        let targets = enabled_target_names(&connection, &rows)?;
-        drop(connection);
+        let assets = eligible_assets(self, &rows)?;
+        let targets = self.read(|c| {
+            enabled_target_names(c, rows.iter().map(|row| row.target_id.as_str()))
+        })?;
         let mut automatic = 0;
         let mut recommended = 0;
         let mut tallies = BTreeMap::<String, ShadowReviewPendingTarget>::new();
@@ -1067,18 +1180,13 @@ impl Library {
     pub(crate) fn confirm_totals(&self, series_id: Option<&str>) -> Result<ConfirmTotals> {
         let slot = summary_slot(&self.character_changes.shadow_review.totals, series_id);
         self.cached_summary(&slot, || {
-            let candidates = self.shadow_rows_cached(false)?.1;
-            let doubtful = self.shadow_rows_cached(true)?.1;
+            // The database part of both lists is shared with the review pages and the feed: the
+            // first of them to need it computes it, the others reuse it while its key holds.
+            let recognition = self.prepared_list(false, series_id)?;
+            let recheck = self.prepared_list(true, series_id)?;
             let cache = open_shadow_cache(&self.root)?;
             let tags = self.read(|c| pending_tag_rows(c, series_id))?;
-            confirm_totals_of_read(
-                self,
-                cache.as_ref(),
-                candidates.as_ref(),
-                doubtful.as_ref(),
-                tags,
-                series_id,
-            )
+            confirm_totals_from(self, cache.as_ref(), &recognition, &recheck, tags)
         })
     }
 
@@ -1190,10 +1298,10 @@ impl Library {
     /// `recommendation` (태그 추천) or `veto` (다시 확인).
     pub(crate) fn confirm_tag_pairs(&self) -> Result<Vec<(String, String, String)>> {
         let cache = open_shadow_cache(&self.root)?;
-        let connection = self.connection()?;
-        let mut tags = pending_tag_rows(&connection, None)?;
-        let agreed = agreed_pairs_of(
-            &connection,
+        // The judgments read the library in short borrows, never the whole pass.
+        let mut tags = self.read(|c| pending_tag_rows(c, None))?;
+        let agreed = agreed_pairs_read(
+            self,
             cache.as_ref(),
             &tags
                 .iter()
@@ -1250,6 +1358,60 @@ impl Library {
             .collect())
     }
 
+    /// The database part of one review list (see [`Prepared`]), computed on first need and
+    /// reused while its [`ListKey`] holds. The characters are not part of it.
+    fn prepared_list(&self, doubtful: bool, series_id: Option<&str>) -> Result<Arc<Prepared>> {
+        let slot = self
+            .character_changes
+            .shadow_review
+            .slot(doubtful, series_id);
+        let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        self.prepared_in(&mut slot, doubtful, series_id)
+    }
+
+    /// [`Self::prepared_list`] with the list's slot already locked by the caller.
+    fn prepared_in(
+        &self,
+        slot: &mut Option<CachedList>,
+        doubtful: bool,
+        series_id: Option<&str>,
+    ) -> Result<Arc<Prepared>> {
+        let (stamp, rows) = self.shadow_rows_cached(doubtful)?;
+        // The library is borrowed only for short reads: a cold list takes seconds, and
+        // holding the connection that long queued every other reader behind it.
+        let key = ListKey {
+            inputs: self.character_changes.shadow_review_generation(),
+            shadow: stamp,
+            broad_folder_scope: self
+                .read(|c| Ok(super::character_scope::broad_folder_scope_enabled(c)?))?,
+        };
+        if let Some(cached) = slot.as_ref().filter(|cached| cached.key == key) {
+            return Ok(cached.prepared.clone());
+        }
+        *slot = None;
+        #[cfg(test)]
+        self.character_changes
+            .shadow_review
+            .prepared_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let cache = open_shadow_cache(&self.root)?;
+        // A write between two reads leaves the list under the older key above, so the next
+        // call (whose key has moved) computes it again.
+        let prepared = Arc::new(prepare_read(
+            self,
+            cache.as_ref(),
+            rows.as_ref(),
+            doubtful,
+            series_id,
+        )?);
+        *slot = Some(CachedList {
+            key,
+            prepared: prepared.clone(),
+            assembled: None,
+        });
+        Ok(prepared)
+    }
+
     /// One review list, limited to the targets of one series when given; items and summary
     /// counts both follow the scope. The database part is reused while its [`ListKey`] holds;
     /// the characters are read on every call, and the assembled list is reused while they are
@@ -1259,41 +1421,16 @@ impl Library {
         doubtful: bool,
         series_id: Option<&str>,
     ) -> Result<Arc<ShadowReviewItems>> {
-        let cache = &self.character_changes.shadow_review;
-        let slot = cache.slot(doubtful, series_id);
+        let slot = self
+            .character_changes
+            .shadow_review
+            .slot(doubtful, series_id);
         let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
-        let (stamp, rows) = self.shadow_rows_cached(doubtful)?;
-        let c = self.connection()?;
-        let key = ListKey {
-            inputs: self.character_changes.shadow_review_generation(),
-            shadow: stamp,
-            broad_folder_scope: super::character_scope::broad_folder_scope_enabled(&c)?,
-        };
-        let prepared = match slot.as_ref() {
-            Some(cached) if cached.key == key => cached.prepared.clone(),
-            _ => {
-                *slot = None;
-                #[cfg(test)]
-                cache
-                    .prepared_count
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let cache = open_shadow_cache(&self.root)?;
-                Arc::new(prepare(
-                    &c,
-                    cache.as_ref(),
-                    rows.as_ref(),
-                    doubtful,
-                    series_id,
-                )?)
-            }
-        };
-        drop(c);
+        let prepared = self.prepared_in(&mut slot, doubtful, series_id)?;
         let targets = self.review_targets(&prepared.target_ids)?;
-        let cached = slot.get_or_insert_with(|| CachedList {
-            key,
-            prepared: prepared.clone(),
-            assembled: None,
-        });
+        let Some(cached) = slot.as_mut() else {
+            return Ok(Arc::new(assemble(&prepared, doubtful, &targets)));
+        };
         if let Some((seen, items)) = &cached.assembled {
             if *seen == targets {
                 return Ok(items.clone());
@@ -1465,29 +1602,36 @@ fn tagger_signals(
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?)
     })?;
-    let peer_ids = serde_json::to_string(&peers.iter().map(|(id, _)| id).collect::<Vec<_>>())?;
-    // How many taggers read each (character, image): 2 is both.
+    // How many taggers read each (character, image): 2 is both. The grouping is per
+    // character, so a few characters per borrow give the same rows as one big query.
     let mut reads = HashMap::<String, HashMap<String, u32>>::new();
-    let readings = reader.read(|c| {
-        Ok(c.prepare(
-            "SELECT m.target_id,s.asset_id,COUNT(DISTINCT s.source)
-             FROM character_target_tagger_tags m
-             JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.score>=?2
-             JOIN assets a ON a.id=s.asset_id AND a.status='normal' AND a.media_kind='image'
-             WHERE m.target_id IN (SELECT value FROM json_each(?1))
-             GROUP BY m.target_id,s.asset_id",
-        )?
-        .query_map(params![peer_ids, CHARACTER_MIN_SCORE], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, u32>(2)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?)
-    })?;
-    for (target, asset, sources) in readings {
-        reads.entry(target).or_default().insert(asset, sources);
+    let peer_list = peers.iter().map(|(id, _)| id).collect::<Vec<_>>();
+    for batch in peer_list.chunks(READ_BATCH_TARGETS) {
+        let peer_ids = serde_json::to_string(batch)?;
+        let readings = reader.read(|c| {
+            Ok(c.prepare(
+                // CROSS JOIN fixes the order: from the characters' few tags to the readings of
+                // each tag. Left to itself the planner starts at every Asset and took ~100 ms
+                // per batch on a 10k-Asset library.
+                "SELECT m.target_id,s.asset_id,COUNT(DISTINCT s.source)
+                 FROM character_target_tagger_tags m
+                 CROSS JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.score>=?2
+                 CROSS JOIN assets a ON a.id=s.asset_id AND a.status='normal' AND a.media_kind='image'
+                 WHERE m.target_id IN (SELECT value FROM json_each(?1))
+                 GROUP BY m.target_id,s.asset_id",
+            )?
+            .query_map(params![peer_ids, CHARACTER_MIN_SCORE], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, u32>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+        })?;
+        for (target, asset, sources) in readings {
+            reads.entry(target).or_default().insert(asset, sources);
+        }
     }
     // Per series: the images some character is read on by both taggers, and which characters.
     let mut sure = HashMap::<&str, HashMap<&str, Vec<&str>>>::new();
@@ -1540,18 +1684,6 @@ pub(super) fn readiness_of(
     Ok(judgments_of(c, cache, targets, Auto::Full)?.readiness)
 }
 
-fn scored_at(
-    score: &mut rusqlite::Statement<'_>,
-    asset: &str,
-    target: &str,
-    version: &str,
-) -> Result<Option<String>> {
-    shadow_read_phase();
-    Ok(score
-        .query_row(params![asset, target, version], |r| r.get(0))
-        .optional()?)
-}
-
 /// One character's numbers from its people's judgments `(judged, wrong)`, the taggers'
 /// `(judged, wrong)` and its manual examples; the one place the totals and the status are made.
 fn readiness_row(
@@ -1595,6 +1727,87 @@ pub(super) fn judgments_of(
     judgments_of_read(c, cache, targets, auto)
 }
 
+/// What the decisions say about one (character, image) pair.
+struct PairDecisions {
+    /// The newest decision of any origin.
+    newest: String,
+    /// The newest manual decision `(decision, created_at)`.
+    manual: Option<(String, String)>,
+}
+
+/// The decisions of the given characters by character and image, read a few characters per
+/// library borrow in one pass each (not one query per character).
+fn pair_decisions(
+    reader: &impl ReviewRead,
+    targets: &[String],
+) -> Result<HashMap<String, HashMap<String, PairDecisions>>> {
+    let mut by_target = HashMap::<String, HashMap<String, PairDecisions>>::new();
+    for batch in targets.chunks(READ_BATCH_TARGETS) {
+        let ids = serde_json::to_string(batch)?;
+        let found = reader.read(|c| {
+            Ok(c.prepare(
+                "SELECT d.target_id,d.source_asset_id,d.origin,d.decision,d.created_at
+                 FROM character_decisions d
+                 WHERE d.target_id IN (SELECT value FROM json_each(?1))
+                 ORDER BY d.sequence DESC",
+            )?
+            .query_map([ids], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+        })?;
+        // Newest first: the first row of a pair is its newest decision, the first manual one
+        // its newest manual decision.
+        for (target, asset, origin, decision, at) in found {
+            let pair = by_target
+                .entry(target)
+                .or_default()
+                .entry(asset)
+                .or_insert_with(|| PairDecisions {
+                    newest: decision.clone(),
+                    manual: None,
+                });
+            if origin == "manual" && pair.manual.is_none() {
+                pair.manual = Some((decision, at));
+            }
+        }
+    }
+    Ok(by_target)
+}
+
+/// `scored_at` of the newest policy's `automatic` scores, by character and image. Read from the
+/// cache in one pass: the judgments look up tens of thousands of pairs.
+fn automatic_scored_at(
+    cache: &Connection,
+    version: &str,
+) -> Result<HashMap<String, HashMap<String, String>>> {
+    shadow_read_phase();
+    let mut scored = HashMap::<String, HashMap<String, String>>::new();
+    for row in cache
+        .prepare(
+            "SELECT target_id,asset_id,scored_at FROM scores
+             WHERE policy_version=?1 AND verdict='automatic'",
+        )?
+        .query_map([version], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+    {
+        let (target, asset, at) = row?;
+        scored.entry(target).or_default().insert(asset, at);
+    }
+    Ok(scored)
+}
+
 fn judgments_of_read(
     c: &impl ReviewRead,
     cache: Option<&Connection>,
@@ -1602,24 +1815,24 @@ fn judgments_of_read(
     auto: Auto,
 ) -> Result<Judgments> {
     let version = cache.map(newest_policy).transpose()?.flatten();
-    let mut score = match (&version, cache) {
-        (Some(_), Some(cache)) => Some(cache.prepare(
-            "SELECT scored_at FROM scores WHERE asset_id=?1 AND target_id=?2 AND policy_version=?3 AND verdict='automatic'",
-        )?),
+    let scored = match (&version, cache) {
+        (Some(version), Some(cache)) => Some(automatic_scored_at(cache, version)?),
         _ => None,
     };
-    let example_counts = c.read(|c| {
-        let mut examples = c.prepare(
-        "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
-           (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
-         FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
-         WHERE latest='accepted'",
-    )?;
-        targets
+    let decisions = pair_decisions(c, targets)?;
+    let no_decisions = HashMap::new();
+    // Manual examples: images with a manual decision whose newest decision is an acceptance.
+    let example_counts = targets
         .iter()
-        .map(|target| Ok(examples.query_row([target], |r| r.get::<_, u32>(0))?))
-        .collect::<Result<Vec<_>>>()
-    })?;
+        .map(|target| {
+            decisions
+                .get(target)
+                .unwrap_or(&no_decisions)
+                .values()
+                .filter(|pair| pair.manual.is_some() && pair.newest == "accepted")
+                .count() as u32
+        })
+        .collect::<Vec<_>>();
     let signals = if version.is_none() {
         HashMap::new()
     } else {
@@ -1644,46 +1857,36 @@ fn judgments_of_read(
     for (target, examples) in targets.iter().zip(example_counts) {
         let (mut manual, mut manual_wrong) = (0u32, 0u32);
         let (mut judged_auto, mut wrong_auto) = (0u32, 0u32);
-        if let (Some(version), Some(score)) = (&version, score.as_mut()) {
-            // Newest first: only the latest manual decision of a pair counts, and a `cleared`
-            // one leaves the pair without any.
-            let mut latest = HashMap::<String, (String, String)>::new();
-            let mut seen = BTreeSet::new();
-            let manual_rows = c.read(|c| {
-                let mut decisions = c.prepare(
-                    "SELECT d.source_asset_id,d.decision,d.created_at FROM character_decisions d
-                     WHERE d.target_id=?1 AND d.origin='manual' ORDER BY d.source_asset_id,d.sequence DESC",
-                )?;
-                let rows = decisions.query_map([target], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })?.collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            })?;
-            for (asset, decision, at) in manual_rows {
-                if seen.insert(asset.clone()) && decision != "cleared" {
-                    latest.insert(asset, (decision, at));
-                }
-            }
+        if let Some(scored) = &scored {
+            let scored = scored.get(target);
+            let scored_at = |asset: &String| scored.and_then(|scored| scored.get(asset));
+            // Only the latest manual decision of a pair counts, and a `cleared` one leaves the
+            // pair without any.
+            let latest = decisions
+                .get(target)
+                .unwrap_or(&no_decisions)
+                .iter()
+                .filter_map(|(asset, pair)| {
+                    let (decision, at) = pair.manual.as_ref()?;
+                    (decision != "cleared").then_some((asset, (decision, at)))
+                })
+                .collect::<HashMap<_, _>>();
             for (asset, (decision, at)) in &latest {
-                if scored_at(score, asset, target, version)?.is_some_and(|scored| *at > scored) {
+                if scored_at(asset).is_some_and(|scored| *at > scored) {
                     manual += 1;
-                    manual_wrong += u32::from(decision == "rejected");
+                    manual_wrong += u32::from(*decision == "rejected");
                 }
             }
             if let Some(signals) = signals.get(target) {
                 let mut settled = BTreeSet::new();
                 for (assets, correct) in [(&signals.agree, true), (&signals.disagree, false)] {
                     for asset in assets {
-                        let Some(scored) = scored_at(score, asset, target, version)? else {
+                        let Some(scored) = scored_at(asset) else {
                             continue;
                         };
                         match latest.get(asset) {
                             Some((_, at)) if *at > scored => continue,
-                            Some((decision, _)) if decision == "rejected" => continue,
+                            Some((decision, _)) if *decision == "rejected" => continue,
                             Some(_) if !correct => continue,
                             _ => {}
                         }
@@ -1856,21 +2059,22 @@ impl Library {
     }
 
     /// Every character 학습 인식 places right now, and the series they belong to.
-    pub(super) fn learning_overview(
-        &self,
-        c: &Connection,
-    ) -> Result<(LearningTargets, BTreeSet<String>)> {
-        let targets = c
-            .prepare(
+    ///
+    /// Borrows the library only for short reads (the judgments take seconds on a cold start),
+    /// so callers must not hold a connection.
+    pub(super) fn learning_overview(&self) -> Result<(LearningTargets, BTreeSet<String>)> {
+        let targets = self.read(|c| {
+            Ok(c.prepare(
                 "SELECT id,series_classification_id FROM character_targets
                  WHERE role='character' AND enabled=1 AND manual_only=0",
             )?
             .query_map([], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
             })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+        })?;
         let ids = targets.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
-        let learning = self.learning_targets(c, &ids);
+        let learning = self.learning_targets_read(self, &ids);
         let series = targets
             .into_iter()
             .filter(|(id, _)| learning.owns(id))
@@ -1887,13 +2091,21 @@ impl Library {
         c: &Connection,
         target_ids: &[String],
     ) -> LearningTargets {
+        self.learning_targets_read(c, target_ids)
+    }
+
+    fn learning_targets_read(
+        &self,
+        c: &impl ReviewRead,
+        target_ids: &[String],
+    ) -> LearningTargets {
         let read = || -> Result<LearningTargets> {
             let Some(cache) = open_shadow_cache(&self.root)? else {
                 return Ok(LearningTargets::default());
             };
-            let automatic = automatic_targets(c, target_ids)?;
+            let automatic = c.read(|c| automatic_targets(c, target_ids))?;
             Ok(LearningTargets(
-                judgments_of(c, Some(&cache), &automatic, Auto::ReadyOnly)?
+                judgments_of_read(c, Some(&cache), &automatic, Auto::ReadyOnly)?
                     .readiness
                     .into_iter()
                     .filter(|r| r.status == "learning")

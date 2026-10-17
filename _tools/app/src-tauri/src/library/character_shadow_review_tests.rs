@@ -17,6 +17,7 @@
             static STATEMENTS: Cell<u64> = const { Cell::new(0) };
             static SQL: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
             static PROFILE_NANOS: RefCell<BTreeMap<&'static str, u64>> = const { RefCell::new(BTreeMap::new()) };
+            static PROFILE_SQL: RefCell<BTreeMap<String, (u64, u64)>> = const { RefCell::new(BTreeMap::new()) };
         }
 
         unsafe extern "C" fn trace(
@@ -45,6 +46,14 @@
                         let nanos = (*(detail.cast::<i64>())).max(0) as u64;
                         PROFILE_NANOS.with(|profile| {
                             *profile.borrow_mut().entry(category(&sql)).or_default() += nanos;
+                        });
+                        PROFILE_SQL.with(|profile| {
+                            let key = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+                            let mut profile = profile.borrow_mut();
+                            let entry = profile
+                                .entry(key.chars().take(110).collect())
+                                .or_default();
+                            *entry = (entry.0 + 1, entry.1 + nanos);
                         });
                     }
                 }
@@ -121,6 +130,7 @@
             STATEMENTS.with(|count| count.set(0));
             SQL.with(|statements| statements.borrow_mut().clear());
             PROFILE_NANOS.with(|profile| profile.borrow_mut().clear());
+            PROFILE_SQL.with(|profile| profile.borrow_mut().clear());
             ENABLED.with(|enabled| enabled.set(true));
             let value = call();
             ENABLED.with(|enabled| enabled.set(false));
@@ -187,11 +197,86 @@
             assert_eq!(locked, 0);
         }
 
+        /// The row-dependent reads run in batches of `READ_BATCH_ROWS`, one library borrow each.
+        /// A list that spans several batches must give what one big read would: every pair
+        /// counted once, decisions found in any batch.
+        #[test]
+        fn review_list_spanning_several_read_batches_counts_every_pair() {
+            let fixture = Fixture::new();
+            let target = fixture.ready("Batched");
+            let total = READ_BATCH_ROWS + 50;
+            {
+                let c = fixture.library.connection().unwrap();
+                let tx = c.unchecked_transaction().unwrap();
+                for index in 0..total {
+                    let id = format!("batched-{index:05}");
+                    tx.execute(
+                        "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+                         VALUES(?1,?2,'image',?1,'assets/'||?1||'.png','thumbnails/'||?1||'.webp',7,3,2,'2026-09-08','normal')",
+                        params![id, content_hash(&id)],
+                    )
+                    .unwrap();
+                    tx.execute(
+                        "INSERT INTO asset_classifications VALUES(?1,?2)",
+                        params![id, fixture.series],
+                    )
+                    .unwrap();
+                }
+                tx.commit().unwrap();
+            }
+            super::super::super::character_shadow::Cache::open(fixture.temp.path()).unwrap();
+            {
+                let cache = Connection::open(
+                    fixture.temp.path().join(".cache/characters/s36_shadow.sqlite"),
+                )
+                .unwrap();
+                let tx = cache.unchecked_transaction().unwrap();
+                for index in 0..total {
+                    let id = format!("batched-{index:05}");
+                    tx.execute(
+                        "INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections)
+                         VALUES(?1,?2,?3,0.1,'recommended','batched-v1','feature','none','2026-09-29T00:00:00Z','2026-09-29T00:00:00Z',100)",
+                        params![id, content_hash(&id), target.id],
+                    )
+                    .unwrap();
+                }
+                tx.commit().unwrap();
+            }
+            // One manual rejection in the first batch and one in the last.
+            for index in [0, total - 1] {
+                fixture
+                    .library
+                    .connection()
+                    .unwrap()
+                    .execute(
+                        "INSERT INTO character_decisions(target_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+                         VALUES(?1,?2,'hash','rejected','fingerprint','{}','manual','2026-10-01T00:00:00Z')",
+                        params![target.id, format!("batched-{index:05}")],
+                    )
+                    .unwrap();
+            }
+            let page = fixture
+                .library
+                .character_shadow_review_page(ShadowReviewQuery {
+                    offset: 0,
+                    limit: 10,
+                    mode: None,
+                    series_id: None,
+                })
+                .unwrap();
+            assert_eq!(page.summary.recommended.pending as usize, total - 2);
+            assert_eq!(page.summary.recommended.rejected, 2);
+            let summary = fixture.library.character_shadow_review_summary().unwrap();
+            assert_eq!(summary.recommended as usize, total - 2);
+        }
+
         #[test]
         fn shadow_review_page_statement_count_is_independent_of_row_count() {
             // The per-character judgment reads (newest policy, examples, decisions, tagger readings) are
             // a fixed handful for one character, whatever the number of rows.
-            const MAX_PAGE_STATEMENTS: u64 = 28;
+            // The page reads the library in short borrows (not one long hold); each borrow's
+            // opening statements count here, so 37 measured on 2026-10-18 (was within 28 on one hold).
+            const MAX_PAGE_STATEMENTS: u64 = 38;
             const MAX_SUMMARY_STATEMENTS: u64 = 14;
             install_trace();
             let small = fixture_with_rows(5);
@@ -295,6 +380,45 @@
             }
             summary_elapsed.sort_by(f64::total_cmp);
             eprintln!("summary_median_ms={:.2}", summary_elapsed[1]);
+        }
+
+        /// Cost of the Home 확인 count on the target/perf-root snapshot (opened in place; it is a
+        /// disposable copy, never the production library).
+        #[test]
+        #[ignore = "reads target/perf-root snapshot"]
+        fn measure_confirm_counts() {
+            install_trace();
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/perf-root");
+            assert!(root.join("library.sqlite").is_file());
+            let library = Library::open(&root).unwrap();
+            for run in 1..=3 {
+                if run > 1 {
+                    // A new list key each run: the totals cache would otherwise answer.
+                    library.character_changes.changed_table("character_decisions");
+                }
+                let started = Instant::now();
+                let ((counts, hold_total, hold_max), statements) = statement_count(|| {
+                    let (result, total, longest) =
+                        Library::measure_character_summary_hold(|| {
+                            library.character_confirm_counts(None)
+                        });
+                    (result.unwrap(), total, longest)
+                });
+                let millis = started.elapsed().as_secs_f64() * 1000.0;
+                let mut top = PROFILE_SQL.with(|p| {
+                    p.borrow()
+                        .iter()
+                        .map(|(sql, (n, nanos))| (*nanos as f64 / 1e6, *n, sql.clone()))
+                        .collect::<Vec<_>>()
+                });
+                top.sort_by(|a, b| b.0.total_cmp(&a.0));
+                eprintln!(
+                    "confirm_counts run={run} wall_ms={millis:.1} hold_total_ms={hold_total:.1} hold_max_ms={hold_max:.1} statements={statements} counts={counts:?}"
+                );
+                for (ms, n, sql) in top.iter().take(8) {
+                    eprintln!("   {ms:8.1} ms x{n}  {sql}");
+                }
+            }
         }
     }
 
@@ -2567,4 +2691,308 @@
             .execute("UPDATE scores SET scored_at='2026-01-15T00:00:00Z'", [])
             .unwrap();
         assert_eq!(ready(&f), "learning");
+    }
+
+    /// The judgments as they were computed with one query per character; the oracle for the
+    /// bulk reads of [`judgments_of`].
+    fn legacy_judgments_of(
+        c: &Connection,
+        cache: Option<&Connection>,
+        targets: &[String],
+        auto: Auto,
+    ) -> Judgments {
+        let version = cache.and_then(|cache| newest_policy(cache).unwrap());
+        let mut examples = c
+            .prepare(
+                "SELECT COUNT(*) FROM (SELECT d.source_asset_id,
+                   (SELECT x.decision FROM character_decisions x WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id ORDER BY x.sequence DESC LIMIT 1) AS latest
+                 FROM character_decisions d WHERE d.target_id=?1 AND d.origin='manual' GROUP BY d.source_asset_id)
+                 WHERE latest='accepted'",
+            )
+            .unwrap();
+        let example_counts = targets
+            .iter()
+            .map(|target| examples.query_row([target], |r| r.get::<_, u32>(0)).unwrap())
+            .collect::<Vec<_>>();
+        let signals = if version.is_none() {
+            HashMap::new()
+        } else {
+            let wanted = targets
+                .iter()
+                .zip(&example_counts)
+                .filter(|(_, count)| match auto {
+                    Auto::Off => false,
+                    Auto::ReadyOnly => **count >= READY_EXAMPLES,
+                    Auto::Full => true,
+                })
+                .map(|(target, _)| target.clone())
+                .collect::<Vec<_>>();
+            if wanted.is_empty() {
+                HashMap::new()
+            } else {
+                tagger_signals(c, &wanted).unwrap()
+            }
+        };
+        let mut agreed = HashMap::new();
+        let mut result = Vec::new();
+        for (target, examples) in targets.iter().zip(example_counts) {
+            let (mut manual, mut manual_wrong) = (0u32, 0u32);
+            let (mut judged_auto, mut wrong_auto) = (0u32, 0u32);
+            if let (Some(version), Some(cache)) = (&version, cache) {
+                let scored_at = |asset: &str| -> Option<String> {
+                    cache
+                        .query_row(
+                            "SELECT scored_at FROM scores WHERE asset_id=?1 AND target_id=?2 AND policy_version=?3 AND verdict='automatic'",
+                            params![asset, target, version],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .unwrap()
+                };
+                let mut latest = HashMap::<String, (String, String)>::new();
+                let mut seen = BTreeSet::new();
+                let rows = c
+                    .prepare(
+                        "SELECT d.source_asset_id,d.decision,d.created_at FROM character_decisions d
+                         WHERE d.target_id=?1 AND d.origin='manual' ORDER BY d.source_asset_id,d.sequence DESC",
+                    )
+                    .unwrap()
+                    .query_map([target], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                for (asset, decision, at) in rows {
+                    if seen.insert(asset.clone()) && decision != "cleared" {
+                        latest.insert(asset, (decision, at));
+                    }
+                }
+                for (asset, (decision, at)) in &latest {
+                    if scored_at(asset).is_some_and(|scored| *at > scored) {
+                        manual += 1;
+                        manual_wrong += u32::from(decision == "rejected");
+                    }
+                }
+                if let Some(signals) = signals.get(target) {
+                    let mut settled = BTreeSet::new();
+                    for (assets, correct) in [(&signals.agree, true), (&signals.disagree, false)] {
+                        for asset in assets {
+                            let Some(scored) = scored_at(asset) else {
+                                continue;
+                            };
+                            match latest.get(asset) {
+                                Some((_, at)) if *at > scored => continue,
+                                Some((decision, _)) if decision == "rejected" => continue,
+                                Some(_) if !correct => continue,
+                                _ => {}
+                            }
+                            judged_auto += 1;
+                            if correct {
+                                settled.insert(asset.clone());
+                            } else {
+                                wrong_auto += 1;
+                            }
+                        }
+                    }
+                    agreed.insert(target.clone(), settled);
+                }
+            }
+            result.push(readiness_row(
+                target,
+                (manual, manual_wrong),
+                (judged_auto, wrong_auto),
+                examples,
+            ));
+        }
+        Judgments {
+            readiness: result,
+            agreed,
+        }
+    }
+
+    fn automatic_decision(f: &Fixture, target: &Target, asset: &str, decision: &str, at: &str) {
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+                 VALUES(?1,?2,?2,?3,?4,'native','{}','automatic',?5)",
+                params![target.id, asset, content_hash(asset), decision, at],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn judgments_read_in_bulk_equal_the_per_character_reads() {
+        let f = Fixture::new();
+        let here = f.ready("Here");
+        let other = f.ready("Other");
+        link_tag(&f, &here, "here_tag");
+        link_tag(&f, &other, "other_tag");
+        for id in ["j0", "j1", "j2", "j3", "j4", "j5", "j6", "j7", "j8"] {
+            candidate(&f, &here, id);
+        }
+        candidate(&f, &other, "j1");
+        candidate(&f, &other, "j4");
+        // j0: both taggers read Here. j1: both read Other. j2: one tagger reads Here. j3 to j7:
+        // both read Here, then people and the native pass decide in different ways.
+        tagger_reads(&f, "j0", "here_tag", Some(0.9), Some(0.9));
+        tagger_reads(&f, "j1", "other_tag", Some(0.9), Some(0.9));
+        tagger_reads(&f, "j2", "here_tag", Some(0.9), Some(0.2));
+        for id in ["j3", "j4", "j5", "j6", "j7"] {
+            tagger_reads(&f, id, "here_tag", Some(0.9), Some(0.9));
+        }
+        tagger_reads(&f, "j8", "other_tag", Some(0.9), Some(0.9));
+        decide(&f, &here, "j3", DecisionKind::Rejected);
+        decide(&f, &here, "j4", DecisionKind::Accepted);
+        decide(&f, &here, "j5", DecisionKind::Accepted);
+        decide(&f, &here, "j5", DecisionKind::Cleared);
+        // j6: accepted by a person, then rejected by the native pass (the newest decision of
+        // any origin is no acceptance, so it is not an example). j7: only the native pass.
+        decide(&f, &here, "j6", DecisionKind::Accepted);
+        automatic_decision(&f, &here, "j6", "rejected", "2999-01-01T00:00:00Z");
+        automatic_decision(&f, &here, "j7", "accepted", "2999-01-01T00:00:00Z");
+        // Scored after the person's decision: the decision does not count against it.
+        series_asset(&f, "j9");
+        decide(&f, &here, "j9", DecisionKind::Rejected);
+        insert(
+            f.temp.path(),
+            &[(
+                "j9",
+                &here.id,
+                "automatic",
+                0.1,
+                "v1",
+                "none",
+                "2999-06-01T00:00:00Z",
+            )],
+        );
+
+        let cache = open_shadow_cache(f.temp.path()).unwrap();
+        let c = f.library.connection().unwrap();
+        let targets = vec![here.id.clone(), other.id.clone(), "missing".to_string()];
+        for auto in [Auto::Off, Auto::ReadyOnly, Auto::Full] {
+            let bulk = judgments_of(&c, cache.as_ref(), &targets, auto).unwrap();
+            let legacy = legacy_judgments_of(&c, cache.as_ref(), &targets, auto);
+            assert_eq!(bulk.readiness, legacy.readiness, "{auto:?}");
+            assert_eq!(bulk.agreed, legacy.agreed, "{auto:?}");
+        }
+        let full = judgments_of(&c, cache.as_ref(), &targets, Auto::Full).unwrap();
+        // The scenario must exercise what it compares: judged pairs, examples, agreements.
+        assert!(full.readiness[0].reviewed >= 4, "{:?}", full.readiness[0]);
+        // Only j4 is an example: j5 was cleared, j6's newest decision is a native rejection, j9 is rejected.
+        assert_eq!(full.readiness[0].examples, 1);
+        assert!(full.agreed[&here.id].contains("j0"));
+        // Without a score cache only the examples are counted.
+        let without = judgments_of(&c, None, &targets, Auto::Full).unwrap();
+        let legacy = legacy_judgments_of(&c, None, &targets, Auto::Full);
+        assert_eq!(without.readiness, legacy.readiness);
+        assert_eq!(without.agreed, legacy.agreed);
+    }
+
+    /// More scored pairs than one read batch holds: the doubtful list narrows to the natively
+    /// accepted pairs first and reads their decisions in one pass. Both lists, the counts and
+    /// the summary must equal what the pre-batching reads gave.
+    #[test]
+    fn lists_longer_than_a_read_batch_equal_the_legacy_lists() {
+        let f = Fixture::new();
+        let here = f.ready("Many");
+        let total = READ_BATCH_ROWS * 2 + 37;
+        {
+            let c = f.library.connection().unwrap();
+            let tx = c.unchecked_transaction().unwrap();
+            for index in 0..total {
+                let id = format!("many-{index:05}");
+                tx.execute(
+                    "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+                     VALUES(?1,?2,'image',?1,'assets/'||?1||'.png','thumbnails/'||?1||'.webp',7,3,2,'2026-09-08','normal')",
+                    params![id, content_hash(&id)],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO asset_classifications VALUES(?1,?2)",
+                    params![id, f.series],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        super::super::character_shadow::Cache::open(f.temp.path()).unwrap();
+        {
+            let cache =
+                Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite"))
+                    .unwrap();
+            let tx = cache.unchecked_transaction().unwrap();
+            for index in 0..total {
+                let id = format!("many-{index:05}");
+                // Mostly nothing found; some recommended, a few automatic.
+                let verdict = match index % 25 {
+                    0 => "recommended",
+                    1 => "automatic",
+                    _ => "none",
+                };
+                tx.execute(
+                    "INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections)
+                     VALUES(?1,?2,?3,0.1,?4,'many-v1','feature','none','2026-09-29T00:00:00Z','2026-09-29T00:00:00Z',100)",
+                    params![id, content_hash(&id), here.id, verdict],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        // The native pass accepted every 7th pair; for every 21st of those a later native
+        // rejection replaced it, and a person rejected every 35th.
+        for index in (0..total).step_by(7) {
+            let id = format!("many-{index:05}");
+            automatic_decision(&f, &here, &id, "accepted", "2026-08-01T00:00:00Z");
+            if index % 21 == 0 {
+                automatic_decision(&f, &here, &id, "rejected", "2026-08-02T00:00:00Z");
+            }
+        }
+        for index in (0..total).step_by(35) {
+            decide(&f, &here, &format!("many-{index:05}"), DecisionKind::Rejected);
+        }
+
+        for mode in [None, Some("doubtful")] {
+            let legacy = legacy_items(&f.library, mode, None);
+            assert!(!legacy.items.is_empty());
+            assert_eq!(items_in(&f.library, mode, None), legacy, "mode={mode:?}");
+        }
+        let doubtful = legacy_items(&f.library, Some("doubtful"), None);
+        let candidates = legacy_items(&f.library, None, None);
+        assert!(doubtful.summary.doubtful.pending > 100);
+        let totals = f.library.confirm_totals(None).unwrap();
+        assert_eq!(totals.counts.recheck, doubtful.summary.doubtful.pending);
+        let summary = f.library.character_shadow_review_summary().unwrap();
+        assert_eq!(summary.automatic, candidates.summary.automatic.pending);
+        assert_eq!(summary.recommended, candidates.summary.recommended.pending);
+    }
+
+    #[test]
+    fn the_confirm_counts_share_the_prepared_lists_with_the_review_pages() {
+        let (f, target) = summary_fixture();
+        let counts = || f.library.character_confirm_counts(Some(&f.series)).unwrap();
+        let page = || {
+            f.library
+                .character_shadow_review_page(review_query(0, 50, Some(&f.series)))
+                .unwrap()
+        };
+        let start = prepared_lists(&f);
+        assert_eq!(counts().recognition, 5);
+        // The candidate and the doubtful list, one computation each.
+        assert_eq!(prepared_lists(&f) - start, 2);
+        // The page needs the candidate list the count just prepared.
+        assert_eq!(page().items.len(), 5);
+        assert_eq!(prepared_lists(&f) - start, 2);
+        // A decision moves both lists' key: the count follows and prepares them again once.
+        decide(&f, &target, "cached-0", DecisionKind::Rejected);
+        assert_eq!(counts().recognition, 4);
+        assert_eq!(prepared_lists(&f) - start, 4);
+        assert_eq!(page().items.len(), 4);
+        assert_eq!(prepared_lists(&f) - start, 4);
     }

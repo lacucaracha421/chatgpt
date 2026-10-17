@@ -3052,7 +3052,7 @@ fn tagger_agreement_requires_native_acceptance_and_preserves_manual_rejection() 
 }
 
 #[test]
-fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
+fn s36_catch_up_skips_scored_references_and_reuses_the_score_cache() {
     use crate::library::character_sources::ORIGINAL_OPENS;
     let f = Fixture::new();
     let target = f.ready("Cached");
@@ -3130,17 +3130,11 @@ fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
         .unwrap()
         .s36_checked
         .clear();
-    let before = connections();
     let pending = f.library.s36_catch_up(&cfg).unwrap().unwrap();
     assert_eq!(pending.asset_id, "asset-5");
     assert_eq!(
         pending.outcomes,
         BTreeMap::from([(target.id.clone(), "none".into())])
-    );
-    assert_eq!(
-        connections() - before,
-        2,
-        "a missing score uses the same pass connection"
     );
     // The character is taken off automatic recognition: nobody is placed by 학습 인식.
     f.library

@@ -36,6 +36,31 @@ pub(crate) fn launch_maintenance_ready() -> bool {
     )
 }
 
+/// Heavy background computations (the tablet review-feed build, the S36 catch-up) start only
+/// this long after launch, so the first screens' reads are not competing with them while the
+/// library is still warming up. Counted from process start, so it also covers a renderer that
+/// settles early; after it the usual cadence applies unchanged.
+const STARTUP_BACKGROUND_GRACE: Duration = Duration::from_secs(20);
+
+fn background_remaining(elapsed: Option<Duration>) -> Duration {
+    elapsed.map_or(Duration::ZERO, |elapsed| {
+        STARTUP_BACKGROUND_GRACE.saturating_sub(elapsed)
+    })
+}
+
+/// True once the launch grace for heavy background computations has passed. Unit-test
+/// libraries have no window/setup and never wait.
+pub(crate) fn startup_background_ready() -> bool {
+    startup_background_remaining().is_none()
+}
+
+/// Time left of the launch grace, or `None` when it has passed: an idle loop that skipped
+/// heavy work because of it must wake no later than this.
+pub(crate) fn startup_background_remaining() -> Option<Duration> {
+    Some(background_remaining(LAUNCH_STARTED.get().map(Instant::elapsed)))
+        .filter(|left| !left.is_zero())
+}
+
 /// Wait without holding a library lock or occupying a blocking worker. Unit-test
 /// libraries have no window/setup and do not wait. A missing renderer has a cap.
 pub(crate) async fn after_launch_settled() {
@@ -911,6 +936,28 @@ mod tests {
         ));
         assert!(launch_ready(false, Some(LAUNCH_FALLBACK)));
         assert!(launch_ready(true, Some(Duration::ZERO)));
+    }
+    #[test]
+    fn startup_background_work_waits_for_the_launch_grace() {
+        assert_eq!(background_remaining(None), Duration::ZERO);
+        assert_eq!(
+            background_remaining(Some(Duration::ZERO)),
+            STARTUP_BACKGROUND_GRACE
+        );
+        assert_eq!(
+            background_remaining(Some(STARTUP_BACKGROUND_GRACE - Duration::from_secs(5))),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            background_remaining(Some(STARTUP_BACKGROUND_GRACE)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            background_remaining(Some(STARTUP_BACKGROUND_GRACE * 3)),
+            Duration::ZERO
+        );
+        // No window/setup (unit tests, tools): never waits.
+        assert!(startup_background_ready());
     }
     #[test]
     fn window_activity_records_initial_focus_hide_and_restore() {
