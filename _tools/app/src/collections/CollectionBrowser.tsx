@@ -20,7 +20,7 @@ import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionList, hasBookcase, shelfGroups, useCollectionView } from "./CollectionList";
 import { SpineShelf, type SpineShelfControl } from "./SpineShelf";
 import { useSpineShelfWorks } from "./spineShelfData";
-import { SPINE_SCALE } from "./case/caseDimensions";
+import { spineScale } from "./case/caseDimensions";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { useShelfPutDown } from "./useShelfPutDown";
 import { MangaShelfList } from "./MangaShelfList";
@@ -295,7 +295,8 @@ export function CollectionBrowser({
 
   const libraryRoot = library?.root ?? "";
   const { privacyMode } = usePrivacy();
-  const spineData = useSpineShelfWorks(libraryItems, typeFilter === "av" ? "av" : "game", { enabled: spineBookcase, gateway, root: libraryRoot, privacy: privacyMode, coverUrl: collectionCoverUrl, refreshKey: spineBatch.running });
+  const shelfScale = spineScale("pc", typeFilter, viewSettings.spineSize ?? "normal");
+  const spineData = useSpineShelfWorks(libraryItems, typeFilter === "av" ? "av" : "game", { enabled: spineBookcase, gateway, root: libraryRoot, privacy: privacyMode, coverUrl: collectionCoverUrl, refreshKey: spineBatch.running, scale: shelfScale });
   const spineGroups = useMemo(() => spineBookcase ? shelfGroups(libraryItems, viewSettings.grouping).map(group => ({ label: group.label, works: group.items.map(spineData.toWork) })) : [],
     [spineBookcase, libraryItems, viewSettings.grouping, spineData.toWork]);
   const libraryById = useMemo(() => new Map(libraryItems.map(item => [item.id, item])), [libraryItems]);
@@ -459,7 +460,7 @@ export function CollectionBrowser({
             {sectionDrop.inline}
             {leading}
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
-              : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={SPINE_SCALE.pc[viewSettings.spineSize ?? "normal"]} label={`${sectionLabel} 작품 목록`}
+              : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={shelfScale} label={`${sectionLabel} 작품 목록`}
                 pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} prepare={spineData.prepare} controlRef={spineControl}
                 restoredFocusId={navigationMemory?.get(scope)?.focusId} restorePick={returnPick.current.pick} entrance={spineEntrance} />
               : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}

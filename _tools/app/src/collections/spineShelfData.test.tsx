@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { spineScale } from "./case/caseDimensions";
 import { useMemo } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
@@ -12,11 +13,11 @@ type Sets = Awaited<ReturnType<NonNullable<typeof avGateway.listCoverSets>>>;
 const item = (id: string) => ({ id, name: `작품 ${id}`, type: "av", updatedAt: "1" }) as unknown as CollectionSummary;
 const sets = (...ids: string[]): Sets => ids.map(id => ({ collectionId: id, frontId: null, spineId: `s-${id}`, backId: null, revision: "r" }));
 
-function AvShelf({ items, picked = null }: { items: CollectionSummary[]; picked?: string | null }) {
-  const data = useSpineShelfWorks(items, "av", { enabled: true, gateway: {} as LibraryGateway, root: "lib", privacy: false, coverUrl: () => null });
+function AvShelf({ items, picked = null, scale = 1.1 }: { items: CollectionSummary[]; picked?: string | null; scale?: number }) {
+  const data = useSpineShelfWorks(items, "av", { enabled: true, gateway: {} as LibraryGateway, root: "lib", privacy: false, coverUrl: () => null, scale });
   const groups = useMemo(() => shelfGroups(items, "sort").map(group => ({ label: group.label, works: group.items.map(data.toWork) })), [items, data.toWork]);
   return <div className="collection-browser__list-scroll">
-    <SpineShelf groups={groups} scale={1.1} label="AV" pickedId={picked} onPick={() => undefined} onOpen={() => undefined} onWindow={data.onWindow} prepare={data.prepare} />
+    <SpineShelf groups={groups} scale={scale} label="AV" pickedId={picked} onPick={() => undefined} onOpen={() => undefined} onWindow={data.onWindow} prepare={data.prepare} />
   </div>;
 }
 const titles = () => screen.queryAllByRole("button").map(button => button.getAttribute("aria-label")!.split(" ·")[0]);
@@ -92,4 +93,23 @@ it("prints the stored AV back cover on the pulled-out case, as the work screen d
   expect(back.getAttribute("src")).toContain("b-a1");
   // Not the generated back the case prints for a work without back artwork.
   expect(document.querySelector(".spine-shelf__out .case-back")).toBeNull();
+});
+
+it("draws AV spines from the stored artwork where the shelf is taller than their thumbnails, and keeps thumbnails below that", async () => {
+  vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(1.5);
+  vi.spyOn(avGateway, "listCoverSets").mockResolvedValue([{ collectionId: "a1", frontId: "f-a1", spineId: "s-a1", backId: null, revision: "r" }]);
+  // 작게 on the PC (190 mm at 1 px/mm, 285 device px): the 360px thumbnail is enough.
+  const { unmount } = render(<AvShelf items={[item("a1")]} scale={spineScale("pc", "av", "small")} />);
+  await waitFor(() => expect(document.querySelector(".spine img")).not.toBeNull());
+  expect(document.querySelector(".spine img")!.getAttribute("src")).toContain("work-artwork-thumbnail/s-a1");
+  unmount(); resetSpineShelfDataForTests();
+  // 크게 (1.8 px/mm, 513 device px): the stored spine itself.
+  render(<AvShelf items={[item("a1")]} scale={spineScale("pc", "av", "large")} />);
+  await waitFor(() => expect(document.querySelector(".spine img")).not.toBeNull());
+  expect(document.querySelector(".spine img")!.getAttribute("src")).toMatch(/\/work-artwork\/s-a1/);
+});
+
+it("stands AV cases larger than games at every 책등 크기", () => {
+  for (const size of ["small", "normal", "large"] as const) expect(spineScale("pc", "av", size)).toBeGreaterThan(spineScale("pc", "game", size));
+  expect(spineScale("tablet", "av", "large")).toBeGreaterThan(spineScale("tablet", "game", "large"));
 });

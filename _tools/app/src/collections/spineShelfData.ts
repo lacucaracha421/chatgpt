@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
+import { workArtworkThumbnailUrl, workArtworkUrl } from "../assets/mediaUrl";
+import { spineNeedsOriginal } from "./case/caseDimensions";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
 import { beginNativePhase } from "../shared/nativePerf";
 import { avGateway } from "./avClient";
@@ -9,11 +10,19 @@ import { collectionCredit } from "./collectionFormat";
 import type { SpineWork } from "./SpineShelf";
 import { decodeSpine, isSpineWarm, warmSpines } from "./spineShelfWarm";
 
-type AvArt = { front: string | null; spine: string | null; back: string | null };
+type AvArt = { frontId: string | null; spineId: string | null; backId: string | null; revision: string };
 /** The last read per library and work, so a shelf that mounts again prints its spines at once. The back is the stored
  * back cover the pulled-out case shows, as on the work screen. */
 const rememberedAvArt = new Map<string, AvArt>();
-const spineUrl = (artworkId: string | null, revision: string) => artworkId ? `${workArtworkThumbnailUrl(artworkId)}?v=${encodeURIComponent(revision)}` : null;
+const spineUrl = (artworkId: string | null, revision: string, original = false) => artworkId ? `${original ? workArtworkUrl(artworkId) : workArtworkThumbnailUrl(artworkId)}?v=${encodeURIComponent(revision)}` : null;
+/**
+ * An AV case's images. The spine comes from the stored artwork itself where the 360px thumbnail would be enlarged
+ * (AV 크게); the front and back only show on the one pulled-out case, held larger than a thumbnail, so they come from
+ * the stored artwork always. AV works are few (7 in the library on 2026-10-18, their spines 0.37 MB together).
+ */
+const avUrls = (art: AvArt, originalSpine: boolean) => ({
+  front: spineUrl(art.frontId, art.revision, true), spine: spineUrl(art.spineId, art.revision, originalSpine), back: spineUrl(art.backId, art.revision, true),
+});
 const avArtKey = (root: string, collection: Pick<CollectionSummary, "id" | "updatedAt">) => JSON.stringify([root, collection.id, collection.updatedAt]);
 /** Longest the shelf waits for the owned devices before it draws with what the list says. */
 const SHELF_INFO_CAP_MS = 400;
@@ -30,6 +39,8 @@ type Options = {
   coverUrl(collection: CollectionSummary): string | null;
   /** Changes when artwork may have changed behind the list (a 책등 받기 run ended). */
   refreshKey?: unknown;
+  /** The shelf's px per mm: AV spines drawn taller than their thumbnails use the stored artwork. */
+  scale?: number;
 };
 
 /**
@@ -38,7 +49,8 @@ type Options = {
  * AV cases are all one size, so their artwork is read in one batch per mounted window of rows, and a spine stays
  * plastic until its artwork has arrived.
  */
-export function useSpineShelfWorks(collections: CollectionSummary[], type: "game" | "av", { enabled, gateway, root, privacy, coverUrl, refreshKey }: Options) {
+export function useSpineShelfWorks(collections: CollectionSummary[], type: "game" | "av", { enabled, gateway, root, privacy, coverUrl, refreshKey, scale = 1 }: Options) {
+  const originalSpine = type === "av" && spineNeedsOriginal("av", scale, typeof window === "undefined" ? 1 : window.devicePixelRatio);
   const [games, setGames] = useState<Map<string, ShelfInfo>>(() => new Map());
   const [capped, setCapped] = useState(false);
   const [avArt, setAvArt] = useState<Map<string, AvArt>>(() => new Map());
@@ -101,7 +113,7 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
         for (const item of wanted) {
           const set = found.get(item.id), key = avArtKey(root, item);
           if (!set) { failed.push(key); continue; }
-          const art = { front: spineUrl(set.frontId, set.revision), spine: spineUrl(set.spineId, set.revision), back: spineUrl(set.backId, set.revision) };
+          const art = { frontId: set.frontId, spineId: set.spineId, backId: set.backId, revision: set.revision };
           rememberedAvArt.delete(key); rememberedAvArt.set(key, art);
           if (rememberedAvArt.size > 2048) rememberedAvArt.delete(rememberedAvArt.keys().next().value!);
           arrived.set(key, art);
@@ -125,10 +137,10 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
   const spineOf = useCallback((id: string): string | null => {
     const item = byId.current.get(id);
     if (!item) return null;
-    if (type === "av") return rememberedAvArt.get(avArtKey(root, item))?.spine ?? null;
+    if (type === "av") { const art = rememberedAvArt.get(avArtKey(root, item)); return art ? avUrls(art, originalSpine).spine : null; }
     const artworkId = infoRef.current(id)?.spineArtworkId;
     return artworkId ? workArtworkThumbnailUrl(artworkId) : null;
-  }, [type, root]);
+  }, [type, root, originalSpine]);
 
   /**
    * The works near the viewport: their spines are decoded a few at a time ahead of scrolling (AV reads its cover
@@ -159,13 +171,13 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
   const toWork = useCallback((item: CollectionSummary): SpineWork => {
     const base = { id: item.id, title: item.name, credit: collectionCredit(item), developer: item.developer ?? null };
     if (type === "av") {
-      const key = avArtKey(root, item), art = avArt.get(key) ?? rememberedAvArt.get(key);
-      return { ...base, platform: "av", front: art?.front ?? coverUrl(item), spine: art?.spine ?? null, back: art?.back ?? null, pending: !privacy && !art && !avFailed.has(key) };
+      const key = avArtKey(root, item), stored = avArt.get(key) ?? rememberedAvArt.get(key), art = stored ? avUrls(stored, originalSpine) : null;
+      return { ...base, platform: "av", front: art?.front ?? coverUrl(item), spine: art?.spine ?? null, back: art?.back ?? null, pending: !privacy && !stored && !avFailed.has(key) };
     }
     const info = infoOf(item.id);
     return { ...base, platform: workCasePlatform("game", item.platforms, info?.ownedPlatform), front: coverUrl(item),
       spine: info?.spineArtworkId ? workArtworkThumbnailUrl(info.spineArtworkId) : null, pending: !privacy && !info };
-  }, [type, root, avArt, avFailed, infoOf, coverUrl, privacy]);
+  }, [type, root, avArt, avFailed, infoOf, coverUrl, privacy, originalSpine]);
 
   // Only a shelf that reads artwork lazily has anything to wait for; privacy draws no artwork at all.
   const preparing = enabled && !privacy ? prepare : undefined;

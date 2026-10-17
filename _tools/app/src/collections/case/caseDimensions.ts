@@ -23,6 +23,24 @@ export const SPINE_SCALE = {
   pc: { small: .9, normal: 1.1, large: 1.45 },
   tablet: { small: 1, normal: 1.25, large: 1.7 },
 } as const satisfies Record<string, Record<SpineSize, number>>;
+/**
+ * AV 책장 (user, 2026-10-18: "AV 쪽만 크게크게"): AV cases stand larger than games at every size, 크게 most of all.
+ * Above the 360px thumbnails these spines are drawn from the stored artwork itself (`spineNeedsOriginal`).
+ */
+export const SPINE_SCALE_AV = {
+  pc: { small: 1, normal: 1.3, large: 1.8 },
+  tablet: { small: 1.15, normal: 1.5, large: 2.05 },
+} as const satisfies Record<keyof typeof SPINE_SCALE, Record<SpineSize, number>>;
+/** The 책장 scale for a client, a type tab and a 책등 크기. */
+export function spineScale(client: keyof typeof SPINE_SCALE, type: string, size: SpineSize) {
+  return (type === "av" ? SPINE_SCALE_AV : SPINE_SCALE)[client][size];
+}
+/** Stored spine thumbnails are this tall (WORK_ARTWORK_THUMBNAIL_BOUND in the library). */
+export const SPINE_THUMBNAIL_PX = 360;
+/** Whether a spine drawn at `scale` on a screen of this density needs more pixels than its thumbnail has. */
+export function spineNeedsOriginal(platform: CasePlatform, scale: number, devicePixelRatio: number) {
+  return casePixels(platform, scale).height * Math.max(1, devicePixelRatio || 1) > SPINE_THUMBNAIL_PX;
+}
 export const isSpineSize = (value: unknown): value is SpineSize => value === "small" || value === "normal" || value === "large";
 
 /** One case in whole pixels, so spines never blur: its height, spine thickness and front width. */

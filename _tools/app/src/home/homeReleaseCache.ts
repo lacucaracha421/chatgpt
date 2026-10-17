@@ -37,3 +37,23 @@ export function writeCalendarSourcesCache(root: string, calendar: ReleaseCalenda
   if (!root) return;
   try { localStorage.setItem(CALENDAR_SOURCES_KEY + root, JSON.stringify(calendar.sources ?? [])); } catch { /* Storage can be disabled. */ }
 }
+
+/**
+ * The last exact 확인 total Home counted, per library. The exact count reads the recognition lists
+ * and can take seconds on a cold start, so Home shows this at once and swaps the number in when the
+ * current count arrives; the first load never waits for it.
+ */
+const CONFIRM_TOTAL_KEY = "lakomics.home.confirm-total.v1:";
+
+export function readConfirmTotalCache(root: string): number | null {
+  if (!root) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIRM_TOTAL_KEY + root) ?? "null");
+    return typeof saved === "number" && Number.isInteger(saved) && saved >= 0 ? saved : null;
+  } catch { return null; }
+}
+
+export function writeConfirmTotalCache(root: string, total: number) {
+  if (!root) return;
+  try { localStorage.setItem(CONFIRM_TOTAL_KEY + root, String(total)); } catch { /* Storage can be disabled. */ }
+}

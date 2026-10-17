@@ -2,7 +2,7 @@ import {useCallback, useContext, useMemo, type RefObject} from 'react';
 import {SpineShelf, type SpineArt, type SpineWork} from '../src/collections/SpineShelf';
 import {shelfGroups, type CollectionViewSettings} from '../src/collections/CollectionList';
 import {workCasePlatform} from '../src/collections/case/CollectionCase';
-import {SPINE_SCALE, type SpineSize} from '../src/collections/case/caseDimensions';
+import {spineScale, type SpineSize} from '../src/collections/case/caseDimensions';
 import {markSpineWarm} from '../src/collections/spineShelfWarm';
 import {ArtworkMemoryContext, artworkSource, useCoverUrl} from './collectionArtwork';
 import {collectionCardCredit, collectionCover, type CollectionSummary} from './collectionModel';
@@ -55,5 +55,5 @@ export function TabletSpineShelf({items, grouping, size, label, revision, active
     return Promise.all(wanted.map(({item, artworkId}) => memory.request(item, artworkId, revision, false, signal).then(ticket => {markSpineWarm(ticket.url);}, () => undefined))).then(() => undefined);
   }, [byId, memory, revision]);
   const hold = active && !privacy && !!memory;
-  return <SpineShelf groups={groups} scale={SPINE_SCALE.tablet[size]} label={label} pickedId={picked} onPick={onPick} onOpen={onOpen} onLongPress={onActions} privacy={privacy} touchTargets art={art} prepare={hold ? prepare : undefined}/>;
+  return <SpineShelf groups={groups} scale={spineScale('tablet', items[0]?.type ?? 'game', size)} label={label} pickedId={picked} onPick={onPick} onOpen={onOpen} onLongPress={onActions} privacy={privacy} touchTargets art={art} prepare={hold ? prepare : undefined}/>;
 }

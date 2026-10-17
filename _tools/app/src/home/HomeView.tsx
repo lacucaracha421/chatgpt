@@ -43,7 +43,7 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useLaunchReady } from "../shared/launch/LaunchSplash";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { pcStartupInput, pcStartupRead } from "../shared/pcPerfLog";
-import { readCalendarSourcesCache, readWishlistCache, writeCalendarSourcesCache, writeWishlistCache } from "./homeReleaseCache";
+import { readCalendarSourcesCache, readConfirmTotalCache, readWishlistCache, writeCalendarSourcesCache, writeConfirmTotalCache, writeWishlistCache } from "./homeReleaseCache";
 import "./home.css";
 
 const ConfirmList = lazy(() => import("../characters/ConfirmList").then((module) => ({ default: module.ConfirmList })));
@@ -113,7 +113,8 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
 
   // 신간 board + inbox: the cache the Collections grid and the 신간 view share.
   const tracking = gateway.collectionTracking;
-  const release = useReleaseData(tracking, collections, Boolean(tracking));
+  // Keyed on the collection list: reading before it arrives would read the board twice at start.
+  const release = useReleaseData(tracking, collections, Boolean(tracking) && collectionsReady);
   const board = useMemo(() => release.data?.board ?? new Map(), [release.data]);
   const inbox = useMemo(() => groupInbox(release.data?.inbox ?? []), [release.data]);
 
@@ -207,7 +208,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
     if (!overviewActive || !gateway.listAssetDateBuckets) return;
     let live = true;
     const list = gateway.listAssetDateBuckets;
-    void Promise.all(monthSavedQueries(month).map(query => list(query))).then(parts => {
+    void pcStartupRead("home.savedDays", () => Promise.all(monthSavedQueries(month).map(query => list(query)))).then(parts => {
       if (!live) return;
       const read = new Map(parts.flat().map(bucket => [bucket.date, bucket.count]));
       setSavedCounts(previous => {
@@ -253,17 +254,24 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   // Lightweight mode skips the exact count (it reads the recognition lists); the tag count of the Home
   // overview stands in for the total until the mode ends, then the exact count is read once.
   const { restricted } = useWorkloadProfile();
+  // The exact total is slow on a cold start (it reads the recognition lists and queues behind the
+  // library connection), so it never gates the first load: the last total is shown at once and the
+  // read starts once Home is shown, leaving the connection to the reads the first load needs.
+  const confirmCache = useRef<{ root: string; total: number | null }>({ root: "", total: null });
+  if (confirmCache.current.root !== root) confirmCache.current = { root, total: readConfirmTotalCache(root) };
   useEffect(() => {
     if (!active) return;
     if (!sources || restricted) { setConfirmQueue(null); return; }
+    if (!startupSettled) return;
     let live = true;
-    void sources.counts().then(confirmTotal).then((total) => {
+    void pcStartupRead("home.characterQueue", () => sources.counts()).then(confirmTotal).then((total) => {
       if (!live) return;
+      writeConfirmTotalCache(root, total);
       setConfirmQueue({ total });
       setConfirmError(false);
     }).catch(() => { if (live) setConfirmError(true); });
     return () => { live = false; };
-  }, [sources, restricted, queueRead, active]);
+  }, [sources, restricted, queueRead, active, startupSettled, root]);
   useEffect(() => {
     if (!active) return;
     onQueuesRequested?.();
@@ -286,7 +294,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const taggerQueueCounts = overview?.tagger ?? null;
   // The exact 확인 total, each pair once; in lightweight mode (or while the exact count is out) only the tag pairs are counted, by the overview read.
   const confirmExact = Boolean(sources) && !restricted;
-  const confirmTotalNow = confirmExact && confirmQueue ? confirmQueue.total : taggerQueueCounts?.total ?? 0;
+  const confirmTotalNow = confirmExact ? confirmQueue?.total ?? confirmCache.current.total ?? taggerQueueCounts?.total ?? 0 : taggerQueueCounts?.total ?? 0;
   const retryOverview = () => setQueueRead(value => value + 1);
   const fieldFailed = (field: HomeOverview["failed"][number]) => overviewError || Boolean(overview?.failed.includes(field));
   const reviewUnknown = [
@@ -369,13 +377,14 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const shelfFailed = Boolean(release.error) || wishlistError;
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
   const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError)
-    || confirmExact && confirmQueue === null && !confirmError || Boolean(store && !notesState.ready)
+    || Boolean(store && !notesState.ready)
     || Boolean(gateway.listAssetDateBuckets) && savedDaysSettled !== root;
   // Opt-in timing log: which first-load input arrives last (no effect when the log is off).
   if (collectionsReady) pcStartupInput("home.collections");
   if (!shelfLoading) pcStartupInput("home.shelf");
   if (!(Boolean(gateway.getHomeOverview) && !overview && !overviewError)) pcStartupInput("home.overview");
   if (!(confirmExact && confirmQueue === null && !confirmError)) pcStartupInput("home.characterQueue");
+  if (savedDaysSettled === root) pcStartupInput("home.savedDays");
   if (!(store && !notesState.ready)) pcStartupInput("home.notes");
   if (!tracking || release.data || release.error) pcStartupInput("home.releases");
   if (wishlistReady || wishlistError) pcStartupInput("home.wishlist");

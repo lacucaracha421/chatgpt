@@ -347,6 +347,20 @@ describe('Home attention', () => {
     renderHome({ characters: 7 });
     expect(await screen.findByRole('button', {name:/확인7/})).toBeTruthy();
   });
+  it('does not hold the first load for the slow exact 확인 count: the saved total shows at once and the new one swaps in', async () => {
+    localStorage.setItem('lakomics.home.confirm-total.v1:fixture', '5');
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 1, week: 2 }, {}, { tagger: { total: 2, recommendation: 2, veto: 0 } }));
+    let resolve!: (value: { recognition: number; tag: number; recheck: number }) => void;
+    const confirmSource = confirmSourceFor({ counts: { recognition: 7 } });
+    confirmSource.counts.mockReturnValue(new Promise(r => { resolve = r; }));
+    renderHome({ props: { confirmSource } });
+    expect(await screen.findByRole('button', {name:/확인5/})).toBeTruthy();
+    expect(document.querySelector('.home-media-waiting')).toBeNull();
+    await waitFor(() => expect(confirmSource.counts).toHaveBeenCalled());
+    await act(async () => resolve({ recognition: 7, tag: 0, recheck: 0 }));
+    expect(await screen.findByRole('button', {name:/확인7/})).toBeTruthy();
+    expect(localStorage.getItem('lakomics.home.confirm-total.v1:fixture')).toBe('7');
+  });
   it('counts only the tag pairs in lightweight mode, where the recognition lists are not read', async () => {
     workload.restricted = true;
     gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 1, week: 2 }, {}, { tagger: { total: 4, recommendation: 4, veto: 0 } }));
