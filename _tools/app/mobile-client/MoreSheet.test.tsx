@@ -71,3 +71,11 @@ it('reports More ready once its portal content is shown, not canceled', () => {
     cancelScreenTiming(); vi.clearAllTimers(); vi.useRealTimers(); delete window.LakomicsNative; resetPerfEnabledForTests();
   }
 });
+it('lists 링크 보관 with the destinations when the app can open it, and runs it after closing More', () => {
+  const onLinks=vi.fn(), close=vi.fn();
+  render(<MoreSheet {...options({onLinks})} onClose={close}/>);
+  const go=within(screen.getByRole('navigation',{name:'이동'}));
+  expect(go.getAllByRole('button').map(button=>button.textContent)).toContain('링크 보관');
+  fireEvent.click(go.getByRole('button',{name:'링크 보관'}));
+  expect(close).toHaveBeenCalledOnce(); expect(onLinks).toHaveBeenCalledOnce();
+});

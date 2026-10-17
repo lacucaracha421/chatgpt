@@ -45,6 +45,8 @@ final class NetworkPolicy {
   get=get || p.matches("/v1/library/classifications/[A-Za-z0-9_-]{1,128}/contains/[A-Za-z0-9_-]{1,128}");
   // HOME-DASH-001: read-only Home library counts.
   get=get || p.equals("/v1/library/summary");
+  // HOME-CAL-001: read-only saved-image counts per local day for the Home month calendar.
+  get=get || p.equals("/v1/library/saved-days");
   // Home release calendar (+ the wishlist intent command) and Home cover tickets.
   // Snapshot PUTs and the intent log GET (`/wishlist/intents`) are publisher-only.
   get=get || p.equals("/v1/home/upcoming");

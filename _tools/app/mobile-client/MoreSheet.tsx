@@ -1,5 +1,5 @@
 import {createContext,useCallback,useContext,useEffect,useRef,useState} from 'react';
-import {EllipsisHorizontalIcon, InboxIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
+import {EllipsisHorizontalIcon, InboxIcon, LinkIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
 import {MORE_LABELS, NAVIGATION_GROUP_LABELS, type NavigationEntry} from '../src/shared/findEntries';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {BottomSheet} from './BottomSheet';
@@ -17,6 +17,8 @@ export type MoreOptions = {
   readTrashCount?(signal:AbortSignal):Promise<number|null>;
   exchangeActivity?: string;
   onReview(): void; onUnsorted(): void; onExchange(): void; onVault(): void; onArtists(): void; onTrash(): void; onSettings(): void;
+  /** Opens the 링크 보관 sheet (it left Home, HOME-CAL-001). */
+  onLinks?(): void;
 };
 export type ScreenMenuEntry=NavigationEntry&{disabled?:boolean;hint?:string|null;danger?:boolean;keepOpen?:boolean};
 export type ScreenMenu={title:string;entries:ScreenMenuEntry[]};
@@ -37,6 +39,7 @@ export function tabletMoreEntries(options: MoreOptions): NavigationEntry[] {
     {id:'exchange', group:queue(options.unseen), label:MORE_LABELS.exchange, icon:<AREA_ICONS.exchange/>, count:count(options.unseen), activity:options.exchangeActivity, run:options.onExchange},
     ...(options.vaultPresent ? [{id:'private_vault', group:'go' as const, label:MORE_LABELS.private_vault, icon:<AREA_ICONS.private_vault/>, run:options.onVault}] : []),
     {id:'artists', group:'go', label:MORE_LABELS.artists, icon:<AREA_ICONS.artists/>, run:options.onArtists},
+    ...(options.onLinks ? [{id:'links', group:'go' as const, label:MORE_LABELS.links, icon:<LinkIcon/>, run:options.onLinks}] : []),
     {id:'trash', group:'go', label:MORE_LABELS.trash, icon:<TrashIcon/>, count:count(options.trashCount), run:options.onTrash},
     {id:'settings', group:'go', label:MORE_LABELS.settings, icon:<AREA_ICONS.settings/>, run:options.onSettings},
   ];

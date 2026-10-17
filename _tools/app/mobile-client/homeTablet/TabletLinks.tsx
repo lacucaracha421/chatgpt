@@ -11,7 +11,7 @@ const noSubscribe = () => () => undefined;
 const emptySnapshot = () => EMPTY;
 const SHOWN = 4;
 
-type Props = {store: NotesStore | null; root: string; privacy: boolean; onOpenNotes(): void; open?(url: string): Promise<unknown>};
+type Props = {store: NotesStore | null; root: string; privacy: boolean; /** Lists every kept link instead of the newest few (the full 링크 보관 sheet). */ all?: boolean; onOpenNotes(): void; open?(url: string): Promise<unknown>};
 
 const openInBrowser = (url: string) => native('openExternal', {url});
 
@@ -27,7 +27,7 @@ function Thumb({url, privacy}: {url?: string | null; privacy: boolean}) {
  * 링크 보관 on the tablet: the same dedicated note and JSON format as the PC (shared `links.ts`), added by
  * pasting a URL. A link is stored without a preview; the PC enriches it later.
  */
-export function TabletLinks({store, root, privacy, onOpenNotes, open = openInBrowser}: Props) {
+export function TabletLinks({store, root, privacy, all = false, onOpenNotes, open = openInBrowser}: Props) {
   const state = useSyncExternalStore(store?.subscribe ?? noSubscribe, store?.snapshot ?? emptySnapshot);
   const id = useRef({root, value: readLinksId(root)});
   if (id.current.root !== root) id.current = {root, value: readLinksId(root)};
@@ -60,7 +60,7 @@ export function TabletLinks({store, root, privacy, onOpenNotes, open = openInBro
     void store.finish();
     setInput(''); setError(null);
   }
-  const shown = links.slice(0, SHOWN);
+  const shown = all ? links : links.slice(0, SHOWN);
   const status = parseError ?? (state.ready && locked ? (note?.concealed ? '숨긴 메모입니다' : '메모를 열어야 쓸 수 있습니다') : null);
   return <section className="home-attention-section home-tool home-tab-links" aria-label="링크 보관">
     <SectionLabel title="링크 보관" />

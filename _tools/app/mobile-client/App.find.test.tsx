@@ -52,6 +52,12 @@ it.each([
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
   expect((await screen.findByLabelText(region)).textContent).toContain(text);
 });
+it('a find pick 링크 보관 opens the link sheet over the current screen and closes the sheet',async()=>{
+  await start('링크');const options=await screen.findAllByRole('option');
+  fireEvent.click(options.find(option=>option.textContent?.startsWith('링크 보관'))!);
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
+  expect(await screen.findByRole('dialog',{name:'링크 보관'})).toBeTruthy();
+});
 it('Android Back closes find first, preserves Home, then the usual back chain works',async()=>{
   await start('별과');await screen.findAllByRole('option');back();
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());

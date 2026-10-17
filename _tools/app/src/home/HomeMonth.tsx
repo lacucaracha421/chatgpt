@@ -37,8 +37,8 @@ type Props = {
   onSelect(date: string): void;
   onToday(): void;
   onOpenCalendar(): void;
-  /** Enter on a day moves focus into the day panel. */
-  onEnterPanel(): void;
+  /** Enter on a day moves focus into the day panel (the tablet opens that day instead). */
+  onEnterPanel(date: string): void;
 };
 
 function Cell({ day, heat, selected, tabbable, hideAmounts }: { day: MonthDay<MonthRelease>; heat: number; selected: boolean; tabbable: boolean; hideAmounts: boolean }) {
@@ -96,7 +96,7 @@ export function HomeMonth({ month, today, at, selected, days, totals, hideAmount
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     const date = (event.target as HTMLElement).closest<HTMLElement>("[data-day]")?.dataset.day;
     if (!date || event.nativeEvent.isComposing) return;
-    if (event.key === "Enter") { event.preventDefault(); onEnterPanel(); return; }
+    if (event.key === "Enter") { event.preventDefault(); onEnterPanel(date); return; }
     const next = movedSelection(date, event.key, today);
     if (!next) return;
     event.preventDefault();

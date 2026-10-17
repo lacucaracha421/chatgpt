@@ -45,7 +45,7 @@ type MemoProps = {
  * One short memo for the day, written like 빠른 메모: saved while typing, on blur and when the day changes.
  * The text stays on screen until the notes store reports it back, so a save never flickers the old text.
  */
-function DayMemo({ date, store, saved, conflict, unavailable, syncing, onOpenNotes, delay }: MemoProps) {
+export function DayMemo({ date, store, saved, conflict, unavailable, syncing, onOpenNotes, delay }: MemoProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -85,6 +85,28 @@ function DayMemo({ date, store, saved, conflict, unavailable, syncing, onOpenNot
   </section>;
 }
 
+const entryTag = (entry: LedgerEntry) => entry.recurring ? (entry.amount === 0 ? "이번 달 건너뜀" : "고정·구독 확정") : entry.planned ? "계획" : entry.in ? "들어온 돈" : "";
+
+/** The icon, name, tag and amount of one 가계부 entry row (the host decides whether the row is a button). */
+export function EntryRowParts({ entry, hideAmounts }: { entry: LedgerEntry; hideAmounts: boolean }) {
+  return <>
+    <span className="ledger-entry__icon" aria-hidden="true">{entry.recurring ? <ArrowPathRoundedSquareIcon /> : entry.in ? "+" : null}</span>
+    <span className="ledger-entry__name">{entry.name || (entry.in ? "들어온 돈" : "이름 없음")}</span>
+    <span className="ledger-entry__tag">{entryTag(entry)}</span>
+    <span className={`ledger-entry__amount${entry.in ? " is-in" : ""}`}>{entry.in ? "+" : ""}<Money amount={entry.amount} hidden={hideAmounts} symbol /></span>
+  </>;
+}
+
+/** An unconfirmed subscription charge of the day: read-only, confirming stays in 메모 › 가계부. */
+export function DayChargeRow({ payment, hideAmounts }: { payment: PaymentEvent; hideAmounts: boolean }) {
+  return <div className="ledger-entry is-derived"><span className="ledger-entry__main" role="group" aria-label={`${payment.name} 결제 예정`}>
+    <span className="ledger-entry__icon" aria-hidden="true"><ArrowPathRoundedSquareIcon /></span>
+    <span className="ledger-entry__name">{payment.name}</span>
+    <span className="ledger-entry__tag">{payment.kind === "trialEnd" ? "무료 끝남" : "고정·구독 자동"}</span>
+    <span className="ledger-entry__amount">{payment.kind === "trialEnd" ? null : <Money amount={payment.amount} hidden={hideAmounts} symbol />}</span>
+  </span></div>;
+}
+
 type LedgerProps = {
   date: string;
   store: NotesStore | null;
@@ -115,33 +137,20 @@ function DayLedger({ date, store, ledger, unavailable, entries, payments, hideAm
   const rows = sortEntries(entries);
   const charges = payments.filter(payment => payment.kind === "charge");
   const total = rows.filter(entry => !entry.in).reduce((sum, entry) => sum + entry.amount, 0) + charges.reduce((sum, payment) => sum + payment.amount, 0);
-  const tag = (entry: LedgerEntry) => entry.recurring ? (entry.amount === 0 ? "이번 달 건너뜀" : "고정·구독 확정") : entry.planned ? "계획" : entry.in ? "들어온 돈" : "";
-  const amount = (entry: LedgerEntry) => <>{entry.in ? "+" : ""}<Money amount={entry.amount} hidden={hideAmounts} symbol /></>;
-
   const entryContent = (entry: LedgerEntry) => {
     if (editing === entry.id && writer) return <EntryForm label="기록 고치기" submitLabel="저장" month={date.slice(0, 7)}
       initial={{ date: entry.date, amount: amountText(entry.amount), name: entry.name, in: !!entry.in }}
       onSubmit={async draft => { if (!await writer.updateEntry(entry, draft)) return false; setEditing(null); return true; }}
       onCancel={() => setEditing(null)}
       onDelete={() => { if (writer.removeEntry(entry.id)) { setEditing(null); setUndo(entry); } }} />;
-    const inner = <>
-      <span className="ledger-entry__icon" aria-hidden="true">{entry.recurring ? <ArrowPathRoundedSquareIcon /> : entry.in ? "+" : null}</span>
-      <span className="ledger-entry__name">{entry.name || (entry.in ? "들어온 돈" : "이름 없음")}</span>
-      <span className="ledger-entry__tag">{tag(entry)}</span>
-      <span className={`ledger-entry__amount${entry.in ? " is-in" : ""}`}>{amount(entry)}</span>
-    </>;
+    const inner = <EntryRowParts entry={entry} hideAmounts={hideAmounts} />;
     // The edit form would show the amount, so privacy mode keeps the row read-only.
     return hideAmounts || !writer ? <span className="ledger-entry__main" role="group" aria-label={entry.name || "기록"}>{inner}</span>
       : <button type="button" className="ledger-entry__main" onClick={() => setEditing(entry.id)}>{inner}</button>;
   };
   const items = [
     ...rows.map(entry => ({ key: entry.id, content: <div className="ledger-entry" data-fresh={fresh === entry.id ? "" : undefined}>{entryContent(entry)}</div> })),
-    ...payments.map(payment => ({ key: `charge:${payment.key}`, content: <div className="ledger-entry is-derived"><span className="ledger-entry__main" role="group" aria-label={`${payment.name} 결제 예정`}>
-      <span className="ledger-entry__icon" aria-hidden="true"><ArrowPathRoundedSquareIcon /></span>
-      <span className="ledger-entry__name">{payment.name}</span>
-      <span className="ledger-entry__tag">{payment.kind === "trialEnd" ? "무료 끝남" : "고정·구독 자동"}</span>
-      <span className="ledger-entry__amount">{payment.kind === "trialEnd" ? null : <Money amount={payment.amount} hidden={hideAmounts} symbol />}</span>
-    </span></div> })),
+    ...payments.map(payment => ({ key: `charge:${payment.key}`, content: <DayChargeRow payment={payment} hideAmounts={hideAmounts} /> })),
   ];
   return <section className="home-attention-section" aria-label="가계부">
     <SectionLabel title="가계부" actions={items.length > 0 && !unavailable ? <span className="home-day__sum" aria-label="하루 합계"><Money amount={total} hidden={hideAmounts} symbol /></span> : undefined} />
@@ -180,10 +189,10 @@ function DayFoldSection({ title, count, open, onToggle, children }: FoldProps) {
   </section>;
 }
 
-type ListsProps = { store: NotesStore | null; ledger: Note; allEntries: LedgerEntry[]; today: string; hideAmounts: boolean; folds: DayFolds; onToggle(fold: DayFold): void };
+export type DayListsProps = { store: NotesStore | null; ledger: Note; allEntries: LedgerEntry[]; today: string; hideAmounts: boolean; folds: DayFolds; onToggle(fold: DayFold): void };
 
 /** Under the 가계부: every running subscription (read-only) and the things to buy, which can be added here (other edits stay in the 가계부 note). */
-function DayLedgerLists({ store, ledger, allEntries, today, hideAmounts, folds, onToggle }: ListsProps) {
+export function DayLedgerLists({ store, ledger, allEntries, today, hideAmounts, folds, onToggle }: DayListsProps) {
   const { subscriptions, wishes } = useMemo(() => ledgerLists(ledger, allEntries, today), [ledger, allEntries, today]);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -224,6 +233,19 @@ function DayLedgerLists({ store, ledger, allEntries, today, hideAmounts, folds, 
       <QuickEntry label="사고 싶은 것 빠른 입력" placeholder="예: 키보드 120000" hint="이름을 적어 주세요. 금액은 뒤에 붙입니다. 예: 키보드 120000" parse={parseWishEntry} onSave={async draft => addWish(draft)} />
     </DayFoldSection>
   </>;
+}
+
+/** The day's releases as the Home release rows (shared with the tablet day sheet); nothing when there are none. */
+export function DayReleases({ releases, today }: { releases: MonthRelease[]; today: string }) {
+  if (!releases.length) return null;
+  return <section className="home-attention-section" aria-label="발매">
+    <SectionLabel title="발매" count={releases.length} />
+    <div>{releases.map(release => <button type="button" key={release.key} className="home-arrival-row" onClick={release.onOpen}>
+      {release.cover && <span className="home-arrival-cover">{release.cover}</span>}
+      <span className="home-attention-copy"><span className="home-day__release-name"><ReleaseKindMark kind={release.kind} />{release.name}</span>{volumeDetail(release.detail) && <small>{volumeDetail(release.detail)}</small>}</span>
+      {release.fresh ? <Badge variant="accent">NEW</Badge> : <DDay days={daysAfter(release.date, today)} />}
+    </button>)}</div>
+  </section>;
 }
 
 export type HomeDayProps = {
@@ -268,14 +290,7 @@ export function HomeDay({ date, today, releases, savedCount, hideAmounts, store,
           <span className="home-attention-value numeric">{savedCount.toLocaleString()}장</span>
           <ChevronRightIcon aria-hidden="true" />
         </button>}
-        {releases.length > 0 && <section className="home-attention-section" aria-label="발매">
-          <SectionLabel title="발매" count={releases.length} />
-          <div>{releases.map(release => <button type="button" key={release.key} className="home-arrival-row" onClick={release.onOpen}>
-            {release.cover && <span className="home-arrival-cover">{release.cover}</span>}
-            <span className="home-attention-copy"><span className="home-day__release-name"><ReleaseKindMark kind={release.kind} />{release.name}</span>{volumeDetail(release.detail) && <small>{volumeDetail(release.detail)}</small>}</span>
-            {release.fresh ? <Badge variant="accent">NEW</Badge> : <DDay days={daysAfter(release.date, today)} />}
-          </button>)}</div>
-        </section>}
+        <DayReleases releases={releases} today={today} />
       </div>
       <div className="home-day__col">
         <DayMemo date={date} store={store} saved={memo} conflict={memoNote?.conflict ? memoNote : null} unavailable={notesUnavailable} syncing={syncing} onOpenNotes={onOpenNotes} delay={memoDelay} />

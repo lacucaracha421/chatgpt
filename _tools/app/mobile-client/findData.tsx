@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {FolderIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
+import {FolderIcon,LinkIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {FIND_SCOPES} from '../src/shared/findModel';
 import {FIND_WORK_TYPE_LABEL,type NavigationEntry} from '../src/shared/findEntries';
@@ -14,7 +14,7 @@ import {DESCRIPTION_TYPING_PAUSE_MS,cachedDescription,descriptionQueryReady,read
 import {artistName,searchValues,type LibraryArtist} from './artistsModel';
 
 export const TABLET_FIND_SCOPES=FIND_SCOPES;
-export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'shortcut';shortcut:'calendar'|'releases'}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
+export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'shortcut';shortcut:'calendar'|'releases'|'links'}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
 export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{item:CollectionSummary;revision:string};assetId?:string;contentRating?:import("../src/shared/privacy/contentMask").ContentRating|null};
 
 /** Project titles only, including concealed and locked secret notes' public titles. */
@@ -23,6 +23,7 @@ export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:
   return [
     entry('release-calendar','go','발매 캘린더',{kind:'shortcut',shortcut:'calendar'},{icon:<AREA_ICONS.collections/>}),
     entry('new-releases','go','신간',{kind:'shortcut',shortcut:'releases'},{icon:<AREA_ICONS.collections/>}),
+    entry('links','go','링크 보관',{kind:'shortcut',shortcut:'links'},{icon:<LinkIcon/>,keywords:['링크','북마크','주소']}),
     ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{workType:work.item.type,keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
     ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{count:artist.assetCount,keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
     ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month'&&!isDayMemoNote(note)).map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),

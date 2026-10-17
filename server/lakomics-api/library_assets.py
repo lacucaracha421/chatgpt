@@ -7,6 +7,7 @@ import library_search
 import base64
 import binascii
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import ModuleType
@@ -784,6 +785,84 @@ def list_mobile_library_trash(
             "total_count": total_count, "total_bytes": total_bytes}
 
 
+#: The tablet Home month grid is six Monday-first weeks, so one read never needs more days.
+SAVED_DAYS_MAX = 42
+# Whole-second UTC instants, as `Date.toISOString()` writes a local midnight.
+_SAVED_BOUND = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.000)?Z")
+
+
+def _saved_day_bounds(first: str, bounds: str) -> tuple[list[str], list[datetime]]:
+    """The local dates and their ``N + 1`` UTC cut points, or HTTP 400.
+
+    Days are consecutive from ``first``; cut ``i`` and ``i + 1`` enclose day ``i`` exactly, so
+    the client's own local midnights (23 or 25 hours at a DST change) decide every day and the
+    server never guesses a zone. A day is 20 to 28 hours long.
+    """
+    try:
+        start_date = datetime.strptime(first, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="from must be YYYY-MM-DD") from None
+    parts = bounds.split(",")
+    if not 2 <= len(parts) <= SAVED_DAYS_MAX + 1 or not all(_SAVED_BOUND.fullmatch(part) for part in parts):
+        raise HTTPException(
+            status_code=400, detail=f"bounds must list 2 to {SAVED_DAYS_MAX + 1} UTC instants")
+    cuts = [datetime.strptime(part[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            for part in parts]
+    if any(not timedelta(hours=20) <= later - earlier <= timedelta(hours=28)
+           for earlier, later in zip(cuts, cuts[1:])):
+        raise HTTPException(status_code=400, detail="bounds must cut consecutive local days")
+    return [(start_date + timedelta(days=index)).isoformat() for index in range(len(cuts) - 1)], cuts
+
+
+def mobile_saved_days(
+    authorization: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None),
+    first: str = Query(alias="from"),
+    bounds: str = Query(),
+):
+    """Saved images per local day, for the tablet Home month calendar (PC: ``listAssetDateBuckets``).
+
+    ``from`` is the first local date; ``bounds`` is a comma-separated list of ``N + 1`` UTC
+    instants (``N`` between 1 and 42): day ``i`` is ``[bounds[i], bounds[i + 1])``. Counts cover
+    committed, non-trashed image Assets (the list's ``images`` bucket, GIF included) by the
+    list's own sort key ``COALESCE(collected_at, created_at)``, read through the shared
+    ``visible_assets`` projection so a trashed Asset is hidden here as on every list route.
+    Every requested day is answered, with ``count`` 0 where nothing was saved.
+    """
+    api.client_guard(api.get_db, api.API_TOKEN)(authorization)
+    dates, cuts = _saved_day_bounds(first, bounds)
+    # Bare `YYYY-MM-DDTHH:MM:SS` bounds, compared as text like the summary and the keyset cursor:
+    # every stored spelling at or after a bound sorts at or after it, so an Asset collected
+    # exactly at midnight belongs to the day that starts there.
+    ranges = json.dumps([[a.strftime("%Y-%m-%dT%H:%M:%S"), b.strftime("%Y-%m-%dT%H:%M:%S")]
+                         for a, b in zip(cuts, cuts[1:])])
+    kinds = asset_filters.MEDIA_KINDS["images"]
+    with api.get_db() as db:
+        db.execute("BEGIN")
+        try:
+            generation = api.list_generation(db)
+            counts = {
+                row["day"]: row["count"] for row in db.execute(
+                    f"""
+                    SELECT day.key AS day, COUNT(*) AS count
+                    FROM json_each(?) AS day
+                    JOIN visible_assets AS asset
+                      ON COALESCE(asset.collected_at, asset.created_at) >= json_extract(day.value, '$[0]')
+                     AND COALESCE(asset.collected_at, asset.created_at) < json_extract(day.value, '$[1]')
+                    WHERE asset.committed = 1 AND asset.kind IN ({",".join("?" for _ in kinds)})
+                    GROUP BY day.key
+                    """,
+                    [ranges, *kinds])
+            }
+        finally:
+            db.rollback()
+    return conditional.json_response(
+        {"version": 1, "days": [{"date": date, "count": counts.get(index, 0)}
+                                for index, date in enumerate(dates)],
+         "listGeneration": generation},
+        if_none_match)
+
+
 def register(app, services):
     global api
     api = services
@@ -792,6 +871,7 @@ def register(app, services):
     app.get("/v1/library/assets")(list_mobile_classification_assets)
     app.get("/v1/library/assets/{asset_id}/image-text")(asset_image_text)
     app.get("/v1/library/summary")(mobile_library_summary)
+    app.get("/v1/library/saved-days")(mobile_saved_days)
 
 
 def register_trash(app, services):

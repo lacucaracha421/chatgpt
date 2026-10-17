@@ -264,6 +264,9 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/summary?tzOffsetMinutes=540","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/summary",method));
  for(String path:new String[]{"/v1/library/summary/","/v1/library/summaryx","/v1/library/summary/extra","/v1/library/summary%2f.."})reject(()->NetworkPolicy.api(path,"GET"));
+ pass(()->NetworkPolicy.api("/v1/library/saved-days?from=2026-08-31&bounds=2026-08-30T15:00:00.000Z,2026-08-31T15:00:00.000Z","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/saved-days",method));
+ for(String path:new String[]{"/v1/library/saved-days/","/v1/library/saved-daysx","/v1/library/saved-days/extra","/v1/library/saved-days%2f.."})reject(()->NetworkPolicy.api(path,"GET"));
  // Home release calendar reads, the wishlist intent command and the Home cover ticket.
  for(String path:new String[]{"/v1/home/upcoming"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  pass(()->NetworkPolicy.api("/v1/home/upcoming/wishlist","POST"));

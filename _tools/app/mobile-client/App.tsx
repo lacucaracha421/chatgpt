@@ -90,6 +90,7 @@ import {useSelectionActions} from './useSelectionActions';
 import {FolderArrowDownIcon,InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
 import {SelectionBar} from '../src/assets/SelectionBar';
 import {Home} from './Home';
+import {TabletLinksSheet} from './homeTablet/TabletLinksSheet';
 import {Collections, type CollectionsPlace, type CollectionsRequest} from './Collections';
 import {resetReleaseStore} from './releaseStore';
 import {useCollectionEditBackgroundFlush} from './useCollectionEdits';
@@ -185,6 +186,7 @@ export function App() {
   const [nsfwFilter]=useNsfwFilter();
   const [searchChips,setSearchChips]=useState<AssetSearchChip[]>([]);
   const [moreOpen,setMoreOpen]=useState(false);
+  const [linksOpen,setLinksOpen]=useState(false);
   const [unsortedCount,setUnsortedCount]=useState<number|null>(null);
   const [findOpen,setFindOpen]=useState(false),[findRetry,setFindRetry]=useState(0);
   const findStore=useMemo(()=>new NotesStore(mobileNotesRequest),[status.endpoint]);
@@ -1183,7 +1185,7 @@ export function App() {
     else if(destination.kind==='note'){
       setNotesVisited(true);setArea('notes');setNoteRequest(current=>({id:destination.id,key:(current?.key??0)+1}));
     }else if(destination.kind==='place'){setArea('assets');select(destination.view);}
-    else if(destination.kind==='shortcut'){if(destination.shortcut==='calendar')openCalendar();else openCollections({kind:'releases'});}
+    else if(destination.kind==='shortcut'){if(destination.shortcut==='calendar')openCalendar();else if(destination.shortcut==='links')setLinksOpen(true);else openCollections({kind:'releases'});}
     else if(destination.screen==='home')openHome();
     else if(destination.screen==='assets')openLibrary();
     else if(destination.screen==='settings')setSettings(true);
@@ -1236,7 +1238,7 @@ export function App() {
   const moreOptions={reviewCount,unsortedCount,unseen:exchangeUnseen,trashCount:null,readTrashCount:(signal:AbortSignal)=>readTabletTrashCount(status.endpoint,findStore,signal),vaultPresent,exchangeActivity:exchangeSending?'보내는 중':undefined,
     onReview:()=>setSimilarity(true),onUnsorted:()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);},
     onExchange:()=>setExchangeOpen(true),onVault:()=>setVaultOpen(true),onArtists:()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();},
-    onTrash:()=>trash.setOpen(true),onSettings:()=>setSettings(true)};
+    onTrash:()=>trash.setOpen(true),onSettings:()=>setSettings(true),onLinks:()=>setLinksOpen(true)};
   const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<TopBarActions/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
@@ -1299,6 +1301,7 @@ export function App() {
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}><BusyLabel busy={!!(checking)} idle={'라이브러리 연결'}>연결 확인 중</BusyLabel><ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('home','tab');closeArtists();openHome();}}><AREA_ICONS.home aria-hidden="true"/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{beginScreenTiming('assets','tab');closeArtists();setHomeOrigin(null);openLibrary();}}><AREA_ICONS.assets aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('collections','tab');closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><AREA_ICONS.collections aria-hidden="true"/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('catalog','tab');closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><AREA_ICONS.manga aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{tabIntent.current++;beginScreenTiming('notes','tab');closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><AREA_ICONS.notes aria-hidden="true"/><span>메모</span></button></nav>}
     {status.configured&&<FindSheet context={{tab:settings?"menu":area==="catalog"?"manga":area==="assets"?(page.view.tab==="home"?"home":"assets"):area}} search={findSearch} open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} onDescription={query=>openDescription(query)} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
+    {linksOpen&&status.configured&&<TabletLinksSheet store={findStore} root={status.endpoint} privacy={privacyMode} onOpenNotes={()=>{setHomeOrigin(null);setNotesVisited(true);setArea('notes');}} onClose={()=>setLinksOpen(false)}/>}
     {moreOpen&&<MoreSheet {...moreOptions} screenTitle={screenMenu?.title} screenEntries={screenMenu?.entries} onClose={()=>setMoreOpen(false)}/>}
     {viewSettings&&<BottomSheet title="보기" onClose={()=>setViewSettings(false)}><div className="ui-view-options__content">
       {filterable&&<AssetViewSections value={filters} onChange={applyFilters} sorts={rankedServer&&!page.view.album?RANKED_ASSET_SORTS:ASSET_SORTS} onSort={applySort} onShuffle={reshuffle}/>}

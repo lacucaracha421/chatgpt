@@ -3,15 +3,27 @@
 .home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); align-items:start; }
 .home-tablet-card, .home-tablet-today { min-width:0; }
 
-/* This week as one row: the PC cells, shorter, with touch-sized targets and the week arrows. */
-.home-tablet-week { touch-action:pan-y; }
-.home-tablet-week__nav { display:inline-flex; align-items:center; }
-.home-tablet-week__nav .ui-icon-button { min-width:44px; min-height:44px; }
-.home-attention-mobile .home-cal__payment.ui-button, .home-attention-mobile .home-cal__payment.ui-menu__trigger { min-height:44px; }
-.home-attention-mobile .home-cal .home-cal__item { min-height:44px; }
-.home-attention-mobile .ui-section-label__actions .home-link { min-height:44px; min-width:44px; }
+/* Month calendar (HOME-CAL-001): the PC month grid with touch-sized controls; a sideways swipe pages months. */
+.home-tablet-month { touch-action:pan-y; }
+.home-attention-mobile .home-month__nav .ui-button--icon { width:44px; min-height:44px; }
+.home-attention-mobile .home-month__nav .ui-button--quiet, .home-attention-mobile .home-month__head .home-link { min-height:44px; }
+.home-attention-mobile .home-month__totals dd { font-size:var(--type-meta); }
+.home-attention-mobile .home-cal--month { column-gap:var(--space-1); }
+/* The grid keeps its cell height from the PC rules; the cell is a button, so its whole face is the touch target. */
 
-/* 빠른 메모 and 링크 보관 side by side. */
+/* The day sheet: the PC day panel's sections in a column (it wears .home-day for the shared row rules), rows and inputs at 44-48 px. */
+.home-day-sheet { gap:var(--space-6); }
+.home-day-sheet__title { display:inline-flex; align-items:center; gap:var(--space-2); }
+.home-day-sheet__title > span:not(.ui-badge) { color:var(--color-muted); font-weight:400; }
+.home-day-sheet .home-arrival-row { min-height:64px; }
+.home-day-sheet .ledger-entry__main { min-height:48px; }
+.home-day-sheet .ledger-quick .ui-button, .home-day-sheet .home-qmemo__status .ui-button { min-height:44px; }
+.home-day-sheet .ledger-quick .ui-text-input { min-height:44px; font-size:var(--type-body); }
+.home-day-sheet .home-day__add { width:100%; justify-content:flex-start; min-height:48px; }
+.home-day-sheet .ui-section-label--collapsible { min-height:48px; }
+.home-day-sheet textarea.ui-text-input.home-day__memo { min-height:112px; font-size:var(--type-body); }
+
+/* 전송 and 빠른 메모 side by side; 링크 보관 (its sheet) shares the link rows. */
 .home-attention-mobile textarea.ui-text-input.home-qmemo__text { min-height:216px; font-size:var(--type-body); }
 .home-attention-mobile .home-qmemo__status .ui-button, .home-tab-links__status .ui-button { min-height:44px; }
 .home-tab-links__input { display:flex; align-items:center; gap:var(--space-2); background:var(--color-surface); border-radius:var(--radius-control); }
