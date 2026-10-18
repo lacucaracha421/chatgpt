@@ -15,7 +15,7 @@ const PAGE = { id: 'test', frameId: 0, url: 'https://www.youtube.com/watch?v=vid
 const OPTIONS = { id: 'test', frameId: 0, url: 'chrome-extension://test/options/options.html' };
 const request = { type: 'youtube:process', videoId: 'video12', trackKey: 'en:asr',
   json3: { events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Jeff' }] }] } };
-const entry = () => ({ version: 1, video: 'video12', track: 'en:asr', mode: 'translate-ko-auto+t6',
+const entry = () => ({ version: 1, video: 'video12', track: 'en:asr', mode: 'translate-ko-auto+t8',
   model: 'claude-haiku-5-5', createdAt: 123, register: 'haeyo', glossary: [],
   cues: [{ startMs: 0, endMs: 1000, text: '제프', orig: 'Jeff' }] });
 const response = (status, data) => ({ status, ok: status === 200, json: async () => data });
@@ -76,7 +76,7 @@ test('local miss GET precedes Anthropic, complete local write precedes PUT, uplo
   h.serve(async (url, init) => {
     if (url.startsWith('https://api.anthropic.com/')) return apiResponse(JSON.parse(init.body));
     if (init.method === 'PUT') {
-      assert.ok(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t6']);
+      assert.ok(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t8']);
       assert.equal(JSON.parse(init.body).version, undefined);
       return response(++puts === 1 ? 503 : 200, { ok: true });
     }
@@ -84,7 +84,7 @@ test('local miss GET precedes Anthropic, complete local write precedes PUT, uplo
   });
   const result = await h.send(request); await tick();
   assert.equal(result.ok, true);
-  assert.match(h.calls[0].url, /\/v1\/extension\/subtitles\?video=video12&track=en%3Aasr&mode=translate-ko-auto%2Bt6$/);
+  assert.match(h.calls[0].url, /\/v1\/extension\/subtitles\?video=video12&track=en%3Aasr&mode=translate-ko-auto%2Bt8$/);
   assert.equal(h.calls[0].init.headers.authorization, 'Bearer ' + TOKEN);
   assert.equal(puts, 2);
   assert.equal(h.calls.filter(call => call.url.startsWith('https://api.anthropic.com/')).length, 2);
@@ -102,7 +102,7 @@ test('valid server result is stored and shown before requiring an API key, extra
   assert.equal(result.cached, true); assert.equal(result.cues[0].text, '제프');
   assert.equal(h.calls.length, 1);
   assert.doesNotMatch(JSON.stringify([result, await h.send({ type: 'youtube:getCached', videoId: 'video12' })]), new RegExp(TOKEN + '|' + KEY));
-  assert.equal(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t6'].token, undefined);
+  assert.equal(h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t8'].token, undefined);
 });
 
 for (const failure of ['offline', 404, 401, 403, 500, 201, 'invalid']) {
@@ -133,7 +133,10 @@ test('unpaired skips server, partial failures never PUT and resumed completion d
     if (fail && body.messages[0].content.includes('0\tw200')) return response(400, { error: { message: 'private' } });
     if (body.output_config.format.schema.required.includes('terms')) return apiResponse(body);
     const count = body.messages[0].content.split('\n').filter(line => /^\d+\t/.test(line)).length;
-    return response(200, { content: [{ type: 'text', text: JSON.stringify({ register: 'haeyo', lines: [{ from: 0, to: count - 1, text: '번역' }] }) }], usage: {} });
+    // Realistic subtitle ranges keep each original within the shared cache's 500-character limit.
+    const lines = Array.from({ length: Math.ceil(count / 12) }, (_, i) =>
+      ({ from: i * 12, to: Math.min(count - 1, i * 12 + 11), text: '번역' }));
+    return response(200, { content: [{ type: 'text', text: JSON.stringify({ register: 'haeyo', lines }) }], usage: {} });
   });
   const long = { ...request, videoId: 'longvid', json3: { events: [{ tStartMs: 0, dDurationMs: 135000,
     segs: Array.from({ length: 450 }, (_, i) => ({ utf8: 'w' + i, tOffsetMs: i * 300 })) }] } };
@@ -145,6 +148,42 @@ test('unpaired skips server, partial failures never PUT and resumed completion d
   const put = h.calls.find(call => call.init.method === 'PUT'); assert.ok(put);
   assert.ok(JSON.parse(put.init.body).cues.every(cue => Number.isInteger(cue.startMs) && Number.isInteger(cue.endMs)));
 });
+
+for (const obeyRetry of [true, false]) {
+  test(`real rolling source slots: invalid model ranges ${obeyRetry ? 'retry and cache' : 'fall back without caching'}`, async t => {
+    const h = setup(t, { paired: false });
+    const source = JSON.parse(await readFile(new URL('./fixtures/youtube/4JBqJ-ax-lM-timing-excerpts.json3.json', import.meta.url), 'utf8'));
+    const json3 = { events: source.events.filter(e => e.tStartMs >= 470000 && e.tStartMs < 494000) };
+    let attempts = 0;
+    let expected;
+    h.serve(async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.output_config.format.schema.required.includes('terms')) return apiResponse(body);
+      attempts++;
+      const slots = body.messages[0].content.split('\n').filter(line => line.startsWith('{') && line.includes('"targetChars"')).map(JSON.parse);
+      assert.ok(slots.length > 1);
+      expected = slots;
+      const lines = attempts > 1 && obeyRetry ? slots.map(({ from, to }) => ({ from, to, text: '설명이 이어져요.' }))
+        : [{ from: 0, to: slots.at(-1).to, text: '원문 구간을 무시한 번역이에요.' }];
+      return response(200, { content: [{ type: 'text', text: JSON.stringify({ register: 'haeyo', lines }) }], usage: {} });
+    });
+    const result = await h.send({ ...request, json3 });
+    assert.equal(attempts, 2);
+    const cached = h.stored['lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto+t8'];
+    if (obeyRetry) {
+      assert.equal(result.ok, true);
+      assert.ok(cached);
+      assert.deepEqual(result.cues.map(c => c.startMs), expected.map(s => s.startMs));
+      assert.ok(globalThis.LakomicsYouTube.serverCache.validate({ version: 1, ...cached }));
+      assert.ok(cached.cues.every(c => !Object.hasOwn(c, 'sourceEndMs')));
+    } else {
+      assert.equal(result.ok, false);
+      assert.equal(cached, undefined);
+      const partial = h.delivered.find(m => m.type === 'youtube:partial');
+      assert.deepEqual(partial.cues.map(c => c.startMs), expected.map(s => s.startMs));
+    }
+  });
+}
 
 test('sender checks protect settings and clear operations; malformed processing never reaches fetch', async t => {
   const h = setup(t);
@@ -312,7 +351,7 @@ test('standalone button suppresses our UI and logs once; enabled switch removes 
 test('processing version t4: results stored under the old mode key are never matched', async t => {
   const h = setup(t);
   const oldKey = 'lakomics:youtube:subs:v2:video12:en:asr:translate-ko-auto';
-  const newKey = oldKey + '+t6';
+  const newKey = oldKey + '+t8';
   h.stored[oldKey] = { ...entry(), cues: [{ startMs: 0, endMs: 1500, text: '옛 결과', orig: 'Jeff' }] };
   h.stored['lakomics:youtube:subs:index'] = { video12: ['en:asr|translate-ko-auto'] };
   assert.equal((await h.send({ type: 'youtube:getCached', videoId: 'video12' })).cached, null);

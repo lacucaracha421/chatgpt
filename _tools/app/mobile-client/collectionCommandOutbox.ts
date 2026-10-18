@@ -54,7 +54,7 @@ export type ConflictWork = {name: string; fields: Fields; entityRevision?: numbe
 /** The server's person in a `setPerson` conflict (`current.person`). */
 export type ConflictPerson = ProfilePerson & {personId?: string; memo?: string | null; favorite?: boolean; entityRevision?: number};
 export type CommandIntent = {inboxId?: string; command: Command; label?: string; avOverlay?: AvOverlay; lastError?: string; receipts?: CommandReceipt[]; acceptedAt?: number; createdAt: number; attempts: number; nextAttemptAt: number;
-  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; current?: {work?: ConflictWork; person?: ConflictPerson}}};
+  state: 'pending' | 'conflict' | 'accepted'; conflict?: {code: string; lifecycle?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}};
 export function authorityIdentity(reply: unknown): AuthorityIdentity | null {
   const value = reply as Partial<AuthorityIdentity> & {active?: boolean} | null;
   return value?.active === true && typeof value.libraryId === 'string' && /^[a-f0-9]{32}$/.test(value.libraryId)
@@ -239,14 +239,14 @@ async function deliver(connection: string) {
       // acknowledgement they just observed, and the queue lets it go.
       if (isLifecycle(row.command)) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
     } catch (error) {
-      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
+      const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; lifecycle?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
       const code = detail?.code;
       if (code === 'workDeleted' && !row.inboxId && !isPersonCommand(row.command)) { dropWork(identity, row.command.workId, connection); continue; }
       // The server has no such person: no retry can succeed, so its queued edits go, with a note.
       if (code === 'personNotFound' && isPersonCommand(row.command)) { dropPerson(identity, row.command.personId, connection, row.label); continue; }
       if (error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) {
         changeIntent(connection, row.command.operationId, stored => {
-          stored.state = 'conflict'; stored.conflict = {code: code ?? 'commandRejected', current: detail?.current};
+          stored.state = 'conflict'; stored.conflict = {code: code ?? 'commandRejected', lifecycle: detail?.lifecycle, current: detail?.current};
         });
         continue;
       }

@@ -1,7 +1,7 @@
 // Ported from yt-subs 089a1fd; classic worker namespace.
 (() => {
 "use strict";
-const { buildPrompt, hasSpeakers } = globalThis.LakomicsYouTube.chunk;
+const { buildPrompt, hasSpeakers, subtitleSlots } = globalThis.LakomicsYouTube.chunk;
 const { normalizeGlossary, termsForTranscript } = globalThis.LakomicsYouTube.terms;
 
 const SYSTEM_PROMPT = [
@@ -48,6 +48,8 @@ const TRANSLATE_KO_SYSTEM_PROMPT = [
   'Translate profanity, swearing, slurs used in context, vulgarity and rough speech with the same strength and nuance as the original: never soften, censor, euphemise or drop it (e.g. "shit" -> 씨발/좆같은/개같은 as fits, "fucking" -> 존나/씨발, "goddamn" -> 젠장/빌어먹을). Every swear word in the source must stay audible in the Korean line.',
   "Never output a line containing only a sentence ending, auxiliary verb or particle (e.g. 않아요, 있어요, 거예요); attach it to its sentence by extending that line's index range. If the sentence continues beyond this chunk's last index, end the line there as naturally as possible without inventing words.",
   ...KOREAN_RENDERING_RULES,
+  "Convert physical imperial/US measurements to metric in Korean subtitles: feet/inches (combine feet + inches) -> m/cm, yards -> m, miles -> km, pounds -> kg, ounces -> g, fluid ounces -> mL, gallons -> L, °F -> °C, square feet -> m², mph -> km/h. Respect US versus imperial volume when specified. Use 2–3 significant digits and prefix 약 when rounded; for precise small DIY dimensions, use the nearest 0.5 cm or mm. Do not convert names, prices, GBP/pound currency (keep 파운드), or idioms; render vague distances naturally.",
+  `Examples: 6'2" -> 약 1.88m; 3/4 inch -> 약 1.9cm; 50 lbs at 68°F -> 약 23kg, 20°C.`,
   "Keep proper nouns sensible and fix obvious speech-recognition errors using the context.",
   "Cover every index exactly once, in order: each line has an inclusive from and to index, and the next line starts at to + 1.",
   "Every index must belong to exactly one line, even for non-speech annotations such as [Music], [Applause], or music notes: never skip an index. Include such words in a line's from/to range but omit them from its text.",
@@ -193,9 +195,17 @@ function buildChunkPrompt({ chunk, mode = "clean", register = null, context = []
   const system = translate ? translateSystemPrompt(register, glossary, meta) : SYSTEM_PROMPT;
   // Audio speaker labels (translations only) replace the inferred-speaker instruction; without labels nothing changes.
   const labels = translate && hasSpeakers(chunk);
+  const slots = translate ? subtitleSlots(chunk) : [];
+  const slotInstruction = slots.length ? [
+    "Source subtitle slots (from, to, startMs, endMs, target Korean characters):",
+    ...slots.map(slot => JSON.stringify({ ...slot,
+      targetChars: Math.max(8, Math.min(40, Math.floor((slot.endMs - slot.startMs) * 12 / 1000))) })),
+    "Return exactly one translated line per slot, retaining its from/to indices. These slots follow the source speech, not the translated text length. Fit concise natural Korean into the target character budget without dropping meaning; never repeat a translation to fill time or move words between slots.",
+  ].join("\n") : "";
   return {
     system: labels ? `${system}\n${AUDIO_SPEAKER_INSTRUCTION}` : speakers ? `${system}\n${SPEAKER_INSTRUCTION}` : system,
-    userText: buildPrompt(chunk, translate ? context : [], translate ? following : [], { labels }) + (retryNote ? `\n\n${retryNote}` : ""),
+    userText: buildPrompt(chunk, translate ? context : [], translate ? following : [], { labels }) +
+      (slotInstruction ? `\n\n${slotInstruction}` : "") + (retryNote ? `\n\n${retryNote}` : ""),
     schema: translate ? TRANSLATE_RESPONSE_SCHEMA : RESPONSE_SCHEMA,
   };
 }

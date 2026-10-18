@@ -58,6 +58,19 @@ test("storageMode isolates Sonnet glossaries for translated tracks and composes 
   assert.equal(storageMode("ja:asr", false, "auto", true, true), "clean+spk");
 });
 
+test("Korean subtitle prompts request metric physical measurements in every register mode", () => {
+  for (const register of [null, "haeyo", "hapnida", "banmal", { follow: "haeyo" }]) {
+    const { system } = buildChunkPrompt({ chunk: [{ text: "50 lbs" }], mode: "translate-ko", register });
+    for (const rule of [/Convert physical imperial\/US measurements to metric/, /combine feet \+ inches/,
+      /fluid ounces -> mL/, /°F -> °C/, /square feet -> m²/, /mph -> km\/h/,
+      /2–3 significant digits/, /prefix 약 when rounded/, /GBP\/pound currency/, /or idioms/]) {
+      assert.match(system, rule);
+    }
+  }
+  assert.doesNotMatch(buildChunkPrompt({ chunk: [{ text: "50 lbs" }], mode: "clean" }).system,
+    /Convert physical imperial\/US measurements/);
+});
+
 test("casual and rough Korean (반말) is not an offending cue, so it is never retried", () => {
   const cues = [{ text: "이 씨발 물건 진짜 좆같네." }, { text: "야, 그만해. 가자." }, { text: "그렇게 하시면 안 돼요." }];
   assert.deepEqual(offendingKoreanCues(cues), []);

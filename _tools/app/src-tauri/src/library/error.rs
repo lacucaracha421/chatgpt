@@ -406,6 +406,8 @@ pub enum LibraryError {
     InvalidExternalBinding,
     #[error("같은 이름의 컬렉션이 있습니다")]
     DuplicateCollectionName,
+    #[error("휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.")]
+    CollectionNameInTrash,
     #[error("대표 이미지는 컬렉션에 속한 정상 자산이어야 합니다")]
     CollectionCoverNotMember,
     #[error("지원하지 않는 컬렉션 유형입니다")]

@@ -5,13 +5,14 @@
 //
 // Cues arrive from cues.js/display.js sorted by start, non-overlapping, with endMs = the end of the real
 // speech of their source words. finalizeTimings decides how long each stays on screen:
-//   end = max(speech end, start + reading time), but never later than 80 ms before the next cue starts;
+//   end = max(source end, start + reading time), never past the next speech onset;
+//   up to 80 ms of silence is kept before the next cue, without cutting source speech;
 //   a gap of less than 1.2 s to the next cue is bridged so lines do not blink off and on;
-//   no cue is shorter than 700 ms unless the next cue starts sooner, and none longer than 7 s.
+//   short cues get at least 1.2 s when silence permits; reading extensions are bounded to 7 s.
 const READING_CHARS_PER_SECOND = 12; // Korean reading speed
 const MIN_READING_MS = 1200;
 const MAX_READING_MS = 6000;
-const MIN_DISPLAY_MS = 700;
+const MIN_DISPLAY_MS = 1000;
 const SHORT_DISPLAY_MS = 300; // floor when the next cue starts too soon for MIN_DISPLAY_MS
 const GUARD_MS = 80; // visible gap kept before the next cue
 const BRIDGE_GAP_MS = 1200;
@@ -53,10 +54,11 @@ function finalizeTimings(cues, { nextStartMs = Infinity } = {}) {
   return merged.map((cue, index) => {
     const next = merged[index + 1]?.startMs ?? nextStartMs;
     const speechEnd = Math.max(cue.endMs, cue.startMs);
-    const cap = next - GUARD_MS;
+    // Keep the guard in silence only. It must never cut off source speech.
+    const cap = Math.min(next, Math.max(speechEnd, next - GUARD_MS));
     let end = Math.max(speechEnd, cue.startMs + readingTime(cue.text));
     if (cap - cue.startMs >= MIN_DISPLAY_MS) end = Math.min(end, cap);
-    else end = Math.min(next, Math.max(cap, cue.startMs + SHORT_DISPLAY_MS));
+    else end = Math.min(next, Math.max(speechEnd, cap, cue.startMs + SHORT_DISPLAY_MS));
     if (next - end < BRIDGE_GAP_MS) end = Math.max(end, Math.min(cap, cue.startMs + maxMs));
     end = Math.min(end, Math.max(speechEnd, cue.startMs + maxMs));
     const startMs = Math.round(cue.startMs);

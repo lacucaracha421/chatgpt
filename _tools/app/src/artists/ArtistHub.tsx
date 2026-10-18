@@ -22,6 +22,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
+import { FolderSearchPicker } from "../classification/FolderSearchPicker";
 import { ArtistCollage } from "./ArtistCollage";
 import { artistHandle } from "./format";
 import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, PinSolidIcon, XMarkIcon } from "./artistIcons";
@@ -99,25 +100,11 @@ export function ruleText(rule: ArtistSettings) {
   return `${rule.mainMinCount}장 이상 · ${rule.recentDays}일 안에 ${rule.recentMinCount}장 이상`;
 }
 
-function folderBreadcrumb(entries: ClassificationEntry[], entry: ClassificationEntry) {
-  const byId = new Map(entries.map((candidate) => [candidate.id, candidate]));
-  const names: string[] = [];
-  const seen = new Set<string>();
-  let current: ClassificationEntry | undefined = entry;
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    names.push(current.name);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
-  }
-  return names.reverse().join(" › ");
-}
-
 function ArtistExclusionSettings() {
   const library = useOptionalLibrary();
   const gateway = useArtistGateway();
   const excluded = useArtistRead((artists) => artists.listExcludedFolders(), "excluded-folders").data;
   const [folders, setFolders] = useState<ClassificationEntry[] | null>(null);
-  const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,15 +118,7 @@ function ArtistExclusionSettings() {
     return () => { active = false; };
   }, [library?.gateway]);
 
-  const selected = new Set(excluded?.map((folder) => folder.id));
-  const options = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase();
-    return (folders ?? [])
-      .filter((entry) => !selected.has(entry.id))
-      .map((entry) => ({ entry, breadcrumb: folderBreadcrumb(folders ?? [], entry) }))
-      .filter(({ breadcrumb }) => !needle || breadcrumb.toLocaleLowerCase().includes(needle))
-      .slice(0, 100);
-  }, [folders, search, excluded]);
+  const selected = useMemo(() => new Set(excluded?.map((folder) => folder.id)), [excluded]);
 
   const update = async (ids: string[]) => {
     if (!gateway) return;
@@ -156,7 +135,6 @@ function ArtistExclusionSettings() {
   };
   const add = (id: string) => {
     if (!excluded) return;
-    setSearch("");
     void update([...excluded.map((folder) => folder.id), id]);
   };
   const remove = (id: string) => {
@@ -165,7 +143,6 @@ function ArtistExclusionSettings() {
   };
 
   const showExcluded = useDelayedBusy(excluded === null);
-  const showFolders = useDelayedBusy(addOpen && folders === null);
   return <section className="artist-exclusion" aria-labelledby="artist-exclusion-title">
     <div className="artist-exclusion__head">
       <h3 id="artist-exclusion-title">작가에서 제외할 폴더</h3>
@@ -178,12 +155,7 @@ function ArtistExclusionSettings() {
         <Button size="icon" variant="ghost" aria-label={`${folder.breadcrumb} 제외 해제`} disabled={pending} onClick={() => void remove(folder.id)}><XMarkIcon aria-hidden="true" /></Button>
       </li>)}
     </ul>}
-    {addOpen && <div className="artist-exclusion__picker">
-      <label className="artist-search artist-exclusion__search"><MagnifyingGlassIcon aria-hidden="true" /><span className="artist-sr-only">제외 폴더 검색</span><input type="search" value={search} placeholder="폴더 경로 검색" onChange={(event) => setSearch(event.target.value)} /></label>
-      {folders === null || showFolders ? showFolders && <p className="artist-muted">폴더를 불러오는 중…</p> : options.length === 0 ? <p className="artist-muted">추가할 폴더가 없습니다.</p> : <ul className="artist-exclusion__options" role="listbox" aria-label="제외할 폴더 선택">
-        {options.map(({ entry, breadcrumb }) => <li key={entry.id}><button type="button" role="option" className="artist-exclusion__option" disabled={pending} onClick={() => add(entry.id)}><span>{breadcrumb}</span><small>{formatCount(entry.totalAssetCount ?? entry.assetCount ?? 0)}장</small></button></li>)}
-      </ul>}
-    </div>}
+    {addOpen && <FolderSearchPicker folders={folders} hiddenIds={selected} pending={pending} onPick={add} />}
     {error && <p role="alert" className="artist-error">{error}</p>}
   </section>;
 }

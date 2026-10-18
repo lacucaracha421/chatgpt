@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { commandErrorMessage } from "../library/errorMessage";
 import type { CollectionSummary, CollectionType, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -98,7 +99,7 @@ export function CollectionEditDialog({
       }
       onClose();
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "저장하지 못했습니다.");
+      setError(commandErrorMessage(submitError, "저장하지 못했습니다."));
       setSaving(false);
     }
   }

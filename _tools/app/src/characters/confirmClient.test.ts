@@ -70,3 +70,10 @@ it("folds the 인식 추천 of far characters out of a wide read, keeps what els
   expect(one?.items.map(item => item.assetId).sort()).toEqual(["f1", "f2", "t1"]);
   expect(one?.folded).toEqual([]);
 });
+it("shows member suggestions in recognition without folding or duplicating candidates", async () => {
+  const sources = confirmSourceFor({ candidates: [shadowItem("member", "hina", "Hina", { folded: true })] });
+  const members = vi.fn(async () => [shadowItem("member", "hina", "Hina", { origin: "claude", folded: false })]);
+  const read = await readConfirmItems({ ...sources, members }, {}, targets);
+  expect(read?.items.map(item => [item.assetId, item.kind])).toEqual([["member", "recognition"]]);
+  expect(read?.folded).toEqual([]);
+});

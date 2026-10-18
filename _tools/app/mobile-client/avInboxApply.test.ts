@@ -3,6 +3,7 @@ import {setOutboxConnection} from './outboxConnection';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',async()=>({...await vi.importActual<typeof import('./transport')>('./transport'),api:mocks.api,native:mocks.native}));
 import {ApiError} from './transport';
+import {COLLECTION_NAME_IN_TRASH} from '../src/collections/collectionEditFields';
 import {composeInboxCommands,createInboxPlan,initialChoices,readInboxPlans,resumeInboxApplies,cancelInboxPlan,inboxWorks,inboxMatches,refreshedChoices,retryInboxPlan} from './avInboxApply';
 import {AUTHORITY_STATUS_PATH,COMMAND_PATH,flushCommands,readCommands,reconcileCommands} from './collectionCommandOutbox';
 import {inboxAuthority,inboxFixture,inboxIdentity,inboxWork,manifest} from './avInboxFixtures';
@@ -87,6 +88,13 @@ it('stops dependents on conflict and retains choices and partial accepted progre
   expect(readInboxPlans()[0]).toMatchObject({state:'blocked',choices:{surfaces:{front:'candidate'}}});
   expect(mocks.api.mock.calls.filter(([p])=>p===COMMAND_PATH).map(([, ,b])=>b.commandType)).toEqual(['createWork','addArtwork','selectArtwork']);
   expect(mocks.api.mock.calls.some(([p])=>p.endsWith('/applied'))).toBe(false);
+});
+it('explains a name held by trash and stops the new work sequence',async()=>{
+  const base=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(...args)=>args[0]===COMMAND_PATH&&args[2].commandType==='createWork'?Promise.reject(new ApiError('중복',409,{detail:{code:'nameConflict',lifecycle:'trashed'}})):base(...args));
+  createInboxPlan(inboxFixture,authority,initialChoices(inboxFixture,null));await pass();
+  expect(readInboxPlans()[0]).toMatchObject({state:'blocked',error:COLLECTION_NAME_IN_TRASH});
+  expect(mocks.api.mock.calls.filter(([p])=>p===COMMAND_PATH).map(([, ,b])=>b.commandType)).toEqual(['createWork']);
 });
 it('refuses a different nonempty code and scopes durable plans to the connection',()=>{
   authority.works=[{...inboxWork,details:{av:{productCode:'ABW-100'}}}];

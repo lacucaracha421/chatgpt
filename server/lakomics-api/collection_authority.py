@@ -908,11 +908,12 @@ def write_work(db, library_id, state, *, insert=False):
                 " WHERE library_id=? AND work_id=?", values + [library_id, state["workId"]])
     except sqlite3.IntegrityError:
         holder = db.execute(
-            "SELECT work_id FROM collection_authority_works WHERE library_id=? AND type=?"
+            "SELECT work_id,lifecycle FROM collection_authority_works WHERE library_id=? AND type=?"
             " AND name=? COLLATE NOCASE AND lifecycle<>'tombstoned' AND work_id<>?",
             [library_id, state["type"], state["name"], state["workId"]]).fetchone()
         fail(409, "nameConflict", "같은 종류에 같은 이름의 작품이 있습니다.",
-             name=state["name"], type=state["type"], workId=holder[0] if holder else None)
+             name=state["name"], type=state["type"], workId=holder[0] if holder else None,
+             lifecycle=holder[1] if holder else None)
 
 
 def binding_row(db, library_id, work_id, provider):

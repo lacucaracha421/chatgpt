@@ -120,7 +120,7 @@ describe("AvLinkChooserDialog", () => {
     await user.click(await screen.findByRole("button", { name: "자세히" }));
     expect(screen.getByRole("button", { name: "치녀" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "기승위" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "ギリモザ" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "아슬아슬 모자이크" })).toBeInTheDocument();
     expect(screen.queryByText("セール対象商品")).not.toBeInTheDocument();
     expect(screen.getByText("판매·샘플 태그 3개 숨김")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "기승위" }));

@@ -6,6 +6,7 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { Select } from "../shared/ui/Select";
 import { SettingsRow } from "../shared/ui/SettingsRow";
 import { Switch } from "../shared/ui/Switch";
+import { ClaudeMemberSettings } from "./ClaudeMemberSettings";
 import { CredentialRow } from "./CredentialRow";
 
 export type ClaudeState = "off" | "no_key" | "idle" | "running" | "capped" | "credential" | "error";
@@ -172,6 +173,7 @@ export function ClaudeSettings({ disabled = false }: { disabled?: boolean }) {
       onCancelDelete={() => setConfirmingDelete(false)}
       onConfirmDelete={() => void deleteKey()}
     />
+    <ClaudeMemberSettings disabled={disabled || configured !== true} />
     <SettingsRow
       name="자동 판정"
       control={<Switch aria-label="자동 판정" checked={settings?.enabled ?? false} disabled={disabled || busy || !ready} onChange={event => settings && void change({ ...settings, enabled: event.target.checked })} />}

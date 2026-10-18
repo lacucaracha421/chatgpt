@@ -4,6 +4,7 @@ import {enqueueInboxCommands, readCommands, releaseInboxCommands, discardInboxCo
 import {AV_DETAIL_FIELDS, sameAvValue, validateAvDetails, validateAvCredits, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson} from './avEditModel';
 import {normalizeProductCode} from './avLookup';
 import {displayAvGenres} from '../src/collections/avGenreNames';
+import {COLLECTION_NAME_IN_TRASH} from '../src/collections/collectionEditFields';
 import {candidateHasSurface, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
 
 export type PersonChoice={nameJa:string;role:'performer'|'director';action:'new'|'link'|'skip';displayName:string;personId:string|null};
@@ -265,7 +266,8 @@ async function resume(connection:string,identity:AuthorityIdentity){
       const rows=readCommands(connection);
       const accepted=rows.filter(r=>r.inboxId===plan.id&&r.state==='accepted'&&plan.commands.some(c=>c.operationId===r.command.operationId)).map(r=>r.command.operationId);
       plan.accepted=[...new Set([...plan.accepted,...accepted])];
-      if(rows.some(r=>r.inboxId===plan.id&&r.state==='conflict')){plan.state='blocked';plan.error='다른 기기의 변경과 겹침';save(plan,connection);continue;}
+      const conflict=rows.find(r=>r.inboxId===plan.id&&r.state==='conflict');
+      if(conflict){plan.state='blocked';plan.error=conflict.conflict?.code==='nameConflict'&&conflict.conflict.lifecycle==='trashed'?COLLECTION_NAME_IN_TRASH:'다른 기기의 변경과 겹침';save(plan,connection);continue;}
       const credits=plan.commands.find(c=>c.commandType==='setAvCredits');
       if(credits && !plan.accepted.includes(credits.operationId) && !rows.some(r=>r.command.operationId===credits.operationId)
         && predecessors.every(c=>plan.accepted.includes(c.operationId))) {

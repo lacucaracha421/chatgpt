@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 134;
+pub(crate) const SCHEMA_VERSION: i64 = 136;
 
 #[cfg(test)]
 #[path = "db_character_folder_perf_migration_tests.rs"]
@@ -14,11 +14,18 @@ mod character_folder_perf_migration_tests;
 #[path = "db_character_claude_migration_tests.rs"]
 mod character_claude_migration_tests;
 
-/// Test helper: undoes migrations 0103 through 0132 so older-version fixtures can be rebuilt.
+/// Test helper: removes later-schema objects used by older-version fixtures.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE character_member_exclusion_state;
+    DROP TABLE character_member_excluded_folders;
+    DROP VIEW character_member_pending;
+    DROP TABLE character_member_recommendations;
+    DROP TABLE character_member_requests;
+    DROP TABLE character_member_items;
+    DROP TABLE character_member_control;
     ALTER TABLE character_claude_opinions DROP COLUMN cache_write_tokens;
     ALTER TABLE character_claude_opinions DROP COLUMN cache_read_tokens;
     DROP TABLE character_claude_settings;
@@ -820,6 +827,12 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version < 134 {
             transaction.execute_batch(include_str!("../../migrations/0134_classification_containers.sql"))?;
+        }
+        if version < 135 {
+            transaction.execute_batch(include_str!("../../migrations/0135_character_member_runs.sql"))?;
+        }
+        if version < 136 {
+            transaction.execute_batch(include_str!("../../migrations/0136_character_member_excluded_folders.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

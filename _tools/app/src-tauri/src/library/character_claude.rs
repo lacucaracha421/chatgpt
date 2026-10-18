@@ -33,6 +33,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Offline experiment entry point; never called by the application.
+#[path = "character_member_probe.rs"]
+pub mod member_probe;
+#[path = "character_member_run.rs"]
+pub mod member_run;
+
 pub const HAIKU: &str = "claude-haiku-5-5";
 pub const SONNET: &str = "claude-sonnet-5-5";
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -281,6 +287,14 @@ fn tokens(usage: &Value, field: &str) -> u32 {
         .map_or(0, |count| u32::try_from(count).unwrap_or(u32::MAX))
 }
 
+fn response_text(message: &Value) -> Option<&str> {
+    message["content"]
+        .as_array()?
+        .iter()
+        .find(|block| block["type"] == "text")?["text"]
+        .as_str()
+}
+
 /// Reads one Messages API answer. `stop_reason` comes first: a refusal is an answer (and is
 /// billed), a truncated one is an error.
 pub(super) fn parse_message(body: &str) -> std::result::Result<Opinion, CallError> {
@@ -306,11 +320,7 @@ pub(super) fn parse_message(body: &str) -> std::result::Result<Opinion, CallErro
         Some("max_tokens") => return Err(CallError::Invalid),
         _ => {}
     }
-    let text = message["content"]
-        .as_array()
-        .and_then(|blocks| blocks.iter().find(|block| block["type"] == "text"))
-        .and_then(|block| block["text"].as_str())
-        .ok_or(CallError::Invalid)?;
+    let text = response_text(&message).ok_or(CallError::Invalid)?;
     let answer: Value = serde_json::from_str(text).map_err(|_| CallError::Invalid)?;
     let verdict = match answer["same_character"].as_str() {
         Some("yes") => Verdict::Yes,
@@ -437,9 +447,15 @@ fn http_transport() -> &'static HttpTransport {
 
 impl Transport for HttpTransport {
     fn post(&self, api_key: &str, body: &[u8]) -> std::result::Result<Reply, ()> {
+        self.post_url(api_key, body, API_URL)
+    }
+}
+
+impl HttpTransport {
+    fn post_url(&self, api_key: &str, body: &[u8], url: &str) -> std::result::Result<Reply, ()> {
         let mut response = self
             .agent
-            .post(API_URL)
+            .post(url)
             .header("x-api-key", api_key)
             .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
@@ -565,6 +581,7 @@ struct SentReference {
 
 #[derive(Debug, Default)]
 pub(super) struct State {
+    member_discovered_at: Option<Instant>,
     /// Settings and key were read since the last [`Library::claude_poke`].
     checked: bool,
     /// Off or without a key: nothing to do until a poke.
@@ -682,7 +699,7 @@ fn spend_usd(c: &Connection, since: &str) -> Result<f64> {
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows
+    Ok(member_run::monthly_spend(c, since)? + rows
         .into_iter()
         .map(|(model, input, output, cache_write, cache_read)| {
             cost_usd(
@@ -693,7 +710,7 @@ fn spend_usd(c: &Connection, since: &str) -> Result<f64> {
                 u32::try_from(cache_read).unwrap_or(u32::MAX),
             )
         })
-        .sum())
+        .sum::<f64>())
 }
 
 fn reject_in(
@@ -904,6 +921,7 @@ impl Library {
     /// Pairs whose cascade already ended in "leave for the user" for the current references
     /// are not asked again.
     fn claude_build_queue(&self) -> Result<Vec<QueuedPair>> {
+        self.member_exclusions_seed()?;
         let pairs = self.claude_open_pairs()?;
         if pairs.is_empty() {
             return Ok(Vec::new());
@@ -937,6 +955,9 @@ impl Library {
              WHERE target_id IN (SELECT value FROM json_each(?1)) AND asset_id IS NOT NULL
              UNION
              SELECT target_id,asset_id FROM character_learned_references
+             WHERE target_id IN (SELECT value FROM json_each(?1))
+             UNION
+             SELECT target_id,asset_id FROM character_member_pending
              WHERE target_id IN (SELECT value FROM json_each(?1))",
             )?
             .query_map([serde_json::to_string(&target_ids)?], |row| {
@@ -982,9 +1003,16 @@ impl Library {
             })?
             .collect::<std::result::Result<BTreeMap<_, _>, _>>()?
         };
+        // Images in an analysis-excluded folder (실사, 밈, ...) are never sent to Claude.
+        let excluded = member_run::excluded_assets(
+            &c,
+            &pairs.iter().map(|(_, asset)| asset.clone()).collect::<Vec<_>>(),
+        )?;
         let mut queue = Vec::new();
         for (target_id, asset_id) in pairs {
-            if protected.contains(&(target_id.clone(), asset_id.clone())) {
+            if protected.contains(&(target_id.clone(), asset_id.clone()))
+                || excluded.contains(&asset_id)
+            {
                 continue;
             }
             let Some(target) = targets
@@ -1064,7 +1092,9 @@ impl Library {
                 |row| row.get(0),
             )
             .optional()?;
-        if current.as_deref() != Some(pair.asset_hash.as_str()) {
+        if current.as_deref() != Some(pair.asset_hash.as_str())
+            || !member_run::excluded_assets(&c, std::slice::from_ref(&pair.asset_id))?.is_empty()
+        {
             return Ok(None);
         }
         Ok(open_sequence(&c, &pair.target_id, &pair.asset_id)?)

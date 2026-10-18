@@ -1,5 +1,7 @@
 import { KIND_LABEL } from "./collectionFormat";
 
+export const COLLECTION_NAME_IN_TRASH = "휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.";
+
 /**
  * The basic-information fields of 컬렉션 편집, shared by the PC dialog and the tablet form so
  * both offer the same fields, order, wording and checks. UI-free: each surface renders them

@@ -16,7 +16,7 @@ export type CollectionGrouping = "device" | "year" | "sort";
 
 const sizeOptions = (sizes: readonly SpineSize[]) => sizes.map(value => ({ value, label: SPINE_SIZE_LABEL[value] }));
 const SPINE_SIZE_OPTIONS = sizeOptions(SPINE_SIZES), AV_SPINE_SIZE_OPTIONS = sizeOptions(AV_SPINE_SIZES);
-/** 배치 → 책등 크기 (game and AV 책장): replaces 한 줄에 N개, which the spines' real sizes make meaningless. AV adds 아주 크게. */
+/** Bookcase spine size replaces the per-row control for games, manga and AV. AV adds the huge option. */
 export function SpineSizeRow({ value, av = false, onChange }: { value: SpineSize; av?: boolean; onChange(value: SpineSize): void }) {
   return <div className="collection-view-sort__row"><span className="collection-view-sort__label">책등 크기</span>
     <SegmentedControl label="책등 크기" options={av ? AV_SPINE_SIZE_OPTIONS : SPINE_SIZE_OPTIONS} value={!av && value === "huge" ? "large" : value} fullWidth onChange={onChange} /></div>;

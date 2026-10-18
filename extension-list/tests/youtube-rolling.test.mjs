@@ -146,14 +146,12 @@ test('the bottom line stays anchored: it is always the last slot, the overlay is
   assert.match(cssSource, /\.lakomics-yt-prev \{[^}]*opacity: 0\.72/);
 });
 
-test('the 80 ms guard between bridged cues does not empty the slots', async (t) => {
+test('the renderer respects the guard interval before the next speech onset', async (t) => {
   const h = await mount(t);
   h.load([cue(0, 1000, 'one'), cue(1080, 2000, 'two')]);
   h.at(0.5);
-  const element = h.lines()[0];
   h.at(1.04);
-  assert.equal(h.overlay().style.display, 'block');
-  assert.equal(h.lines()[0], element);
+  assert.equal(h.overlay().style.display, 'none');
   h.at(1.1);
   assert.deepEqual(shown(h), [['lakomics-yt-prev', 'one'], ['lakomics-yt-cur', 'two']]);
   h.at(2.5);
@@ -220,7 +218,7 @@ test('motion: the overlay fades out into a silence (160 ms) and fades back in af
 
 test('single-line mode: consecutive cues replace the text without a gap; fades only at the edges of silence', async (t) => {
   const h = await mount(t, { stored: { [KEY + 'rolling']: false }, motion: true });
-  h.load([cue(0, 1000, 'one'), cue(1080, 2000, 'two'), cue(5000, 6000, 'three')]);
+  h.load([cue(0, 1000, 'one'), cue(1000, 2000, 'two'), cue(5000, 6000, 'three')]);
   h.at(4); // silence: the overlay fades out, then nothing is shown
   h.animations.find((x) => x.el === h.overlay() && x.keyframes.opacity).onfinish();
   assert.equal(h.overlay().style.display, 'none');
@@ -228,7 +226,7 @@ test('single-line mode: consecutive cues replace the text without a gap; fades o
   assert.match(h.overlay().firstChild.className, /lakomics-yt-in/, 'after silence the line fades in');
   h.at(0.5);
   h.animations.length = 0;
-  h.at(1.04); // inside the 80 ms guard
+  h.at(0.99);
   assert.equal(h.overlay().textContent, 'one');
   h.at(1.1);
   assert.equal(h.overlay().textContent, 'two');
@@ -238,7 +236,7 @@ test('single-line mode: consecutive cues replace the text without a gap; fades o
   assert.ok(h.animations.some((a) => a.el === h.overlay() && a.keyframes.opacity));
 });
 
-test('time sweep at 30 fps: consecutive cues never leave an empty frame, in rolling and single-line mode', async (t) => {
+test('time sweep at 30 fps: empty frames occur only outside cue intervals, in both display modes', async (t) => {
   for (const rolling of [true, false]) {
     const h = await mount(t, { stored: { [KEY + 'rolling']: rolling } });
     // 1080 ms-spaced cues with 80 ms gaps, a 250 ms gap, then a real 2 s silence, then a cue after 1.2 s.
@@ -253,11 +251,19 @@ test('time sweep at 30 fps: consecutive cues never leave an empty frame, in roll
       if (visible) { bottoms.add(h.lines().at(-1)); continue; }
       empty.push(ms);
     }
-    const inGap = (ms) => cues.some((c, k) => k && ms >= cues[k - 1].endMs && ms < c.startMs && c.startMs - cues[k - 1].endMs > 300);
+    const inGap = (ms) => cues.some((c, k) => k && ms >= cues[k - 1].endMs && ms < c.startMs);
     assert.ok(empty.length > 0, 'the real silences are empty');
     assert.deepEqual(empty.filter((ms) => !inGap(ms) && ms < 10000), [], `rolling=${rolling}: no empty frame between close cues`);
     for (const ms of empty) assert.ok(inGap(ms) || ms >= 10000, `empty frame at ${ms} ms`);
   }
+});
+
+test('identical adjacent translations never appear twice in the rolling overlay', async (t) => {
+  const h = await mount(t);
+  h.load([cue(0, 1000, '같은 번역', 'first source'), cue(1000, 3000, '같은 번역', 'second source')]);
+  h.at(1.2);
+  assert.deepEqual(shown(h), [['lakomics-yt-cur', '같은 번역']]);
+  assert.equal(h.hook.previousLineIndex([cue(0, 1000, '같은 번역'), cue(1000, 3000, '같은 번역')], 1), -1);
 });
 
 test('time sweep, roll-up: the previous line stays until the next cue starts and goes with the current one in silence', async (t) => {

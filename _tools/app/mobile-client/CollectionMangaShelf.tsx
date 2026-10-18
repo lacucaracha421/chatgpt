@@ -1,4 +1,5 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useState, type CSSProperties} from 'react';
+import {spineScale, type SpineSize} from '../src/collections/case/caseDimensions';
 import {MangaShelfRow, mangaShelfData, shelfEditionVolumes, type MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {localDay} from '../src/shared/displayDate';
 import {api} from './transport';
@@ -62,14 +63,14 @@ function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, o
 }
 
 /** The tablet 만화 list as the PC's bookcase rows (shared `MangaShelfRow`), one per work in list order. */
-export function TabletMangaShelf({items, label, revision, active, privacy, owned, pick, onPick, onOpen, onActions}: {
-  items: CollectionSummary[]; label: string; revision: string; active: boolean; privacy: boolean;
+export function TabletMangaShelf({items, label, size = 'normal', revision, active, privacy, owned, pick, onPick, onOpen, onActions}: {
+  items: CollectionSummary[]; label: string; size?: SpineSize; revision: string; active: boolean; privacy: boolean;
   owned(work: CollectionSummary, edition: number): number | null;
   pick: MangaShelfPick; onPick(pick: MangaShelfPick): void;
   onOpen(id: string, at: {volumeId: string; edition: number} | null): void;
   /** Long press on a work's row opens its action sheet. */onActions?(work: CollectionSummary): void;
 }) {
-  return <div className="manga-shelf-list" role="group" aria-label={label}>
+  return <div className="manga-shelf-list" role="group" aria-label={label} style={{'--manga-spine-scale': spineScale('tablet', 'manga', size)} as CSSProperties}>
     {items.map(work => <TabletMangaRow key={work.id} work={work} revision={revision} active={active} privacy={privacy} owned={edition => owned(work, edition)} pick={pick} onPick={onPick} onOpen={onOpen} onActions={onActions}/>)}
   </div>;
 }

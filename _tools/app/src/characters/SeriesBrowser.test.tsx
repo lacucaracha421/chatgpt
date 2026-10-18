@@ -1126,7 +1126,7 @@ it("acknowledges a seen run when the panel is saved", async () => {
 
 it("adds a suggested reference to the draft with its region and writes it only with the panel's own 저장", async () => {
   const region = { contentHash: "hash-image-8", baselineFingerprint: "baseline", bounds: [5, 6, 70, 80] as [number, number, number, number] };
-  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 1, safe: true, region }]);
+  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 2, safe: false, region }]);
   const save = vi.spyOn(api, "saveSettings");
   await user.click(await within(panel).findByRole("button", { name: "추천 레퍼런스 1 추가" }));
   expect(within(panel).getByText("저장하지 않은 변경")).toBeVisible();
@@ -1139,7 +1139,7 @@ it("adds a suggested reference to the draft with its region and writes it only w
 });
 
 it("drops suggestions that were not added when the panel is closed without saving", async () => {
-  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 1, safe: true }]);
+  const { user, panel, api } = await openReinforced([{ assetId: "image-8", hash: "hash-image-8", persons: 2, safe: false }]);
   const save = vi.spyOn(api, "saveSettings");
   await user.click(await within(panel).findByRole("button", { name: "추천 레퍼런스 1 추가" }));
   await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));

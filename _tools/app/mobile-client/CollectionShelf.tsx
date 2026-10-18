@@ -17,7 +17,7 @@ import {collectionCover, type CollectionKind, type CollectionSummary} from './co
 import './collectionShelf.css';
 
 export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
-export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'; /** 책장 size of the games and AV spine shelf. */spineSize?: SpineSize};
+export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'; /** Bookcase spine size, saved per Collection type. */spineSize?: SpineSize};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
@@ -106,7 +106,7 @@ export function ShelfViewSheet({type, view, onChange, onClose}: {type: Collectio
 }
 export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void}) {
   const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(hasBookcase(type) ? [{value: 'bookcase' as const, label: '책장'}] : [])];
-  const spineBookcase = view.layout === 'bookcase' && (type === 'game' || type === 'av');
+  const spineBookcase = view.layout === 'bookcase' && hasBookcase(type);
   return <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
       {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} av={type === 'av'} onChange={spineSize => onChange({spineSize})}/> : <>

@@ -7,7 +7,7 @@ import { casePlatform } from "./case/CollectionCase";
 import { isSpineSize, type SpineSize } from "./case/caseDimensions";
 
 /** 격자 is flat front covers, 선반 the turned cases on planks, 책장 the bookcase (manga volumes; for games and AV the spine-only shelf). */
-export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort"; /** 책장 size of the games and AV spine shelf. */ spineSize?: SpineSize };
+export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort"; /** Bookcase spine size, saved per Collection type. */ spineSize?: SpineSize };
 /** Which types have a 책장 in their 보기 menu. */
 export const hasBookcase = (type: CollectionType) => type === "manga" || type === "game" || type === "av";
 type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;

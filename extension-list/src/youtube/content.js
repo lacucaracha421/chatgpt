@@ -727,8 +727,6 @@
       getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).opacity !== "0");
   }
 
-  const HOLD_GAP_MS = 300; // a gap this short between two cues never empties the overlay
-
   function findCue(ms) {
     const cues = state.cues;
     let lo = 0;
@@ -744,11 +742,7 @@
       }
     }
     if (found < 0) return -1;
-    if (ms < cues[found].endMs) return found;
-    // Consecutive cues hand over without an empty frame: a cue stays through a gap of up to HOLD_GAP_MS
-    // (timing.js leaves 80 ms before the next cue, and older caches may hold other small gaps).
-    const next = cues[found + 1];
-    return next && next.startMs - cues[found].endMs <= HOLD_GAP_MS ? found : -1;
+    return ms < cues[found].endMs ? found : -1;
   }
 
   function isCovered(ms) {
@@ -771,7 +765,8 @@
   function previousLineIndex(cues, index) {
     const previous = cues[index - 1];
     const current = cues[index];
-    return isDrawable(previous) && current && current.startMs - previous.endMs <= ROLL_GAP_MS ? index - 1 : -1;
+    return isDrawable(previous) && current && previous.text.trim() !== current.text.trim() &&
+      current.startMs - previous.endMs <= ROLL_GAP_MS ? index - 1 : -1;
   }
 
   function reducedMotion() {

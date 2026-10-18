@@ -12,7 +12,7 @@ export type ShadowReviewItem = {
   targetFingerprint: string;
   referenceAssetIds: string[];
   verdict: "automatic" | "recommended" | "none";
-  origin: "live" | "backfill";
+  origin: "live" | "backfill" | "claude";
   knn3: number | null;
   nativeOutcome: string;
   scoredAt: string;

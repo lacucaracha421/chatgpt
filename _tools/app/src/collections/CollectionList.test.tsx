@@ -70,11 +70,11 @@ it("persists layout and count independently for each collection type", () => {
 });
 it("reads saved layouts: grid and shelf keep working, 책장 is valid for games, AV and manga but not movies, and the spine size defaults to 보통", () => {
   const save = (type: string, value: object) => localStorage.setItem(`lakomics.collections.view.${type}.v1`, JSON.stringify({ perRow: 8, grouping: "device", ...value }));
-  save("game", { layout: "grid" }); save("av", { layout: "bookcase", spineSize: "large" }); save("manga", { layout: "bookcase", spineSize: "huge" }); save("movie", { layout: "bookcase" });
+  save("game", { layout: "grid" }); save("av", { layout: "bookcase", spineSize: "large" }); save("manga", { layout: "bookcase", spineSize: "small" }); save("movie", { layout: "bookcase" });
   const read = (type: CollectionType) => renderHook(() => useCollectionView(type)).result.current[0];
   expect(read("game")).toMatchObject({ layout: "grid", spineSize: "normal" });
   expect(read("av")).toMatchObject({ layout: "bookcase", spineSize: "large" });
-  expect(read("manga")).toMatchObject({ layout: "bookcase", spineSize: "normal" });
+  expect(read("manga")).toMatchObject({ layout: "bookcase", spineSize: "small" });
   expect(read("movie").layout).toBe("shelf");
   const { result } = renderHook(() => useCollectionView("game"));
   act(() => result.current[1]({ layout: "bookcase", spineSize: "small" }));

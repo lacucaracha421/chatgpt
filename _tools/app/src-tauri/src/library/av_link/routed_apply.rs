@@ -306,7 +306,7 @@ impl Library {
                 } else {
                     requested
                 };
-                if super::super::collection_authority::av_name_held_by_trash(&c, name)? {
+                if super::super::collection_authority::collection_name_held_by_trash(&c, "av", name)? {
                     return Err(AvError::Inbox(
                         "av_inbox_name_in_trash",
                         "휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.",

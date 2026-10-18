@@ -484,7 +484,7 @@ function workerSetup(t, extra = {}) {
   return { stored, send };
 }
 
-const MODE = "translate-ko-auto+t6";
+const MODE = "translate-ko-auto+t8";
 const entry = (text) => ({ cues: [{ startMs: 0, endMs: 900, text }], model: "m", createdAt: 1 });
 function cachedSetup(t, tracks, pref) {
   const stored = { "lakomics:youtube:subs:index": { [VIDEO]: tracks.map((trackKey) => `${trackKey}|${MODE}`) } };

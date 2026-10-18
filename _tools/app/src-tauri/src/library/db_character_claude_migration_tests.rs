@@ -84,3 +84,23 @@
             )
             .expect_err("an opinion needs its character");
     }
+
+#[test]
+fn member_run_migrates_134_without_changing_pairwise_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = crate::library::Library::open(temp.path()).unwrap();
+    library.set_claude_settings(true, 20.0).unwrap();
+    let mut connection = library.connection().unwrap();
+    connection.execute_batch("DROP VIEW character_member_pending;
+        DROP TABLE character_member_recommendations;
+        DROP TABLE character_member_requests;
+        DROP TABLE character_member_items;
+        DROP TABLE character_member_control;
+        PRAGMA user_version=134;").unwrap();
+    super::migrate_to_latest(&mut connection, 134).unwrap();
+    let settings: (String,f64) = connection.query_row("SELECT ongoing_mode,cap_usd FROM character_member_control",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(settings,("until".into(),45.0));
+    let pairwise: (bool,f64) = connection.query_row("SELECT enabled,monthly_cap_usd FROM character_claude_settings",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(pairwise,(true,20.0));
+    assert_eq!(connection.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),super::SCHEMA_VERSION);
+}

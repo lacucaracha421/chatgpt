@@ -147,6 +147,13 @@ impl Library {
             }
             let now = chrono::Utc::now().to_rfc3339();
             if let Some(name) = new_name {
+                if authority.active
+                    && super::collection_authority::collection_name_held_by_trash(
+                        &transaction, "manga", &name,
+                    )?
+                {
+                    return Err(LibraryError::CollectionNameInTrash);
+                }
                 transaction
                     .execute(
                         "INSERT INTO collections (

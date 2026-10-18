@@ -46,6 +46,7 @@ const SUGGESTION_INPUT_TABLES: &[&str] = &[
 /// decisions, Asset eligibility and the registered-series folder scope. Target names,
 /// references and fingerprints are read on every call, so they are not listed.
 const SHADOW_REVIEW_INPUT_TABLES: &[&str] = &[
+    "character_member_recommendations",
     "assets",
     "asset_classifications",
     "classification_entries",

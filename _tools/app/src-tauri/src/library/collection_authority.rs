@@ -52,6 +52,21 @@ include!("collection_authority_people.rs");
 include!("collection_authority_profile_fields.rs");
 include!("collection_authority_av_inbox.rs");
 
+/// Trashed names remain reserved per type until purged. Match the server's SQLite
+/// NOCASE rule (ASCII case only); callers pass the normalized command name.
+pub(crate) fn collection_name_held_by_trash(
+    db: &Connection,
+    work_type: &str,
+    name: &str,
+) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collection_authority_trash WHERE lifecycle='trashed' \
+         AND json_extract(payload,'$.type')=?1 AND json_extract(payload,'$.name')=?2 COLLATE NOCASE)",
+        params![work_type, name],
+        |r| r.get(0),
+    )
+}
+
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CollectionAuthorityStatus {
@@ -753,6 +768,9 @@ impl Library {
         let mut input = input;
         if let Some(name) = new_name {
             let name = super::collection::normalized_name(name.to_owned())?;
+            if collection_name_held_by_trash(&tx, work_type, &name)? {
+                return Err(LibraryError::CollectionNameInTrash);
+            }
             let binding = input.as_ref().ok_or(LibraryError::InvalidExternalBinding)?;
             let snapshot: Value = serde_json::from_str(
                 binding

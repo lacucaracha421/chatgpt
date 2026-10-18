@@ -1010,7 +1010,7 @@ fn confirm_totals_of_read(
 ) -> Result<ConfirmTotals> {
     let recognition = prepare_read(connection, cache, candidates, false, series_id)?;
     let recheck = prepare_read(connection, cache, doubtful, true, series_id)?;
-    confirm_totals_from(connection, cache, &recognition, &recheck, tags)
+    confirm_totals_from(connection, cache, &recognition, &recheck, tags, Vec::new())
 }
 
 /// Pairs still waiting in one prepared list whose character exists and is enabled, with whether
@@ -1049,6 +1049,7 @@ fn confirm_totals_from(
     recognition: &Prepared,
     recheck: &Prepared,
     tags: Vec<(String, String, String)>,
+    members: Vec<(String,String)>,
 ) -> Result<ConfirmTotals> {
     let recognition = pending_pairs(connection, recognition)?;
     let recheck_by_recognition = pending_pairs(connection, recheck)?;
@@ -1080,6 +1081,7 @@ fn confirm_totals_from(
     for (target_id, asset_id, _) in recheck_by_recognition {
         kinds.insert((target_id, asset_id), 2);
     }
+    for pair in members { let kind=kinds.entry(pair).or_insert(1); *kind=(*kind).max(1); }
     folded.retain(|key| !kinds.contains_key(key));
     let mut counts = ConfirmCounts::default();
     for kind in kinds.into_values() {
@@ -1186,7 +1188,8 @@ impl Library {
             let recheck = self.prepared_list(true, series_id)?;
             let cache = open_shadow_cache(&self.root)?;
             let tags = self.read(|c| pending_tag_rows(c, series_id))?;
-            confirm_totals_from(self, cache.as_ref(), &recognition, &recheck, tags)
+            let members=self.read(|c| Ok(c.prepare("SELECT target_id,asset_id FROM character_member_pending WHERE ?1 IS NULL OR series_id=?1")?.query_map([series_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?))?;
+            confirm_totals_from(self, cache.as_ref(), &recognition, &recheck, tags, members)
         })
     }
 

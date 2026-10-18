@@ -79,10 +79,10 @@ test("the cache key gets the rule id only for matching translated videos", async
   await setup(t);
   const { storedModeFor } = globalThis.LakomicsYouTubeService;
   const base = { translate: true, speakers: false, glossarySonnet: false, model: "claude-haiku-5-5", registerSetting: "auto" };
-  assert.equal(storedModeFor("en:asr", base), "translate-ko-auto+t6");
-  assert.equal(storedModeFor("en:asr", base, "avgn1"), "translate-ko-auto+avgn1+t6");
-  assert.equal(storedModeFor("en:asr", { ...base, registerSetting: "haeyo" }, "avgn1"), "translate-ko-haeyo+avgn1+t6");
-  assert.equal(storedModeFor("ko:asr", base, "avgn1"), "clean+t6");
+  assert.equal(storedModeFor("en:asr", base), "translate-ko-auto+t8");
+  assert.equal(storedModeFor("en:asr", base, "avgn1"), "translate-ko-auto+avgn1+t8");
+  assert.equal(storedModeFor("en:asr", { ...base, registerSetting: "haeyo" }, "avgn1"), "translate-ko-haeyo+avgn1+t8");
+  assert.equal(storedModeFor("ko:asr", base, "avgn1"), "clean+t8");
 });
 
 test("follow mode: the rule decides the register, ignoring the overview; non-matching videos still use it", async (t) => {
@@ -107,7 +107,7 @@ test("follow mode: the rule decides the register, ignoring the overview; non-mat
       }
     }
     const keys = Object.keys(stored).filter((key) => key.startsWith("lakomics:youtube:subs:v2:avgn-video:"));
-    assert.deepEqual(keys, [`lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto${expectRule ? "+avgn1" : ""}+t6`]);
+    assert.deepEqual(keys, [`lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto${expectRule ? "+avgn1" : ""}+t8`]);
     assert.equal(stored[keys[0]].register, expectRule ? "haeyo" : "hapnida");
   }
 });
@@ -127,15 +127,15 @@ test("fixed register setting is kept for an AVGN video and the cache key carries
     assert.match(system, /exactly this Korean speech register for every line: hapnida/);
     assert.match(system, /욕은 찰지게/);
   }
-  assert.ok(stored["lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-hapnida+avgn1+t6"]);
+  assert.ok(stored["lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-hapnida+avgn1+t8"]);
 });
 
 test("getCached: an old plain result is not served to a rule-matching video once its metadata is known", async (t) => {
-  const plainKey = "lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto+t6";
-  const styledKey = "lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto+avgn1+t6";
+  const plainKey = "lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto+t8";
+  const styledKey = "lakomics:youtube:subs:v2:avgn-video:en:asr:translate-ko-auto+avgn1+t8";
   const result = (text) => ({ cues: [{ startMs: 0, endMs: 100, text }], model: "m", createdAt: 1 });
   const { send, stored } = await setup(t, {
-    "lakomics:youtube:subs:index": { "avgn-video": ["en:asr|translate-ko-auto+t6"] },
+    "lakomics:youtube:subs:index": { "avgn-video": ["en:asr|translate-ko-auto+t8"] },
     [plainKey]: result("옛 결과"),
   });
   const get = (meta) => send({ type: "youtube:getCached", videoId: "avgn-video", ...(meta ? { meta } : {}) });
@@ -145,7 +145,7 @@ test("getCached: an old plain result is not served to a rule-matching video once
   assert.equal(styled.cached, null);
   assert.equal(styled.styled, true);
   stored[styledKey] = result("새 결과");
-  stored["lakomics:youtube:subs:index"]["avgn-video"].push("en:asr|translate-ko-auto+avgn1+t6");
+  stored["lakomics:youtube:subs:index"]["avgn-video"].push("en:asr|translate-ko-auto+avgn1+t8");
   assert.equal((await get()).cached.cues[0].text, "새 결과");
   assert.equal((await get(avgnByTitle)).cached.cues[0].text, "새 결과");
   assert.equal((await get(other)).cached.cues[0].text, "옛 결과");

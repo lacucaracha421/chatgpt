@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { spineScale, type SpineSize } from "./case/caseDimensions";
 import { useLibrary } from "../library/LibraryContext";
 import type { CollectionCoverFocus, CollectionSummary, CollectionVolume, LibraryGateway, ReleaseBoardEntry } from "../library/types";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
@@ -72,15 +73,15 @@ function PcMangaRow({ collection, owned, pick, privacy, menu, onPick, onOpen }: 
  * they come near the visible list. One spine is picked across the list (a click); a double-click
  * or Enter on the picked spine opens the work at that volume.
  */
-export function MangaShelfList({ items, label, board, pick, onPick, menu, onOpen }: {
-  items: CollectionSummary[]; label: string;
+export function MangaShelfList({ items, label, size = "normal", board, pick, onPick, menu, onOpen }: {
+  items: CollectionSummary[]; label: string; size?: SpineSize;
   /** The 신간 board: owned counts per edition. */board: Map<string, ReleaseBoardEntry> | undefined;
   pick: MangaShelfPick; onPick(pick: MangaShelfPick): void;
   menu(collection: CollectionSummary): ContextMenuItem[];
   onOpen(collection: CollectionSummary, volumeId: string | null): void;
 }) {
   const { privacyMode } = usePrivacy();
-  return <div className="manga-shelf-list" role="group" aria-label={label}>
+  return <div className="manga-shelf-list" role="group" aria-label={label} style={{ "--manga-spine-scale": spineScale("pc", "manga", size) } as CSSProperties}>
     {items.map(collection => <PcMangaRow key={collection.id} collection={collection} pick={pick} privacy={privacyMode} menu={menu(collection)} onPick={onPick} onOpen={onOpen}
       owned={edition => board?.get(collection.id)?.ownedVolumes.find(entry => entry.editionIndex === edition)?.count ?? null} />)}
   </div>;

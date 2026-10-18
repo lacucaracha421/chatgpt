@@ -204,7 +204,7 @@ for (const outcome of ["success", "youtube:partial", "fatal", "writing"]) {
     globalThis.fetch = async () => response;
     assert.equal((await send(message)).ok, true);
     assert.ok(stored["lakomics:youtube:subs:index"]);
-    assert.ok(stored["lakomics:youtube:subs:v2:video12:ko:asr:clean+t6"]);
+    assert.ok(stored["lakomics:youtube:subs:v2:video12:ko:asr:clean+t8"]);
   });
 }
 

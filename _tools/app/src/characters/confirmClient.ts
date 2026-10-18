@@ -13,6 +13,7 @@ export type ConfirmKindCounts = { recognition: number; tag: number; recheck: num
 export interface ConfirmSources {
   /** The complete pending tag list (one read). */
   tagger(): Promise<readonly TaggerReviewItem[]>;
+  members?(): Promise<readonly ShadowReviewItem[]>;
   /** Exact pending counts, for the whole library or one series. */
   counts(seriesId?: string): Promise<ConfirmKindCounts>;
   shadow: Pick<ShadowReviewApi, "page"> & Partial<Pick<ShadowReviewApi, "inboundStatus">>;
@@ -20,6 +21,7 @@ export interface ConfirmSources {
 
 export const confirmSources: ConfirmSources = {
   tagger: () => invoke<TaggerReviewItem[]>("tagger_review_items"),
+  members: () => invoke<ShadowReviewItem[]>("claude_member_recommendations"),
   counts: seriesId => invoke<ConfirmKindCounts>("character_confirm_counts", { seriesId: seriesId ?? null }),
   shadow: shadowReviewApi,
 };
@@ -75,20 +77,23 @@ export async function readConfirmItems(sources: ConfirmSources, scope: ConfirmSc
     try { return await read(); } catch { if (!failed.includes(kind)) failed.push(kind); return empty; }
   };
   const seriesId = scope.series?.id;
-  const [tagger, candidates, doubtful] = await Promise.all([
+  const [tagger, candidates, doubtful, members] = await Promise.all([
     attempt<readonly TaggerReviewItem[]>("tag", () => sources.tagger(), []),
     attempt<ShadowReviewItem[] | null>("recognition", () => readShadowList(sources.shadow, "candidates", seriesId, isLive), []),
     attempt<ShadowReviewItem[] | null>("recheck", () => readShadowList(sources.shadow, "doubtful", seriesId, isLive), []),
+    attempt<readonly ShadowReviewItem[]>("recognition", () => sources.members?.() ?? Promise.resolve([]), []),
   ]);
   if (!isLive() || !candidates || !doubtful) return null;
   const inScope = <T extends { targetId: string }>(items: readonly T[]) => scope.target ? items.filter(item => item.targetId === scope.target!.id) : items;
   const tagItems = tagger.filter(item => (!seriesId || item.seriesId === seriesId));
   // Separate learning suggestions for overview grouping; a single-character read needs no partition.
   const fold = !scope.target;
-  const shown = inScope(candidates).filter(item => !(fold && item.folded));
+  const memberIds = new Set(members.map(item => shadowItemKey(item)));
+  const allCandidates = [...members.filter(item => !seriesId || targets.find(t => t.id === item.targetId)?.seriesClassificationId === seriesId), ...candidates.filter(item => !memberIds.has(shadowItemKey(item)))];
+  const shown = inScope(allCandidates).filter(item => !(fold && item.folded));
   const items = mergeConfirmItems({ tagger: inScope(tagItems), candidates: shown, doubtful: inScope(doubtful), targets });
   const have = new Set(items.map(item => item.key));
-  const folded = fold ? mergeConfirmItems({ tagger: [], candidates: inScope(candidates).filter(item => item.folded), doubtful: [], targets }).filter(item => !have.has(item.key)) : [];
+  const folded = fold ? mergeConfirmItems({ tagger: [], candidates: inScope(allCandidates).filter(item => item.folded), doubtful: [], targets }).filter(item => !have.has(item.key)) : [];
   const read = { items, folded, failed };
   if (!scope.series && !scope.target) overviewReads.set(sources, read);
   return read;

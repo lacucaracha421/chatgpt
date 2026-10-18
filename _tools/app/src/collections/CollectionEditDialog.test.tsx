@@ -3,8 +3,23 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CollectionSummary, CreateCollection, UpdateCollection } from "../library/types";
 import { CollectionEditDialog } from "./CollectionEditDialog";
+import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 
 afterEach(cleanup);
+
+it.each(["create", "edit"] as const)("shows the native trash-name conflict in the %s dialog and keeps the draft", async (kind) => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const onSubmit = vi.fn().mockRejectedValue({ code: "collection_name_in_trash", message: COLLECTION_NAME_IN_TRASH });
+  render(<CollectionEditDialog open mode={kind === "create" ? { kind, type: "game" } : { kind, collection: collectionFixture }} onClose={onClose} onSubmit={onSubmit} />);
+  const name = screen.getByRole("textbox", { name: "이름" });
+  await user.clear(name);
+  await user.type(name, "Reserved");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(await screen.findByText(COLLECTION_NAME_IN_TRASH)).toBeTruthy();
+  expect((name as HTMLInputElement).value).toBe("Reserved");
+  expect(onClose).not.toHaveBeenCalled();
+});
 
 it("submits only fields owned by ordinary collection editing", async () => {
   const user = userEvent.setup();

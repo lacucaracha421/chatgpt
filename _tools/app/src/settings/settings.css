@@ -415,3 +415,69 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.settings-view__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 var(--space-3);
+  list-style: none;
+}
+
+.settings-view__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  background: var(--color-surface-raised);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  animation: settings-chip-in 180ms var(--ease-out) both;
+}
+
+@keyframes settings-chip-in {
+  from { opacity: 0; transform: translateY(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-view__chip { animation: none; }
+}
+
+.settings-view__chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-view__chip button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.settings-view__chip button:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.settings-view__chip button:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-width);
+}
+
+.settings-view__chip button svg {
+  width: 14px;
+  height: 14px;
+}

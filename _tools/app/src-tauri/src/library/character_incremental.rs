@@ -600,6 +600,7 @@ impl Library {
                     }
                     // Claude's automatic judgment of the open 확인 pairs: last, so it only
                     // runs when everything else is idle (and never in saver mode).
+                    if self.advance_character_members(&stop) { return Ok(true); }
                     return Ok(self.advance_character_claude(&stop));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {

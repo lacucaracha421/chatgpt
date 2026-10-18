@@ -69,7 +69,7 @@ for (const provider of ["anthropic"]) {
       assert.doesNotMatch(calls[0].system, /니치/);
       assert.doesNotMatch(calls[1].system, /니치/);
       assert.doesNotMatch(calls[1].system, /모델 제프/);
-      const saved = stored["lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t6"];
+      const saved = stored["lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t8"];
       assert.ok(saved);
       assert.deepEqual(saved.glossary, failGlossary ? [userTerms[0]] : [userTerms[0], { source: "Jef", korean: "내 제프" }]);
       calls.length = 0;
@@ -114,8 +114,8 @@ test("large coverage gap retries instead of stretching a translation and logs wh
 
 test("existing cached long cues are display-safe on both cache reply paths without API calls", async (t) => {
   const cached = { cues: [{ startMs: 0, endMs: 18000, text: "긴 자막을 나눠 보여줘요. ".repeat(10) }], model: "test", createdAt: 1 };
-  const { send } = await setup(t, { "lakomics:youtube:subs:v2:resume-video:ko:asr:clean+t6": cached,
-    "lakomics:youtube:subs:index": { "resume-video": ["ko:asr|clean+t6"] } });
+  const { send } = await setup(t, { "lakomics:youtube:subs:v2:resume-video:ko:asr:clean+t8": cached,
+    "lakomics:youtube:subs:index": { "resume-video": ["ko:asr|clean+t8"] } });
   globalThis.fetch = () => { throw new Error("cache must not fetch"); };
   const processed = await send(message("ko:asr", 1));
   const lookup = await send({ type: "youtube:getCached", videoId: "resume-video" });
@@ -160,8 +160,8 @@ test("glossary runs once upfront, then all chunks start concurrently; retry rest
   assert.equal(first.partialFailure, true);
   assert.ok(first.cues.every((c) => typeof c.orig === "string"));
   assert.ok(first.cues.slice(1).every((c, i) => first.cues[i].endMs <= c.startMs));
-  const resumeKey = "lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t6";
-  const cacheKey = "lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t6";
+  const resumeKey = "lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t8";
+  const cacheKey = "lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t8";
   assert.deepEqual(Object.keys(stored[resumeKey].successful), ["0", "2"]);
   assert.equal(stored[resumeKey].register, "banmal");
   assert.equal(stored[cacheKey], undefined);
@@ -225,7 +225,7 @@ test("mismatched resume is deleted and clean mode skips glossary while polishing
   const { stored, removed, messages, send } = await setup(t);
   const request = message("ko:asr", 1);
   const chunks = chunkUnits(parseJson3(request.json3).units, 200);
-  const resumeKey = "lakomics:youtube:resume:v1:resume-video:clean+t6";
+  const resumeKey = "lakomics:youtube:resume:v1:resume-video:clean+t8";
   stored[resumeKey] = createResumeRecord(chunks, [{ failed: false, cues: [{ startMs: 0, endMs: 300, text: "old" }] }], [], null, "ko:asr");
   request.json3.events[0].segs[0].utf8 = "changed";
   let count = 0;
@@ -253,7 +253,7 @@ test("all failed chunks retain glossary for retry and count consumed usage", asy
     return response(translated(body));
   };
   assert.equal((await send(message("en:asr", 1))).ok, false);
-  assert.deepEqual(stored["lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t6"].successful, {});
+  assert.deepEqual(stored["lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t8"].successful, {});
   assert.equal(stored["lakomics:youtube:usage:total"].input_tokens, 6);
   fail = false;
   assert.equal((await send(message("en:asr", 1))).ok, true);
@@ -277,7 +277,7 @@ test("fatal errors wait for active chunks and preserve their success and usage f
     return response(translated(body));
   };
   assert.equal((await send(message())).ok, false);
-  assert.deepEqual(Object.keys(stored["lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t6"].successful), ["0", "2"]);
+  assert.deepEqual(Object.keys(stored["lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t8"].successful), ["0", "2"]);
   assert.equal(stored["lakomics:youtube:usage:total"].input_tokens, 9);
   fatal = false;
   assert.equal((await send(message())).ok, true);
@@ -369,7 +369,7 @@ for (const on of [false, true]) {
     if (on) assert.deepEqual(usage.byModel['claude-sonnet-5-5'], { input_tokens: 10, output_tokens: 5 });
     assert.equal(usage.videos, 1);
     assert.equal(usage.input_tokens, 13);
-    const cacheKey = `lakomics:youtube:subs:v2:resume-video:ja:asr:translate-ko-auto${on ? "+gs" : ""}+t6`;
+    const cacheKey = `lakomics:youtube:subs:v2:resume-video:ja:asr:translate-ko-auto${on ? "+gs" : ""}+t8`;
     assert.ok(stored[cacheKey]);
     assert.equal((await send({ type: 'youtube:getCached', videoId: request.videoId })).cached.cues[0].text, '번역한 자막');
     assert.equal((await send(request)).cached, true);
@@ -424,27 +424,27 @@ test('Sonnet glossary resume uses +gs and clean mode skips glossary', async (t) 
     return response(fail ? { invalid: true } : translated(body));
   };
   assert.equal((await send(message('ja:asr', 1))).ok, false);
-  assert.ok(stored['lakomics:youtube:resume:v1:resume-video:translate-ko-auto+gs+t6']);
+  assert.ok(stored['lakomics:youtube:resume:v1:resume-video:translate-ko-auto+gs+t8']);
   fail = false;
   assert.equal((await send(message('ja:asr', 1))).ok, true);
   assert.equal(glossaries, 1);
-  assert.equal(stored['lakomics:youtube:resume:v1:resume-video:translate-ko-auto+gs+t6'], undefined);
+  assert.equal(stored['lakomics:youtube:resume:v1:resume-video:translate-ko-auto+gs+t8'], undefined);
   assert.equal((await send(message('ko:asr', 1))).ok, true);
   assert.equal(glossaries, 1);
   assert.equal(chunks, 3);
-  assert.ok(stored['lakomics:youtube:subs:v2:resume-video:ko:asr:clean+t6']);
+  assert.ok(stored['lakomics:youtube:subs:v2:resume-video:ko:asr:clean+t8']);
 });
 
-test("stored mode differs by register setting and carries the +t6 processing version", async (t) => {
+test("stored mode differs by register setting and carries the +t8 processing version", async (t) => {
   await setup(t);
   const { storedModeFor } = globalThis.LakomicsYouTubeService;
   const base = { translate: true, speakers: false, glossarySonnet: false, model: "claude-haiku-5-5" };
   const follow = storedModeFor("en:asr", { ...base, registerSetting: "auto" });
   const fixed = storedModeFor("en:asr", { ...base, registerSetting: "haeyo" });
-  assert.equal(follow, "translate-ko-auto+t6");
-  assert.equal(fixed, "translate-ko-haeyo+t6");
+  assert.equal(follow, "translate-ko-auto+t8");
+  assert.equal(fixed, "translate-ko-haeyo+t8");
   assert.notEqual(follow, fixed);
-  assert.equal(storedModeFor("ko:asr", { ...base, registerSetting: "haeyo" }), "clean+t6");
+  assert.equal(storedModeFor("ko:asr", { ...base, registerSetting: "haeyo" }), "clean+t8");
 });
 
 test("follow mode gives every chunk the same stored register; fixed modes are unaffected", async (t) => {
@@ -480,7 +480,7 @@ test("follow mode resume keeps a stored register without asking the overview aga
   const { send, stored } = await setup(t);
   const request = { ...message("en:asr"), videoId: "register-resume" };
   const chunks = chunkUnits(parseJson3(request.json3).units, 200);
-  const resumeKey = "lakomics:youtube:resume:v1:register-resume:translate-ko-auto+t6";
+  const resumeKey = "lakomics:youtube:resume:v1:register-resume:translate-ko-auto+t8";
   const record = createResumeRecord(chunks, [{ failed: false, cues: [{ startMs: 0, endMs: 300, text: "a" }] }], [], "hapnida", "en:asr");
   stored[resumeKey] = record;
   const systems = [];
@@ -498,7 +498,7 @@ test("follow mode resume keeps a stored register without asking the overview aga
 
   // A resume record without a register (the overview never answered) gets the 해요체 fallback.
   const second = { ...request, videoId: "register-resume-null" };
-  stored["lakomics:youtube:resume:v1:register-resume-null:translate-ko-auto+t6"] = { ...record, register: null };
+  stored["lakomics:youtube:resume:v1:register-resume-null:translate-ko-auto+t8"] = { ...record, register: null };
   systems.length = 0;
   assert.equal((await send(second)).ok, true);
   assert.equal(glossaries, 0);

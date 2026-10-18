@@ -1150,6 +1150,7 @@ describe("CollectionBrowser manga shelf", () => {
   });
 
   it("honours stored 책장 and keeps volume picking and opening on each work row", async () => {
+    const user = userEvent.setup();
     localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "bookcase", perRow: 8, grouping: "device" }));
     const onViewChange = vi.fn();
     const gateway = renderBrowser({ collections: [manga("m1", "다이의 대모험"), manga("m2", "빈 작품")], typeFilter: "manga", showcase: false, onViewChange, tracking: tracking(), patch: gateway => {
@@ -1169,6 +1170,20 @@ describe("CollectionBrowser manga shelf", () => {
     expect(gateway.startCollectionCoverFocus).not.toHaveBeenCalled();
     fireEvent.click(spines[1]);
     expect(spines[1]).toHaveAttribute("aria-pressed", "true");
+    const image = spines[1].querySelector("img");
+    const reads = vi.mocked(gateway.listCollectionVolumes).mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(screen.queryByRole("slider", { name: "한 줄에" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "보통" })).toHaveAttribute("aria-checked", "true");
+    expect(within(screen.getByRole("radiogroup", { name: "책등 크기" })).getAllByRole("radio")).toHaveLength(3);
+    await user.click(screen.getByRole("radio", { name: "크게" }));
+    expect(JSON.parse(localStorage.getItem("lakomics.collections.view.manga.v1")!)).toMatchObject({ spineSize: "large" });
+    expect(localStorage.getItem("lakomics.collections.view.game.v1")).toBeNull();
+    expect(within(row).getByRole("button", { name: "2권 보기" })).toBe(spines[1]);
+    expect(spines[1].querySelector("img")).toBe(image);
+    expect(spines[1]).toHaveAttribute("aria-pressed", "true");
+    expect(gateway.listCollectionVolumes).toHaveBeenCalledTimes(reads);
+    await user.click(screen.getByRole("button", { name: "보기" }));
     expect(within(spines[1]).getByText("2", { selector: ".manga-picked-number" })).toBeInTheDocument();
     expect(spines[1]).not.toHaveTextContent("미보유");
     expect(onViewChange).not.toHaveBeenCalled();

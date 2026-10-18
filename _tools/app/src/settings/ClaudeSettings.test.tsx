@@ -12,7 +12,7 @@ const status = (patch: Partial<ClaudeStatus> = {}): ClaudeStatus => ({
 
 type Backend = { configured: boolean; enabled: boolean; cap: number; status: ClaudeStatus };
 let backend: Backend;
-const calls = () => vi.mocked(invoke).mock.calls.filter(([command]) => !["claude_status", "claude_credential_status", "claude_settings"].includes(command));
+const calls = () => vi.mocked(invoke).mock.calls.filter(([command]) => !["claude_status", "claude_member_status", "claude_member_excluded_folders", "claude_credential_status", "claude_settings"].includes(command));
 
 beforeEach(() => {
   backend = { configured: true, enabled: true, cap: 10, status: status() };

@@ -86,12 +86,12 @@ for (const [trackKey, baseMode, storedMode] of [
     assert.deepEqual(results[2], results[3]);
     assert.equal(requests.length, 2);
 
-    const offKey = `lakomics:youtube:subs:v2:video12:${trackKey}:${storedMode}+t6`;
-    const onKey = `lakomics:youtube:subs:v2:video12:${trackKey}:${storedMode}+spk+t6`;
+    const offKey = `lakomics:youtube:subs:v2:video12:${trackKey}:${storedMode}+t8`;
+    const onKey = `lakomics:youtube:subs:v2:video12:${trackKey}:${storedMode}+spk+t8`;
     assert.equal(stored[offKey].cues[0].text, "응.");
     assert.equal(stored[onKey].cues[0].text, "- 응.");
     assert.deepEqual(new Set(stored["lakomics:youtube:subs:index"].video12), new Set([
-      `${trackKey}|${storedMode}+t6`, `${trackKey}|${storedMode}+spk+t6`,
+      `${trackKey}|${storedMode}+t8`, `${trackKey}|${storedMode}+spk+t8`,
     ]));
     assert.ok(messages.filter((m) => m.type === "youtube:progress").every((m) => m.mode === baseMode));
     assert.equal((await getCached()).cached.cues[0].text, "- 응.");
@@ -104,7 +104,7 @@ for (const [trackKey, baseMode, storedMode] of [
     assert.equal((await getCached()).cached.cues[0].text, "응.");
     stored["lakomics:youtube:settings:speakers"] = true;
     delete stored[onKey];
-    stored["lakomics:youtube:subs:index"].video12 = [`${trackKey}|${storedMode}+t6`];
+    stored["lakomics:youtube:subs:index"].video12 = [`${trackKey}|${storedMode}+t8`];
     assert.equal((await getCached()).cached, null);
     assert.equal(requests.length, 2);
   });

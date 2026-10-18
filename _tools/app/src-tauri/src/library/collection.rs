@@ -4,8 +4,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     collection_authority::{
-        collection_write_status, editable_work, enqueue_collection_command, enqueue_work_changes,
-        optimistic_collection_trash, predicted_collection_revision,
+        collection_name_held_by_trash, collection_write_status, editable_work,
+        enqueue_collection_command, enqueue_work_changes, optimistic_collection_trash,
+        predicted_collection_revision,
     },
     error::LibraryError,
     models::{
@@ -246,6 +247,9 @@ impl Library {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let authority = collection_write_status(&transaction)?;
+        if authority.active && collection_name_held_by_trash(&transaction, type_str, &name)? {
+            return Err(LibraryError::CollectionNameInTrash);
+        }
         transaction
             .execute(
                 "INSERT INTO collections (
@@ -315,6 +319,9 @@ impl Library {
             .optional()?;
         if authority.active && current_type.as_deref() != Some(type_str) {
             return Err(LibraryError::CollectionAuthorityTypeChangeUnavailable);
+        }
+        if authority.active && collection_name_held_by_trash(&transaction, type_str, &name)? {
+            return Err(LibraryError::CollectionNameInTrash);
         }
         if let Some(base) = request.personal_base.as_ref().filter(|_| authority.active) {
             if write_description {
@@ -640,7 +647,10 @@ impl Library {
 }
 
 pub(crate) fn normalized_name(name: String) -> Result<String, LibraryError> {
-    let name = name.trim().to_owned();
+    // Python str.strip(), used by the server, also strips these four C0 separators.
+    let name = name
+        .trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'))
+        .to_owned();
     if name.is_empty() {
         return Err(LibraryError::EmptyCollectionName);
     }

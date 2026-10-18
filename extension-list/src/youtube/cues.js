@@ -42,8 +42,10 @@ function wordsText(units, from, to) {
 }
 
 // End of the real speech of one source unit. Human-made tracks hold whole caption events, so the event's
-// own end is the speech end; auto-caption units are single words and get the estimate above.
+// own end is the source end. Rolling word intervals are retained; units without that timing
+// (including the local recognizer's stretched phrase tails) keep the bounded estimate above.
 function speechEnd(unit, human) {
+  if (Number.isFinite(unit.sourceEndMs) && unit.sourceEndMs > unit.startMs) return unit.sourceEndMs;
   const known = Number.isFinite(unit.endMs) && unit.endMs > unit.startMs ? unit.endMs : null;
   if (human && known !== null) return known;
   const chars = Array.from(String(unit.text).replace(/\s/gu, "")).length;
@@ -92,6 +94,9 @@ function buildCues(units, lines, mode = "clean", human = false) {
 // Simple segmentation by pauses (> 700 ms between word starts) and a maximum line length.
 function fallbackSegment(units, { pauseMs = 700, maxChars = 40, mode = "clean", human = false } = {}) {
   if (!units.length) return [];
+  const slots = globalThis.LakomicsYouTube.chunk.subtitleSlots(units);
+  if (slots.length) return buildCues(units, slots.map(({ from, to }) =>
+    ({ from, to, text: wordsText(units, from, to) })), mode, human);
 
   const lines = [];
   let from = 0;

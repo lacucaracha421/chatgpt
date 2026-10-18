@@ -143,7 +143,7 @@ test("the diarizing state of the PC server is a known state", async () => {
 
 // ---------------------------------------------------------------- server cache
 
-const entry = (cues) => ({ version: 1, video: "dDPmbj_mgUg", track: "kotoba:ja", mode: "translate-ko-auto+t6", model: "m", createdAt: 1,
+const entry = (cues) => ({ version: 1, video: "dDPmbj_mgUg", track: "kotoba:ja", mode: "translate-ko-auto+t8", model: "m", createdAt: 1,
   register: null, glossary: [], cues });
 
 test("server cache validation accepts a plausible speaker and drops nothing else", () => {

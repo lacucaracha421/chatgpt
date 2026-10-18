@@ -10,7 +10,7 @@ const cue = (startMs, endMs, text = "가") => ({ startMs, endMs, text });
 test("finalizeTimings bridges gaps strictly below 1.2 s to 80 ms before the next cue", () => {
   assert.equal(finalizeTimings([cue(0, 1500), cue(2699, 4000)])[0].endMs, 2699 - 80);
   assert.equal(finalizeTimings([cue(0, 1500), cue(2700, 4000)])[0].endMs, 1500);
-  assert.equal(finalizeTimings([cue(0, 1500), cue(1550, 4000)])[0].endMs, 1550 - 80);
+  assert.equal(finalizeTimings([cue(0, 1500), cue(1550, 4000)])[0].endMs, 1500);
 });
 
 test("finalizeTimings keeps a cue for its reading time: 12 characters per second between 1.2 s and 6 s", () => {
@@ -27,10 +27,10 @@ test("finalizeTimings never ends a cue before its speech, nor later than 7 s", (
   assert.equal(finalizeTimings([cue(0, 1, "가".repeat(80))])[0].endMs, 6000);
 });
 
-test("finalizeTimings clamps to the next start, with a floor of 700 ms and then 300 ms", () => {
-  // Room for the minimum: end 80 ms before the next cue.
-  assert.equal(finalizeTimings([cue(0, 1500), cue(780, 3000)])[0].endMs, 700);
-  // Next cue too close for 700 ms: end at the guard, at least 300 ms, never past the next start.
+test("finalizeTimings preserves speech up to the next start when there is no room for a guard", () => {
+  // Source speech reaches the next onset: there is no silence available for a guard.
+  assert.equal(finalizeTimings([cue(0, 1500), cue(780, 3000)])[0].endMs, 780);
+  // Short slots may use available silence, but never delay the next onset.
   assert.equal(finalizeTimings([cue(0, 100), cue(500, 3000)])[0].endMs, 420);
   assert.equal(finalizeTimings([cue(0, 100), cue(350, 3000)])[0].endMs, 300);
   assert.equal(finalizeTimings([cue(0, 100), cue(200, 3000)])[0].endMs, 200);
@@ -72,10 +72,10 @@ test("cue construction prevents a short source gap from causing overlapping fall
   assert.ok(cues[0].endMs <= cues[1].startMs);
 });
 
-test("timing merges only fragments of the same translated line and display does not undo it", () => {
+test("a translated source slot stays whole through timing and display", () => {
   const text = "이 문장은 자막을 읽을 시간이 부족할 때 같은 번역문 조각들을 합쳐서 보여주는지 확인합니다. ".repeat(2);
   const parts = splitDisplayCues([{ startMs: 0, endMs: 900, text, orig: "source words ".repeat(20) }]);
-  assert.ok(parts.length > 1);
+  assert.equal(parts.length, 1);
   const result = finalizeTimings(structuredClone(parts));
   assert.equal(result.length, 1);
   assert.ok(result[0].endMs >= 1200);
@@ -89,16 +89,16 @@ test("a final short fragment merges backwards but never across a translated line
     { ...cue(2000, 2400, "아니요, 안 해요."), orig: "No, I do not." }];
   const result = finalizeTimings(input);
   assert.equal(result.length, 2);
-  assert.equal(result[0].endMs, 2000 - 80);
+  assert.equal(result[0].endMs, 2000);
   assert.equal(result[1].startMs, 2000);
   assert.equal(result[1].text, "아니요, 안 해요.");
   assert.equal(input.length, 3);
 });
 
-test("merging preserves deliberate repeated clauses", () => {
+test("display preserves deliberate repeated clauses within a source slot", () => {
   const text = "이 문장은 아주 길게 설명하고 있는 내용입니다. ".repeat(2).trim();
   const parts = splitDisplayCues([{ startMs: 0, endMs: 900, text, orig: "source words ".repeat(10) }]);
-  assert.ok(parts.length > 1);
+  assert.equal(parts.length, 1);
   assert.equal(finalizeTimings(parts)[0].text.replace(/\s/g, ""), text.replace(/\s/g, ""));
 });
 
@@ -117,7 +117,7 @@ test("standalone negative answers retain separate source cues and speech sync", 
   const result = finalizeTimings(applyResult(units, [{ from: 0, to: 0, text: "이 방법으로 할까요?" },
     { from: 1, to: 1, text: "아니요, 안 해요." }], { mode: "translate-ko" }));
   assert.equal(result.length, 2);
-  assert.equal(result[0].endMs, 600 - 80);
+  assert.equal(result[0].endMs, 600);
   assert.equal(result[1].startMs, 600);
   assert.equal(result[1].text, "아니요, 안 해요.");
 });

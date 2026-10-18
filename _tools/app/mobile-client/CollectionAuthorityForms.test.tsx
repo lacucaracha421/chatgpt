@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api, native: mocks.native}));
 vi.mock('./media', () => ({mediaTicket: vi.fn()}));
 import {ApiError} from './transport';
+import {COLLECTION_NAME_IN_TRASH} from '../src/collections/collectionEditFields';
 import {Collections} from './Collections';
 import {TrashLayer} from './TrashLayer';
 import {NotesStore} from '../src/notes/store';
@@ -232,6 +233,18 @@ describe('activation-gated tablet forms', () => {
     fireEvent.change(screen.getByRole('textbox', {name: /^이름/}), {target: {value: '다른 이름'}}); fireEvent.click(screen.getByRole('button', {name: '저장'}));
     await waitFor(() => expect(sent()).toHaveLength(2));
     expect(sent()[1].name).toBe('다른 이름'); expect(sent()[1].operationId).not.toBe(first);
+  });
+  it.each(['create', 'rename'])('explains a trashed name in the %s dialog', async mode => {
+    localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));
+    command = () => new ApiError('중복', 409, {detail: {code: 'nameConflict', lifecycle: 'trashed'}});
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    if (mode === 'create') fireEvent.click((await screen.findAllByRole('button', {name: '새 작품'}))[0]);
+    else { fireEvent.click(await screen.findByText(item.name)); await openEdit(); }
+    fireEvent.change(screen.getByLabelText('이름'), {target: {value: 'Reserved'}});
+    fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    if (mode === 'create') fireEvent.click(await screen.findByRole('button', {name: '확인'}));
+    expect(await screen.findByText(COLLECTION_NAME_IN_TRASH)).toBeTruthy();
+    expect((screen.getByRole('textbox', {name: /^이름/}) as HTMLInputElement).value).toBe('Reserved');
   });
   it('edits the name and basic info in one 컬렉션 편집 form, sending only changed fields in one updateWork', async () => {
     localStorage.setItem('lakomics.mobile.collectionView.game.v1', JSON.stringify({layout: 'grid', perRow: 4}));

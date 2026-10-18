@@ -41,7 +41,7 @@ test("track choice: human Japanese captions always win; Japanese auto-captions o
 
 test("the Kotoba track key fits the server cache and is not a human or ':asr' key", () => {
   assert.equal(choice.TRACK_KEY, "kotoba:ja");
-  assert.equal(globalThis.LakomicsYouTube.serverCache.validIdentity("zuMy38hC5eU", choice.TRACK_KEY, "translate-ko-auto+t6"), true);
+  assert.equal(globalThis.LakomicsYouTube.serverCache.validIdentity("zuMy38hC5eU", choice.TRACK_KEY, "translate-ko-auto+t8"), true);
   assert.equal(choice.TRACK_KEY.endsWith(":asr"), false);
 });
 
@@ -109,8 +109,8 @@ test("a kotoba:ja track is translated, stored under its own key, and ends its cu
   await tick();
   assert.equal(result.ok, true);
   assert.ok(result.cues.at(-1).endMs < 4000, `ends at ${result.cues.at(-1).endMs}`);
-  assert.ok(stored["lakomics:youtube:subs:v2:zuMy38hC5eU:kotoba:ja:translate-ko-auto+t6"]);
-  assert.deepEqual(stored["lakomics:youtube:subs:index"].zuMy38hC5eU, ["kotoba:ja|translate-ko-auto+t6"]);
+  assert.ok(stored["lakomics:youtube:subs:v2:zuMy38hC5eU:kotoba:ja:translate-ko-auto+t8"]);
+  assert.deepEqual(stored["lakomics:youtube:subs:index"].zuMy38hC5eU, ["kotoba:ja|translate-ko-auto+t8"]);
   const human = await send(process("ja:std"));
   assert.ok(human.cues.at(-1).endMs >= 7000, `human track ends at ${human.cues.at(-1).endMs}`);
 });
@@ -118,7 +118,7 @@ test("a kotoba:ja track is translated, stored under its own key, and ends its cu
 test("getCached shows the PC's result before YouTube's automatic one", async (t) => {
   const { stored, send } = workerSetup(t);
   const entry = (text) => ({ cues: [{ startMs: 0, endMs: 900, text }], model: "m", createdAt: 1 });
-  const mode = "translate-ko-auto+t6";
+  const mode = "translate-ko-auto+t8";
   stored["lakomics:youtube:subs:index"] = { zuMy38hC5eU: [`ja:asr|${mode}`, `kotoba:ja|${mode}`, `ja:std|${mode}`] };
   stored[`lakomics:youtube:subs:v2:zuMy38hC5eU:ja:asr:${mode}`] = entry("자동 자막");
   stored[`lakomics:youtube:subs:v2:zuMy38hC5eU:kotoba:ja:${mode}`] = entry("PC 받아쓰기");

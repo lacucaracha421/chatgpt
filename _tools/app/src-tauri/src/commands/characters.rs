@@ -1378,3 +1378,34 @@ pub async fn character_registration_preview(request: crate::library::character_c
     let library=current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_registration_preview(request)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn claude_member_status(state: State<'_, AppState>) -> Result<crate::library::character_claude::member_run::MemberStatus,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.member_status()).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn claude_member_plan(state: State<'_, AppState>) -> Result<crate::library::character_claude::member_run::MemberStatus,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.member_plan()).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn claude_member_control(action:String,cap_usd:Option<f64>,plan_id:Option<String>,ongoing_enabled:Option<bool>,state: State<'_, AppState>) -> Result<crate::library::character_claude::member_run::MemberStatus,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.member_control(&action,cap_usd,plan_id.as_deref(),ongoing_enabled)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn claude_member_excluded_folders(state: State<'_, AppState>) -> Result<Vec<crate::library::character_claude::member_run::ExcludedFolder>,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.member_excluded_folders()).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn claude_member_set_excluded_folders(ids:Vec<String>,state: State<'_, AppState>) -> Result<Vec<crate::library::character_claude::member_run::ExcludedFolder>,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_member_excluded_folders(&ids)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn claude_member_recommendations(state: State<'_, AppState>) -> Result<Vec<crate::library::character_shadow_review::ShadowReviewItem>,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.member_recommendations()).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}

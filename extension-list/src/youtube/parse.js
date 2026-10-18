@@ -21,12 +21,14 @@ function stripNonSpeech(raw) {
 function parseJson3(json) {
   const data = typeof json === "string" ? JSON.parse(json) : json;
   const events = Array.isArray(data && data.events) ? data.events : [];
+  const rolling = events.some(ev => ev?.aAppend && ev.wWinId != null);
 
   const units = [];
   const eventEnds = []; // parallel to units: event end for the last unit of an event, else null
 
   for (const ev of events) {
-    if (!ev || ev.aAppend || !Array.isArray(ev.segs)) continue;
+    // Append events may contain new speech too; a bare newline contributes no unit.
+    if (!ev || !Array.isArray(ev.segs)) continue;
 
     const eventStart = Number(ev.tStartMs) || 0;
     const eventEnd = ev.dDurationMs != null ? eventStart + (Number(ev.dDurationMs) || 0) : null;
@@ -44,6 +46,25 @@ function parseJson3(json) {
     if (units.length > before) eventEnds[units.length - 1] = eventEnd;
   }
 
+  // Rolling windows overlap in presentation time. Repeated words with the same source timestamp
+  // belong to the transcript once, while genuinely repeated speech at a later time stays intact.
+  const ordered = units.map((unit, i) => ({ unit, eventEnd: eventEnds[i] }))
+    .sort((a, b) => a.unit.startMs - b.unit.startMs);
+  const seen = new Map();
+  units.length = 0;
+  eventEnds.length = 0;
+  for (const { unit, eventEnd } of ordered) {
+    const key = JSON.stringify([unit.startMs, unit.text, unit.speaker]);
+    const prior = seen.get(key);
+    if (prior !== undefined) {
+      if (eventEnd != null) eventEnds[prior] = Math.max(eventEnds[prior] ?? 0, eventEnd);
+      continue;
+    }
+    seen.set(key, units.length);
+    units.push(unit);
+    eventEnds.push(eventEnd);
+  }
+
   let trackEnd = 0;
   for (let i = 0; i < units.length; i++) {
     const unit = units[i];
@@ -56,6 +77,10 @@ function parseJson3(json) {
       end = next ? next.startMs : unit.startMs;
     }
     unit.endMs = Math.max(end, unit.startMs);
+    // json3 supplies word onsets, not acoustic word ends. Preserve its bounded source interval
+    // for rolling captions instead of shortening it by the translated/source character count.
+    // This is transient input metadata, never part of a cached/display cue.
+    if (rolling) unit.sourceEndMs = unit.endMs;
     trackEnd = Math.max(trackEnd, unit.endMs);
   }
 

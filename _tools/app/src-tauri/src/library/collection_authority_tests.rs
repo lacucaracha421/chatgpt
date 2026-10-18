@@ -1699,6 +1699,91 @@ fn core_edit(kind: &str, name: &str) -> super::super::models::UpdateCollection {
 }
 
 #[test]
+fn collection_authority_create_refuses_name_in_trash_before_queueing() {
+    use super::super::models::{CollectionType, CreateCollection};
+    let (_temp, l, s) = fixture();
+    let mut trashed = work("trash", 2);
+    trashed["type"] = json!("game");
+    trashed["name"] = json!("Game Ä  Name");
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    adopt(&l, &s, json!({"works":[trashed]}));
+    let create = |kind, name: &str| l.create_collection(CreateCollection {
+        name: name.into(), description: None, collection_type: kind,
+    });
+    assert!(matches!(create(CollectionType::Game, " \u{1c}gAME Ä  Name\u{1f} "),
+        Err(LibraryError::CollectionNameInTrash)));
+    assert!(core_bodies(&l).is_empty());
+    assert!(l.list_collections().unwrap().is_empty());
+    // The server folds ASCII only, preserves internal whitespace, and scopes by type.
+    create(CollectionType::Game, "Game ä  Name").unwrap();
+    create(CollectionType::Game, "Game Ä Name").unwrap();
+    create(CollectionType::Movie, "Game Ä  Name").unwrap();
+}
+
+#[test]
+fn collection_authority_rename_refuses_name_in_trash_without_changing_work() {
+    let (_temp, l, s) = fixture();
+    let mut trashed = work("trash", 2);
+    trashed["type"] = json!("game");
+    trashed["name"] = json!("Reserved");
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    adopt(&l, &s, json!({"works":[trashed]}));
+    let created = core_create(&l, "Original");
+    assert!(matches!(l.update_collection(&created.id, core_edit("game", " reserved ")),
+        Err(LibraryError::CollectionNameInTrash)));
+    assert_eq!(l.get_collection(&created.id).unwrap().name, "Original");
+    assert_eq!(core_bodies(&l).len(), 1);
+    l.update_collection(&created.id, core_edit("game", "Available")).unwrap();
+}
+
+#[test]
+fn collection_authority_provider_create_refuses_name_in_trash_before_queueing() {
+    let (_temp, l, s) = fixture();
+    let mut trashed = work("trash", 2);
+    trashed["type"] = json!("movie");
+    trashed["name"] = json!("Imported");
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    adopt(&l, &s, json!({"works":[trashed]}));
+    let input = super::super::models::ExternalBindingInput {
+        provider: "tmdb".into(), external_id: "42".into(), provider_config_json: None,
+        provider_data_json: Some(json!({"id":42,"overview":"B"}).to_string()),
+        last_synced_at: None,
+    };
+    assert!(matches!(l.queue_provider_operation("w", Some(" imported "), "movie", Some(input), &[], &[]),
+        Err(LibraryError::CollectionNameInTrash)));
+    assert!(core_bodies(&l).is_empty());
+    assert!(l.list_collections().unwrap().is_empty());
+}
+
+#[test]
+fn collection_authority_mangadex_create_refuses_name_in_trash_before_queueing() {
+    use super::super::{mangadex, models::{MangaDexApplyRequest, MangaDexApplyTarget}};
+    let (_temp, l, s) = fixture();
+    let mut trashed = work("trash", 2);
+    trashed["name"] = json!("Manga");
+    trashed["lifecycle"] = json!("trashed");
+    trashed["trashedAt"] = json!(NOW);
+    adopt(&l, &s, json!({"works":[trashed]}));
+    let mut preview = mangadex::parse_work_preview(
+        include_str!("fixtures/mangadex_detail.json"),
+        include_str!("fixtures/mangadex_covers.json"),
+    ).unwrap();
+    preview.covers.clear();
+    let request = MangaDexApplyRequest {
+        target: MangaDexApplyTarget::New { name: " manga ".into() },
+        manga_id: preview.manga_id.clone(), title: None,
+    };
+    let fetched = mangadex::MangaDexFetchedWork { preview, snapshot_json: "{}".into() };
+    assert!(matches!(l.apply_fetched_mangadex(request, fetched, None),
+        Err(LibraryError::CollectionNameInTrash)));
+    assert!(core_bodies(&l).is_empty());
+    assert!(l.list_collections().unwrap().is_empty());
+}
+
+#[test]
 fn collection_authority_core_crud_and_records_use_exact_commands_and_atomic_local_state() {
     use super::super::collection_pc::WorkRecordEdit;
     let (_temp, l, s) = fixture();

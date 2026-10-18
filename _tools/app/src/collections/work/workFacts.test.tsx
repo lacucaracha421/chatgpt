@@ -6,7 +6,7 @@ it("shows an AV work's stored genres by Korean name and leaves sale and distribu
   const rows = workFacts({ type: "av" }, { genres: ["痴女", "セール対象商品", "ギリモザ", "ハイビジョン"], productCode: "ABC-123" });
   const tags = rows.find(([label]) => label === "태그")!;
   render(<>{tags[1]}</>);
-  expect(screen.getAllByText(/./).map(node => node.textContent)).toEqual(["치녀", "ギリモザ"]);
+  expect(screen.getAllByText(/./).map(node => node.textContent)).toEqual(["치녀", "아슬아슬 모자이크"]);
 });
 
 it("shows no tag row when every stored genre is hidden", () => {

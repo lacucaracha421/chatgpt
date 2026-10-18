@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
-import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
+import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_IN_TRASH, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
   collectionEditDraft, collectionEditError, collectionEditValue, type CollectionCreateType} from '../src/collections/collectionEditFields';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
 import {createdWork, isPersonCommand, discardLifecycle, isLifecycle, lifecycleInFlight, rebasePersonCommand, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
@@ -74,7 +74,7 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
   return <Dialog open title={title} onClose={onClose}><DialogDescription className="sr-only">작품 정보를 저장합니다.</DialogDescription>
     <form className={`library-sheet collection-authority-form${form.mode === 'create' ? ' collection-create-form' : ''}`} onSubmit={event => { event.preventDefault(); if (!pending) save(); }}>
       <div className="collection-authority-form__fields">
-        <Field label="이름" error={nameConflict ? '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
+        <Field label="이름" error={nameConflict ? intent?.conflict?.lifecycle === 'trashed' ? COLLECTION_NAME_IN_TRASH : '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
         {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
           <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={setCreateType}/></>}
         {form.mode === 'edit' && COLLECTION_EDIT_FIELDS[type].map(field => <Field key={field.key} label={field.label}><TextInput {...COLLECTION_EDIT_INPUT[field.control]} value={draft[field.key] ?? ''} maxLength={field.maxLength} disabled={pending} onChange={event => change(field.key, event.target.value)}/></Field>)}

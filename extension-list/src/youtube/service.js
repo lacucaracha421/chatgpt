@@ -4,7 +4,7 @@
 // the selected AI service, caches the cleaned cues and keeps a running usage total.
 const { requestBudget } = globalThis.LakomicsYouTube.deadline;
 const { parseJson3 } = globalThis.LakomicsYouTube.parse;
-const { chunkUnits, chunkContexts, chunkFollowing } = globalThis.LakomicsYouTube.chunk;
+const { chunkUnits, chunkContexts, chunkFollowing, subtitleSlotProblem } = globalThis.LakomicsYouTube.chunk;
 const { chunkOrder, chunkRange } = globalThis.LakomicsYouTube.order;
 const { applyResult, coverageProblem, fallbackSegment, repairLines } = globalThis.LakomicsYouTube.cues;
 const { splitDisplayCues } = globalThis.LakomicsYouTube.display;
@@ -56,7 +56,8 @@ async function readSettings() {
 // and gives it to every chunk, so results made with per-chunk registers are made once more.
 // A video matching a channel style rule (prompts.STYLE_RULES) also carries that rule's id (+avgn1), so only
 // its results are re-made when the rule is added or changed; other videos keep their +t6 keys.
-const PROCESSING_VERSION = "+t6";
+// t8 (3.5.55): prefer explicit source clause boundaries and convert Korean measurements to metric.
+const PROCESSING_VERSION = "+t8";
 
 // Human-made caption tracks (`en:std`) hold whole caption events; `:asr` tracks hold single words. The PC's own
 // recognition (`kotoba:ja`) has real word ends, but Whisper stretches the last word of a phrase across the pause
@@ -300,7 +301,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
 
       let applied = applyResult(chunk, result.lines, { mode, human });
       if (mode === "translate-ko") {
-        const problem = coverageProblem(chunk.length, result.lines);
+        const problem = coverageProblem(chunk.length, result.lines) || subtitleSlotProblem(chunk, result.lines);
         const offending = offendingKoreanCues(applied);
         if (problem || offending.length) {
           if (problem) console.warn(`[Lakomics YouTube] chunk ${index}: ${problem} (attempt 1)`);
@@ -317,7 +318,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
             addUsageOf(retry);
             const retryCues = applyResult(chunk, retry.lines, { mode, human });
             const retryOffending = offendingKoreanCues(retryCues);
-            const retryProblem = coverageProblem(chunk.length, retry.lines);
+            const retryProblem = coverageProblem(chunk.length, retry.lines) || subtitleSlotProblem(chunk, retry.lines);
             if (retryProblem) console.warn(`[Lakomics YouTube] chunk ${index}: ${retryProblem} (attempt 2)`);
             if (retryOffending.length) console.warn(`[Lakomics YouTube] chunk ${index}: kana/CJK remain in ${retryOffending.length} cues after retry`);
             // Script cleanup takes priority; coverage alone keeps the existing retry behavior,
@@ -333,6 +334,9 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
             console.warn(`[Lakomics YouTube] chunk ${index}: retry failed (${err.message}); using the first response`);
           }
         }
+        // A response that still moves source slots cannot be shown as a successful translation.
+        // Keep the source captions available and allow the existing partial-failure retry flow.
+        if (subtitleSlotProblem(chunk, result.lines)) throw new Error(subtitleSlotProblem(chunk, result.lines));
       }
 
       outcome = { cues: applied, register: result.register, failed: false };

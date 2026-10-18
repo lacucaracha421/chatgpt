@@ -12,8 +12,8 @@ test("human track keeps a long caption event's own end instead of cutting it sho
   const human = applyResult(units, lines, { mode: "translate-ko", human: true });
   assert.equal(human[0].startMs, 39540);
   assert.equal(human[0].endMs, 45540);
-  // Displayed until just before the next caption starts (the 40 ms gap is bridged to 80 ms).
-  assert.equal(finalizeTimings(human)[0].endMs, 45600 - 80);
+  // The guard uses only the available silence; it cannot shorten the source event.
+  assert.equal(finalizeTimings(human)[0].endMs, 45540);
   // Word tracks only know a start, so the same event is a single estimated word there.
   const asr = applyResult(units, lines, { mode: "translate-ko" });
   assert.equal(asr[0].endMs, 39540 + 1200);

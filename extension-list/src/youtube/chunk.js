@@ -36,6 +36,50 @@ function chunkUnits(units, maxWords = 600) {
   return chunks;
 }
 
+// Source slots are chosen before translation. Rolling captions provide bounded word intervals;
+// the model translates each slot in place and cannot move the next clause to suit Korean length.
+function subtitleSlots(units) {
+  if (!units.length || !units.every(u => Number.isFinite(u.sourceEndMs))) return [];
+  const slots = [];
+  let from = 0;
+  while (from < units.length) {
+    let to = from;
+    let clause = -1;
+    let connective = -1;
+    let fallback = from;
+    for (let i = from; i < units.length; i++) {
+      const duration = units[i].sourceEndMs - units[from].startMs;
+      if (i > from && duration > 7000) {
+        to = clause >= from ? clause : connective >= from ? connective : fallback;
+        // If punctuation is absent, leave an article/preposition with the phrase it introduces.
+        while (to > from && /^(?:a|an|the|to|of|for|with|in|on|and|but)$/iu.test(units[to].text)) to--;
+        break;
+      }
+      to = i;
+      if (duration <= 5000) fallback = i;
+      const enough = duration >= 1000;
+      if (enough && /[.!?。！？][\s"'\p{Pe}\p{Pf}]*$/u.test(units[i].text)) break;
+      if (enough && /[,;:，；：]$/u.test(units[i].text)) clause = i;
+      const next = units[i + 1];
+      // A guessed connective must not overwrite an explicit clause end: "and" can
+      // belong to "5 and 1/2 ft", and "that" to "that far away" within a clause.
+      if (next && duration >= 2000 && /^(?:and|but|so|because|while|which|that|when|where|if|although|in)$/iu.test(next.text)) connective = i;
+      if (next && next.startMs - units[i].sourceEndMs >= 700) break;
+    }
+    slots.push({ from, to, startMs: units[from].startMs, endMs: units[to].sourceEndMs });
+    from = to + 1;
+  }
+  return slots;
+}
+
+function subtitleSlotProblem(units, lines) {
+  const slots = subtitleSlots(units);
+  if (!slots.length) return null;
+  return Array.isArray(lines) && lines.length === slots.length &&
+    slots.every((slot, i) => lines[i]?.from === slot.from && lines[i]?.to === slot.to)
+    ? null : "Use exactly the supplied source subtitle slots, one line per slot with unchanged from/to indices.";
+}
+
 // The PC's recognition labels who speaks (unit.speaker, 0 for the first voice found in the audio); the prompt shows
 // that as [S1], [S2] ... in front of a word. Speakers are numbered from 1 there.
 const speakerLabel = (speaker) => `[S${speaker + 1}]`;
@@ -101,5 +145,5 @@ function chunkFollowing(chunks, maxWords = FOLLOWING_WORDS) {
   });
 }
 
-(globalThis.LakomicsYouTube ??= {}).chunk = { chunkUnits, buildPrompt, hasSpeakers, speakerLabel, CONTEXT_WORDS, FOLLOWING_WORDS, CONTEXT_HEADER, FOLLOWING_HEADER, LIST_HEADER, chunkContexts, chunkFollowing };
+(globalThis.LakomicsYouTube ??= {}).chunk = { chunkUnits, subtitleSlots, subtitleSlotProblem, buildPrompt, hasSpeakers, speakerLabel, CONTEXT_WORDS, FOLLOWING_WORDS, CONTEXT_HEADER, FOLLOWING_HEADER, LIST_HEADER, chunkContexts, chunkFollowing };
 })();

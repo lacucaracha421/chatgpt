@@ -9,15 +9,15 @@ import { JSDOM } from "../../_tools/app/node_modules/jsdom/lib/api.js";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const oldCues = [{ startMs: 0, endMs: 300, text: "이전 자막" }];
-const cacheKey = "lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t6";
-const resumeKey = "lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t6";
+const cacheKey = "lakomics:youtube:subs:v2:resume-video:en:asr:translate-ko-auto+t8";
+const resumeKey = "lakomics:youtube:resume:v1:resume-video:translate-ko-auto+t8";
 
 async function setup(t) {
   const old = { chrome: globalThis.chrome, fetch: globalThis.fetch };
   t.after(() => { globalThis.chrome = old.chrome; globalThis.fetch = old.fetch; });
   const stored = { "lakomics:translation:v1": { anthropicApiKey: "mock-key" },
     [cacheKey]: { cues: oldCues, model: "test", createdAt: 1 },
-    "lakomics:youtube:subs:index": { "resume-video": ["en:asr|translate-ko-auto+t6"] } };
+    "lakomics:youtube:subs:index": { "resume-video": ["en:asr|translate-ko-auto+t8"] } };
   let listener;
   globalThis.chrome = {
     storage: { local: {
@@ -31,7 +31,7 @@ async function setup(t) {
   loadWorker();
   // A paired server that holds an older copy of the result.
   const requests = [];
-  const remote = { version: 1, video: "resume-video", track: "en:asr", mode: "translate-ko-auto+t6", model: "test", createdAt: 1,
+  const remote = { version: 1, video: "resume-video", track: "en:asr", mode: "translate-ko-auto+t8", model: "test", createdAt: 1,
     register: null, glossary: [], cues: [{ startMs: 0, endMs: 300, text: "서버 자막" }] };
   globalThis.LakomicsListApi = { readConnection: async () => ({}), connectionIdentity: () => "paired",
     request: async (path, options = {}) => {
