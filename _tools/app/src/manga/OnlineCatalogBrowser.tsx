@@ -3,7 +3,7 @@ import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
@@ -719,6 +719,12 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     observer.observe(target);
     return () => observer.disconnect();
   }, [canAutoLoad, results]);
+  // Stable card handlers (latest closures through a ref) so memoized cards skip re-rendering on append.
+  const cardActions = useRef({ openDetail, readWork, bookmarkWork });
+  cardActions.current = { openDetail, readWork, bookmarkWork };
+  const cardOpen = useCallback((selected: CatalogWork, opener: HTMLButtonElement) => { void cardActions.current.openDetail(selected, selected as CatalogGroupedWork, opener); }, []);
+  const cardRead = useCallback((selected: CatalogWork, opener: HTMLButtonElement) => { void cardActions.current.readWork(selected, selected.artists.join(" · ") || null, opener); }, []);
+  const cardBookmark = useCallback((identity: CatalogWorkIdentity, bookmarked: boolean) => { void cardActions.current.bookmarkWork(identity, bookmarked); }, []);
   const scrubberSort = useMemo<ScrubberSort>(() => results && displayedView.current?.sort === "latest"
     ? {kind: "date", values: results.works.map(work => work.posted)} : {kind: "fallback"}, [results]);
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
@@ -767,9 +773,9 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
               opening={reading || loading || !active || requestedSource === "local"}
               selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
               bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
-              onOpen={(selected, opener) => void openDetail(selected, work, opener)}
-              onRead={(selected, opener) => void readWork(selected, selected.artists.join(" · ") || null, opener)}
-              onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
+              onOpen={cardOpen}
+              onRead={cardRead}
+              onBookmark={cardBookmark}
             />)}
           </div>
           {loadingMore && <MangaSkeletonGrid more />}

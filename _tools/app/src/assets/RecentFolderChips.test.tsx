@@ -27,7 +27,6 @@ it("shows five stable chips, disambiguates duplicate names and opens all eight f
   render(<RecentFolders state={history} />);
   const group = screen.getByRole("group", { name: "최근 폴더" });
   expect(within(group).getAllByRole("button")).toHaveLength(6);
-  expect(screen.getByLabelText("숨겨진 폴더 3개")).toBeVisible();
   const current = within(group).getByRole("button", { name: /폴더 2 › ?풍경/ });
   expect(current).toHaveAccessibleDescription("폴더 2 › 풍경");
   expect(current).toHaveAttribute("aria-current", "page");
@@ -40,16 +39,14 @@ it("shows five stable chips, disambiguates duplicate names and opens all eight f
   expect(history.open).toHaveBeenLastCalledWith(folders[7]);
 });
 
-it("drops chips from the end as space shrinks and counts every hidden entry", () => {
+it("drops chips from the end as space shrinks", () => {
   const history = state();
   let room = 250;
   layout(() => room);
   const { rerender } = render(<RecentFolders state={history} />);
-  expect(screen.getByLabelText("숨겨진 폴더 6개")).toBeVisible();
   expect(screen.queryByRole("button", { name: "폴더 2" })).not.toBeInTheDocument();
   room = 0;
   rerender(<RecentFolders state={{ ...history, folders: [...history.folders] }} />);
-  expect(screen.getByLabelText("숨겨진 폴더 8개")).toBeVisible();
   expect(screen.getAllByRole("button")).toHaveLength(1);
 });
 

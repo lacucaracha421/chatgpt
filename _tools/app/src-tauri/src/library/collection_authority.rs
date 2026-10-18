@@ -2616,7 +2616,10 @@ fn apply_entities(
     let map = entities
         .as_object()
         .ok_or(LibraryError::InvalidCloudResponse)?;
-    if map.keys().any(|s| !SECTIONS.contains(&s.as_str())) {
+    if map
+        .keys()
+        .any(|s| !SECTIONS.contains(&s.as_str()) && s != "deletedPeople")
+    {
         return Err(LibraryError::InvalidCloudResponse);
     }
     let mut count = 0;
@@ -2625,6 +2628,13 @@ fn apply_entities(
             for v in rows.as_array().ok_or(LibraryError::InvalidCloudResponse)? {
                 count += usize::from(apply_entity(tx, section, v, generation, now)?);
             }
+        }
+    }
+    // People ride inside their works; only a person deleted without any credit has no work to
+    // carry the news, so the feed names it here (not a baseline section).
+    if let Some(rows) = map.get("deletedPeople") {
+        for v in rows.as_array().ok_or(LibraryError::InvalidCloudResponse)? {
+            count += usize::from(forget_deleted_person(tx, v)?);
         }
     }
     Ok(count)

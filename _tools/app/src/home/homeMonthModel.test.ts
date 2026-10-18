@@ -8,13 +8,13 @@ import { gridDates, homeLedger, ledgerLists, monthDays, monthSavedQueries, month
 const entry = (id: string, date: string, amount: number, extra: Partial<LedgerEntry> = {}): LedgerEntry => ({ id, date, amount, name: id, createdAt: `${date}T00:00:00Z`, ...extra });
 
 describe("month grid", () => {
-  it("always shows six Monday-first weeks around the month", () => {
+  it("always shows six Sunday-first weeks around the month", () => {
     const dates = gridDates("2026-09");
     expect(dates).toHaveLength(42);
-    expect(dates[0]).toBe("2026-08-31");
-    expect(dates[41]).toBe("2026-10-11");
+    expect(dates[0]).toBe("2026-08-30");
+    expect(dates[41]).toBe("2026-10-10");
     // February 2027 starts on a Monday and still gets six rows.
-    expect(gridDates("2027-02")[0]).toBe("2027-02-01");
+    expect(gridDates("2027-02")[0]).toBe("2027-01-31");
     expect(gridDates("2027-02")).toHaveLength(42);
   });
 
@@ -59,11 +59,11 @@ describe("month grid", () => {
     const days = queries.flatMap(query => query.localDays!);
     expect(queries.every(query => query.imagesOnly && query.localDays!.length <= 31)).toBe(true);
     expect(days).toHaveLength(42);
-    expect(queries[0]!.startUtc).toBe(new Date(2026, 7, 31).toISOString());
-    expect(queries[queries.length - 1]!.endUtc).toBe(new Date(2026, 9, 12).toISOString());
+    expect(queries[0]!.startUtc).toBe(new Date(2026, 7, 30).toISOString());
+    expect(queries[queries.length - 1]!.endUtc).toBe(new Date(2026, 9, 11).toISOString());
     days.forEach((range, index) => {
-      expect(range.startUtc).toBe(new Date(2026, 7, 31 + index).toISOString());
-      expect(range.endUtc).toBe(new Date(2026, 7, 32 + index).toISOString());
+      expect(range.startUtc).toBe(new Date(2026, 7, 30 + index).toISOString());
+      expect(range.endUtc).toBe(new Date(2026, 7, 31 + index).toISOString());
     });
   });
 });

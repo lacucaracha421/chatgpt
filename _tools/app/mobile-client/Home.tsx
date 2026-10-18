@@ -284,9 +284,12 @@ export function Home(props: HomeProps) {
       onSelect={date => setShown(previous => ({month: previous.month ?? month, selected: date}))}
       onOpenDay={date => { setShown(previous => ({month: previous.month ?? month, selected: date})); setDaySheet(date); }}
       onToday={() => setShown({month: null, selected: null})} onOpenCalendar={props.onReleases} />
-    {/* Always two halves (user 2026-10-16): the card never takes the whole row; an empty 오늘 할 것 shows its empty line. */}
-    <div className="home-tablet-pair">
+    {/* As the PC column (user 2026-10-18): 오늘의 카드 beside 전송, then 오늘 할 것 beside 빠른 메모. The card still never takes the whole row (2026-10-16). */}
+    <div className="home-tablet-pair is-card">
       <div className="home-tablet-card"><TabletDailyCard privacy={privacy} root={props.scope} active={!paused} onOpenAlbum={() => props.onAlbum?.()} /></div>
+      <TabletTransfer exchange={props.exchange} onOpenDetail={props.onExchange} />
+    </div>
+    <div className="home-tablet-pair">
       <div className="home-tablet-today"><TabletHomeToday rows={rows} onOpen={row => {
         if (row.noteId) props.onNotes(row.noteId);
         else if (row.key === 'unsorted') props.onUnclassified();
@@ -297,9 +300,6 @@ export function Home(props: HomeProps) {
         else if (row.key === 'connection:exchange') props.onExchange();
         else if (row.key.startsWith('connection:')) props.onSettings();
       }} /></div>
-    </div>
-    <div className="home-tablet-pair">
-      <TabletTransfer exchange={props.exchange} onOpenDetail={props.onExchange} />
       <HomeQuickMemo store={notesStore} root={props.scope} onOpenNotes={() => props.onNotes()} />
     </div>
     </div>}

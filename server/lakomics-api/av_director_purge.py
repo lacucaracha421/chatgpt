@@ -18,6 +18,7 @@ tablet remember a person once the server confirmed it (a hand-deleted row would 
 ``setAvCredits`` that re-uses the person fail), and a person without credits is not part of any
 work's feed. A person who only ever had director credits therefore stays as an unreferenced
 record (memo, favourite and portrait kept); only the PC's "add a person" search can show it.
+``av_person_purge.py`` later removes such records through the ``deletePerson`` command.
 
 Trashed works are skipped (a trashed work accepts no edits) and counted; run it again after
 restoring one. Run on the server from the API directory: ``python3 av_director_purge.py``.

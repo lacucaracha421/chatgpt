@@ -35,6 +35,6 @@ export function TabletMonth({onOpenDay, ...props}: Omit<ComponentProps<typeof Ho
   return <div className="home-tablet-month" onClick={onClick}
     onTouchStart={event => { const point = event.touches[0]; touch.current = point ? {x: point.clientX, y: point.clientY} : null; }}
     onTouchEnd={onTouchEnd} onTouchCancel={() => { touch.current = null; }}>
-    <HomeMonth {...props} onEnterPanel={onOpenDay} />
+    <HomeMonth {...props} chargeAmounts={false} onEnterPanel={onOpenDay} />
   </div>;
 }

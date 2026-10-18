@@ -87,7 +87,7 @@ export type HomeViewProps = {
   linksRequest?: object;
 };
 
-/** PC Home (layout A): the release calendar and the tools on the left, today's card and attention on the right. */
+/** PC Home (layout A): the month calendar and the day panel on the left; today's card beside 전송, then attention and 빠른 메모 on the right. */
 
 export function HomeView({ collections, collectionsReady = true, overviewReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onOpenAsset, onQueuesRequested, notes, confirmSource, confirmApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, exchange, subscribeDrops, pickFiles, linksRequest }: HomeViewProps) {
   const [cardAlbum, setCardAlbum] = useState(false);
@@ -461,7 +461,11 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         </>}
       </div>
       <div className="home-day-column">
-      {!firstLoad && <HomeDailyCard key={root} root={root} active={active} onAlbum={() => setCardAlbum(true)} />}
+      {/* 오늘의 카드 and 전송 share one row (user 2026-10-18): the card takes only its own width, the drop tile the rest. */}
+      {!firstLoad && <div className="home-day-pair">
+        <HomeDailyCard key={root} root={root} active={active} onAlbum={() => setCardAlbum(true)} />
+        <HomeTransfer enabled={active && visible} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />
+      </div>}
       {!firstLoad && todayRows.length > 0 && <HomeToday rows={todayRows} animate={false} onOpen={row => {
         if (row.noteId) onNavigate({ kind: 'notes', noteId: row.noteId });
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }
@@ -469,7 +473,6 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
         else todos.find(todo => todo.key === row.key)?.open();
       }} />}
       {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}
-      {!firstLoad && <HomeTransfer at={at} enabled={active && visible} store={exchange} subscribeDrops={subscribeDrops} pickFiles={pickFiles} onOpenDetail={() => onNavigate({ kind: 'exchange' })} />}
       {!firstLoad && <HomeQuickMemo store={store} root={root} onOpenNotes={() => onNavigate({ kind: 'notes' })} />}
       </div>
     </div></div>

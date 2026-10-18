@@ -2020,13 +2020,13 @@ pub fn start_asset_drag(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_manga_root(state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
     let library = current_required(state)?;
     library.manga_root().map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_other_machine_manga_root(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, CommandError> {
@@ -2099,7 +2099,7 @@ pub async fn refresh_local_manga_thumbnails(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
@@ -2120,7 +2120,7 @@ pub async fn get_manga_frequent_index(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_manga_index_pins(
     state: State<'_, AppState>,
 ) -> Result<Vec<MangaIndexIdentity>, CommandError> {
@@ -2128,7 +2128,7 @@ pub fn list_manga_index_pins(
     library.list_manga_index_pins().map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_manga_index_pin(
     identity: MangaIndexIdentity,
     state: State<'_, AppState>,
@@ -2139,7 +2139,7 @@ pub fn add_manga_index_pin(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_manga_index_pin(
     identity: MangaIndexIdentity,
     state: State<'_, AppState>,
@@ -2303,7 +2303,7 @@ pub async fn get_online_catalog_status(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_catalog_visibility_policy(
     state: State<'_, AppState>,
 ) -> Result<CatalogVisibilityPolicy, CommandError> {
@@ -2312,7 +2312,7 @@ pub fn get_catalog_visibility_policy(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_catalog_category_hidden(
     category: i64,
     hidden: bool,
@@ -2323,7 +2323,7 @@ pub fn set_catalog_category_hidden(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_catalog_tag_blocked(
     tag: CatalogBlockedTag,
     blocked: bool,
@@ -2533,7 +2533,7 @@ pub async fn get_online_catalog_work_detail(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_online_catalog_bookmark(
     identity: CatalogWorkIdentity,
     bookmarked: bool,

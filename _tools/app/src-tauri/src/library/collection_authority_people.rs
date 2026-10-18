@@ -384,6 +384,32 @@ fn receive_person(tx: &Transaction<'_>, person: &Value, now: &str) -> Result<(),
     Ok(())
 }
 
+/// The server deleted an unreferenced person (`deletedPeople`): forget everything this PC kept
+/// for it, including the remembered confirmation, so a later credit supplies the person again and
+/// "add a person" no longer finds it. A person some local credit still uses is left alone.
+fn forget_deleted_person(tx: &Transaction<'_>, change: &Value) -> Result<bool, LibraryError> {
+    let l = local(tx)?.ok_or(LibraryError::CollectionAuthorityNotAdopted)?;
+    let id = safe_id(text(change, "personId")?)?;
+    if tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collection_person_relations WHERE person_id=?1)",
+        [id],
+        |r| r.get::<_, bool>(0),
+    )? {
+        return Ok(false);
+    }
+    for table in ["collection_authority_people_cache", "collection_authority_people_reconcile"] {
+        tx.execute(
+            &format!("DELETE FROM {table} WHERE library_id=?1 AND epoch=?2 AND person_id=?3"),
+            params![l.id.library, l.id.epoch, id],
+        )?;
+    }
+    tx.execute("DELETE FROM notes_state WHERE key=?1", [confirmed_av_person_key(tx, id)?])?;
+    for table in ["collection_person_portraits", "collection_person_profiles", "av_favorite_performers"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE person_id=?1"), [id])?;
+    }
+    Ok(tx.execute("DELETE FROM collection_people WHERE id=?1", [id])? > 0)
+}
+
 pub(crate) fn enqueue_person_changes(
     tx: &Transaction<'_>,
     status: &CollectionAuthorityStatus,

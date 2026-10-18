@@ -1,0 +1,145 @@
+/* PROPOSED CSS: classic Sunday-first month grid for Home (HOME-CAL classic, 2026-10-18).
+   Would replace the grid part of src/home/homeMonth.css (the .home-cal--month rules); the day panel rules stay.
+   Tablet sizes come from the tablet tokens (mobile.css), so the same rules serve both clients. */
+
+/* ---------- Calendar palette (user 2026-10-18: ignore the app theme, one harmonious set for this calendar) ----------
+   Kind faces are solid, near-equal in chroma, with lightness spread on purpose (0.41-0.54 OKLCH) so they stay apart
+   for deutan / protan / tritan vision; white chip text is >= 4.8:1 on every face (WCAG AA). */
+:root {
+  --cal-ink: #f5f6f7;          /* date numbers, chip text, today circle */
+  --cal-ink-on: #17181a;       /* text on light faces (today, NEW) */
+  --cal-muted: #a9aeb5;        /* weekday names, memo mark, spending, wallet icon */
+  --cal-soft: #cdd1d6;         /* +N, subscription chip text */
+  --cal-line: #2e3135;         /* grid lines */
+  --cal-sun: #f97770;          /* Sundays and public holidays */
+  --cal-sat: #6aa7f4;          /* Saturdays */
+  --cal-today: var(--cal-ink);
+  --cal-today-text: var(--cal-ink-on);
+  --cal-selected: #e8eaed;     /* selected-day frame */
+  --cal-new: #f8d14f;          /* NEW release chip */
+  --cal-new-detail: #5a4a12;   /* volume on a NEW chip */
+  --cal-pay: #2d3137;          /* subscription charge chip */
+  --cal-heat: #7f95b5;         /* saved-image wash (steel blue, mixed 2-13 % into the page) */
+  --cal-release: #385064;      /* one-colour mode: every release chip (slate) */
+  --cal-pay-line: #464b52;     /* one-colour mode: subscription chip outline */
+  --kind-manga: #986021;
+  --kind-game: #005d32;
+  --kind-anime: #2b6ea1;
+  --kind-movie: #693265;
+  --cal-chip-text: 13px;       /* PC: one step above meta (12) for legibility */
+  --cal-chip-line: 18px;
+  --cal-chip-height: 20px;
+  --cal-date: var(--type-body);
+  --cal-today-size: 26px;
+  --cal-cell-height: 132px;
+}
+
+/* ---------- Head: 10월 · ‹ 오늘 › · 쓴 돈 · 예정 · 발매 캘린더 ---------- */
+.cc-month { display:flex; flex-direction:column; gap:var(--space-3); min-width:0; }
+.cc-head { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2) var(--space-4); min-height:var(--control-height); }
+.cc-title { margin:0; min-width:3.2em; font-size:var(--type-title); font-weight:700; line-height:1.2; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.cc-nav { display:inline-flex; align-items:center; gap:var(--space-1); }
+.cc-icon-button, .cc-text-button { display:inline-grid; place-items:center; min-width:var(--control-height); height:var(--control-height); padding:0 var(--space-3); border:0; border-radius:var(--radius-control); background:transparent; color:var(--color-text); font:inherit; font-size:var(--type-body); cursor:pointer; }
+.cc-icon-button { padding:0; }
+.cc-icon-button svg { width:16px; height:16px; }
+.cc-text-button { color:var(--color-muted); }
+.cc-text-button[disabled] { color:var(--color-faint); cursor:default; }
+@media (hover:hover) { .cc-icon-button:hover, .cc-text-button:not([disabled]):hover { background:var(--color-surface-hover); } }
+.cc-spacer { flex:1; }
+.cc-totals { display:flex; align-items:baseline; gap:var(--space-4); margin:0; }
+.cc-totals > div { display:flex; align-items:baseline; gap:var(--space-2); }
+.cc-totals dt { color:var(--color-faint); font-size:var(--type-meta); }
+.cc-totals dd { margin:0; font-size:var(--type-body); font-weight:600; font-variant-numeric:tabular-nums; }
+.cc-totals > div + div dd { color:var(--color-muted); font-weight:400; }
+.cc-link { display:inline-flex; align-items:center; gap:2px; min-height:var(--control-height); padding:0; border:0; background:none; color:var(--color-muted); font:inherit; font-size:var(--type-meta); cursor:pointer; }
+.cc-link svg { width:14px; height:14px; }
+
+/* ---------- Grid: Sunday first, six week rows, thin lines all round the inside ---------- */
+.cc-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); border-top:1px solid var(--cal-line); }
+.cc-weekday { padding:var(--space-2) var(--space-2) var(--space-2); border-bottom:1px solid var(--cal-line); color:var(--cal-muted); font-size:var(--type-meta); font-weight:600; line-height:var(--line-meta); text-align:left; }
+.cc-weekday[data-dow="0"] { color:var(--cal-sun); }
+.cc-weekday[data-dow="6"] { color:var(--cal-sat); }
+
+.cc-day { position:relative; display:flex; flex-direction:column; gap:3px; min-width:0; height:var(--cal-cell-height); box-sizing:border-box; margin:0; padding:var(--space-1) var(--space-1) var(--space-1); overflow:hidden;
+  border:0; border-bottom:1px solid var(--cal-line); border-left:1px solid var(--cal-line); border-radius:0;
+  background:var(--cal-wash, transparent); color:var(--cal-ink); font:inherit; text-align:left; cursor:pointer; transition:background-color 90ms var(--ease-standard); }
+.cc-day[data-dow="0"] { border-left:0; }
+@media (hover:hover) { .cc-day:hover:not([aria-selected="true"]) { background:color-mix(in srgb, var(--color-surface-hover) 70%, var(--cal-wash, var(--color-bg))); } }
+.cc-day:active:not([aria-selected="true"]) { background:var(--color-surface-pressed); }
+.cc-day:focus-visible { outline:var(--focus-width, 2px) solid var(--color-focus); outline-offset:-3px; z-index:2; }
+
+/* Selected day: an ivory frame inside the cell; the face underneath (wash) never changes, so text colours stay. */
+.cc-day[aria-selected="true"]::after { content:""; position:absolute; inset:0; border:2px solid var(--cal-selected); pointer-events:none; }
+
+/* Top row: date number at the top left, holiday name beside it, memo mark at the right. */
+.cc-top { display:flex; align-items:center; gap:var(--space-1); min-height:var(--cal-today-size); padding:0 0 0 2px; }
+.cc-date { display:inline-grid; place-items:center; min-width:var(--cal-today-size); height:var(--cal-today-size); padding:0 2px; box-sizing:border-box; border-radius:50%;
+  font-size:var(--cal-date); font-weight:600; line-height:1; font-variant-numeric:tabular-nums; color:var(--cal-ink); }
+.cc-day[data-dow="0"] .cc-date, .cc-day[data-holiday] .cc-date { color:var(--cal-sun); }
+.cc-day[data-dow="6"]:not([data-holiday]) .cc-date { color:var(--cal-sat); }
+/* Today: a filled circle on the number (the one round mark, as every calendar does it). */
+.cc-day[data-today] .cc-date { background:var(--cal-today); color:var(--cal-today-text); font-weight:700; }
+.cc-holiday { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--cal-sun); font-size:var(--type-meta); line-height:var(--line-meta); }
+.cc-memo { flex:none; margin-left:auto; width:14px; height:14px; color:var(--cal-muted); }
+
+/* Entries: one line each, a tinted face, square-ish corners (marks are radius 2). */
+.cc-chips { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.cc-chip { display:flex; align-items:center; gap:4px; min-width:0; height:var(--cal-chip-height); padding:0 var(--space-1); border-radius:var(--radius-mark);
+  background:var(--chip, var(--cal-pay)); color:var(--cal-ink);
+  font-size:var(--cal-chip-text); font-weight:500; line-height:var(--cal-chip-line); white-space:nowrap; }
+.cc-chip__title { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.cc-chip__detail { flex:none; color:inherit; font-weight:400; font-variant-numeric:tabular-nums; }
+.cc-chip[data-kind="manga"] { --chip:var(--kind-manga); }
+.cc-chip[data-kind="game"] { --chip:var(--kind-game); }
+.cc-chip[data-kind="movie"] { --chip:var(--kind-movie); }
+.cc-chip[data-kind="anime"] { --chip:var(--kind-anime); }
+/* NEW: the app's NEW colour (ivory face, dark text). */
+.cc-chip[data-new] { background:var(--cal-new); color:var(--cal-ink-on); font-weight:600; }
+.cc-chip[data-new] .cc-chip__detail { color:var(--cal-new-detail); }
+/* One-colour mode (user 2026-10-18, default): every release shares the slate face, NEW stays yellow.
+   The subscription chip turns into an outline so it never reads as a release. */
+[data-chip-mode="one"] .cc-chip[data-kind] { --chip:var(--cal-release); }
+[data-chip-mode="one"] .cc-chip--pay { background:transparent; box-shadow:inset 0 0 0 1px var(--cal-pay-line); }
+/* Subscription charge: neutral face, repeat icon, muted text. */
+.cc-chip--pay { background:var(--cal-pay); color:var(--cal-soft); font-weight:400; }
+.cc-chip--pay svg { flex:none; width:12px; height:12px; }
+.cc-chip--pay .cc-chip__detail { color:var(--cal-soft); }
+.cc-more { padding:0 var(--space-1); color:var(--cal-soft); font-size:var(--type-meta); font-weight:600; line-height:16px; font-variant-numeric:tabular-nums; }
+
+/* Foot: saved-image count (count mode) at the left, the day's spending at the right. */
+.cc-foot { display:flex; align-items:center; gap:var(--space-1); margin-top:auto; min-height:var(--line-meta); padding:0 2px; color:var(--cal-muted); font-size:var(--type-meta); line-height:var(--line-meta); font-variant-numeric:tabular-nums; }
+.cc-foot svg { flex:none; width:12px; height:12px; }
+.cc-saved { display:none; align-items:center; gap:2px; color:var(--cal-muted); }
+.cc-spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
+.cc-mask { letter-spacing:2px; color:var(--color-faint); }
+
+/* Days of the neighbouring months: everything dimmed, still selectable. */
+.cc-day[data-outside] > * { opacity:.38; }
+.cc-day[data-outside][aria-selected="true"] > * { opacity:.7; }
+
+/* Saved-image heat as a soft wash over the whole cell, eight steps of the steel blue by rank (as today's strip). */
+[data-saved-mode="wash"] .cc-day[data-heat="1"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 2%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="2"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 4%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="3"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 5%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="4"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 7%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="5"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 8%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="6"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 10%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="7"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 11%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-heat="8"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 13%, var(--color-bg)); }
+[data-saved-mode="wash"] .cc-day[data-outside][data-heat] { --cal-wash:color-mix(in srgb, var(--cal-heat) 3%, var(--color-bg)); }
+[data-saved-mode="count"] .cc-saved { display:inline-flex; }
+[data-holidays="off"] .cc-holiday { display:none; }
+[data-holidays="off"] .cc-day[data-holiday]:not([data-dow="0"]) .cc-date { color:var(--cal-ink); }
+[data-holidays="off"] .cc-day[data-holiday][data-dow="6"] .cc-date { color:var(--cal-sat); }
+[data-holidays="off"] .cc-day[data-holiday][data-today] .cc-date { color:var(--cal-today-text); }
+
+/* ---------- Tablet: the tablet tokens (17 / 13) and a narrower cell; nothing else differs ---------- */
+.is-tablet { --cal-date: var(--type-body); --cal-chip-text: 13px; --cal-chip-height: 22px; --cal-today-size: 30px; --cal-cell-height: 118px; }
+.is-tablet .cc-day { padding:var(--space-1) 3px; }
+.is-tablet .cc-chip { padding:0 3px; }
+.is-tablet .cc-chip--pay svg { display:none; }
+/* Too narrow for name and amount: the tablet cell keeps the name; the amount is in the day sheet. */
+.is-tablet .cc-chip--pay:not([data-trial]) .cc-chip__detail { display:none; }
+.is-tablet .cc-icon-button, .is-tablet .cc-text-button { min-width:44px; height:44px; }
+
+@media (prefers-reduced-motion:reduce) { .cc-day { transition:none; } }

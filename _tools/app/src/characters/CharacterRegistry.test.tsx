@@ -336,7 +336,7 @@ function ReinforcedEditor({ target, reinforcement, onUndo = vi.fn(), onDraft }: 
 }
 const reinforced = (extra: Partial<ReferenceReinforcementState> = {}): ReferenceReinforcementState =>
   ({ run: null, ghosts: [], dismissRun: vi.fn(), ...extra });
-const ghost = (assetId: string, extra: Partial<ReinforcementGhost> = {}): ReinforcementGhost => ({ assetId, hash: `hash-${assetId}`, persons: 1, safe: true, ...extra });
+const ghost = (assetId: string, extra: Partial<ReinforcementGhost> = {}): ReinforcementGhost => ({ assetId, hash: `hash-${assetId}`, persons: 1, safe: false, ...extra });
 
 it("shows the reinforcement line only while a run is pending, and undoes it from the line", async () => {
   const target = readyTarget(6);
@@ -401,6 +401,16 @@ it("adds every suggestion from the line, keeps the person choice for ones withou
   expect(latest.references).toEqual(["ref-0", "ref-1", "sug-1", "sug-2", "sug-3"]);
   expect(latest.referenceRegions).toEqual({});
   expect(screen.queryByText(/추천 \d+장/)).not.toBeInTheDocument();
+});
+
+it("leaves safe suggestions to automatic reinforcement and adds only unsafe ghosts by hand", async () => {
+  let latest!: ReturnType<typeof characterDraft>;
+  render(<ReinforcedEditor target={readyTarget(5)} onDraft={draft => { latest = draft; }}
+    reinforcement={reinforced({ ghosts: [ghost("safe", { safe: true }), ghost("multiple", { persons: 2 }), ghost("unknown", { persons: null }), ghost("near-duplicate")] })} />);
+  expect(screen.getByText("추천 3장")).toBeVisible();
+  await userEvent.setup().click(screen.getByRole("button", { name: "모두 추가" }));
+  expect(latest.references).toEqual(["ref-0", "ref-1", "ref-2", "ref-3", "ref-4", "multiple", "unknown", "near-duplicate"]);
+  expect(screen.queryByRole("button", { name: /추천 레퍼런스/ })).not.toBeInTheDocument();
 });
 
 it("offers no more suggestions than the 25 reference limit leaves room for", () => {

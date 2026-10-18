@@ -174,12 +174,12 @@ it('shows the kept shelf before paging finishes and converges to the refreshed s
     expect(today.querySelectorAll('.ui-badge--icon')).toHaveLength(4);
     expect(today.querySelector('.home-attention-mark')).toBeNull();
     await monthRegion();
-    expect(screen.getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['달력','오늘의 카드','오늘 할 것','전송','빠른 메모']);
+    expect(screen.getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['달력','오늘의 카드','전송','오늘 할 것','빠른 메모']);
     const layout = document.querySelector('.home-tablet-layout')!;
     const pairs = [...layout.querySelectorAll(':scope > .home-tablet-pair')];
     expect(pairs).toHaveLength(2);
-    expect(within(pairs[0] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['오늘의 카드','오늘 할 것']);
-    expect(within(pairs[1] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['전송','빠른 메모']);
+    expect(within(pairs[0] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['오늘의 카드','전송']);
+    expect(within(pairs[1] as HTMLElement).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['오늘 할 것','빠른 메모']);
     for (const name of ['1년 전 오늘','오늘의 한 장','지금 하는 중','2주 안에 발매','자산 현황','AV 배우','작가','메모','검토','이어지는 시리즈']) expect(screen.queryByRole('region',{name})).toBeNull();
     expect(mocks.api.mock.calls.some(([path]) => ['/v1/home/av-pick','/v1/library/artists'].includes(path) || path.startsWith('/v1/library/revisit') || path.startsWith('/v1/albums/'))).toBe(false);
     expect(mocks.native.mock.calls.some(([op]) => op === 'albumTree')).toBe(false);
@@ -272,7 +272,7 @@ it('shows the kept shelf before paging finishes and converges to the refreshed s
   it('keeps NEW across tab visits, then clears it only when the item is opened', async () => {
     const p = props(); const view = render(<Home {...p}/>);
     const fresh = await monthRegion();
-    expect(within(fresh).getByText('NEW')).toBeTruthy();
+    expect(fresh.querySelector('[data-new]')).toBeTruthy();
     view.unmount(); const next = render(<Home {...p}/>);
     const card = await within(await openDay('2026-09-23')).findByRole('button',{name:/밤의 도서관.*4권/});
     expect(within(card).getByText('NEW')).toBeTruthy();
@@ -370,7 +370,7 @@ it('preserves the visit after a failed release read and advances after a success
   fireEvent.touchStart(home,{touches:[{clientX:0,clientY:0}]});
   fireEvent.touchMove(home,{touches:[{clientX:0,clientY:150}]});
   fireEvent.touchEnd(home);
-  expect(await screen.findByText('NEW')).toBeTruthy();
+  await waitFor(()=>expect(document.querySelector('[data-new]')).toBeTruthy());
   await waitFor(()=>expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
 });
 
@@ -453,13 +453,13 @@ function notesBackend() {
 const savedBodies = (saves: Note[], title: string) => saves.filter(entry => entry.title === title).map(entry => entry.body);
 
 describe('tablet Home month calendar', () => {
-  it('shows the month Monday first with today filled, pages by swipe and buttons, and comes back with 오늘', async () => {
+  it('shows the month Sunday first with today filled, pages by swipe and buttons, and comes back with 오늘', async () => {
     render(<Home {...props()}/>);
     const region = await monthRegion();
     expect(screen.getByRole('heading', {name: '9월'})).toBeTruthy();
     expect(region.querySelectorAll('.home-cal__day')).toHaveLength(42);
-    expect([...region.querySelectorAll('.home-cal__weekday')].map(day => day.textContent).join('')).toBe('월화수목금토일');
-    expect(region.querySelector('.home-cal__day')?.getAttribute('data-day')).toBe('2026-08-31');
+    expect([...region.querySelectorAll('.home-cal__weekday')].map(day => day.textContent).join('')).toBe('일월화수목금토');
+    expect(region.querySelector('.home-cal__day')?.getAttribute('data-day')).toBe('2026-08-30');
     expect(region.querySelector('.home-cal__day[data-tense="today"] .home-cal__date')?.textContent).toBe('25');
     const strip = document.querySelector('.home-tablet-month')!;
     // A mostly vertical drag is the page scrolling, not a swipe.
@@ -490,7 +490,8 @@ describe('tablet Home month calendar', () => {
     notes = [note('ledger', {type: 'ledger', title: '가계부', pinned: false, income: null, recurring: [{id: 'r', name: '넷플릭스', amount: 17000, every: 1, unit: 'month', start: '2026-08-27', trial: false, until: null, remindDays: 0, memo: '', order: 'a'}], planned: []})];
     render(<Home {...props()}/>);
     await monthRegion();
-    await waitFor(() => expect(cell('2026-09-27').textContent).toContain('넷플릭스 17,000원'));
+    await waitFor(() => expect(cell('2026-09-27').textContent).toContain('넷플릭스'));
+    expect(cell('2026-09-27').textContent).not.toContain('17,000');
     const sheet = within(await openDay('2026-09-27'));
     const charge = sheet.getByRole('group', {name: '넷플릭스 결제 예정'});
     expect(charge.textContent).toContain('고정·구독 자동');
@@ -520,7 +521,7 @@ describe('tablet Home month saved-image counts', () => {
     await waitFor(() => expect(cell('2026-09-24').getAttribute('data-heat')).toBeTruthy());
     expect(asked).toHaveLength(1);
     const query = new URL(asked[0]!, 'https://a.example').searchParams;
-    expect(query.get('from')).toBe('2026-08-31');
+    expect(query.get('from')).toBe('2026-08-30');
     expect(query.get('bounds')!.split(',')).toHaveLength(43);
     expect(cell('2026-09-24').getAttribute('aria-label')).toContain('저장 4장');
     expect(Number(cell('2026-09-23').getAttribute('data-heat'))).toBeGreaterThan(Number(cell('2026-09-24').getAttribute('data-heat')));
@@ -545,7 +546,7 @@ describe('tablet Home month saved-image counts', () => {
   it('keeps the counts on screen while the next month loads', async () => {
     const waiting: Array<(reply: unknown) => void> = [];
     server.savedDays = path => {
-      if (new URL(path, 'https://a.example').searchParams.get('from') === '2026-08-31') return savedDaysReply(path, {'2026-09-04': 4, '2026-09-24': 2});
+      if (new URL(path, 'https://a.example').searchParams.get('from') === '2026-08-30') return savedDaysReply(path, {'2026-09-04': 4, '2026-09-24': 2});
       return new Promise(finish => waiting.push(finish));
     };
     render(<Home {...props()}/>);
@@ -555,7 +556,7 @@ describe('tablet Home month saved-image counts', () => {
     expect(screen.getByRole('heading', {name: '8월'})).toBeTruthy();
     // 9/4 is in August's grid as well and keeps its strip from the earlier read while August loads.
     expect(cell('2026-09-04').getAttribute('data-heat')).toBeTruthy();
-    await act(async () => { waiting[0]!(savedDaysReply('/v1/library/saved-days?from=2026-07-27', {'2026-08-10': 7, '2026-09-04': 5})); });
+    await act(async () => { waiting[0]!(savedDaysReply('/v1/library/saved-days?from=2026-07-26', {'2026-08-10': 7, '2026-09-04': 5})); });
     await waitFor(() => expect(cell('2026-08-10').getAttribute('data-heat')).toBeTruthy());
     expect(cell('2026-09-04').getAttribute('data-heat')).toBeTruthy();
   });
@@ -770,19 +771,13 @@ describe('tablet Home tools and the 링크 보관 sheet', () => {
     fireEvent.click(await screen.findByRole('button', {name: /첫 글/}));
     await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('openExternal', {url: 'https://a.example/1'}));
   });
-  it('puts the route word of a direct send in front of its state on the 전송 tile', async () => {
-    const base = exchange(true);
-    render(<Home {...props({exchange: {...base, outgoing: base.outgoing.map(row => ({...row, route: 'tailscale' as const}))}})}/>);
-    const list = await screen.findByRole('list', {name: '최근 보낸 파일'});
-    expect(within(list).getByText('Tailscale · 보내는 중')).toBeTruthy();
-  });
-  it('sends files to the PC through the exchange picker and lists the latest sends', async () => {
+  it('sends files to the PC through the exchange picker and shows the newest send on the icon alone', async () => {
     const p = props({exchange: exchange(true)}); render(<Home {...p}/>);
-    fireEvent.click(await screen.findByRole('button', {name: 'PC로 파일 보내기'}));
+    const send = await screen.findByRole('button', {name: /PC로 파일 보내기/});
+    expect(send.getAttribute('aria-label')).toBe('스케치.zip 업로드 중 · PC로 파일 보내기');
+    expect(screen.queryByRole('list', {name: '최근 보낸 파일'})).toBeNull();
+    fireEvent.click(send);
     await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('exchangeSend', {toDevice: 'pc'}));
-    const list = screen.getByRole('list', {name: '최근 보낸 파일'});
-    expect(within(list).getByText('스케치.zip')).toBeTruthy();
-    expect(within(list).getByText('업로드 중')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', {name: /^상세/})); expect(p.onExchange).toHaveBeenCalled();
   });
   it('cannot send while the exchange is not set up and says why', async () => {
@@ -796,5 +791,6 @@ describe('tablet Home tools and the 링크 보관 sheet', () => {
     render(<Home {...props({exchange: exchange()})}/>);
     fireEvent.click(await screen.findByRole('button', {name: 'PC로 파일 보내기'}));
     expect((await screen.findByRole('alert')).textContent).toContain('파일을 읽지 못했습니다');
+    expect(screen.getByRole('button', {name: /보내지 못했습니다: 파일을 읽지 못했습니다/})).toBeTruthy();
   });
 });

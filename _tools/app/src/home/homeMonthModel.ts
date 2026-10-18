@@ -7,10 +7,11 @@ import { nextCharge, isEnded } from "../notes/ledger/cycle";
 import { LEDGER, sortRecurring, type LedgerEntry, type Planned, type Recurring } from "../notes/ledger/model";
 import { donePlans, type LedgerLike } from "../notes/ledger/summary";
 import type { Note } from "../notes/store";
+import { koreanHolidays } from "./koreanHolidays";
 
 /**
  * PC Home month calendar (HOME-CAL-001): pure shaping of the rows Home already reads. The grid is
- * always six Monday-first weeks (42 days), so paging never changes its height.
+ * always six Sunday-first weeks (42 days), so paging never changes its height.
  */
 export const MONTH_GRID_DAYS = 42;
 const DAY = 86_400_000;
@@ -22,11 +23,12 @@ export type MonthDay<T> = {
   /** `YYYY-MM-DD` */
   date: string;
   day: number;
+  holiday?: string;
   /** False for the neighbouring months' days shown to fill the six weeks. */
   inMonth: boolean;
   tense: "past" | "today" | "future";
   daysFromToday: number;
-  /** The seven days of today's week share a quiet face. */
+  /** Week membership retained for model consumers; the month grid has no current-week face. */
   currentWeek: boolean;
   releases: T[];
   savedCount: number;
@@ -49,7 +51,8 @@ export function monthTitle(month: string, today: string): string {
 }
 /** The 42 dates of the grid that shows `month`. */
 export const gridDates = (month: string): string[] => {
-  const start = mondayOf(monthStart(month));
+  const first = monthStart(month);
+  const start = addDays(first, -new Date(utc(first)).getUTCDay());
   return Array.from({ length: MONTH_GRID_DAYS }, (_, index) => addDays(start, index));
 };
 
@@ -70,10 +73,13 @@ export function monthDays<T extends { date: string | null; fresh?: boolean }>(mo
   const spent = new Map<string, number>();
   for (const entry of activity.entries) if (!entry.in) spent.set(entry.date, (spent.get(entry.date) ?? 0) + entry.amount);
   const thisWeek = mondayOf(today);
-  return gridDates(month).map((date): MonthDay<T> => {
+  const dates = gridDates(month);
+  const holidays = new Map([...new Set(dates.map(date => Number(date.slice(0, 4))))]
+    .flatMap(year => [...koreanHolidays(year)]));
+  return dates.map((date): MonthDay<T> => {
     const daysFromToday = Math.round((utc(date) - utc(today)) / DAY);
     return {
-      date, day: Number(date.slice(8)), inMonth: monthOf(date) === month,
+      date, day: Number(date.slice(8)), holiday: holidays.get(date), inMonth: monthOf(date) === month,
       tense: daysFromToday < 0 ? "past" : daysFromToday === 0 ? "today" : "future", daysFromToday,
       currentWeek: mondayOf(date) === thisWeek,
       // NEW first; a stable sort keeps the source order otherwise.

@@ -3,7 +3,6 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { CheckIcon, ClockIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { ClassificationIcon, classificationColor } from "../classification/classificationAppearance";
 import { Button } from "../shared/ui/Button";
-import { Badge } from "../shared/ui/Badge";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Menu } from "../shared/ui/Menu";
 import { SectionLabel } from "../shared/ui/SectionLabel";
@@ -44,7 +43,6 @@ function RecentFoldersBar({ history }: { history: RecentFoldersState }) {
   const previous = useRef(folders.slice(0, 5));
   const leaveTimer = useRef<number | undefined>(undefined);
   const [departing, setDeparting] = useState<Array<{ folder: RecentFolder; style: CSSProperties }>>([]);
-  const [visibleCount, setVisibleCount] = useState(5);
   const first = folders.slice(0, 5);
   const ids = first.map(folder => folder.id).join("\0");
 
@@ -71,20 +69,17 @@ function RecentFoldersBar({ history }: { history: RecentFoldersState }) {
         return rect ? [{ folder, style: { left: rect.left - host.getBoundingClientRect().left, width: rect.width } }] : [];
       }));
       window.clearTimeout(leaveTimer.current);
-      leaveTimer.current = window.setTimeout(() => setDeparting([]), 120);
+      leaveTimer.current = window.setTimeout(() => setDeparting([]), 240);
     }
     const measure = () => {
       const chips = [...host.querySelectorAll<HTMLElement>("[data-recent-id]:not(.is-leaving)")];
       // Measure the full first five in the same layout pass; no intermediate state paints.
       chips.forEach(chip => { chip.hidden = false; });
       const room = host.getBoundingClientRect().right;
-      let count = chips.length;
       for (let index = chips.length - 1; index >= 0; index--) {
         if (chips[index].getBoundingClientRect().right <= room + 0.5) break;
         chips[index].hidden = true;
-        count--;
       }
-      setVisibleCount(count);
       const nextPositions = new Map<string, DOMRect>();
       for (const chip of chips) {
         if (chip.hidden) continue;
@@ -92,9 +87,10 @@ function RecentFoldersBar({ history }: { history: RecentFoldersState }) {
         const rect = chip.getBoundingClientRect();
         nextPositions.set(id, rect);
         const was = positions.current.get(id);
+        // A chip that shifted fades back in place instead of sliding, so the bar changes quietly.
         if (was && !reducedMotion() && was.left !== rect.left) {
           const easing = getComputedStyle(chip).getPropertyValue("--ease-standard").trim() || "ease-out";
-          chip.animate?.([{ transform: `translateX(${was.left - rect.left}px)` }, { transform: "translateX(0)" }], { duration: 200, easing });
+          chip.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 280, easing });
         }
       }
       positions.current = nextPositions;
@@ -105,12 +101,11 @@ function RecentFoldersBar({ history }: { history: RecentFoldersState }) {
     return () => observer.disconnect();
   }, [ids, folders]);
 
-  const hiddenCount = folders.length - Math.min(visibleCount, first.length);
   if (!folders.length && reducedMotion()) { previous.current = []; return null; }
   if (!folders.length && !departing.length && !previous.current.length) return null;
   return <div className="recent-folders" role="group" aria-label="최근 폴더">
     {folders.length > 0 && <Menu label="최근 폴더" triggerClassName="ui-button ui-button--quiet recent-folders__more" contentClassName="recent-folders__menu"
-      trigger={<><ClockIcon aria-hidden="true" />{hiddenCount > 0 && <Badge variant="corner" aria-label={`숨겨진 폴더 ${hiddenCount}개`}>{hiddenCount}</Badge>}</>}
+      trigger={<ClockIcon aria-hidden="true" />}
       content={<>
         <DropdownMenu.Label asChild><SectionLabel title="최근 폴더" /></DropdownMenu.Label>
         {folders.map(folder => <DropdownMenu.Item key={folder.id} asChild onSelect={() => open(folder)}>

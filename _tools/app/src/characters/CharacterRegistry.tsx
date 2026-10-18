@@ -112,9 +112,10 @@ export function CharacterRegistry({ draft, target, seriesId, libraryKey, privacy
     ? `사용 가능 ${usable.toLocaleString()}장 · ${AUTOMATIC_CHARACTER_REFERENCE_COUNT}장 이상 권장` : null;
   const run = reinforcement?.run?.assetIds.length ? reinforcement.run : null;
   const added = new Set(run?.assetIds ?? []);
-  // A suggestion fills a free slot; none is offered beyond the limit or twice.
+  // The backend only returns candidates for automatic reinforcement targets.
+  // Leave safe candidates to that run; manual suggestions fill free slots without repeats.
   const ghosts: ReinforcementGhost[] = (reinforcement?.ghosts ?? [])
-    .filter(ghost => !draft.references.includes(ghost.assetId)).slice(0, Math.max(0, MAX_CHARACTER_REFERENCES - draft.references.length));
+    .filter(ghost => !ghost.safe && !draft.references.includes(ghost.assetId)).slice(0, Math.max(0, MAX_CHARACTER_REFERENCES - draft.references.length));
   function addGhosts(chosen: ReinforcementGhost[]) {
     if (!chosen.length) return;
     onChange({ ...draft, references: [...draft.references, ...chosen.map(ghost => ghost.assetId)],

@@ -296,6 +296,39 @@ fn collection_authority_av_details_reusing_unlinked_confirmed_person_queues_no_p
 }
 
 #[test]
+fn collection_authority_deleted_person_is_forgotten_and_a_credited_one_is_kept() {
+    let (_temp, library, status, mut server) = av_details_fixture();
+    library.connection().unwrap().execute("INSERT OR IGNORE INTO av_favorite_performers(person_id,created_at) VALUES('p','t')", []).unwrap();
+    // "p" lost its only credit; "q" is still credited, so a delete naming it must change nothing.
+    server["avCredits"] = json!([{"personId":"q","name":"Q","nameJa":null,"role":"performer","order":0,"creditName":null,"portraitCrop":null}]);
+    server["avPeople"] = json!([{"personId":"q","displayName":"Q","nameJa":null,"memo":null,"profile":null,"portrait":null}]);
+    server["entityRevision"] = json!(2);
+    let deleted = json!({"deletedPeople":[
+        {"personId":"p","entityRevision":1},{"personId":"q","entityRevision":1}]});
+    library
+        .apply_collection_changes(&changes(
+            &status,
+            2,
+            json!([change(1, json!({"works":[server]})), change(2, deleted)]),
+        ))
+        .unwrap();
+    let ids = |query: &str| -> Vec<String> {
+        library.search_av_people(query).unwrap().into_iter().map(|p| p.id).collect()
+    };
+    assert!(ids("Display").is_empty());
+    assert_eq!(ids("Q"), vec!["q".to_string()]);
+    assert_eq!(count(&library, "av_favorite_performers"), 0);
+    let remembered = |person: &str| -> bool {
+        let key = format!("collectionAuthorityPerson:{}:1:{person}", status.library_id.as_ref().unwrap());
+        library.connection().unwrap()
+            .query_row("SELECT EXISTS(SELECT 1 FROM notes_state WHERE key=?1)", [key], |r| r.get(0))
+            .unwrap()
+    };
+    assert!(!remembered("p"));
+    assert!(remembered("q"));
+}
+
+#[test]
 fn collection_authority_av_details_credit_revision_conflict_reaches_queue_health() {
     let (_temp, library, status, server) = av_details_fixture();
     let mut draft = av_draft(&library);

@@ -1,3 +1,4 @@
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { displayTime } from "../shared/displayDate";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../shared/ui/Button";
@@ -86,22 +87,25 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
   const pack = state?.unopened[0];
   const albumLabel = state ? `앨범 ${state.albumSummary.cards}/${state.albumSummary.total}` : "앨범";
   const goAlbum = () => { setSession(null); onAlbum?.(); };
+  // Compact (user 2026-10-18): the column is as wide as the card, beside 전송; the album link sits under the card.
+  const album = onAlbum && <button type="button" className="home-link home-daily-card__album" onClick={goAlbum}>{albumLabel}<ChevronRightIcon aria-hidden="true" /></button>;
   return <section className="home-attention-section home-daily-card" aria-label="오늘의 카드">
-    <SectionLabel title="오늘의 카드" actions={onAlbum && <Button variant="quiet" onClick={goAlbum}>{albumLabel}</Button>} />
-    <div className="home-daily-card__body daily-card-stage">
-      {!snapshot ? <div><BusyLabel busy={pending} delay={400}>{"불러오는 중"}</BusyLabel>{pending && <Skeleton className="daily-card-skeleton" label="오늘의 카드" />}</div> : !pack ? <div className="daily-card-result">
+    <SectionLabel title="오늘의 카드" />
+    <div className="home-daily-card__body">
+      {!snapshot ? <div className="home-daily-card__loading"><BusyLabel busy={pending} delay={400}>{"불러오는 중"}</BusyLabel>{pending && <Skeleton className="daily-card-skeleton" label="오늘의 카드" />}{album}</div> : !pack ? <div className="daily-card-result">
         <div className="daily-card-result__art">{best && last && <button type="button" className="daily-card-result__button" aria-label="오늘의 결과 보기" onClick={() => setSession({ packId: last.result.packId, cover, cards: last.cards, undecided: waiting.some(item => item.packId === last.result.packId) })}>
           <TradingCard card={best} />
         </button>}</div>
-        <small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>
+        <div className="home-daily-card__meta"><small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>{album}</div>
       </div> : <>
         <div className="daily-card-stage__art"><button type="button" className="card-demo-preview__button" aria-label="오늘의 카드 팩 열기" onClick={() => setSession({ packId: pack.id, cover })}><span aria-hidden="true" inert><BoosterPack cover={cover} disabled /></span></button></div>
         <div className="daily-card-stage__copy">
-          <p>{`남은 팩 ${state!.unopened.length}`}</p>
-          <Button onClick={() => setSession({ packId: pack.id, cover })}>뜯기</Button>
-          {waiting.length > 0 && <Button variant="quiet" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>}
+          <Button size="sm" onClick={() => setSession({ packId: pack.id, cover })}>뜯기</Button>
+          <small>{`남은 팩 ${state!.unopened.length}`}</small>
+          {waiting.length > 0 && <Button variant="quiet" size="sm" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>}
           {state?.bonusGranted && <small>오늘 50장 저장 · 보너스 팩</small>}
           <small>05:00에 새 팩</small>
+          {album}
         </div>
       </>}
     </div>

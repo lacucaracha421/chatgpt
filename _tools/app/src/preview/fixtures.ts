@@ -376,7 +376,12 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "cloud_backfill_progress": return { activity: [{ direction: "capture", lastAttemptAt: "2026-09-29T06:00:00.000Z", lastSuccessAt: "2026-09-29T06:00:00.000Z", lastError: null, processed: 3, problems: 0 }], replicationEnabled: true, controlState: "idle", totalAssets: 300, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 300, failed: 0, activeWorkers: 0, lastError: null };
     case "authority_sync_health": return { albums: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, classifications: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, assets: { rejectedCount: 0, rejectedReason: null, stopped: false }, characterExclusions: { skippedCount: 0, lastSkipReason: null, lastSkippedAt: null }, authorityPassFailure: null, assetLaneFailure: null };
     case "encrypted_vault_status": return { state: "absent", vaultId: null, root: null, itemCount: null, trashedCount: null, remembered: false };
-    case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: [], incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
+    case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: previewOutgoing(), incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
+    // 오늘의 카드: an opened day by default; `?cards=pack` leaves today's pack unopened.
+    case "card_state": return previewCardState();
+    case "card_open_pack":
+    case "card_pack": return previewCardResult(String(args.packId ?? "d-20261018"));
+    case "card_art_url": return `/preview-media/thumbnail/${encodeURIComponent(String(args.assetId ?? "asset-001"))}`;
     case "character_incremental_status": return { running: true, workActive: false, paused: false, automationEnabled: true, broadFolderEnabled: false, completed: 300, confirmed: 84, definitionRevision: 0, seriesRevisions: {}, historyRefreshActive: false, persistentError: null, activeWork: null, historyRefreshes: [] };
     case "list_character_targets": return orderedPreviewTargets();
     case "reorder_character_folders": {
@@ -459,6 +464,26 @@ function notesRequest(args: Record<string, unknown>): unknown {
     return { createdAt: now, ...stored, ...input, updatedAt: now, localRevision: 2, pending: false, conflict: false };
   }
   return null;
+}
+
+/** Home's 전송 tile states: `?transfer=moving|waiting|failed` adds one send in that state. */
+function previewOutgoing() {
+  const state = new URLSearchParams(window.location.search).get("transfer");
+  const row = { transferId: "preview-send", fileName: "스케치.png", sizeBytes: 2048, toName: "Galaxy Tab Preview", done: 1024, message: null, note: null, retryable: true, cancellable: true, createdAt: "2026-10-18T05:00:00.000Z" };
+  if (state === "moving") return [{ ...row, state: "uploading" }];
+  if (state === "waiting") return [{ ...row, state: "waiting" }];
+  if (state === "failed") return [{ ...row, state: "failed", message: "서버에 연결할 수 없습니다" }];
+  return [];
+}
+
+function previewCardState() {
+  const pack = new URLSearchParams(window.location.search).get("cards") === "pack";
+  return { version: 1, revision: 1, day: "2026-10-18", nextResetAt: "2026-10-18T20:00:00.000Z", unopened: pack ? [{ id: "d-20261018", kind: "daily", day: "2026-10-18" }] : [], pendingKeep: [], prefetch: [], savedToday: 12, bonusThreshold: 50, bonusGranted: false, cover: { day: "2026-10-18", assetIds: ["asset-001"] }, albumSummary: { cards: 10, total: 10 } };
+}
+
+function previewCardResult(packId: string) {
+  const tiers = ["n", "n", "r", "sr", "ssr"];
+  return { packId, openedAt: "2026-10-18T01:00:00.000Z", alreadyOpened: true, keptAt: "2026-10-18T01:01:00.000Z", cards: tiers.map((tier, slot) => ({ slot, characterId: `preview-character-${slot}`, characterName: `카드 ${slot + 1}`, seriesName: "미리보기", tier, artAssetId: `asset-00${slot + 1}`, artWidth: 1000, artHeight: 1400, cutout: null, count: 1, level: 1, serial: null, isNew: false, kept: true })) };
 }
 
 function emptyCommand(command: string): unknown {

@@ -123,6 +123,7 @@ PERSON = "setPerson"
 PERSON_PORTRAIT = "setPersonPortrait"
 PERSON_PROFILE = "setPersonProfile"
 PERSON_PROFILE_FIELDS = "setPersonProfileFields"
+DELETE_PERSON = "deletePerson"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
@@ -131,7 +132,7 @@ CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ART
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
                         VOLUME_RANGE, KAKAO_REVIEW, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
-                           UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE)
+                           UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE, DELETE_PERSON)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
@@ -145,6 +146,7 @@ COMMAND_KEYS = {
     PERSON_PORTRAIT: {"personId", "portrait", "expectedRevision"},
     PERSON_PROFILE: {"personId", "stashdbId", "expectedRevision"},
     PERSON_PROFILE_FIELDS: {"personId", "changes", "expected"},
+    DELETE_PERSON: {"personId", "expectedRevision"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -2085,6 +2087,38 @@ def _set_person_portrait(ctx, entity, payload_sha):
                    person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, person_id)))
 
 
+def _delete_person(ctx, entity, payload_sha):
+    """Remove a person no live or trashed work credits (operator-only; clients learn from the feed).
+
+    People ride inside their works' feed entries, so an unreferenced person is in no work's
+    entry: the change carries a ``deletedPeople`` entity instead, which a client applies by
+    forgetting the person. Trashed works still count, they may be restored with their credits.
+    """
+    person_id = entity["personId"]
+    row = _person_row(ctx, person_id)
+    if row["entity_revision"] != entity["expectedRevision"]:
+        conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    used = ctx.db.execute("SELECT w.work_id FROM collection_authority_works w,json_each(w.av_credits) c"
+                          " WHERE w.library_id=? AND w.lifecycle IN ('live','trashed')"
+                          " AND json_extract(c.value,'$.personId')=? ORDER BY w.work_id LIMIT 1",
+                          [ctx.library_id, person_id]).fetchone()
+    if used is not None:
+        fail(409, "personInUse", "작품에 연결된 인물은 삭제할 수 없습니다.", personId=person_id, workId=used[0])
+    ctx.db.execute("DELETE FROM collection_authority_people WHERE library_id=? AND person_id=?",
+                   [ctx.library_id, person_id])
+    if row["portrait_image"] is not None:
+        # The portrait blob stays a Home cover only while some remaining person owns it.
+        import home_publications
+        import mobile_collections
+        images = [json.loads(r[0]) for r in ctx.db.execute(
+            "SELECT portrait_image FROM collection_authority_people WHERE library_id=? AND portrait_image IS NOT NULL",
+            [ctx.library_id])]
+        home_publications.replace_cover_refs(ctx.db, mobile_collections.PORTRAIT_OWNER, [
+            home_publications.BlobCover(**{k: i[k] for k in ("sha256", "sizeBytes", "contentType")}) for i in images])
+    ctx.add("deletedPeople", {"personId": person_id, "entityRevision": row["entity_revision"]})
+    return _finish(ctx, payload_sha, person_id)
+
+
 def _delete(ctx, entity, payload_sha):
     work_id = entity["workId"]
     row = require_work(ctx, work_id, live=False)
@@ -2792,6 +2826,7 @@ HANDLERS = {
     AV_DETAILS: _set_av_details, AV_CREDITS: _set_av_credits,
     PERSON_PROFILE_FIELDS: _set_person_profile_fields,
     PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait, PERSON_PROFILE: _set_person_profile,
+    DELETE_PERSON: _delete_person,
 }
 
 
@@ -2926,6 +2961,9 @@ def parse_command(body):
         entity.update(personId=require_id(body["personId"]), changes=changes, expected=expected)
     elif command_type == PERSON_PORTRAIT:
         entity.update(personId=require_id(body["personId"]), portrait=_portrait_input(body["portrait"]),
+                      expectedRevision=_revision(body["expectedRevision"], minimum=1))
+    elif command_type == DELETE_PERSON:
+        entity.update(personId=require_id(body["personId"]),
                       expectedRevision=_revision(body["expectedRevision"], minimum=1))
     elif command_type == PERSON_PROFILE:
         stashdb_id = body["stashdbId"]

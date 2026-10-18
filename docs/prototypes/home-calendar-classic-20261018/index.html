@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko" data-saved-mode="wash" data-holidays="on" data-chip-mode="one">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>홈 달력 일반형 시안</title>
+<!-- app-css/ = copies of the app's tokens.css (→ fonts.css → Pretendard) and controls.css. calendar.css = the PROPOSED grid CSS.
+     page.css = mockup only (document, frames, day panel stand-in). calendar.js = stand-in data and light interactions. -->
+<link rel="stylesheet" href="app-css/src/styles/tokens.css">
+<link rel="stylesheet" href="app-css/src/styles/controls.css">
+<link rel="stylesheet" href="calendar.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+  <h1>홈 달력 — 일반 달력형 시안</h1>
+  <p class="lead">지금의 홈 달력을 <b>보통 달력처럼</b> 바꾼 시안이다. 주는 <b>일요일부터 토요일까지</b>, 일요일과 공휴일 날짜는 빨강, 토요일은 파랑. 칸마다 가는 선이 있고, 날짜는 칸 왼쪽 위에 지금보다 크게 놓인다. 오늘은 날짜 위의 <b>채운 동그라미</b>, 고른 날은 칸 둘레의 <b>흰 테두리</b>다. 색은 앱 테마와 별개로 이 달력만의 한 벌이다. 발매 막대는 기본으로 <b>한 색</b>이고 NEW만 밝은 노랑이다(위 스위치로 종류별 색과 비교). 구독 결제는 테두리만 있는 막대다. 발매와 구독 결제는 한 줄짜리 <b>색 칸(일정 막대)</b>으로 들어가고, 칸에 다 안 들어가면 <b>+N</b>으로 접힌다. 메모는 날짜 줄 오른쪽 끝의 작은 표시, 그날 쓴 돈은 칸 아래 오른쪽에 둔다. 날 패널, 태블릿 두 번 누르기, 비공개 모드는 지금과 같다.</p>
+  <p class="lead">오늘은 <b>2026년 10월 18일(일)</b>로 둔다. 제목·금액은 임시 데이터다. PC 화면의 칸을 누르거나 방향키로 날을 바꿔 볼 수 있다.</p>
+  <div class="switches">
+    <div>막대 색 <button type="button" data-set="chipMode:one">한 색</button><button type="button" data-set="chipMode:kind">종류별</button></div>
+    <div>비공개 모드 <button type="button" data-set="privacy:off">끔</button><button type="button" data-set="privacy:on">켬</button></div>
+    <div>공휴일 <button type="button" data-set="holidays:on">표시</button><button type="button" data-set="holidays:off">안 함</button></div>
+    <div>저장한 이미지 <button type="button" data-set="savedMode:wash">칸 바탕 농도</button><button type="button" data-set="savedMode:count">장 수 숫자</button><button type="button" data-set="savedMode:off">칸에 안 보임</button></div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--cal-new)"></i>NEW 발매</span>
+    <span data-mode="one"><i style="background:var(--cal-release)"></i>발매</span>
+    <span data-mode="kind"><i style="background:var(--kind-manga)"></i>망가</span>
+    <span data-mode="kind"><i style="background:var(--kind-game)"></i>게임</span>
+    <span data-mode="kind"><i style="background:var(--kind-movie)"></i>영화</span>
+    <span data-mode="kind"><i style="background:var(--kind-anime)"></i>애니</span>
+    <span data-mode="one"><i class="is-outline"></i>구독 결제 예정</span>
+    <span data-mode="kind"><i style="background:var(--cal-pay)"></i>구독 결제 예정</span>
+  </div>
+
+  <h2>PC 홈 왼쪽 열 <small>1920 창 최대화 기준 · 달력 + 날 패널(340px) · 1:1</small></h2>
+  <p class="note">고른 날의 칸만 테두리가 바뀌고, 오른쪽 <b>날 패널의 내용만 한 번에</b> 바뀐다(지금과 같음). 30일처럼 일정이 많은 날은 두 줄 + <b>+4</b>, 다 보려면 날을 고른다. 다른 달의 날(9.27–9.30, 11.1–11.7)은 흐리게 보인다.</p>
+  <div class="pc-frame">
+    <div class="pc-split">
+      <div data-cal="pc"></div>
+      <aside class="day" data-panel="pc" aria-label="고른 날"></aside>
+    </div>
+  </div>
+
+  <h2>태블릿 세로 <small>800 × 1280 · 80% 축소</small></h2>
+  <p class="note">같은 달력을 태블릿 크기(날짜 17, 일정 13)로 쓴다. 칸이 좁아(약 107px) 제목이 먼저 줄임표로 줄고, 구독 칸은 아이콘과 금액을 빼고 이름만 둔다(금액은 날 시트에). 한 번 누르면 날만 고르고, <b>같은 날을 두 번 누르면 날 시트</b>가 아래에서 올라온다. 옆으로 밀면 달이 넘어간다(지금과 같음).</p>
+  <div class="tablets">
+    <figure class="tablet-wrap" style="margin:0">
+      <div class="tablet is-tablet">
+        <div class="tablet__status"><span>10:24</span><span>배터리 82%</span></div>
+        <div class="tablet__top">홈</div>
+        <div class="tablet__body">
+          <div data-cal="tablet" data-cal-selected="2026-10-18"></div>
+          <div class="tablet__pair"><div class="stub">오늘의 카드</div><div class="stub">오늘 할 것</div></div>
+        </div>
+        <div class="tablet__nav"><b>홈</b><span>에셋</span><span>컬렉션</span><span>메모</span><span>더보기</span></div>
+      </div>
+      <figcaption>홈: 오늘(18일)이 골라져 있다.</figcaption>
+    </figure>
+    <figure class="tablet-wrap" style="margin:0">
+      <div class="tablet is-tablet">
+        <div class="tablet__status"><span>10:24</span><span>배터리 82%</span></div>
+        <div class="tablet__top">홈</div>
+        <div class="tablet__body">
+          <div data-cal="tablet" data-cal-selected="2026-10-30"></div>
+        </div>
+        <div class="tablet__scrim"></div>
+        <div class="sheet"><div class="sheet__grip"></div><div class="day" data-panel="sheet"></div></div>
+      </div>
+      <figcaption>30일을 두 번 눌러 연 날 시트(지금의 시트와 같은 내용).</figcaption>
+    </figure>
+  </div>
+</div>
+<script src="calendar.js"></script>
+</body>
+</html>

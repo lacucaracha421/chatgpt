@@ -1,4 +1,6 @@
 //! Rebuildable lineage membership; all canonical metadata remains in catalog.
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
@@ -85,27 +87,61 @@ pub(super) fn rebuild(connection: &Connection, revision: &str) -> Result<(), Lib
     let components = super::catalog_review::apply_decisions(connection, components)?;
     let handles = reconcile_handles(connection, PROVIDER, &components)?;
     connection.execute(
-        "DELETE FROM online_catalog_group_members WHERE provider=?1",
-        [PROVIDER],
-    )?;
-    connection.execute(
         "DELETE FROM online_catalog_group_diagnostics WHERE provider=?1",
         [PROVIDER],
     )?;
-    let mut insert = connection.prepare(
-        "INSERT INTO online_catalog_group_members(provider,work_id,catalog_work_id,group_id,thumbnail_valid,completeness,lineage_terminal)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
-    )?;
+    // The rebuild holds the library-wide database lock. A catalog update changes a few
+    // works, so write only the member rows that differ instead of replacing all of them.
+    type MemberRow = (i64, String, bool, i64, bool);
+    let mut existing: HashMap<String, MemberRow> = HashMap::new();
+    {
+        let mut read = connection.prepare(
+            "SELECT work_id,catalog_work_id,group_id,thumbnail_valid,completeness,lineage_terminal
+             FROM online_catalog_group_members WHERE provider=?1",
+        )?;
+        let mut found = read.query([PROVIDER])?;
+        while let Some(row) = found.next()? {
+            existing.insert(
+                row.get(0)?,
+                (
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ),
+            );
+        }
+    }
+    let mut desired: Vec<(String, MemberRow)> = Vec::with_capacity(rows.len());
     for (work, thumb, completeness) in rows {
         let work_id = work.id.to_string();
-        insert.execute(params![
-            PROVIDER,
-            work_id,
-            work.id,
-            handles.member_groups[&work_id],
-            thumb,
-            completeness,
-            plan.terminal_ids.contains(&work.id)
+        let group = handles.member_groups[&work_id].clone();
+        let terminal = plan.terminal_ids.contains(&work.id);
+        desired.push((work_id, (work.id, group, thumb, completeness, terminal)));
+    }
+    let wanted: std::collections::HashSet<&str> = desired
+        .iter()
+        .map(|(work_id, _)| work_id.as_str())
+        .collect();
+    let mut delete = connection
+        .prepare("DELETE FROM online_catalog_group_members WHERE provider=?1 AND work_id=?2")?;
+    for work_id in existing.keys().filter(|id| !wanted.contains(id.as_str())) {
+        delete.execute(params![PROVIDER, work_id])?;
+    }
+    let mut upsert = connection.prepare(
+        "INSERT INTO online_catalog_group_members(provider,work_id,catalog_work_id,group_id,thumbnail_valid,completeness,lineage_terminal)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT(provider,work_id) DO UPDATE SET catalog_work_id=excluded.catalog_work_id,
+         group_id=excluded.group_id,thumbnail_valid=excluded.thumbnail_valid,
+         completeness=excluded.completeness,lineage_terminal=excluded.lineage_terminal",
+    )?;
+    for (work_id, row) in &desired {
+        if existing.get(work_id) == Some(row) {
+            continue;
+        }
+        upsert.execute(params![
+            PROVIDER, work_id, row.0, row.1, row.2, row.3, row.4
         ])?;
     }
     let mut diagnostic = connection.prepare(

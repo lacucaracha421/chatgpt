@@ -17,7 +17,6 @@ use super::{
 // <=16 bits is withheld; automatic additions need at least 17 bits of separation.
 // Missing/low-quality fingerprints cannot establish safety, even for an anchor.
 const MINIMUM_DISTANCE: u32 = 17;
-const MAX_PER_RUN: usize = 4;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -220,10 +219,8 @@ impl Library {
                 return Ok(false);
             };
             let target = self.read_character_target(&c, &id)?;
-            let capacity = MAX_PER_RUN.min(
-                MAX_REFERENCES
-                    .saturating_sub(target.references.len() + target.learned_references.len()),
-            );
+            let capacity = MAX_REFERENCES
+                .saturating_sub(target.references.len() + target.learned_references.len());
             let selected = self
                 .reinforcement_candidates_in(&c, &target)?
                 .into_iter()

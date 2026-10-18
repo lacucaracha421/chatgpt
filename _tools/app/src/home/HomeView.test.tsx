@@ -233,7 +233,7 @@ describe('Home attention', () => {
     await calendarRegion();
     expect(screen.queryByRole('region', { name: /오늘 할 것/ })).toBeNull();
     expect(document.querySelectorAll('.home-cal__day')).toHaveLength(42);
-    expect(document.querySelectorAll('.home-cal__line')).toHaveLength(0);
+    expect(document.querySelectorAll('.home-cal__chip')).toHaveLength(0);
   });
   it('puts the monthly subscriptions and reminder before reviews and pinned text-body tasks', async () => {
     const subscription = { id: 'sub', name: 'Netflix', amount: 17000, every: 1, unit: 'month' as const, start: '2026-09-28', trial: true, until: null, remindDays: 3, memo: '', order: 'a' };
@@ -257,42 +257,43 @@ describe('Home attention', () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([title('game', '새 게임', 'game', '2026-09-25', { released: true })]);
     const { view, onNavigate } = renderHome();
     await calendarRegion();
-    await waitFor(() => expect(within(cell('2026-09-25')).getByText('NEW')).toBeTruthy());
+    await waitFor(() => expect(cell('2026-09-25').querySelector('[data-new]')).toBeTruthy());
     await pickDay('2026-09-25');
     expect(within(within(dayPanel()).getByRole('button', { name: /새 게임/ })).getByText('NEW')).toBeTruthy();
     view.unmount();
     const next = renderHome();
-    await waitFor(() => expect(within(cell('2026-09-25')).getByText('NEW')).toBeTruthy());
+    await waitFor(() => expect(cell('2026-09-25').querySelector('[data-new]')).toBeTruthy());
     await pickDay('2026-09-25');
     fireEvent.click(within(dayPanel()).getByRole('button', { name: /새 게임/ }));
     expect(await screen.findByRole('dialog', { name: '새 게임' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '발매 캘린더 열기' }));
     expect(next.onNavigate).toHaveBeenCalledWith({ kind: 'collections', typeFilter: 'game', showcase: false, releaseCalendar: true });
     // Past releases stay visible on their day; only the NEW mark ends.
-    await waitFor(() => expect(within(cell('2026-09-25')).queryByText('NEW')).toBeNull());
+    await waitFor(() => expect(cell('2026-09-25').querySelector('[data-new]')).toBeNull());
     expect(within(cell('2026-09-25')).getByText('새 게임')).toBeTruthy();
     expect(onNavigate).not.toHaveBeenCalled();
     next.view.unmount(); renderHome();
     await calendarRegion();
-    expect(within(cell('2026-09-25')).queryByText('NEW')).toBeNull();
+    expect(cell('2026-09-25').querySelector('[data-new]')).toBeNull();
   });
-  it('draws six Monday-first weeks around the shown month, selects on click and pages months with the data of that month', async () => {
+  it('draws six Sunday-first weeks around the shown month, selects on click and pages months with the data of that month', async () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([title('today', '오늘 작품', 'game', '2026-09-26'), title('edge', '경계 작품', 'game', '2026-10-04'), title('later', '더 나중 작품', 'game', '2026-11-05')]);
     renderHome();
     const region = await calendarRegion();
-    // Saturday 9.26: September's grid runs 8.31 - 10.11.
+    // Saturday 9.26: September's grid runs 8.30 - 10.10.
     const days = [...region.querySelectorAll<HTMLElement>('[data-day]')].map(item => item.dataset.day);
     expect(days).toHaveLength(42);
-    expect(days[0]).toBe('2026-08-31');
-    expect(days[41]).toBe('2026-10-11');
+    expect(days[0]).toBe('2026-08-30');
+    expect(days[41]).toBe('2026-10-10');
     expect(region.querySelector('[data-tense="today"] .home-cal__date')).toBeTruthy();
-    expect(within(cell('2026-10-04')).getByText('D-8')).toBeTruthy();
+    expect(within(cell('2026-10-04')).queryByText('D-8')).toBeNull();
     expect(within(region).queryByText('더 나중 작품')).toBeNull();
     // Clicking a day of the next month only selects it.
     fireEvent.click(cell('2026-10-04'));
     expect(cell('2026-10-04')).toHaveAttribute('aria-selected', 'true');
     expect(within(region).getByRole('heading', { name: '9월' })).toBeTruthy();
     expect(within(dayPanel()).getByText('경계 작품')).toBeTruthy();
+    expect(within(dayPanel()).getByText('D-8')).toBeTruthy();
     // Paging reads that month once and keeps the selected day in the panel.
     const reads = gateway.listAssetDateBuckets.mock.calls.length;
     fireEvent.click(within(region).getByRole('button', { name: '다음 달' }));
@@ -676,13 +677,13 @@ describe("Home day panel", () => {
     expect(cell("2026-09-26")).not.toHaveAccessibleName(/8,000/);
   });
 
-  it("marks a release with its kind icon instead of the kind word, in the cell and in the day panel", async () => {
+  it("keeps kind icons in the day panel while the month chips show titles only", async () => {
     gateway.releaseCalendar.wishlist.mockResolvedValue([title("g", "새 게임", "game", "2026-09-28"), title("m", "새 영화", "movie", "2026-09-28")]);
     renderHome();
     await calendarRegion();
-    await waitFor(() => expect(cell("2026-09-28").querySelector(".home-cal__line")).toBeTruthy());
+    await waitFor(() => expect(cell("2026-09-28").querySelector(".home-cal__chip")).toBeTruthy());
     expect(within(cell("2026-09-28")).queryByText("게임")).toBeNull();
-    expect(cell("2026-09-28").querySelector(".home-cal__line [aria-label]")).toBeTruthy();
+    expect(cell("2026-09-28").querySelector(".home-cal__chip [aria-label]")).toBeNull();
     await pickDay("2026-09-28");
     const row = within(dayPanel()).getByRole("button", { name: /새 게임/ });
     expect(within(row).getByRole("img", { name: "게임" })).toBeTruthy();

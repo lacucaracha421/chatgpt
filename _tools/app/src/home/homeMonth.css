@@ -30,72 +30,74 @@
 .home-month__totals dd { margin:0; color:var(--color-text); font-size:var(--type-body); font-weight:600; }
 .home-month__totals > div + div dd { color:var(--color-muted); font-weight:400; }
 
-/* ---------- Grid: six week rows always (paging never changes the height), Monday first ---------- */
-.home-cal--month { grid-auto-rows:auto; }
+/* ---------- Classic calendar: approved calendar-only palette, Sunday first ---------- */
+.home-cal--month {
+  --cal-ink:#f5f6f7; --cal-ink-on:#17181a; --cal-muted:#a9aeb5; --cal-soft:#cdd1d6;
+  --cal-line:#2e3135; --cal-sun:#f97770; --cal-sat:#6aa7f4; --cal-selected:#e8eaed;
+  --cal-new:#f8d14f; --cal-new-detail:#5a4a12; --cal-release:#385064; --cal-pay-line:#464b52; --cal-heat:#7f95b5;
+  --cal-chip-text:13px; --cal-chip-line:18px; --cal-chip-height:20px;
+  --cal-today-size:26px; --cal-cell-height:132px;
+  grid-auto-rows:auto; gap:0; border-top:1px solid var(--cal-line);
+}
 .home-cal__row { display:contents; }
-.home-cal--month .home-cal__day { position:relative; height:140px; overflow:hidden; width:100%; margin:0; padding:var(--space-2); gap:var(--space-1); border:0; border-top:1px solid var(--color-border); border-radius:0; background:transparent; color:var(--color-text); font:inherit; text-align:left; cursor:pointer; transition:background-color 90ms var(--ease-standard); }
-@media (hover:hover) { .home-cal--month .home-cal__day:hover:not([aria-selected="true"]) { background:var(--color-surface-hover); } }
+.home-cal--month .home-cal__weekday { padding:var(--space-2); border-bottom:1px solid var(--cal-line); color:var(--cal-muted); font-size:var(--type-meta); font-weight:600; line-height:var(--line-meta); text-align:left; }
+.home-cal--month .home-cal__weekday[data-dow="0"] { color:var(--cal-sun); }
+.home-cal--month .home-cal__weekday[data-dow="6"] { color:var(--cal-sat); }
+.home-cal--month .home-cal__day { position:relative; display:flex; flex-direction:column; gap:3px; min-width:0; min-height:0; height:var(--cal-cell-height); box-sizing:border-box; width:100%; margin:0; padding:var(--space-1); overflow:hidden;
+  border:0; border-bottom:1px solid var(--cal-line); border-left:1px solid var(--cal-line); border-radius:0;
+  background:var(--cal-wash, transparent); color:var(--cal-ink); font:inherit; text-align:left; cursor:pointer; transition:background-color 90ms var(--ease-standard); }
+.home-cal--month .home-cal__day[data-dow="0"] { border-left:0; }
+@media (hover:hover) { .home-cal--month .home-cal__day:hover:not([aria-selected="true"]) { background:color-mix(in srgb, var(--color-surface-hover) 70%, var(--cal-wash, var(--color-bg))); } }
 .home-cal--month .home-cal__day:active:not([aria-selected="true"]) { background:var(--color-surface-pressed); }
-.home-cal--month .home-cal__day:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:-2px; }
-.home-cal--month .home-cal__day > span { display:flex; min-width:0; flex:none; }
-/* The current week: a quiet face across its seven days. */
-.home-cal--month .home-cal__day[data-week="current"] { background:var(--color-surface); }
-/* Days of the neighbouring months: same markers, dimmed; still selectable, no paging on click. */
-.home-cal--month .home-cal__day[data-outside] > span { opacity:.42; }
+.home-cal--month .home-cal__day:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:-3px; z-index:2; }
+.home-cal--month .home-cal__day[aria-selected="true"]::after { content:""; position:absolute; inset:0; border:2px solid var(--cal-selected); pointer-events:none; }
 
-/* Selected day = the current-location slab (DESIGN §4/§6): accent face, on-accent text, the hard echo
-   (masked with the page background) and the small dark mark in the top-right corner. */
-.home-cal--month .home-cal__day[aria-selected="true"] { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-bg), 3px 3px 0 0 var(--color-selection-echo); z-index:1; }
-.home-cal--month .home-cal__day[aria-selected="true"]::after { content:""; position:absolute; top:0; right:0; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); }
-.home-cal--month .home-cal__day[aria-selected="true"] > span { opacity:1; }
-.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__date,
-.home-cal--month .home-cal__day[aria-selected="true"] small,
-.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__pay,
-.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__foot,
-.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__saved { color:color-mix(in srgb, var(--color-on-accent) 72%, var(--color-accent)); }
-.home-cal--month .home-cal__day[aria-selected="true"] .home-cal__line b { color:var(--color-on-accent); }
-.home-cal--month .home-cal__day[aria-selected="true"] .home-kind { color:color-mix(in srgb, var(--color-on-accent) 72%, var(--color-accent)); }
-/* Today keeps its filled square (user 2026-10-15); on the slab the square inverts. */
-.home-cal--month .home-cal__day[aria-selected="true"][data-tense="today"] .home-cal__date { background:var(--color-on-accent); color:var(--color-accent); }
-.home-cal--month .home-cal__day[aria-selected="true"] .ui-badge--plain { background:color-mix(in srgb, var(--color-on-accent) 14%, var(--color-accent)); color:var(--color-on-accent); }
+/* Date, holiday and memo share the top row. Today is the calendar's one round mark. */
+.home-cal--month .home-cal__head { display:flex; flex:none; justify-content:flex-start; align-items:center; gap:var(--space-1); min-width:0; min-height:var(--cal-today-size); padding:0 0 0 2px; }
+.home-cal--month .home-cal__day .home-cal__date { display:inline-grid; flex:none; place-items:center; min-width:var(--cal-today-size); height:var(--cal-today-size); padding:0 2px; box-sizing:border-box; border-radius:50%; background:transparent;
+  font-size:var(--type-body); font-weight:600; line-height:1; font-variant-numeric:tabular-nums; color:var(--cal-ink); }
+.home-cal--month .home-cal__day[data-dow="6"] .home-cal__date { color:var(--cal-sat); }
+.home-cal--month .home-cal__day[data-dow="0"] .home-cal__date,
+.home-cal--month .home-cal__day[data-holiday] .home-cal__date { color:var(--cal-sun); }
+.home-cal--month .home-cal__day[data-tense="today"] .home-cal__date { background:var(--cal-ink); color:var(--cal-ink-on); font-weight:700; }
+.home-cal__holiday { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--cal-sun); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-cal__memo { flex:none; margin-left:auto; width:14px; height:14px; color:var(--cal-muted); }
 
-/* Saved-image heat (user 2026-10-17): the strip alone is filled, one hue (--color-focus) in four steps by the day's rank among the
-   shown days' counts. Selecting or today never changes the fill, so text on it always uses the normal colours. */
-.home-cal--month .home-cal__day[data-heat="1"] { --heat-fill:color-mix(in srgb, var(--color-focus) 8%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="2"] { --heat-fill:color-mix(in srgb, var(--color-focus) 14%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="3"] { --heat-fill:color-mix(in srgb, var(--color-focus) 20%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="4"] { --heat-fill:color-mix(in srgb, var(--color-focus) 27%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="5"] { --heat-fill:color-mix(in srgb, var(--color-focus) 34%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="6"] { --heat-fill:color-mix(in srgb, var(--color-focus) 41%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="7"] { --heat-fill:color-mix(in srgb, var(--color-focus) 49%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat="8"] { --heat-fill:color-mix(in srgb, var(--color-focus) 57%, var(--color-bg)); }
-.home-cal--month .home-cal__day[data-heat] .home-cal__head { background:var(--heat-fill); }
-.home-cal--month .home-cal__day[data-heat] .home-cal__date,
-.home-cal--month .home-cal__day[data-heat] .home-cal__saved,
-.home-cal--month .home-cal__day[data-heat] .home-cal__head .ui-dday { color:var(--color-text); }
-.home-cal--month .home-cal__day[data-heat][data-tense="today"] .home-cal__date { background:var(--color-accent); color:var(--color-on-accent); }
-.home-cal--month .home-cal__day[data-heat][aria-selected="true"] .home-cal__head .ui-badge--plain { background:var(--color-surface-elevated); color:var(--color-muted); }
+/* Each entry occupies one line. Four or more entries become two chips and +N. */
+.home-cal__chips { display:flex; flex:none; flex-direction:column; gap:2px; min-width:0; }
+.home-cal__chip { display:flex; align-items:center; gap:4px; min-width:0; height:var(--cal-chip-height); padding:0 var(--space-1); border-radius:var(--radius-mark);
+  background:var(--cal-release); color:var(--cal-ink); font-size:var(--cal-chip-text); font-weight:500; line-height:var(--cal-chip-line); white-space:nowrap; }
+.home-cal__chip-title { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.home-cal__chip-detail { flex:none; color:inherit; font-weight:400; font-variant-numeric:tabular-nums; }
+.home-cal__chip[data-new] { background:var(--cal-new); color:var(--cal-ink-on); font-weight:600; }
+.home-cal__chip[data-new] .home-cal__chip-detail { color:var(--cal-new-detail); }
+.home-cal__chip--pay { background:transparent; box-shadow:inset 0 0 0 1px var(--cal-pay-line); color:var(--cal-soft); font-weight:400; }
+.home-cal__chip--pay svg { flex:none; width:12px; height:12px; }
+/* A charge with an amount or trial end reads as two lines: name, then the amount. */
+.home-cal__chip--pay:has(.home-cal__chip-detail) { display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:4px; height:calc(var(--cal-chip-height) * 2); padding-block:1px; align-content:center; }
+.home-cal__chip--pay:has(.home-cal__chip-detail) .home-cal__chip-detail { grid-column:2; }
+.home-cal__more { padding:0 var(--space-1); color:var(--cal-soft); font-size:var(--type-meta); font-weight:600; line-height:16px; font-variant-numeric:tabular-nums; }
+.home-cal__foot { display:flex; align-items:center; gap:var(--space-1); margin-top:auto; min-height:var(--line-meta); padding:0 2px; color:var(--cal-muted); font-size:var(--type-meta); line-height:var(--line-meta); font-variant-numeric:tabular-nums; }
+.home-cal__foot svg { flex:none; width:12px; height:12px; }
+.home-cal__spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
+.home-cal--month .home-mask { color:var(--cal-muted); }
 
-/* Markers: one release line (+N), one payment line (+N), then memo mark and the day's spending. Each may wrap to two lines
-   (user 2026-10-17); the cell has a fixed height (the most it can hold is 20 + 2 x 36 + 18 + gaps), so no row changes height between months. */
-/* The top strip (date, 사진 N장, D-day) spans the cell edge to edge so it can carry its own fill. */
-.home-cal--month .home-cal__head { width:calc(100% + 2 * var(--space-2)); margin:calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0; padding:var(--space-2) var(--space-2) var(--space-1); box-sizing:border-box; }
-.home-cal--month .home-cal__saved { animation:none; background:transparent; padding:0; }
-.home-cal__line, .home-cal__pay { width:100%; align-items:flex-start; gap:var(--space-1); min-height:var(--line-meta); font-size:var(--type-meta); line-height:var(--line-meta); }
-/* The kind icon leads the title and wraps with it; a manga volume (22권) trails it. */
-.home-cal__line b { flex:0 1 auto; min-width:0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; font-weight:600; }
-.home-cal__line small { flex:none; white-space:nowrap; color:var(--color-muted); font-size:var(--type-meta); }
-.home-cal__line .ui-badge { flex:none; margin-top:calc((var(--line-meta) - var(--badge-height)) / 2); }
-.home-cal__line .ui-badge--plain { margin-left:auto; }
+/* Adjacent-month content dims; selection and heat never change the text colours. */
+.home-cal--month .home-cal__day[data-outside] > * { opacity:.38; }
+.home-cal--month .home-cal__day[data-outside][aria-selected="true"] > * { opacity:.7; }
+.home-cal--month .home-cal__day[data-heat="1"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 2%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="2"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 4%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="3"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 5%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="4"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 7%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="5"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 8%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="6"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 10%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="7"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 11%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-heat="8"] { --cal-wash:color-mix(in srgb, var(--cal-heat) 13%, var(--color-bg)); }
+.home-cal--month .home-cal__day[data-outside][data-heat] { --cal-wash:color-mix(in srgb, var(--cal-heat) 2%, var(--color-bg)); }
+
+/* Kind marks belong to the unchanged day panel, never the month chips. */
 .home-kind { display:inline-block; flex:none; width:12px; height:12px; margin-right:var(--space-1); vertical-align:-2px; color:var(--color-muted); }
 .home-kind > svg { display:block; width:12px; height:12px; }
-.home-cal__pay { color:var(--color-muted); }
-.home-cal__pay > svg, .home-cal__foot svg { flex:none; width:12px; height:12px; }
-.home-cal__pay > svg { margin-top:calc((var(--line-meta) - 12px) / 2); }
-.home-cal__pay > span:not(.ui-badge) { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; min-width:0; overflow:hidden; overflow-wrap:anywhere; }
-.home-cal__pay .ui-badge { flex:none; margin-left:auto; margin-top:calc((var(--line-meta) - var(--badge-height)) / 2); }
-.home-cal__foot { width:100%; margin-top:auto; align-items:center; gap:var(--space-1); min-height:var(--line-meta); color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
-.home-cal__spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
 
 /* Privacy mode: amounts become the secret-note dots (notes/noteCard.css .notes-card__secret-row). */
 .home-mask { letter-spacing:2px; color:var(--color-faint); font-weight:400; }

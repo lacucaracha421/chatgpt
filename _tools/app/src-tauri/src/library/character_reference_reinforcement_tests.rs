@@ -265,7 +265,7 @@ fn reinforcement_reuses_manual_and_exclusion_gates() {
 }
 
 #[test]
-fn reinforcement_adds_four_only_safe_then_undo_and_acknowledge_are_idempotent() {
+fn reinforcement_adds_all_safe_then_undo_and_acknowledge_are_idempotent() {
     let (f, t) = prepared();
     let ids = [
         "asset-7", "asset-8", "asset-9", "asset-10", "asset-11", "asset-12", "asset-13",
@@ -281,14 +281,14 @@ fn reinforcement_adds_four_only_safe_then_undo_and_acknowledge_are_idempotent() 
         .unwrap());
     let first = view(&f, &t);
     let run = first.pending_run.unwrap();
-    assert_eq!(run.asset_ids.len(), 4);
+    assert_eq!(run.asset_ids.len(), 5);
     assert!(run
         .asset_ids
         .iter()
         .all(|id| ids[..5].contains(&id.as_str())));
     let current = f.library.get_character_target(&t.id).unwrap();
     assert_eq!(current.references.len(), 5);
-    assert_eq!(current.learned_references.len(), 4);
+    assert_eq!(current.learned_references.len(), 5);
     assert!(current
         .learned_references
         .iter()
@@ -353,6 +353,39 @@ fn reinforcement_adds_four_only_safe_then_undo_and_acknowledge_are_idempotent() 
         .library
         .undo_reference_reinforcement("wrong-target", &second.run_id)
         .is_err());
+}
+
+#[test]
+fn reinforcement_fills_all_free_slots_in_one_undoable_run() {
+    let (f, t) = prepared();
+    let ids = (7..31).map(|i| format!("asset-{i}")).collect::<Vec<_>>();
+    let candidates = ids.iter().map(String::as_str).collect::<Vec<_>>();
+    accept(&f, &t, &candidates, DecisionKind::Accepted);
+    for id in &ids {
+        single(&f, &t, id);
+    }
+    assert_eq!(view(&f, &t).ghosts.iter().filter(|r| r.safe).count(), 24);
+    assert!(f
+        .library
+        .advance_character_reference_reinforcement()
+        .unwrap());
+    let run = view(&f, &t).pending_run.unwrap();
+    assert_eq!(run.asset_ids.len(), 20);
+    let current = f.library.get_character_target(&t.id).unwrap();
+    assert_eq!(
+        current.references.len() + current.learned_references.len(),
+        MAX_REFERENCES
+    );
+    assert!(current
+        .learned_references
+        .iter()
+        .all(|r| { run.asset_ids.contains(r.asset_id.as_ref().unwrap()) }));
+    let undone = f
+        .library
+        .undo_reference_reinforcement(&t.id, &run.run_id)
+        .unwrap();
+    assert_eq!(undone.references.len(), 5);
+    assert!(undone.learned_references.is_empty());
 }
 
 #[test]

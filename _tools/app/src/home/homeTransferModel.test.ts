@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExchangeOutgoing } from "../exchange/exchangeStore";
 import { recentTransfers } from "./homeTransferModel";
+import { transferTone } from "./TransferMark";
 
 const out = (id: string, fields: Partial<ExchangeOutgoing> = {}): ExchangeOutgoing => ({ transferId: id, fileName: `${id}.png`, sizeBytes: 100, toName: "Tab", state: "delivered", done: 0, message: null, note: null, retryable: false, cancellable: false, createdAt: "2026-10-15T10:00:00Z", ...fields });
 
@@ -34,5 +35,15 @@ describe("recent transfers", () => {
       out("s", { createdAt: "2026-10-15T10:00:00Z" }),
     ]);
     expect(lines.map(line => [line.key, line.route])).toEqual([["same", "lan"], ["mix", null], ["s", null]]);
+  });
+});
+
+describe("the tile's state", () => {
+  const tone = (rows: ExchangeOutgoing[]) => transferTone(recentTransfers(rows), line => line.state === "moving" ? "moving" : line.state === "failed" ? "failed" : line.state === "waiting" ? "waiting" : "idle").tone;
+  it("spins while any send moves, and otherwise follows the newest send only", () => {
+    expect(tone([out("old", { state: "failed", createdAt: "2026-10-15T09:00:00Z" }), out("busy", { state: "uploading", createdAt: "2026-10-15T08:00:00Z" })])).toBe("moving");
+    expect(tone([out("old", { state: "failed", createdAt: "2026-10-15T09:00:00Z" }), out("new", { createdAt: "2026-10-15T11:00:00Z" })])).toBe("idle");
+    expect(tone([out("new", { state: "failed", createdAt: "2026-10-15T11:00:00Z" })])).toBe("failed");
+    expect(tone([])).toBe("idle");
   });
 });

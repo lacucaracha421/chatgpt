@@ -1,13 +1,15 @@
 import {useState} from 'react';
-import {ArrowsUpDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
+import {ChevronRightIcon} from '@heroicons/react/24/outline';
 import {defaultTarget, errorCode, rowView, screenMessage, TOKEN_CODES, type ExchangeRow, type ExchangeSnapshot, type RowTone} from '../exchangeModel';
-import {blockRoute, routeWord, type ExchangeRoute} from '../../src/exchange/route';
+import {blockRoute, type ExchangeRoute} from '../../src/exchange/route';
+import {TransferMark, transferTone, type TransferTone} from '../../src/home/TransferMark';
 import {isImageName} from '../../src/exchange/timeline';
 import {SectionLabel} from '../ui';
 import {errorText, native} from '../transport';
 
 export type TransferLine = {key: string; label: string; state: string; tone: RowTone; route: ExchangeRoute | null};
 const TONE_ORDER: RowTone[] = ['error', 'active', 'waiting', 'done', 'muted'];
+const MARK: Record<RowTone, TransferTone> = {active: 'moving', waiting: 'waiting', error: 'failed', done: 'idle', muted: 'idle'};
 
 /** The newest sends to the target, the files of one batch folded into one line. */
 export function recentSends(outgoing: ExchangeRow[], limit = 3): TransferLine[] {
@@ -24,8 +26,9 @@ export function recentSends(outgoing: ExchangeRow[], limit = 3): TransferLine[] 
 }
 
 /**
- * 전송 on the tablet: one button that opens the system file picker and sends to the PC through the
- * exchange screen's own send (`exchangeSend`), plus the latest sends. There is no drop target on a tablet.
+ * 전송 on the tablet: one tile that opens the system file picker and sends to the PC through the exchange
+ * screen's own send (`exchangeSend`). Icon only as on the PC (user 2026-10-18): the icon shows the newest send's
+ * state and 상세 keeps the list. There is no drop target on a tablet.
  */
 export function TabletTransfer({exchange, onOpenDetail, send = (toDevice: string) => native('exchangeSend', {toDevice})}: {exchange: ExchangeSnapshot | null; onOpenDetail(): void; send?(toDevice: string): Promise<unknown>}) {
   const [error, setError] = useState('');
@@ -40,17 +43,18 @@ export function TabletTransfer({exchange, onOpenDetail, send = (toDevice: string
     setError('');
     void send(target.deviceId).catch(reason => setError(errorText(reason) || screenMessage(errorCode(reason)) || '파일을 보내지 못했습니다.'));
   };
-  const label = target ? `${name}로 파일 보내기` : why || '파일 보내기';
+  const {tone: sendTone, line} = transferTone(lines, item => MARK[item.tone]);
+  const tone: TransferTone = error ? 'failed' : sendTone;
+  const action = target ? `${name}로 파일 보내기` : why || '파일 보내기';
+  const status = error ? `보내지 못했습니다: ${error}` : line ? `${line.label} ${line.state}` : '';
+  const label = status ? `${status} · ${action}` : action;
   return <section className="home-attention-section home-tool home-tab-transfer" aria-label="전송">
     <SectionLabel title="전송" actions={<button type="button" className="home-link" onClick={onOpenDetail}>상세<ChevronRightIcon aria-hidden="true" /></button>} />
     <div className="home-tool__body">
-      <button type="button" className="home-tab-transfer__send" disabled={!target} aria-label={label} onClick={choose}>
-        <ArrowsUpDownIcon aria-hidden="true" /><span>{target ? `${name}로 보내기` : why || '파일 보내기'}</span>
+      <button type="button" className="home-tab-transfer__send transfer-tile" disabled={!target} aria-label={label} onClick={choose}>
+        <TransferMark tone={tone} settled={!!exchange} note={tone === 'failed' ? '보내지 못했습니다' : target ? undefined : why || undefined}/>
       </button>
-      {error && <p className="home-tab-transfer__error" role="alert">{error}</p>}
-      {lines.length > 0 && <ul className="home-tab-sent" aria-label="최근 보낸 파일">
-        {lines.map(line => <li key={line.key} data-tone={line.tone}><span>{line.label}</span><small>{[routeWord(line.route), line.state].filter(Boolean).join(' · ')}</small></li>)}
-      </ul>}
+      {error && <p className="transfer-alert" role="alert">{error}</p>}
     </div>
   </section>;
 }

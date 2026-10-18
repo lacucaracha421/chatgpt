@@ -8,20 +8,20 @@ import { HomeTransfer } from "./HomeTransfer";
 
 afterEach(cleanup);
 
-const AT = new Date(2026, 9, 15, 22, 0);
 const out = (id: string, fields: Partial<ExchangeOutgoing> = {}): ExchangeOutgoing => ({ transferId: id, fileName: `${id}.png`, sizeBytes: 100, toName: "Tab", state: "delivered", done: 0, message: null, note: null, retryable: false, cancellable: false, createdAt: new Date(2026, 9, 15, 21, 40).toISOString(), ...fields });
 const ready = (extra: Partial<ExchangeSnapshot> = {}): ExchangeSnapshot => ({ ...EMPTY_EXCHANGE, availability: { state: "ready", message: null, needsToken: false }, selfName: "PC", devices: [{ deviceId: "tab", name: "Galaxy Tab", kind: "tablet" }], ...extra });
 
 function setup(snapshot: ExchangeSnapshot, props: Partial<Parameters<typeof HomeTransfer>[0]> = {}) {
   const request = vi.fn(async (command: string) => (command === "exchange_snapshot" ? snapshot : 1) as never);
-  const store = new ExchangeStore(request, async () => () => undefined);
+  let push!: (next: ExchangeSnapshot) => void;
+  const store = new ExchangeStore(request, async (handler) => { push = handler; return () => undefined; });
   let drops!: (event: NativeFileDropEvent) => void;
   const subscribeDrops: DropSubscriber = async (handler) => { drops = handler; return () => undefined; };
   const onOpenDetail = vi.fn();
-  const view = render(<HomeTransfer at={AT} enabled store={store} subscribeDrops={subscribeDrops} onOpenDetail={onOpenDetail} {...props} />);
+  const view = render(<HomeTransfer enabled store={store} subscribeDrops={subscribeDrops} onOpenDetail={onOpenDetail} {...props} />);
   const tile = screen.getByRole("region", { name: "전송" });
   vi.spyOn(tile, "getBoundingClientRect").mockReturnValue({ left: 100, top: 100, right: 400, bottom: 400, width: 300, height: 300, x: 100, y: 100, toJSON: () => ({}) });
-  return { request, store, onOpenDetail, view, tile, drop: (event: NativeFileDropEvent) => act(() => drops(event)), subscribed: () => waitFor(() => expect(drops).toBeDefined()) };
+  return { request, store, onOpenDetail, view, tile, push: (next: ExchangeSnapshot) => act(() => push(next)), drop: (event: NativeFileDropEvent) => act(() => drops(event)), subscribed: () => waitFor(() => expect(drops).toBeDefined()) };
 }
 const sendCalls = (request: ReturnType<typeof setup>["request"]) => request.mock.calls.filter(([command]) => command === "exchange_send");
 
@@ -89,35 +89,35 @@ it("says nothing about a reason while the connection is still starting", () => {
   expect(screen.queryByRole("button", { name: "받을 기기가 없습니다" })).toBeNull();
 });
 
-it("lists the last three sends with progress or time and no route word for the server, and opens the detail screen", async () => {
+it("shows the newest send on the icon alone, its state in the tile's name, and opens the detail screen", async () => {
   const rows = [
-    out("old", { createdAt: new Date(2026, 9, 14, 9, 5).toISOString() }),
     out("done", { createdAt: new Date(2026, 9, 15, 21, 40).toISOString() }),
     out("busy", { state: "uploading", sizeBytes: 200, done: 100, createdAt: new Date(2026, 9, 15, 21, 50).toISOString() }),
-    out("wait", { state: "waiting", createdAt: new Date(2026, 9, 15, 21, 45).toISOString() }),
   ];
   const { onOpenDetail } = setup(ready({ outgoing: rows }));
   const tile = screen.getByRole("region", { name: "전송" });
-  await within(tile).findByText("busy.png");
-  expect(within(tile).queryByText("old.png")).toBeNull();
-  expect(within(tile).getByText("50%")).toBeTruthy();
-  expect(within(tile).getByText("받기 대기")).toBeTruthy();
-  expect(within(tile).getByText("21:40")).toBeTruthy();
-  expect(await within(tile).findByRole("progressbar", { name: "busy.png 진행률" })).toHaveAttribute("aria-valuenow", "50");
+  const button = await within(tile).findByRole("button", { name: "busy.png 보내는 중 50% · 놓으면 Galaxy Tab(으)로 보냅니다" });
+  // The list of sends is gone; only the mark shows, spinning once the send has taken a moment.
+  expect(within(tile).queryByText("busy.png")).toBeNull();
+  expect(within(tile).queryByText("done.png")).toBeNull();
+  await waitFor(() => expect(button.querySelector(".transfer-mark")).toHaveAttribute("data-state", "moving"));
   await userEvent.click(within(tile).getByRole("button", { name: /상세/ }));
   expect(onOpenDetail).toHaveBeenCalledOnce();
 });
 
-it("names the route of a direct send in front of its progress or time", async () => {
-  const rows = [
-    out("lan", { route: "lan", createdAt: new Date(2026, 9, 15, 21, 40).toISOString() }),
-    out("ts", { route: "tailscale", state: "uploading", sizeBytes: 200, done: 128, createdAt: new Date(2026, 9, 15, 21, 50).toISOString() }),
-  ];
-  setup(ready({ outgoing: rows }));
-  const tile = screen.getByRole("region", { name: "전송" });
-  await within(tile).findByText("Tailscale · 64%");
-  expect(within(tile).getByText("직접 · 21:40")).toBeTruthy();
-  expect(within(tile).queryByText(/서버/)).toBeNull();
+it("marks a failure that happens while Home is open once, and keeps an older failure still", async () => {
+  const sending = out("a", { state: "uploading", sizeBytes: 200, done: 50 });
+  const { push } = setup(ready({ outgoing: [sending] }));
+  await screen.findByRole("button", { name: /a.png 보내는 중/ });
+  push(ready({ outgoing: [{ ...sending, state: "failed" }] }));
+  const button = screen.getByRole("button", { name: /a.png 보내지 못했습니다/ });
+  expect(button.querySelector(".transfer-mark")).toHaveAttribute("data-alert");
+  expect(within(button).getByText("보내지 못했습니다")).toBeTruthy();
+  cleanup();
+  setup(ready({ outgoing: [{ ...sending, state: "failed" }] }));
+  const still = await screen.findByRole("button", { name: /a.png 보내지 못했습니다/ });
+  expect(still.querySelector(".transfer-mark")).toHaveAttribute("data-state", "failed");
+  expect(still.querySelector(".transfer-mark")).not.toHaveAttribute("data-alert");
 });
 
 it("picks files by click and reports a failed send on the tile", async () => {
@@ -128,4 +128,5 @@ it("picks files by click and reports a failed send on the tile", async () => {
   request.mockImplementation(async (command: string) => { if (command === "exchange_send") throw new Error("서버에 연결할 수 없습니다"); return ready() as never; });
   await userEvent.click(screen.getByRole("button", { name: /Galaxy Tab/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("서버에 연결할 수 없습니다");
+  expect(screen.getByRole("button", { name: /보내지 못했습니다: 서버에 연결할 수 없습니다/ })).toBeTruthy();
 });

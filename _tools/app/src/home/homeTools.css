@@ -3,26 +3,14 @@
 .home-tool > div:last-child, .home-tool__body { flex:1; min-width:0; display:flex; flex-direction:column; }
 .home-tool__body { gap:var(--space-2); }
 
-/* 전송: the whole tile takes a drop; the box shows the dashed edge while a drag is over it. */
+/* 전송: the whole tile takes a drop; the box shows the dashed edge while a drag is over it. The icon is TransferMark. */
 .home-drop { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--space-1); height:120px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; text-align:center; transition:background-color 90ms var(--ease-standard); cursor:copy; }
-.home-drop > svg { width:24px; height:24px; margin-bottom:var(--space-1); color:var(--color-muted); }
-.home-drop > span { max-width:100%; font-size:var(--type-body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.home-drop > small { color:var(--color-faint); font-size:var(--type-meta); }
 .home-drop::after { content:""; position:absolute; inset:0; border:1px dashed transparent; border-radius:inherit; pointer-events:none; transition:border-color 90ms var(--ease-standard); }
 .home-drop:disabled { cursor:default; }
-.home-drop:disabled > span { color:var(--color-muted); }
 @media (hover:hover) { .home-drop:hover:not(:disabled) { background:var(--color-surface-hover); } }
 .home-drop:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--focus-width); }
 .home-transfer[data-over] .home-drop { background:var(--color-surface-hover); }
 .home-transfer[data-over] .home-drop::after { border-color:var(--color-accent); }
-.home-transfer__error { margin:0; color:var(--color-danger); font-size:var(--type-meta); line-height:var(--line-meta); }
-.home-sent__row { display:grid; grid-template-columns:16px minmax(0,1fr) auto; align-items:center; gap:var(--space-2); min-height:32px; border-bottom:1px solid var(--color-border); }
-.home-sent__row > svg { width:16px; height:16px; color:var(--color-faint); }
-.home-sent__row[data-state="failed"] > svg { color:var(--color-danger); }
-.home-sent__row > span:not(.home-sent__meter) { color:var(--color-text); font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.home-sent__row small { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
-.home-sent__meter { position:relative; width:16px; height:3px; border-radius:2px; background:var(--color-surface-hover); overflow:hidden; }
-.home-sent__meter > i { position:absolute; left:0; top:0; bottom:0; background:var(--color-muted); }
 
 /* 빠른 메모: a text area in the shared input look. Like the 메모 tab body it shows no blue focus line (user 2026-10-15); the caret marks focus. */
 textarea.ui-text-input.home-qmemo__text { display:block; flex:1; width:100%; height:auto; min-height:216px; resize:none; margin:0; padding:var(--space-3); line-height:1.75; }
@@ -33,14 +21,26 @@ textarea.ui-text-input.home-qmemo__text:focus { box-shadow:none; }
 .home-slot__empty { flex:1; min-height:120px; display:grid; place-items:center; background:var(--color-surface); border-radius:var(--radius-control); }
 .home-slot__empty .ui-empty-state--inline { margin:0; padding:0; }
 .home-daily-card { flex:none; }
-/* Compact (user 2026-10-17, as the tablet): the pack beside its copy, one fixed height for every state so nothing jumps. */
-.home-daily-card__body { flex:none; height:168px; gap:var(--space-4); }
+/* Compact (user 2026-10-18): only the card, its next-pack line and the album link, in a column as wide as the card beside 전송. */
+.home-daily-card__body { flex:none; display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); }
+.home-daily-card .daily-card-result { align-items:flex-start; }
+.home-daily-card .daily-card-result small, .home-daily-card .daily-card-stage__copy small { white-space:nowrap; }
+.home-daily-card .daily-card-result__art { width:96px; }
+/* An unopened pack is taller than a card: a little narrower, its lines close under it and 뜯기 as wide as the pack. */
 .home-daily-card .daily-card-stage__art { width:80px; }
-.home-daily-card .daily-card-result__art { width:88px; }
-.home-daily-card .daily-card-skeleton { width:80px; height:160px; }
+.home-daily-card .daily-card-stage__copy { align-self:stretch; gap:var(--space-1); }
+.home-daily-card .daily-card-stage__copy > .ui-button:first-child { align-self:stretch; margin-bottom:var(--space-1); }
+.home-daily-card .daily-card-skeleton { width:96px; height:134px; }
+.home-daily-card__loading { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); color:var(--color-muted); font-size:var(--type-meta); }
+.home-daily-card .home-link.home-daily-card__album { margin-left:calc(var(--space-1) * -1); }
+.home-daily-card__meta { display:flex; flex-direction:column; align-items:flex-start; }
+.home-daily-card__meta > small { line-height:var(--line-meta); }
 
-/* 전송 and 빠른 메모 live in the right column under 오늘 할 것; 빠른 메모 takes the rest of the height. */
-.home-day-column .home-drop { height:88px; }
-.home-day-column > .home-attention-section.home-qmemo { flex:1; min-height:0; }
-.home-day-column > .home-qmemo > .home-tool__body { flex:1; }
-.home-day-column textarea.ui-text-input.home-qmemo__text { min-height:160px; }
+/* 오늘의 카드 and 전송 share the column's first row; the drop tile takes the rest of the width and the card's height. */
+.home-day-column .home-day-pair { display:grid; grid-template-columns:auto minmax(0,1fr); gap:var(--space-6); align-items:stretch; }
+.home-day-pair > .home-attention-section { min-width:0; display:flex; flex-direction:column; }
+/* Both labels take the height of 전송's 상세 link so their lines sit level. */
+.home-day-pair .ui-section-label { min-height:24px; }
+.home-day-pair .home-drop { flex:1; height:auto; min-height:88px; }
+/* 빠른 메모 keeps a short box (user 2026-10-18) instead of filling the column. */
+.home-day-column textarea.ui-text-input.home-qmemo__text { flex:none; height:128px; min-height:0; }

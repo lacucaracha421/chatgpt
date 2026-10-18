@@ -2,14 +2,21 @@
 .home-tablet-layout { min-height:100%; display:flex; flex-direction:column; gap:var(--space-8); }
 .home-tablet-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-6); align-items:start; }
 .home-tablet-card, .home-tablet-today { min-width:0; }
+/* 오늘의 카드 beside 전송 as on the PC (user 2026-10-18): the card takes only its own width, the send tile the rest and the card's height. */
+.home-tablet-pair.is-card { grid-template-columns:auto minmax(0,1fr); align-items:stretch; }
+.home-tablet-pair.is-card > .home-attention-section { min-width:0; display:flex; flex-direction:column; }
+.home-tablet-pair.is-card .ui-section-label { min-height:24px; }
 
 /* Month calendar (HOME-CAL-001): the PC month grid with touch-sized controls; a sideways swipe pages months. */
 .home-tablet-month { touch-action:pan-y; }
 .home-attention-mobile .home-month__nav .ui-button--icon { width:44px; min-height:44px; }
 .home-attention-mobile .home-month__nav .ui-button--quiet, .home-attention-mobile .home-month__head .home-link { min-height:44px; }
 .home-attention-mobile .home-month__totals dd { font-size:var(--type-meta); }
-.home-attention-mobile .home-cal--month { column-gap:var(--space-1); }
-/* The grid keeps its cell height from the PC rules; the cell is a button, so its whole face is the touch target. */
+/* Reserve room for all three 22px chips and the spending footer, including on busy days. */
+.home-attention-mobile .home-cal--month { --cal-chip-height:22px; --cal-today-size:30px; --cal-cell-height:134px; }
+.home-attention-mobile .home-cal--month .home-cal__day { padding:var(--space-1) 3px; }
+.home-attention-mobile .home-cal__chip { padding:0 3px; }
+.home-attention-mobile .home-cal__chip--pay svg { display:none; }
 
 /* The day sheet: the PC day panel's sections in a column (it wears .home-day for the shared row rules), rows and inputs at 44-48 px. */
 .home-day-sheet { gap:var(--space-6); }
@@ -24,7 +31,8 @@
 .home-day-sheet textarea.ui-text-input.home-day__memo { min-height:112px; font-size:var(--type-body); }
 
 /* 전송 and 빠른 메모 side by side; 링크 보관 (its sheet) shares the link rows. */
-.home-attention-mobile textarea.ui-text-input.home-qmemo__text { min-height:216px; font-size:var(--type-body); }
+/* 빠른 메모 keeps a short box (user 2026-10-18). */
+.home-attention-mobile textarea.ui-text-input.home-qmemo__text { flex:none; height:152px; min-height:0; font-size:var(--type-body); }
 .home-attention-mobile .home-qmemo__status .ui-button, .home-tab-links__status .ui-button { min-height:44px; }
 .home-tab-links__input { display:flex; align-items:center; gap:var(--space-2); background:var(--color-surface); border-radius:var(--radius-control); }
 .home-tab-links__input .ui-text-input { flex:1; min-width:0; width:100%; min-height:44px; background:transparent; }
@@ -38,14 +46,5 @@
 .home-tab-link__copy > span { font-size:var(--type-body); line-height:var(--line-ui); }
 .home-tab-link__copy small { color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
 
-/* 전송: one wide button, then the latest sends. */
-.home-tab-transfer__send { display:flex; align-items:center; justify-content:center; gap:var(--space-2); width:100%; min-height:64px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; font-size:var(--type-body); }
-.home-tab-transfer__send > svg { width:24px; height:24px; color:var(--color-muted); }
-.home-tab-transfer__send:disabled { color:var(--color-muted); }
-.home-tab-transfer__error { margin:0; color:var(--color-danger); font-size:var(--type-meta); line-height:var(--line-meta); }
-.home-tab-sent { list-style:none; margin:0; padding:0; }
-.home-tab-sent li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--space-3); min-height:44px; border-bottom:1px solid var(--color-border); }
-.home-tab-sent li > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--type-body); }
-.home-tab-sent li small { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
-.home-tab-sent li[data-tone="error"] small { color:var(--color-danger); }
-
+/* 전송: one tile with the shared TransferMark; 상세 keeps the list. */
+.home-tab-transfer__send { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; width:100%; min-height:88px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; }

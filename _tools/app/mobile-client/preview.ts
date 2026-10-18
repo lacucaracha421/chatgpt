@@ -1,3 +1,4 @@
+import {localDay} from '../src/shared/displayDate';
 import type {MobileNote} from './Notes';
 let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body:'마음에 남은 장면과 감상을 적어 두세요.',pinned:true,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false},...demoStickyNotes(),...demoLedger()];
 /** A few notes of every kind so the sticky-note cards can be seen: colours, a checklist, a secret, labels. */
@@ -222,6 +223,14 @@ const demoExchange={configured:true,tokenConfigured:true,receiveSupported:true,d
   ]};
 const demoExchangeThumbs=new Map([...demoExchange.incoming,...demoExchange.outgoing].filter(row=>/\.(jpe?g|png)$/i.test(row.fileName)).map((row,i)=>[row.transferId,art(i+3,256,256)]));
 
+function demoCardState(){
+  const day=localDay(new Date()),reset=new Date();reset.setDate(reset.getDate()+1);reset.setHours(5,0,0,0);
+  const pack=typeof location!=='undefined'&&new URLSearchParams(location.search).get('card')==='pack';
+  return {version:1,revision:1,day,nextResetAt:reset.toISOString(),unopened:pack?[{id:`d-${day.replace(/-/g,'')}`,kind:'daily',day}]:[],pendingKeep:[],prefetch:[],savedToday:12,bonusThreshold:50,bonusGranted:false,cover:{day,assetIds:[assets[0]!.id]},albumSummary:{cards:10,total:10}};
+}
+function demoCardResult(packId:string){
+  return {packId,openedAt:new Date().toISOString(),alreadyOpened:true,keptAt:new Date().toISOString(),cards:['n','n','r','sr','ssr'].map((tier,slot)=>({slot,characterId:`demo-character-${slot}`,characterName:`카드 ${slot+1}`,seriesName:'데모',tier,artAssetId:assets[slot]!.id,artWidth:1000,artHeight:1400,cutout:null,count:1,level:1,serial:null,isNew:false,kept:true}))};
+}
 export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
   await new Promise(resolve => setTimeout(resolve, 80));
   if(homeDemo&&(op==='exchangeState'||op==='exchangeVisible'))return homeDemoExchange();
@@ -305,6 +314,9 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   const url = new URL(String(payload.path),'https://preview.invalid');
   if(homeDemo==='offline'&&/^\/v1\/(captures|collections|library\/(characters\/review|similarity)|library\/summary|mobile-catalog\/(duplicates|refresh))/.test(url.pathname))throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
   if(url.pathname==='/v1/library/list-generation')return {generation:'a'.repeat(64),filterVersion:1};
+  // 오늘의 카드: an opened day; `card=pack` leaves today's pack unopened.
+  if(url.pathname==='/v1/cards/state')return demoCardState();
+  if(url.pathname.startsWith('/v1/cards/packs/'))return demoCardResult(decodeURIComponent(url.pathname.split('/')[4]??'d-demo'));
   if(url.pathname==='/v1/library/summary'){
     // Home ⑤ 자산 현황: calm has nothing today and nothing unclassified.
     const midnight=new Date();midnight.setHours(0,0,0,0);const monday=new Date(midnight);monday.setDate(monday.getDate()-(monday.getDay()+6)%7);
