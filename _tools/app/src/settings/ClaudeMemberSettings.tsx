@@ -14,7 +14,7 @@ import { Switch } from "../shared/ui/Switch";
 import { TextInput } from "../shared/ui/TextInput";
 
 type MemberStatus = {
-  state: string; planId: string | null; buckets: [number, number, number];
+  state: string; planId: string | null; buckets: [number, number, number]; knownBuckets?: [number, number, number];
   estimateLowUsd: number; estimateHighUsd: number;
   total: number; done: number; failed: number;
   capUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number;
@@ -23,6 +23,11 @@ type MemberStatus = {
 type ExcludedFolder = { id: string; path: string };
 const usd = (v: number) => `$${v.toFixed(2)}`;
 const count = (v: number) => v.toLocaleString("ko-KR");
+// Of each bucket: images without any character, and images that already have one accepted character.
+const split = (status: MemberStatus, index: number) => {
+  const one = status.knownBuckets?.[index] ?? 0;
+  return `캐릭터 없음 ${count(status.buckets[index] - one)}장 · 한 명 지정 ${count(one)}장`;
+};
 const labels: Record<string, string> = {
   idle: "시작 전", draft: "시작 전", running: "진행", paused: "일시 정지", cancelled: "취소됨",
   completed: "완료", capped: "분석 한도 도달", no_key: "API 키를 넣어 주세요", credential: "API 키를 확인하세요",
@@ -114,7 +119,7 @@ export function ClaudeMemberSettings({ disabled }: { disabled: boolean }) {
   return <>
     <SettingsRow name="미분류 일괄 분석" status={status && `${labels[status.state] ?? status.state} · ${count(status.done)} / ${count(status.total)}장${status.failed ? ` · 실패 ${count(status.failed)}장` : ""}`}
       control={<>
-        {(!status || ["idle", "draft"].includes(status.state)) && <Button disabled={blocked} onClick={() => void preview()}><BusyLabel busy={busy} idle="대상 확인">확인 중</BusyLabel></Button>}
+        {(!status || ["idle", "draft", "completed", "cancelled"].includes(status.state)) && <Button disabled={blocked} onClick={() => void preview()}><BusyLabel busy={busy} idle={status && ["completed", "cancelled"].includes(status.state) ? "새 대상 확인" : "대상 확인"}>확인 중</BusyLabel></Button>}
         {status?.state === "running" && <Button disabled={blocked} onClick={() => void control("pause")}>일시 정지</Button>}
         {canResume && <Button disabled={blocked} onClick={() => void control("resume")}>다시 시작</Button>}
         {status && !["idle", "draft", "completed", "cancelled"].includes(status.state) && <Button disabled={blocked} onClick={() => void control("cancel")}>실행 취소</Button>}
@@ -138,11 +143,11 @@ export function ClaudeMemberSettings({ disabled }: { disabled: boolean }) {
       onPick={id => void saveExcluded([...(excluded ?? []).map(folder => folder.id), id])} />}
     <Dialog open={confirm !== null} title="미분류 이미지 분석" onClose={() => { if (!busy) setConfirm(null); }}>
       {confirm && <>
-        <SettingsRow name="2–5명 시리즈" value={`${count(confirm.buckets[0])}장`} status="Sonnet · 확신도 90% 이상 자동 지정" />
-        <SettingsRow name="6–15명 시리즈" value={`${count(confirm.buckets[1])}장`} status="Haiku → 필요 시 Sonnet · 확인 목록에 추천" />
-        <SettingsRow name="16명 이상 시리즈" value={`${count(confirm.buckets[2])}장`} status="Haiku → 필요 시 Sonnet · 확인 목록에 추천" />
+        <SettingsRow name="2–5명 시리즈" value={`${count(confirm.buckets[0])}장`} status={`${split(confirm, 0)} · Sonnet · 확신도 90% 이상 자동 지정`} />
+        <SettingsRow name="6–15명 시리즈" value={`${count(confirm.buckets[1])}장`} status={`${split(confirm, 1)} · Haiku → 필요 시 Sonnet · 확인 목록에 추천`} />
+        <SettingsRow name="16명 이상 시리즈" value={`${count(confirm.buckets[2])}장`} status={`${split(confirm, 2)} · Haiku → 필요 시 Sonnet · 확인 목록에 추천`} />
         <SettingsRow name="예상 비용" value={`${usd(confirm.estimateLowUsd)}–${usd(confirm.estimateHighUsd)}`} status={`실험 단가 기준 · 분석 한도 ${usd(status?.capUsd ?? confirm.capUsd)}`} />
-        <p>일치하는 캐릭터가 없으면 미분류로 남깁니다.</p>
+        <p>일치하는 캐릭터가 없으면 그대로 둡니다. 한 명 지정 이미지는 이미 지정된 캐릭터를 건드리지 않고 추가로 있는 캐릭터만 찾습니다.</p>
         {error && <p className="settings-view__row-message" role="alert">{error}</p>}
         <div className="settings-view__actions">
           <Button disabled={busy} onClick={() => setConfirm(null)}>닫기</Button>

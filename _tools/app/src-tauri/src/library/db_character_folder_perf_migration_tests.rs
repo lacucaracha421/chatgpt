@@ -4,7 +4,7 @@
         let library = crate::library::Library::open(temp.path()).unwrap();
         let mut connection = library.connection().unwrap();
         connection
-            .execute_batch("DROP TABLE character_claude_settings;
+            .execute_batch("ALTER TABLE character_member_items DROP COLUMN plan_id; ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;  DROP TABLE character_claude_settings;
                 DROP TABLE character_claude_opinions;
                 DROP INDEX tagger_scores_suggestion_threshold;
                 DROP INDEX character_target_tagger_tags_by_tag;

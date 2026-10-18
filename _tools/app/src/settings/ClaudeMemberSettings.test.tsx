@@ -7,7 +7,7 @@ import type { LibraryGateway } from "../library/types";
 import { ClaudeMemberSettings } from "./ClaudeMemberSettings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const initial = { state: "idle", planId: null as string | null, buckets: [2, 3, 4], estimateLowUsd: .039, estimateHighUsd: .44,
+const initial = { state: "idle", planId: null as string | null, buckets: [2, 3, 4], knownBuckets: [1, 0, 3], estimateLowUsd: .039, estimateHighUsd: .44,
   total: 9, done: 0, failed: 0, capUsd: 45, spentUsd: 0, reservedUsd: 0, remainingUsd: 45,
   ongoingEnabled: true, ongoingUntilCutoff: true };
 let current = { ...initial };
@@ -44,12 +44,23 @@ it("previews the frozen cohort before starting and supports pause and resume", a
   const dialog = await screen.findByRole("dialog", { name: "미분류 이미지 분석" });
   expect(vi.mocked(invoke).mock.calls.some(([, args]) => (args as { action?: string })?.action === "start")).toBe(false);
   for (const n of [2, 3, 4]) expect(within(dialog).getByText(`${n}장`)).toBeInTheDocument();
+  expect(within(dialog).getByText(/캐릭터 없음 1장 · 한 명 지정 1장/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/캐릭터 없음 1장 · 한 명 지정 3장/)).toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "분석 시작" }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("claude_member_control", { action: "start", planId: "frozen-plan" }));
   await user.click(await screen.findByRole("button", { name: "일시 정지" }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("claude_member_control", { action: "pause" }));
   await user.click(await screen.findByRole("button", { name: "다시 시작" }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("claude_member_control", { action: "resume" }));
+});
+it("offers another run after a finished one", async () => {
+  const user = userEvent.setup();
+  current = { ...current, state: "completed", planId: "old-plan", done: 9 };
+  render(<ClaudeMemberSettings disabled={false} />);
+  const another = await screen.findByRole("button", { name: "새 대상 확인" });
+  await waitFor(() => expect(another).toBeEnabled());
+  await user.click(another);
+  expect(await screen.findByRole("dialog", { name: "미분류 이미지 분석" })).toBeInTheDocument();
 });
 it("saves the dedicated cap and ongoing switch independently", async () => {
   const user = userEvent.setup();

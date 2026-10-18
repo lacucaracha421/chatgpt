@@ -1,5 +1,5 @@
 //! Durable, image-level identification. Pairwise judging remains independent.
-use super::member_probe::{self as probe, Answer, Sample, Usage};
+use super::member_probe::{self as probe, Answer, Sample, Usage, UNRESOLVED_RECOMMENDATION};
 use super::*;
 
 const CUTOFF: (i32, u32, u32) = (2026, 10, 26);
@@ -13,7 +13,10 @@ fn ongoing_on(mode: &str, date: chrono::NaiveDate) -> bool {
 pub struct MemberStatus {
     pub state: String,
     pub plan_id: Option<String>,
+    /// Planned images per series size (2-5, 6-15, 16+), both kinds together.
     pub buckets: [usize; 3],
+    /// Of those, the images that already have one accepted character ("한 명 지정").
+    pub known_buckets: [usize; 3],
     pub estimate_low_usd: f64,
     pub estimate_high_usd: f64,
     pub total: usize,
@@ -61,25 +64,47 @@ fn reservation(sample: &Sample, model: &str) -> f64 {
     cost_usd(model, 0, 2000, input, 0)
 }
 
+fn member_snapshot(
+    model: &str,
+    confidence: f64,
+    target: &crate::library::characters::Target,
+) -> Value {
+    json!({"scanId":null,"prediction":{"engine":"claude","memberIdentification":true,"model":model,"confidence":confidence},"references":target.references.iter().filter(|r|r.status=="ready").take(2).collect::<Vec<_>>()})
+}
+
 fn automatic(sample: &Sample, confidence: f64) -> bool {
     sample.member_count <= 5 && confidence >= SONNET_ACCEPT_CONFIDENCE
 }
 
 // This predicate is checked again inside the write transaction. Any hand decision
 // wins, including a rejection/clear of an unrelated member while a request is away.
+// A plain sample needs an image without any decision. A sample with a known member needs
+// that member to be the only accepted character on the image and its other candidates to
+// have no decision. A recommendation that is already resolved no longer blocks either kind.
+const LATEST_ACCEPTED: &str = "SELECT 1 FROM character_decisions d WHERE d.source_asset_id=a.id AND d.asset_hash=a.content_hash AND d.decision='accepted'
+        AND NOT EXISTS(SELECT 1 FROM character_decisions n WHERE n.target_id=d.target_id AND n.source_asset_id=d.source_asset_id AND n.sequence>d.sequence)";
 fn eligible(c: &Connection, sample: &Sample) -> Result<bool> {
+    let others = sample
+        .candidates
+        .iter()
+        .filter(|m| sample.known.as_deref() != Some(m.id.as_str()))
+        .map(|m| m.id.as_str())
+        .collect::<Vec<_>>();
     Ok(c.query_row(&format!("WITH RECURSIVE scope(id) AS (SELECT ?3 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id), {EXCLUDED_TREE}
       SELECT EXISTS(SELECT 1 FROM assets a WHERE a.id=?1 AND a.content_hash=?2 AND a.status='normal' AND a.media_kind='image'
         AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN scope s ON s.id=ac.classification_id WHERE ac.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN excluded x ON x.id=ac.classification_id WHERE ac.asset_id=a.id)
-        AND NOT EXISTS(SELECT 1 FROM character_decisions d WHERE d.source_asset_id=a.id)
+        AND (CASE WHEN ?5 IS NULL THEN NOT EXISTS(SELECT 1 FROM character_decisions d WHERE d.source_asset_id=a.id)
+          ELSE (SELECT COUNT(*) FROM ({LATEST_ACCEPTED}))=1
+            AND EXISTS({LATEST_ACCEPTED} AND d.target_id=?5)
+            AND NOT EXISTS(SELECT 1 FROM character_decisions d WHERE d.source_asset_id=a.id AND d.target_id IN (SELECT value FROM json_each(?6))) END)
         AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id WHERE ac.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM character_tagger_pending p WHERE p.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM character_member_pending p WHERE p.asset_id=a.id)
-        AND NOT EXISTS(SELECT 1 FROM character_autotag_evidence e JOIN character_autotag_predictions p ON p.evidence_id=e.id WHERE e.asset_id=a.id AND json_extract(p.result_json,'$.state')='recommended'))
+        AND NOT {UNRESOLVED_RECOMMENDATION})
         AND (SELECT COUNT(*) FROM character_targets WHERE enabled=1 AND role='character' AND series_classification_id=?3)=?4"),
-      params![sample.image.id,sample.image.hash,sample.series,sample.member_count as i64], |r| r.get(0))?)
+      params![sample.image.id,sample.image.hash,sample.series,sample.member_count as i64,sample.known,serde_json::to_string(&others)?], |r| r.get(0))?)
 }
 
 /// Folders whose images are never analysed (library data, so ids are never hard-coded here).
@@ -267,13 +292,16 @@ impl Library {
     pub fn member_status(&self) -> Result<MemberStatus> {
         let c = self.connection()?;
         let (state,plan_id,cap,mode): (String,Option<String>,f64,String) = c.query_row("SELECT state,plan_id,cap_usd,ongoing_mode FROM character_member_control WHERE singleton=1",[],|r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
-        let rows = c.prepare("SELECT CASE WHEN json_extract(sample_json,'$.member_count')<=5 THEN 0 WHEN json_extract(sample_json,'$.member_count')<=15 THEN 1 ELSE 2 END,COUNT(*),SUM(state<>'pending'),SUM(state='error') FROM character_member_items WHERE mode='backlog' GROUP BY 1")?
-            .query_map([],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        // Counts describe the current plan only; spending below covers every backlog run.
+        let rows = c.prepare("SELECT CASE WHEN json_extract(sample_json,'$.member_count')<=5 THEN 0 WHEN json_extract(sample_json,'$.member_count')<=15 THEN 1 ELSE 2 END,COUNT(*),SUM(state<>'pending'),SUM(state='error'),SUM(json_extract(sample_json,'$.known') IS NOT NULL) FROM character_member_items WHERE mode='backlog' AND plan_id IS (SELECT plan_id FROM character_member_control WHERE singleton=1) GROUP BY 1")?
+            .query_map([],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let mut buckets = [0; 3];
+        let mut known_buckets = [0; 3];
         let mut done = 0;
         let mut failed = 0;
-        for (bucket, total, completed, errors) in rows {
+        for (bucket, total, completed, errors, known) in rows {
             buckets[bucket as usize] = total as usize;
+            known_buckets[bucket as usize] = known as usize;
             done += completed as usize;
             failed += errors as usize;
         }
@@ -286,6 +314,7 @@ impl Library {
             state,
             plan_id,
             buckets,
+            known_buckets,
             estimate_low_usd: buckets[0] as f64 * 0.016 + large * 0.001,
             estimate_high_usd: buckets[0] as f64 * 0.047 + large * 0.0495,
             total,
@@ -302,9 +331,14 @@ impl Library {
 
     /// Freeze the cohort before the user sees its count. Confirming this plan never
     /// adds later arrivals. Read-only experiment code supplies exactly the same candidates.
+    /// A finished or cancelled run can be followed by a new plan; the old items stay as the
+    /// record of what was already analysed and are never planned again.
     pub fn member_plan(&self) -> Result<MemberStatus> {
         let current = self.member_status()?;
-        if !matches!(current.state.as_str(), "idle" | "draft") {
+        if !matches!(
+            current.state.as_str(),
+            "idle" | "draft" | "completed" | "cancelled"
+        ) {
             return Err(Error::Invalid("이미 분석 실행이 있습니다."));
         }
         self.member_exclusions_seed()?;
@@ -329,22 +363,28 @@ impl Library {
             [],
             |r| r.get(0),
         )?;
-        if !matches!(state.as_str(), "idle" | "draft") {
+        if !matches!(state.as_str(), "idle" | "draft" | "completed" | "cancelled") {
             return Err(Error::Invalid("이미 분석 실행이 있습니다."));
         }
         // A draft is only replaced by an explicit preview, never by a background turn.
+        // Unsent items go; an unsent item that already holds a request stays as a record.
         tx.execute(
-            "DELETE FROM character_member_items WHERE mode='backlog'",
+            "DELETE FROM character_member_items WHERE mode='backlog' AND state='pending' AND NOT EXISTS(SELECT 1 FROM character_member_requests r WHERE r.item_id=character_member_items.id)",
             [],
         )?;
+        tx.execute(
+            "UPDATE character_member_items SET state='skipped' WHERE mode='backlog' AND state='pending'",
+            [],
+        )?;
+        let plan_id = uuid::Uuid::new_v4().to_string();
         for sample in samples {
             if eligible(&tx, &sample)? {
-                tx.execute("INSERT OR IGNORE INTO character_member_items(mode,asset_id,sample_json) VALUES('backlog',?1,?2)",params![sample.image.id,serde_json::to_string(&sample)?])?;
+                tx.execute("INSERT OR IGNORE INTO character_member_items(mode,asset_id,sample_json,plan_id) VALUES('backlog',?1,?2,?3)",params![sample.image.id,serde_json::to_string(&sample)?,plan_id])?;
             }
         }
         tx.execute(
             "UPDATE character_member_control SET state='draft',plan_id=?1 WHERE singleton=1",
-            [uuid::Uuid::new_v4().to_string()],
+            [plan_id],
         )?;
         tx.commit()?;
         drop(c);
@@ -402,6 +442,9 @@ impl Library {
     }
 
     pub(in crate::library) fn advance_character_members(&self, stop: &AtomicBool) -> bool {
+        if let Err(e) = self.member_backfill_recommendations() {
+            eprintln!("캐릭터 멤버 추천 보충: {e}");
+        }
         if crate::workload::is_restricted()
             || !self.augmentation_idle_allowed(stop).unwrap_or(false)
         {
@@ -627,7 +670,8 @@ impl Library {
                 params![s.image.id, after],
                 |r| r.get(0),
             )?;
-            if fresh && eligible(&c, &s)? {
+            // Ongoing analysis keeps to images without any character.
+            if fresh && s.known.is_none() && eligible(&c, &s)? {
                 c.execute("INSERT OR IGNORE INTO character_member_items(mode,asset_id,sample_json) VALUES('ongoing',?1,?2)",params![s.image.id,serde_json::to_string(&s)?])?;
             }
         }
@@ -678,6 +722,131 @@ impl Library {
         Ok(true)
     }
 
+    /// The candidates' current registrations, or None when one of them (other than the
+    /// known member, which is context only and never written) no longer matches the sample.
+    fn member_targets(
+        &self,
+        tx: &Connection,
+        s: &Sample,
+    ) -> Result<Option<Vec<crate::library::characters::Target>>> {
+        let mut targets = Vec::new();
+        for member in &s.candidates {
+            let target = match self.read_character_target(tx, &member.id) {
+                Ok(target) => target,
+                Err(Error::NotFound) => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            if s.known.as_deref() != Some(member.id.as_str()) {
+                let hashes = target
+                    .references
+                    .iter()
+                    .filter(|r| r.status == "ready")
+                    .take(2)
+                    .map(|r| r.asset_hash.as_str())
+                    .collect::<Vec<_>>();
+                if !target.enabled
+                    || target.role != "character"
+                    || target.series_classification_id.as_deref() != Some(s.series.as_str())
+                    || hashes
+                        != member
+                            .references
+                            .iter()
+                            .map(|r| r.hash.as_str())
+                            .collect::<Vec<_>>()
+                {
+                    return Ok(None);
+                }
+            }
+            targets.push(target);
+        }
+        Ok(Some(targets))
+    }
+
+    fn member_recommend(
+        &self,
+        tx: &Connection,
+        s: &Sample,
+        target: &crate::library::characters::Target,
+        snapshot: &Value,
+        verb: &str,
+    ) -> Result<bool> {
+        let added = tx.execute(&format!("{verb} INTO character_member_recommendations(asset_id,asset_hash,target_id,target_revision,evidence_json) VALUES(?1,?2,?3,?4,?5)"),params![s.image.id,s.image.hash,target.id,target.revision,serde_json::to_string(snapshot)?])?;
+        Ok(added > 0)
+    }
+
+    /// One-time, free backfill (migration 0137 sets the flag to 0): finished small-series
+    /// answers whose labels fell below the automatic bar were dropped by the earlier rule.
+    /// They become recommendations now, only where nothing has happened to the image since.
+    /// The flag flips in the same transaction as the inserts, so a restart never half-applies it.
+    pub(super) fn member_backfill_recommendations(&self) -> Result<usize> {
+        let mut c = self.connection()?;
+        let flag =
+            "SELECT recommendations_backfilled FROM character_member_control WHERE singleton=1";
+        if c.query_row(flag, [], |r| r.get::<_, bool>(0))? {
+            return Ok(0);
+        }
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.query_row(flag, [], |r| r.get::<_, bool>(0))? {
+            return Ok(0);
+        }
+        let rows = tx
+            .prepare("SELECT i.sample_json,r.model,r.answer_json FROM character_member_items i JOIN character_member_requests r ON r.item_id=i.id
+              WHERE i.state='done' AND r.actual_usd IS NOT NULL AND r.answer_json IS NOT NULL AND r.model=?1
+              AND json_extract(i.sample_json,'$.member_count')<=5 ORDER BY i.id")?
+            .query_map([SONNET], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut created = 0;
+        let mut series = BTreeSet::new();
+        for (sample, model, answer) in rows {
+            let (Ok(sample), Ok(answer)) = (
+                serde_json::from_str::<Sample>(&sample),
+                serde_json::from_str::<Answer>(&answer),
+            ) else {
+                continue;
+            };
+            let below = answer
+                .present
+                .iter()
+                .filter(|p| !automatic(&sample, p.confidence))
+                .collect::<Vec<_>>();
+            if below.is_empty() || !eligible(&tx, &sample)? {
+                continue;
+            }
+            let Some(targets) = self.member_targets(&tx, &sample)? else {
+                continue;
+            };
+            for present in below {
+                let Some(target) = (0..sample.candidates.len())
+                    .find(|i| probe::label(*i) == present.label)
+                    .map(|i| &targets[i])
+                    .filter(|t| sample.known.as_deref() != Some(t.id.as_str()))
+                else {
+                    continue;
+                };
+                let snapshot = member_snapshot(&model, present.confidence, target);
+                if self.member_recommend(&tx, &sample, target, &snapshot, "INSERT OR IGNORE")? {
+                    created += 1;
+                    series.insert(sample.series.clone());
+                }
+            }
+        }
+        tx.execute(
+            "UPDATE character_member_control SET recommendations_backfilled=1 WHERE singleton=1",
+            [],
+        )?;
+        tx.commit()?;
+        for s in series {
+            self.character_changes.series_analysed(Some(s.as_str()));
+        }
+        Ok(created)
+    }
+
     fn member_apply(
         &self,
         id: i64,
@@ -705,57 +874,29 @@ impl Library {
             return Ok(());
         }
         // Recheck registration and the exact reference prefix, before writing any label.
-        let mut targets = Vec::new();
-        for member in &s.candidates {
-            let target = match self.read_character_target(&tx, &member.id) {
-                Ok(target) => target,
-                Err(Error::NotFound) => {
-                    tx.execute(
-                        "UPDATE character_member_items SET state='skipped' WHERE id=?1",
-                        [id],
-                    )?;
-                    tx.commit()?;
-                    return Ok(());
-                }
-                Err(error) => return Err(error),
-            };
-            let hashes = target
-                .references
-                .iter()
-                .filter(|r| r.status == "ready")
-                .take(2)
-                .map(|r| r.asset_hash.as_str())
-                .collect::<Vec<_>>();
-            if !target.enabled
-                || target.role != "character"
-                || target.series_classification_id.as_deref() != Some(s.series.as_str())
-                || hashes
-                    != member
-                        .references
-                        .iter()
-                        .map(|r| r.hash.as_str())
-                        .collect::<Vec<_>>()
-            {
-                tx.execute(
-                    "UPDATE character_member_items SET state='skipped' WHERE id=?1",
-                    [id],
-                )?;
-                tx.commit()?;
-                return Ok(());
-            }
-            targets.push(target);
-        }
+        let Some(targets) = self.member_targets(&tx, s)? else {
+            tx.execute(
+                "UPDATE character_member_items SET state='skipped' WHERE id=?1",
+                [id],
+            )?;
+            tx.commit()?;
+            return Ok(());
+        };
         for present in &answer.present {
             let Some(index) = (0..s.candidates.len()).find(|i| probe::label(*i) == present.label)
             else {
                 return Err(Error::Stale);
             };
             let target = &targets[index];
-            let snapshot = json!({"scanId":null,"prediction":{"engine":"claude","memberIdentification":true,"model":model,"confidence":present.confidence},"references":target.references.iter().filter(|r|r.status=="ready").take(2).collect::<Vec<_>>()});
+            if s.known.as_deref() == Some(target.id.as_str()) {
+                continue;
+            }
+            let snapshot = member_snapshot(model, present.confidence, target);
             if automatic(s, present.confidence) {
                 self.accept_s36_in(&tx, target, &s.image.id, &s.image.hash, &snapshot)?;
-            } else if s.member_count > 5 {
-                tx.execute("INSERT OR REPLACE INTO character_member_recommendations(asset_id,asset_hash,target_id,target_revision,evidence_json) VALUES(?1,?2,?3,?4,?5)",params![s.image.id,s.image.hash,target.id,target.revision,serde_json::to_string(&snapshot)?])?;
+            } else {
+                // Everything below the automatic bar is left to the person, in any series size.
+                self.member_recommend(&tx, s, target, &snapshot, "INSERT OR REPLACE")?;
                 self.character_changes
                     .series_analysed(Some(s.series.as_str()));
             }

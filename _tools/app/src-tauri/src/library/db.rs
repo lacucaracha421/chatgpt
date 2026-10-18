@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 136;
+pub(crate) const SCHEMA_VERSION: i64 = 137;
 
 #[cfg(test)]
 #[path = "db_character_folder_perf_migration_tests.rs"]
@@ -833,6 +833,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version < 136 {
             transaction.execute_batch(include_str!("../../migrations/0136_character_member_excluded_folders.sql"))?;
+        }
+        if version < 137 {
+            transaction.execute_batch(include_str!("../../migrations/0137_character_member_plan_items.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

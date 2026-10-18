@@ -5,7 +5,9 @@
         let mut connection = fixture.library.connection().unwrap();
         connection
             .execute_batch(
-                "DROP TABLE character_claude_opinions;
+                "ALTER TABLE character_member_items DROP COLUMN plan_id;
+                 ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
+                 DROP TABLE character_claude_opinions;
                  DROP TABLE character_claude_settings;",
             )
             .unwrap();
@@ -56,7 +58,9 @@
         let mut connection = library.connection().unwrap();
         connection
             .execute_batch(
-                "DROP TABLE character_claude_settings;
+                "ALTER TABLE character_member_items DROP COLUMN plan_id;
+                 ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
+                 DROP TABLE character_claude_settings;
                  DROP TABLE character_claude_opinions;
                  PRAGMA user_version=130;",
             )
@@ -102,5 +106,21 @@ fn member_run_migrates_134_without_changing_pairwise_settings() {
     assert_eq!(settings,("until".into(),45.0));
     let pairwise: (bool,f64) = connection.query_row("SELECT enabled,monthly_cap_usd FROM character_claude_settings",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(pairwise,(true,20.0));
+    assert_eq!(connection.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),super::SCHEMA_VERSION);
+}
+
+#[test]
+fn member_run_migrates_136_so_a_running_plan_keeps_its_items() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = crate::library::Library::open(temp.path()).unwrap();
+    let mut connection = library.connection().unwrap();
+    connection.execute_batch("INSERT INTO character_member_items(mode,asset_id,sample_json) VALUES('backlog','a','{}'),('ongoing','b','{}');
+        UPDATE character_member_control SET state='running',plan_id='plan-1';
+        ALTER TABLE character_member_items DROP COLUMN plan_id;
+        ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
+        PRAGMA user_version=136;").unwrap();
+    super::migrate_to_latest(&mut connection, 136).unwrap();
+    let plans: Vec<(String, Option<String>)> = connection.prepare("SELECT mode,plan_id FROM character_member_items ORDER BY mode").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(plans,[("backlog".into(),Some("plan-1".into())),("ongoing".into(),None)]);
     assert_eq!(connection.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),super::SCHEMA_VERSION);
 }

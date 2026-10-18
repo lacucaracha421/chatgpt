@@ -12,6 +12,14 @@ use std::{
 };
 
 type ProbeResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+/// SQL condition on an `assets a` row: some 'recommended' automatic-tagging prediction on the
+/// image is still waiting. A recommendation whose target already has an accepted or rejected
+/// latest decision for the image's current hash is resolved and no longer counts.
+pub(super) const UNRESOLVED_RECOMMENDATION: &str = "EXISTS(SELECT 1 FROM character_autotag_evidence e JOIN character_autotag_predictions p ON p.evidence_id=e.id
+    WHERE e.asset_id=a.id AND json_extract(p.result_json,'$.state')='recommended'
+    AND NOT EXISTS(SELECT 1 FROM character_decisions d WHERE d.target_id=p.target_id AND d.source_asset_id=a.id AND d.asset_hash=a.content_hash
+      AND d.decision IN ('accepted','rejected')
+      AND NOT EXISTS(SELECT 1 FROM character_decisions n WHERE n.target_id=d.target_id AND n.source_asset_id=d.source_asset_id AND n.sequence>d.sequence)))";
 const VERSION: u32 = 2;
 const HARD_CAP: f64 = 8.0;
 const OUTPUT_LIMIT: u32 = 2000;
@@ -47,6 +55,10 @@ pub(super) struct Sample {
     pub(super) truth_source: String,
     pub(super) candidates: Vec<Member>,
     pub(super) missing_scores: usize,
+    /// Target id of the one character already accepted on this image. It is listed among
+    /// the candidates for context only: it is never asked about, proposed or written again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) known: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub(super) struct Manifest {
@@ -277,13 +289,23 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
         WHERE NOT EXISTS(SELECT 1 FROM character_decisions newer WHERE newer.target_id=d.target_id AND newer.source_asset_id=d.source_asset_id AND newer.sequence>d.sequence)")?
         .query_map([], |r| Ok(((r.get::<_,String>(0)?,r.get::<_,String>(1)?), (r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?))))?
         .collect::<rusqlite::Result<BTreeMap<_,_>>>()?;
+    let mut by_asset = BTreeMap::<String, Vec<(String, String, String)>>::new();
+    for ((target, asset), (hash, decision, _)) in &decisions {
+        by_asset.entry(asset.clone()).or_default().push((
+            target.clone(),
+            hash.clone(),
+            decision.clone(),
+        ));
+    }
     let rows = db.prepare("WITH RECURSIVE scope(series,id) AS (SELECT classification_id,classification_id FROM character_series UNION SELECT s.series,c.id FROM scope s JOIN classification_entries c ON c.parent_id=s.id)
         SELECT DISTINCT s.series,a.id,a.content_hash,a.relative_path,a.width,a.height FROM scope s JOIN asset_classifications ac ON ac.classification_id=s.id JOIN assets a ON a.id=ac.asset_id
         WHERE a.status='normal' AND a.media_kind='image' AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)")?
         .query_map([], |r| Ok((r.get::<_,String>(0)?,picture(r,1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut pool = Vec::new();
     let excluded_app = if unclassified {
-        let mut ids = db.prepare("SELECT source_asset_id FROM character_decisions UNION SELECT ac.asset_id FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id UNION SELECT asset_id FROM character_tagger_pending UNION SELECT e.asset_id FROM character_autotag_predictions p JOIN character_autotag_evidence e ON e.id=p.evidence_id WHERE json_extract(p.result_json,'$.state')='recommended' UNION SELECT asset_id FROM character_member_items WHERE mode='ongoing' OR (SELECT state FROM character_member_control WHERE singleton=1)<>'draft' UNION SELECT asset_id FROM character_member_pending")?
+        // Decisions are judged per image below. An item that has not been sent yet (and has no
+        // request) belongs to a plan that is about to be replaced, so it stays available.
+        let mut ids = db.prepare(&format!("SELECT ac.asset_id FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id UNION SELECT asset_id FROM character_tagger_pending UNION SELECT a.id FROM assets a WHERE {UNRESOLVED_RECOMMENDATION} UNION SELECT asset_id FROM character_member_items WHERE mode='ongoing' OR state<>'pending' OR EXISTS(SELECT 1 FROM character_member_requests r WHERE r.item_id=character_member_items.id) UNION SELECT asset_id FROM character_member_pending"))?
             .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<BTreeSet<_>>>()?;
         ids.extend(cache.prepare("SELECT asset_id FROM scores WHERE policy_version=?1 AND verdict IN ('automatic','recommended')")?.query_map([&policy], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
         ids
@@ -303,27 +325,49 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
                 .get(&(id.to_owned(), image.id.clone()))
                 .filter(|d| d.0 == image.hash)
         };
+        // The app cohort is images without any decision, or with exactly one accepted
+        // character of this series (any origin) whose other members have no decision.
+        let mut known = None::<String>;
+        let mut decided = BTreeSet::<&str>::new();
+        if unclassified {
+            if let Some(rows) = by_asset.get(&image.id) {
+                let accepted = rows
+                    .iter()
+                    .filter(|r| r.1 == image.hash && r.2 == "accepted")
+                    .collect::<Vec<_>>();
+                match accepted.as_slice() {
+                    [one] if all.iter().any(|m| m.id == one.0) => known = Some(one.0.clone()),
+                    _ => continue,
+                }
+                decided = rows.iter().map(|r| r.0.as_str()).collect();
+            }
+        }
         // A current automatic/unknown judgment is never part of this manual-only
         // cohort, even if another member of the same image was manually accepted.
-        if all
-            .iter()
-            .any(|m| decision(&m.id).is_some_and(|d| d.2 != "manual" && d.1 != "cleared"))
+        if !unclassified
+            && all
+                .iter()
+                .any(|m| decision(&m.id).is_some_and(|d| d.2 != "manual" && d.1 != "cleared"))
         {
             *excluded.entry("automatic/unknown judgment").or_default() += 1;
             continue;
         }
-        let truth: BTreeSet<_> = all
-            .iter()
-            .filter(|m| decision(&m.id).is_some_and(|d| d.2 == "manual" && d.1 == "accepted"))
-            .map(|m| m.id.clone())
-            .collect();
+        let truth: BTreeSet<_> = if unclassified {
+            known.iter().cloned().collect()
+        } else {
+            all.iter()
+                .filter(|m| decision(&m.id).is_some_and(|d| d.2 == "manual" && d.1 == "accepted"))
+                .map(|m| m.id.clone())
+                .collect()
+        };
         // Group 기타 says none in that group only; only the series-wide bucket is none.
-        let extras = targets.iter().any(|(id, _, s, _, role, group)| {
-            s == &series
-                && role == "extras"
-                && group.is_none()
-                && decision(id).is_some_and(|d| d.2 == "manual" && d.1 == "accepted")
-        });
+        let extras = !unclassified
+            && targets.iter().any(|(id, _, s, _, role, group)| {
+                s == &series
+                    && role == "extras"
+                    && group.is_none()
+                    && decision(id).is_some_and(|d| d.2 == "manual" && d.1 == "accepted")
+            });
         let rejected = all
             .iter()
             .all(|m| decision(&m.id).is_some_and(|d| d.2 == "manual" && d.1 == "rejected"));
@@ -334,7 +378,13 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
             *excluded.entry("conflicting manual truth").or_default() += 1;
             continue;
         }
-        let mut ranked = all.clone();
+        // Candidates to ask about: members without any decision on this image. The known
+        // member is added afterwards so the five-member narrowing never spends a slot on it.
+        let mut ranked = all
+            .iter()
+            .filter(|m| known.as_deref() != Some(m.id.as_str()) && !decided.contains(m.id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
         let missing_scores = all
             .iter()
             .filter(|m| !scores.contains_key(&(image.id.clone(), image.hash.clone(), m.id.clone())))
@@ -362,13 +412,20 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
             }
             ranked.truncate(5);
         }
-        ranked.sort_by(|a, b| a.id.cmp(&b.id));
+        if ranked.is_empty() {
+            *excluded.entry("no undecided candidate").or_default() += 1;
+            continue;
+        }
         if ranked.iter().any(|m| m.references.len() < 2) {
             *excluded
                 .entry("candidate has fewer than two references")
                 .or_default() += 1;
             continue;
         }
+        if let Some(member) = all.iter().find(|m| known.as_deref() == Some(m.id.as_str())) {
+            ranked.push(member.clone());
+        }
+        ranked.sort_by(|a, b| a.id.cmp(&b.id));
         if media_path(root, &image.path).is_err() {
             *excluded.entry("missing image").or_default() += 1;
             continue;
@@ -380,7 +437,11 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
             image,
             truth,
             truth_source: if unclassified {
-                "unclassified"
+                if known.is_some() {
+                    "one known member"
+                } else {
+                    "unclassified"
+                }
             } else if extras {
                 "series extras"
             } else if rejected {
@@ -391,6 +452,7 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
             .into(),
             candidates: ranked,
             missing_scores,
+            known,
         });
     }
     println!("Eligible pool: {}; exclusions: {:?}", pool.len(), excluded);
@@ -545,11 +607,18 @@ pub(super) fn request(
     content.last_mut().ok_or("No reference block")?["cache_control"] = json!({"type":"ephemeral"});
     content.push(text_block("Image to identify:"));
     content.push(image_block(&encode_picture(&s.image)?));
-    content.push(text_block("Which listed registered individuals appear in this image? Return every present label with confidence 0..1, or an empty present array and none=true. Several or no candidates can be present. Judge identity, allow costume/hairstyle changes. Do not force a match. none must equal present.is_empty()."));
+    let known = s
+        .known
+        .as_deref()
+        .and_then(|id| s.candidates.iter().position(|c| c.id == id));
+    content.push(text_block(&match known {
+        Some(index) => format!("Candidate {} is already known to be present in this image; never report it. Which of the other listed registered individuals also appear in this image? Return every additionally present label with confidence 0..1, or an empty present array and none=true. Several or no further candidates can be present. Judge identity, allow costume/hairstyle changes. Do not force a match. none must equal present.is_empty().", label(index)),
+        None => "Which listed registered individuals appear in this image? Return every present label with confidence 0..1, or an empty present array and none=true. Several or no candidates can be present. Judge identity, allow costume/hairstyle changes. Do not force a match. none must equal present.is_empty().".to_owned(),
+    }));
     let mut request = request_body(model, &content);
     request["max_tokens"] = json!(OUTPUT_LIMIT);
     request["output_config"]["format"]["schema"] = json!({"type":"object","properties":{
-        "present":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string","enum":(0..s.candidates.len()).map(label).collect::<Vec<_>>()},"confidence":{"type":"number"}},"required":["label","confidence"],"additionalProperties":false}},
+        "present":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string","enum":(0..s.candidates.len()).filter(|i| Some(*i)!=known).map(label).collect::<Vec<_>>()},"confidence":{"type":"number"}},"required":["label","confidence"],"additionalProperties":false}},
         "none":{"type":"boolean"}},"required":["present","none"],"additionalProperties":false});
     Ok(request)
 }
@@ -563,7 +632,9 @@ pub(super) fn parse_answer(v: &Value, s: &Sample) -> ProbeResult<Answer> {
     for p in &a.present {
         if !p.confidence.is_finite()
             || !(0.0..=1.0).contains(&p.confidence)
-            || !(0..s.candidates.len()).any(|i| label(i) == p.label)
+            || !(0..s.candidates.len()).any(|i| {
+                label(i) == p.label && s.known.as_deref() != Some(s.candidates[i].id.as_str())
+            })
             || !seen.insert(&p.label)
         {
             return Err("Invalid label/confidence or repeated label".into());
@@ -1040,6 +1111,7 @@ mod member_probe_tests {
             truth_source: "manual".into(),
             candidates: Vec::new(),
             missing_scores: 0,
+            known: None,
         }
     }
     #[test]
