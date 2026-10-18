@@ -536,7 +536,7 @@ impl Library {
         } else {
             HAIKU
         };
-        let mut model = first;
+        let model = first;
         loop {
             // Reuse a settled answer after restart; an ambiguous reservation is never sent twice.
             let stored:Option<(Option<String>,Option<f64>)>=self.connection()?.query_row("SELECT answer_json,actual_usd FROM character_member_requests WHERE item_id=?1 AND model=?2",params![id,model],|r| Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -603,10 +603,8 @@ impl Library {
                 };
                 answer
             };
-            if model == HAIKU && answer.present.is_empty() {
-                model = SONNET;
-                continue;
-            }
+            // 6+ members only produce recommendations the user confirms, so Haiku alone filters
+            // them (user 2026-10-18: "품질보다는 일단 한번 걸러내는 느낌"); no Sonnet second pass.
             self.member_apply(id, &sample, &answer, model, mode)?;
             crate::activities::progress(
                 "character-members",

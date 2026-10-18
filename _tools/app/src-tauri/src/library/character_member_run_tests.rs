@@ -151,10 +151,10 @@ fn member_run_accepts_only_small_series_at_point_nine() {
     }
 }
 #[test]
-fn member_run_large_series_recommends_and_cascades_only_on_empty() {
+fn member_run_large_series_recommends_with_haiku_only() {
     for (n, answers, models) in [
         (6, vec![yes(0.95)], vec![HAIKU]),
-        (16, vec![none(), yes(0.99)], vec![HAIKU, SONNET]),
+        (16, vec![yes(0.99)], vec![HAIKU]),
     ] {
         let f = fixture(n);
         start(&f);
@@ -217,17 +217,17 @@ fn member_run_cap_stops_before_each_request_and_resumes_with_haiku_answer() {
     let f = fixture(6);
     start(&f);
     f.library
-        .member_control("settings", Some(0.01), None, None)
+        .member_control("settings", Some(0.0001), None, None)
         .unwrap();
-    let fake = Fake::new(vec![none(), yes(0.95)]);
+    let fake = Fake::new(vec![yes(0.95)]);
     assert!(!tick(&f.library, &fake));
-    assert_eq!(fake.calls.lock().unwrap().as_slice(), [HAIKU]);
+    assert!(fake.calls.lock().unwrap().is_empty());
     assert_eq!(f.library.member_status().unwrap().state, "capped");
     f.library
         .member_control("resume", Some(1.0), None, None)
         .unwrap();
     assert!(tick(&f.library, &fake));
-    assert_eq!(fake.calls.lock().unwrap().as_slice(), [HAIKU, SONNET]);
+    assert_eq!(fake.calls.lock().unwrap().as_slice(), [HAIKU]);
     assert_eq!(f.library.member_recommendations().unwrap().len(), 1);
 }
 #[test]
