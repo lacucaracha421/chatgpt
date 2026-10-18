@@ -209,6 +209,7 @@ impl Library {
         stop: Arc<AtomicBool>,
     ) -> bool {
         if config.shadow_model.is_none()
+            || crate::workload::is_restricted()
             || !self
                 .character_shadow_backfill
                 .lock()
@@ -263,7 +264,10 @@ impl Library {
         }
         match result {
             Ok(()) => {}
-            Err(_) if !self.augmentation_idle_allowed(&stop).unwrap_or(false) => {
+            Err(_)
+                if crate::workload::is_restricted()
+                    || !self.augmentation_idle_allowed(&stop).unwrap_or(false) =>
+            {
                 for item in pending.into_iter().skip(completed).rev() {
                     state.pending.push_front(item);
                 }
@@ -294,7 +298,9 @@ impl Library {
         mut progress: impl FnMut(bool),
     ) -> Result<()> {
         let allowed = || -> Result<bool> {
-            Ok(!cancel.load(Ordering::Acquire) && self.augmentation_idle_allowed(&stop)?)
+            Ok(!cancel.load(Ordering::Acquire)
+                && !crate::workload::is_restricted()
+                && self.augmentation_idle_allowed(&stop)?)
         };
         if !allowed()? {
             return Err(Error::Stale);
@@ -310,25 +316,43 @@ impl Library {
             .join("s36-augmentation-v1")
             .join(&policy.feature_id);
         let mut candidates = Vec::new();
+        let mut sources = BTreeMap::new();
         for original in originals {
             if !allowed()? {
                 return Err(Error::Stale);
             }
-            let pending = self
+            let mut pending = self
                 .character_shadow_candidate(&original.asset_id)?
                 .filter(|p| {
                     p.content_hash == original.content_hash && p.outcomes == original.outcomes
                 })
                 .filter(|p| super::character_augmentation::is_hash(&json!(p.content_hash)))
-                .filter(|p| {
-                    feature_root
-                        .join(format!("{}.npz", p.content_hash))
-                        .is_file()
-                })
                 .map(|mut p| {
                     p.native_at = original.native_at.clone();
                     p
                 });
+            if let Some(p) = &pending {
+                if !feature_root
+                    .join(format!("{}.npz", p.content_hash))
+                    .is_file()
+                {
+                    // History may predate shadow scoring. Reuse the live query extractor
+                    // on an immutable source; it only uses existing native geometry.
+                    match super::character_sources::Source::capture(
+                        self,
+                        &p.relative_path,
+                        &p.content_hash,
+                    ) {
+                        Ok(source) => {
+                            sources.insert(p.asset_id.clone(), source);
+                        }
+                        Err(error) => {
+                            eprintln!("S36 backfill source skipped: {error}");
+                            pending = None;
+                        }
+                    }
+                }
+            }
             candidates.push(pending);
         }
         let queries: Vec<_> = candidates.iter().flatten().collect();
@@ -354,8 +378,15 @@ impl Library {
                 if ready["s36FeatureId"] != policy.feature_id {
                     return Ok(json!({"type":"s36_shadow_unavailable", "reason":"S36 feature identity mismatch"}));
                 }
-                worker.send(&json!({"type":"s36_shadow", "cachedOnly":true,
-                    "queries":queries.iter().map(|p| json!({"assetId":p.asset_id,"hash":p.content_hash})).collect::<Vec<_>>(),
+                worker.send(&json!({"type":"s36_shadow", "cachedOnly":sources.is_empty(),
+                    "queries":queries.iter().map(|p| {
+                        let mut query = json!({"assetId":p.asset_id,"hash":p.content_hash});
+                        if let Some(source) = sources.get(&p.asset_id) {
+                            query["path"] = json!(source.path());
+                            query["mediaKind"] = json!("image");
+                        }
+                        query
+                    }).collect::<Vec<_>>(),
                     "snapshotPath":file.path(),"featureId":policy.feature_id,
                     "targets":first.outcomes.keys().collect::<Vec<_>>(),"scoredAt":at}))?;
                 worker.receive_while(std::time::Duration::from_secs(120), allowed)
@@ -394,6 +425,9 @@ impl Library {
             if let Some(pending) = pending {
                 let response = results.next().ok_or(Error::Stale)?;
                 if response["queryAvailable"] == true {
+                    if let Some(source) = sources.get(&pending.asset_id) {
+                        source.verify(self)?;
+                    }
                     // Fence cancel/restart and recheck manual scope for every image.
                     let state = self
                         .character_shadow_backfill
@@ -671,6 +705,70 @@ for line in sys.stdin:
     }
 
     #[test]
+    #[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON; TEMP extraction protocol worker"]
+    fn character_shadow_backfill_missing_feature_reaches_extractor_and_records_score() {
+        let f = Fixture::new();
+        f.ready("Unscored history");
+        let cfg = config(&f);
+        let policy: Value =
+            serde_json::from_str(include_str!("../../../character-runtime/s36_policy.json"))
+                .unwrap();
+        std::fs::write(&cfg.script, format!(r#"import sys, json, hashlib
+from pathlib import Path
+print(json.dumps({{'type':'ready','baselineFingerprint':{baseline},'s36FeatureId':{identity}}}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    assert request['type'] == 's36_shadow' and request['cachedOnly'] is False
+    queries = request['queries']
+    assert len(queries) == 1
+    query = queries[0]
+    assert query['mediaKind'] == 'image'
+    assert hashlib.sha256(Path(query['path']).read_bytes()).hexdigest() == query['hash']
+    result = {{'type':'s36_shadow_result','assetId':query['assetId'],
+        'contentHash':query['hash'],'featureId':request['featureId'],
+        'queryAvailable':True,'scores':{{t:0.2 for t in request['targets']}}}}
+    print(json.dumps({{'type':'s36_shadow_batch_result','results':[result]}}), flush=True)
+"#, baseline=json!(super::super::character_worker::BASELINE), identity=policy["feature_id"])).unwrap();
+        let pending = f
+            .library
+            .character_shadow_candidate("asset-5")
+            .unwrap()
+            .unwrap();
+        idle(&f, &cfg);
+        let before = f.library.connection().unwrap().total_changes();
+        let mut progress = Vec::new();
+        f.library
+            .score_shadow_backfill(
+                &[pending],
+                &cfg,
+                Arc::default(),
+                &AtomicBool::new(false),
+                |scored| progress.push(scored),
+            )
+            .unwrap();
+        assert_eq!(progress, vec![true]);
+        let cache =
+            rusqlite::Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite"))
+                .unwrap();
+        assert_eq!(
+            cache
+                .query_row(
+                    "SELECT knn3,origin FROM scores WHERE asset_id='asset-5'",
+                    [],
+                    |r| Ok((r.get::<_, f64>(0)?, r.get::<_, String>(1)?))
+                )
+                .unwrap(),
+            (0.2, "backfill".into())
+        );
+        assert_eq!(f.library.connection().unwrap().total_changes(), before);
+        f.library
+            .connection()
+            .unwrap()
+            .execute_batch("PRAGMA query_only=OFF")
+            .unwrap();
+    }
+
+    #[test]
     fn character_shadow_backfill_scope_enabled_manual_clear_and_missing_cache() {
         let f = Fixture::new();
         let target = f.ready("History");
@@ -745,14 +843,19 @@ for line in sys.stdin:
             f.library.character_shadow_backfill_start().unwrap().total,
             first.total
         );
-        while f.library.character_shadow_backfill_status().running {
-            assert!(f
-                .library
-                .advance_character_shadow_backfill(&cfg, Arc::default()));
-        }
-        let status = f.library.character_shadow_backfill_status();
+        // Missing S36 features must remain queued for query extraction, rather than
+        // being treated as an already completed cache-only skip.
+        assert!(f
+            .library
+            .character_shadow_backfill
+            .lock()
+            .unwrap()
+            .pending
+            .iter()
+            .any(|p| p.asset_id == "asset-5"));
+        let status = f.library.character_shadow_backfill_cancel();
         assert_eq!(status.scored, 0);
-        assert_eq!(status.skipped, first.total);
+        assert_eq!(status.skipped, 0);
         assert!(status.error.is_none());
         assert_eq!(f.library.connection().unwrap().total_changes(), before);
         assert!(!f
@@ -821,6 +924,7 @@ for line in sys.stdin:
         let script = format!(
             r#"import sys, json, hashlib
 from types import SimpleNamespace
+from pathlib import Path
 sys.path.insert(0, {runtime})
 from test_s36_shadow import feature
 from character_augmentation import S36FeatureCache
@@ -829,6 +933,12 @@ from s36_shadow import handle
 root = {root}
 cache = S36FeatureCache(root + '/.cache/characters', cleanup=False)
 if '--prepare-fixture' in sys.argv:
+    # This fixture has no machine-local compatibility receipt. Match only its
+    # temporary policy to its Python environment, preserving the runtime fence.
+    policy_path = Path(__file__).with_name('s36_policy.json')
+    policy = json.loads(policy_path.read_text())
+    policy['feature_id'] = feature_id()
+    policy_path.write_text(json.dumps(policy))
     for asset in ['asset-0', 'asset-5']:
         h = hashlib.sha256(asset.encode()).hexdigest()
         cache.write(feature(h, 0))

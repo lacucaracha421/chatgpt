@@ -526,18 +526,35 @@ fn member_run_one_member_in_a_large_series_keeps_five_slots_for_the_others() {
 }
 
 #[test]
-fn member_run_resolved_recommendation_is_ignored_and_unresolved_one_still_excludes() {
+fn member_run_only_images_waiting_in_the_confirm_list_are_excluded() {
     let f = fixture(3);
     let ids = target_ids(&f.library);
     let series = f.series.clone();
     decide(&f.library, &ids[0], "asset-5", "accepted", "manual");
-    // Resolved: its target already has an accepted decision on this image.
+    // Saved automatic-tagging recommendations never appear in the 확인 list, resolved or not.
     recommend(&f.library, &ids[0], "asset-5", &series, 1);
-    assert_eq!(f.library.member_plan().unwrap().total, 1);
-    // Unresolved recommendation for another character stays with the confirmation queue.
     recommend(&f.library, &ids[1], "asset-5", &series, 2);
+    let plan = f.library.member_plan().unwrap();
+    assert_eq!(plan.total, 1);
+    // A pair that is waiting in the list (here a tagger pair) keeps the image out.
+    let hash: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT content_hash FROM assets WHERE id='asset-5'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    f.library.connection().unwrap().execute("INSERT INTO character_tagger_candidates VALUES(?1,'asset-5',?2,'recommendation',0.9,0.9,'now')", params![ids[1], hash]).unwrap();
     assert_eq!(f.library.member_plan().unwrap().total, 0);
-    // Once it is rejected it is resolved, and that member is no longer asked about.
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_tagger_candidates", [])
+        .unwrap();
+    // Once it is rejected that member is no longer asked about.
     decide(&f.library, &ids[1], "asset-5", "rejected", "manual");
     let plan = f.library.member_plan().unwrap();
     assert_eq!(plan.total, 1);
@@ -681,13 +698,9 @@ fn member_backfill_recommends_dropped_labels_once() {
 #[test]
 fn member_backfill_skips_images_that_changed_since() {
     type Change = fn(&Fixture, &[String]);
-    let changes: [(&str, Change); 5] = [
+    let changes: [(&str, Change); 4] = [
         ("decided", |f, ids| {
             decide(&f.library, &ids[2], "asset-5", "rejected", "manual")
-        }),
-        ("recommended", |f, ids| {
-            let series = f.series.clone();
-            recommend(&f.library, &ids[2], "asset-5", &series, 1)
         }),
         ("hash changed", |f, _| {
             f.library

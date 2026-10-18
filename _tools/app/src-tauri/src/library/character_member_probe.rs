@@ -12,14 +12,6 @@ use std::{
 };
 
 type ProbeResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-/// SQL condition on an `assets a` row: some 'recommended' automatic-tagging prediction on the
-/// image is still waiting. A recommendation whose target already has an accepted or rejected
-/// latest decision for the image's current hash is resolved and no longer counts.
-pub(super) const UNRESOLVED_RECOMMENDATION: &str = "EXISTS(SELECT 1 FROM character_autotag_evidence e JOIN character_autotag_predictions p ON p.evidence_id=e.id
-    WHERE e.asset_id=a.id AND json_extract(p.result_json,'$.state')='recommended'
-    AND NOT EXISTS(SELECT 1 FROM character_decisions d WHERE d.target_id=p.target_id AND d.source_asset_id=a.id AND d.asset_hash=a.content_hash
-      AND d.decision IN ('accepted','rejected')
-      AND NOT EXISTS(SELECT 1 FROM character_decisions n WHERE n.target_id=d.target_id AND n.source_asset_id=d.source_asset_id AND n.sequence>d.sequence)))";
 const VERSION: u32 = 2;
 const HARD_CAP: f64 = 8.0;
 const OUTPUT_LIMIT: u32 = 2000;
@@ -305,7 +297,10 @@ pub(super) fn build_pool(root: &Path, unclassified: bool) -> ProbeResult<Manifes
     let excluded_app = if unclassified {
         // Decisions are judged per image below. An item that has not been sent yet (and has no
         // request) belongs to a plan that is about to be replaced, so it stays available.
-        let mut ids = db.prepare(&format!("SELECT ac.asset_id FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id UNION SELECT asset_id FROM character_tagger_pending UNION SELECT a.id FROM assets a WHERE {UNRESOLVED_RECOMMENDATION} UNION SELECT asset_id FROM character_member_items WHERE mode='ongoing' OR state<>'pending' OR EXISTS(SELECT 1 FROM character_member_requests r WHERE r.item_id=character_member_items.id) UNION SELECT asset_id FROM character_member_pending"))?
+        // Images waiting in the 확인 list are left out: Claude's own pending recommendations, tagger
+        // pending pairs and S36 shadow candidates below. Saved B36 scan recommendations are not
+        // part of that list (see character_review_feed), so they do not block an image.
+        let mut ids = db.prepare("SELECT ac.asset_id FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id UNION SELECT asset_id FROM character_tagger_pending UNION SELECT asset_id FROM character_member_items WHERE mode='ongoing' OR state<>'pending' OR EXISTS(SELECT 1 FROM character_member_requests r WHERE r.item_id=character_member_items.id) UNION SELECT asset_id FROM character_member_pending")?
             .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<BTreeSet<_>>>()?;
         ids.extend(cache.prepare("SELECT asset_id FROM scores WHERE policy_version=?1 AND verdict IN ('automatic','recommended')")?.query_map([&policy], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
         ids

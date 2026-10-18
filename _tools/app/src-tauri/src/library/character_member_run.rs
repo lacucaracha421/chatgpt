@@ -1,5 +1,5 @@
 //! Durable, image-level identification. Pairwise judging remains independent.
-use super::member_probe::{self as probe, Answer, Sample, Usage, UNRESOLVED_RECOMMENDATION};
+use super::member_probe::{self as probe, Answer, Sample, Usage};
 use super::*;
 
 const CUTOFF: (i32, u32, u32) = (2026, 10, 26);
@@ -80,7 +80,7 @@ fn automatic(sample: &Sample, confidence: f64) -> bool {
 // wins, including a rejection/clear of an unrelated member while a request is away.
 // A plain sample needs an image without any decision. A sample with a known member needs
 // that member to be the only accepted character on the image and its other candidates to
-// have no decision. A recommendation that is already resolved no longer blocks either kind.
+// have no decision. Only pairs waiting in the 확인 list (tagger/Claude pending) block an image.
 const LATEST_ACCEPTED: &str = "SELECT 1 FROM character_decisions d WHERE d.source_asset_id=a.id AND d.asset_hash=a.content_hash AND d.decision='accepted'
         AND NOT EXISTS(SELECT 1 FROM character_decisions n WHERE n.target_id=d.target_id AND n.source_asset_id=d.source_asset_id AND n.sequence>d.sequence)";
 fn eligible(c: &Connection, sample: &Sample) -> Result<bool> {
@@ -101,8 +101,7 @@ fn eligible(c: &Connection, sample: &Sample) -> Result<bool> {
         AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_targets t ON t.linked_classification_id=ac.classification_id WHERE ac.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)
         AND NOT EXISTS(SELECT 1 FROM character_tagger_pending p WHERE p.asset_id=a.id)
-        AND NOT EXISTS(SELECT 1 FROM character_member_pending p WHERE p.asset_id=a.id)
-        AND NOT {UNRESOLVED_RECOMMENDATION})
+        AND NOT EXISTS(SELECT 1 FROM character_member_pending p WHERE p.asset_id=a.id))
         AND (SELECT COUNT(*) FROM character_targets WHERE enabled=1 AND role='character' AND series_classification_id=?3)=?4"),
       params![sample.image.id,sample.image.hash,sample.series,sample.member_count as i64,sample.known,serde_json::to_string(&others)?], |r| r.get(0))?)
 }

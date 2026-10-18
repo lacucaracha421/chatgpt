@@ -475,6 +475,17 @@ by `(asset_id, target_id, policy_version)`. Columns are `asset_id`, `content_has
 `recommended` and `none`. Native observation and scoring times are separate.
 No native decision reads this disposable cache.
 
+Settings → Advanced → Character recognition status → **기존 이미지도 준비**
+explicitly queues historical scoring on the same idle worker, in roster batches
+of at most 32 images. It reuses S36 query features when present; a missing query
+feature now uses the live GPU-capable extractor with an immutable source snapshot
+and existing B36 crop geometry. Missing geometry and whole-image fallback still
+abstain, and galleries are never extracted by this operation. It preserves manual
+pair decisions, series/target opt-outs, pause, saver mode and cancellation. Progress
+appears in the settings row and the existing activity list. This only prepares
+scores; it does not publish automatic memberships. Automatic restart catch-up is
+limited to 500 completed jobs from the last 14 days, not a policy-version backfill.
+
 The report CLI reads only this cache and an existing `replay_dataset.py export`
 JSON, never the library DB. It prints JSON and optionally creates an output outside
 the library, rejecting overwrites and symlink escapes:

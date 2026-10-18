@@ -308,6 +308,51 @@ class ShadowTests(unittest.TestCase):
                 handle(model, {**request, "queries": queries})
                 self.assertLessEqual(model.shadow_features.bytes, 1)
 
+    def test_history_batch_extracts_only_missing_queries_using_native_geometry(self):
+        from feature_cache import FeatureCache
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = S36FeatureCache(root / "cache", cleanup=False)
+            cache.write(feature("a"*64, 0))
+            cache.write(feature("c"*64, 0))
+            native = FeatureCache.__new__(FeatureCache)
+            native.root = root / "cache" / extraction_fingerprint()
+            native.root.mkdir(parents=True)
+            queries = [{"assetId": "cached", "hash": "c"*64}]
+            for name in ("missing", "fallback", "no-geometry"):
+                path = root / name
+                path.write_bytes(name.encode())
+                h = hashlib.sha256(name.encode()).hexdigest()
+                queries.append({"assetId": name, "hash": h,
+                                "path": str(path), "mediaKind": "image"})
+                if name != "no-geometry":
+                    base = feature(h, 0)
+                    if name == "fallback":
+                        base.fallback = True; base.boxes = []
+                    native._write(native.root / (h + ".npz"), base)
+            encoder = Mock()
+            encoder.extract.side_effect = lambda path, h, boxes: feature(h, 0)
+            model = SimpleNamespace(cache_root=root / "cache", encoder_for=Mock(return_value=encoder))
+            snapshot = root / "snapshot.json"
+            snapshot.write_text(json.dumps(dataset()))
+            request = {"cachedOnly": False, "queries": queries, "featureId": feature_id(),
+                       "targets": ["t"], "snapshotPath": str(snapshot),
+                       "scoredAt": "2026-02-01T00:00:00Z"}
+            # Cache-only history must still refuse any inference, even with paths.
+            result = handle(model, {**request, "cachedOnly": True})["results"]
+            self.assertEqual([r["queryAvailable"] for r in result], [True, False, False, False])
+            encoder.extract.assert_not_called()
+            result = handle(model, request)["results"]
+            self.assertEqual([r["queryAvailable"] for r in result], [True, True, False, False])
+            self.assertEqual([r["scores"]["t"] for r in result], [0, 0, None, None])
+            encoder.extract.assert_called_once()
+            self.assertEqual(encoder.extract.call_args.args[2], [(0, 0, 16, 16)])
+            # A repeat uses the newly written S36 cache, including resident invalidation.
+            self.assertEqual(handle(model, request)["results"], result)
+            encoder.extract.assert_called_once()
+            with self.assertRaisesRegex(ValueError, "preempted"):
+                handle(model, request, cancelled=lambda: True)
+
     def test_resident_normalization_is_exact_across_batches_and_rosters(self):
         import s36_shadow
         with tempfile.TemporaryDirectory() as folder:

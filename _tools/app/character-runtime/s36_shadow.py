@@ -255,7 +255,7 @@ def handle_batch(model, request, cancelled=lambda: False):
     if request["featureId"] != identity:
         raise ValueError("Shadow S36 feature identity mismatch")
     queries = request["queries"]
-    if (request.get("cachedOnly") is not True or not isinstance(queries, list)
+    if (not isinstance(request.get("cachedOnly"), bool) or not isinstance(queries, list)
             or not 1 <= len(queries) <= MAX_BATCH_QUERIES
             or any(not is_hash(q["hash"]) for q in queries)
             or len({q["assetId"] for q in queries}) != len(queries)):
@@ -281,6 +281,16 @@ def handle_batch(model, request, cancelled=lambda: False):
             feature = resident.read(cache, h)
             if feature is not None:
                 features[h] = feature
+    if not request["cachedOnly"]:
+        # Explicit history work may extract only its missing queries. References
+        # and manual witnesses above remain cache reads, like the live path.
+        for query in queries:
+            check_cancel(cancelled)
+            if query["hash"] not in features and "path" in query:
+                extracted = extract_query(model, query, cancelled)
+                if extracted is not None and not extracted.fallback:
+                    extracted.vectors = unit(extracted.vectors)
+                    features[query["hash"]] = extracted
     group_key = hashlib.sha256(json.dumps(data["images"], sort_keys=True).encode()).hexdigest()
     saved = getattr(model, "shadow_groups", None)
     if not isinstance(saved, tuple) or saved[0] != group_key:
