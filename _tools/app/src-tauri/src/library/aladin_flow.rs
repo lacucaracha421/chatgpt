@@ -538,8 +538,43 @@ impl BookFlow<'_> {
         if picked.is_empty() {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
+        let mut connection = self.library.connection()?;
+        let transaction = connection.transaction()?;
+        let authority = super::collection_authority::collection_write_status(&transaction)?;
+        require_collection(&transaction, collection_id)?;
+        if let Some(check) = check {
+            check(&transaction)?;
+        }
+        let volume_range = load_transaction(&transaction, collection_id)?;
+        picked.retain(|pick| pick.series.items.iter().any(|item| volume_range.provider_number(item.volume_number.max(1)).is_some()));
+        for pick in &mut picked {
+            pick.known_item_ids.extend(pick.series.items.iter().map(|item| item.item_id.clone()));
+            if volume_range.min_volume.is_some() || volume_range.max_volume.is_some() {
+                if let Some(first) = pick.series.items.iter().filter(|item| volume_range.provider_number(item.volume_number.max(1)).is_some()).min_by_key(|item| item.volume_number.max(1)) {
+                    pick.anchor_item_id = first.item_id.clone();
+                }
+            }
+            if !volume_range.restart_numbering { continue; }
+            pick.series.items.retain(|item| volume_range.provider_number(item.volume_number.max(1)).is_some());
+            for item in &mut pick.series.items {
+                item.volume_number = volume_range.provider_number(item.volume_number.max(1)).unwrap();
+            }
+            pick.series.candidate.volumes.retain_mut(|volume| {
+                if let Some(number) = volume_range.provider_number(volume.volume_number) {
+                    volume.volume_number = number;
+                    true
+                } else { false }
+            });
+        }
+        picked.retain(|pick| !pick.series.items.is_empty());
+        if picked.is_empty() { return Err(LibraryError::AmbiguousAladinBinding); }
         picked.sort_by(|left, right| {
-            let lowest = |pick: &PickedGroup| pick.series.items.first().map(|i| i.volume_number.max(1));
+            let lowest = |pick: &PickedGroup| {
+                let anchor = if volume_range.min_volume.is_some() || volume_range.max_volume.is_some() {
+                    pick.series.items.iter().find(|item| item.item_id == pick.anchor_item_id)
+                } else { None };
+                anchor.or_else(|| pick.series.items.first()).map(|i| i.volume_number.max(1))
+            };
             lowest(left).cmp(&lowest(right)).then_with(|| {
                 left.series
                     .candidate
@@ -596,14 +631,22 @@ impl BookFlow<'_> {
             .sum::<u64>()
             + (all_items.len() - merged.len()) as u64;
         let anchor_item_id = picked[0].anchor_item_id.clone();
-
-        let mut connection = self.library.connection()?;
-        let transaction = connection.transaction()?;
-        let authority = super::collection_authority::collection_write_status(&transaction)?;
-        require_collection(&transaction, collection_id)?;
-        if let Some(check) = check {
-            check(&transaction)?;
+        if self.provider == "kakao" {
+            for item in merged.values() {
+                if !super::collection_volume_range::kakao_item_available(
+                    &transaction, collection_id, &item.item_id, volume_range,
+                )? {
+                    return Err(LibraryError::DuplicateAladinProviderItem);
+                }
+            }
         }
+        if self.provider == "kakao" && transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE provider='kakao' AND external_id=?1 AND collection_id<>?2)",
+            params![anchor_item_id, collection_id], |row| row.get::<_, bool>(0),
+        )? {
+            return Err(LibraryError::DuplicateAladinProviderItem);
+        }
+
         let volumes: Vec<i64> = merged.keys().copied().collect();
         if super::kakao_review::dismissed_for_volumes(&transaction, collection_id, &volumes)? {
             let mut next: serde_json::Value = serde_json::from_str(&config_json).map_err(|_| LibraryError::InvalidAladinResponse)?;
@@ -631,7 +674,7 @@ impl BookFlow<'_> {
             [collection_id],
             |row| row.get::<_, bool>(0),
         )?;
-        let volume_range = load_transaction(&transaction, collection_id)?;
+
         // A subscription row (even with a check timestamp) is not provider history.
         // Bind/rebind is always quiet; a migrated binding first records its sources.
         let baseline_established = !quiet_bind && transaction.query_row(
@@ -1283,6 +1326,35 @@ mod tests {
     }
 
     #[test]
+    fn kakao_parts_map_numbers_and_share_products_with_distinct_anchors() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let items: Vec<_> = (1..=81).map(|n| item(&format!("item-{n}"), "Series", n, "Publisher", None, Some("2026-01-01"))).collect();
+        for (name, min, max, restart) in [("Ocean", 64, 80, true), ("Previous", 47, 64, true), ("Continuous", 12, 30, false)] {
+            let id = create_work(&library, name);
+            library.set_collection_volume_range(&id, Some(min), Some(max), false, restart).unwrap();
+            library.book_flow().apply_aladin_items(request(&id, &items), items.clone()).unwrap();
+            let connection = library.get_kakao_connection(&id).unwrap().unwrap();
+            assert_eq!(connection.anchor_item_id, format!("item-{min}"));
+            let volumes = library.list_collection_volumes(&id).unwrap();
+            let expected: Vec<_> = if restart { (1..=max-min+1).collect() } else { (min..=max).collect() };
+            assert_eq!(volumes.iter().map(|v| v.volume_number).collect::<Vec<_>>(), expected);
+            let review = super::super::kakao_review::load(&*library.connection().unwrap(), &id).unwrap();
+            if restart { assert_eq!(review.volumes, expected); }
+            library.book_flow().refresh_aladin_items_at(&id, items.clone(), "2026-10-19T00:00:00Z").unwrap();
+            assert_eq!(library.get_kakao_connection(&id).unwrap().unwrap().anchor_item_id, format!("item-{min}"));
+            if restart {
+                let db = library.connection().unwrap();
+                let count: i64 = db.query_row("SELECT COUNT(*) FROM collection_volume_sources WHERE collection_id=?1", [&id], |row| row.get(0)).unwrap();
+                assert_eq!(count, max-min+1);
+            }
+        }
+        let duplicate = create_work(&library, "Duplicate");
+        library.set_collection_volume_range(&duplicate, Some(64), Some(80), false, true).unwrap();
+        assert!(library.book_flow().apply_aladin_items(request(&duplicate, &items), items).is_err());
+    }
+
+    #[test]
     fn applies_releases_without_overwriting_work_or_covers() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
@@ -1698,7 +1770,7 @@ mod tests {
         library.set_owned_volume_count(&work_id, 0, 0).unwrap();
         library.set_release_watch_enabled(&work_id, true).unwrap();
         library
-            .set_collection_volume_range(&work_id, Some(1), Some(1), false)
+            .set_collection_volume_range(&work_id, Some(1), Some(1), false, false)
             .unwrap();
         library
             .connection()

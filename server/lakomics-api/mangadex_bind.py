@@ -236,9 +236,9 @@ class Provider:
                 AND b.snapshot_external_id=b.external_id
                 AND v.deleted=0 AND v.source_provider='mangadex'
                 AND v.source_cover_id IS NOT NULL AND v.cover_artwork_id IS NULL
-                AND (json_extract(w.derived,'$.volumeRange.minVolume') IS NULL
+                AND (COALESCE(json_extract(w.derived,'$.volumeRange.restartNumbering'),0)=1 OR json_extract(w.derived,'$.volumeRange.minVolume') IS NULL
                      OR v.volume_number>=json_extract(w.derived,'$.volumeRange.minVolume'))
-                AND (json_extract(w.derived,'$.volumeRange.maxVolume') IS NULL
+                AND (COALESCE(json_extract(w.derived,'$.volumeRange.restartNumbering'),0)=1 OR json_extract(w.derived,'$.volumeRange.maxVolume') IS NULL
                      OR v.volume_number<=json_extract(w.derived,'$.volumeRange.maxVolume'))
                 AND COALESCE(a.skipped,0)=0
                 AND (a.next_attempt_at IS NULL OR a.next_attempt_at<=?)
@@ -305,7 +305,7 @@ class Provider:
                             db.rollback()
                             continue
                         volume_range = self.ca.work_state(work)["derived"].get("volumeRange") or {}
-                        if ((volume_range.get("minVolume") is not None
+                        if not volume_range.get("restartNumbering", False) and ((volume_range.get("minVolume") is not None
                              and live["volume_number"] < volume_range["minVolume"])
                                 or (volume_range.get("maxVolume") is not None
                                     and live["volume_number"] > volume_range["maxVolume"])):

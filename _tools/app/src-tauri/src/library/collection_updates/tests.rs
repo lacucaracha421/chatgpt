@@ -208,7 +208,7 @@ fn mangadex_update_records_hidden_volumes_without_notifying_until_they_are_visib
     let (_temp, library) = library();
     binding(&library, "m", "mangadex");
     library
-        .set_collection_volume_range("m", Some(1), Some(11), false)
+        .set_collection_volume_range("m", Some(1), Some(11), false, false)
         .unwrap();
     let mut connection = library.connection().unwrap();
     let tx = connection.transaction().unwrap();
@@ -247,7 +247,7 @@ fn mangadex_update_records_hidden_volumes_without_notifying_until_they_are_visib
     );
 
     library
-        .set_collection_volume_range("m", None, None, false)
+        .set_collection_volume_range("m", None, None, false, false)
         .unwrap();
     let mut connection = library.connection().unwrap();
     let tx = connection.transaction().unwrap();

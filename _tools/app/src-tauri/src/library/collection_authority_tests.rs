@@ -3010,9 +3010,9 @@ fn collection_authority_volume_view_only_enqueues_shared_changes_and_keeps_filen
 fn collection_authority_range_round_trip_and_active_fences() {
     let (_temp, l, s) = fixture();
     adopt(&l, &s, json!({"works":[work("w",1)]}));
-    l.set_collection_volume_range("w", Some(2), Some(4), true)
+    l.set_collection_volume_range("w", Some(2), Some(4), true, false)
         .unwrap();
-    l.set_collection_volume_range("w", Some(2), Some(4), true)
+    l.set_collection_volume_range("w", Some(2), Some(4), true, false)
         .unwrap();
     assert_eq!(count(&l, "collection_authority_outbox"), 1);
     let mut w = work("w", 2);
@@ -3140,13 +3140,13 @@ fn collection_authority_range_expectation_uses_confirmed_and_pending_state() {
     l.connection()
         .unwrap()
         .execute(
-            "INSERT INTO collection_volume_ranges VALUES('w',1,9,1,'before')",
+            "INSERT INTO collection_volume_ranges VALUES('w',1,9,1,'before',0)",
             [],
         )
         .unwrap();
-    l.set_collection_volume_range("w", Some(2), Some(8), true)
+    l.set_collection_volume_range("w", Some(2), Some(8), true, false)
         .unwrap();
-    l.set_collection_volume_range("w", Some(3), Some(7), false)
+    l.set_collection_volume_range("w", Some(3), Some(7), false, false)
         .unwrap();
     let db = l.connection().unwrap();
     let payloads = db
@@ -3160,11 +3160,11 @@ fn collection_authority_range_expectation_uses_confirmed_and_pending_state() {
     let second: Value = serde_json::from_str(&payloads[1]).unwrap();
     assert_eq!(
         first["expectedRange"],
-        json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false})
+        json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false,"restartNumbering":false})
     );
     assert_eq!(
         second["expectedRange"],
-        json!({"minVolume":2,"maxVolume":8,"hideConnectionPrompt":true})
+        json!({"minVolume":2,"maxVolume":8,"hideConnectionPrompt":true,"restartNumbering":false})
     );
 }
 
@@ -5211,7 +5211,7 @@ fn collection_authority_cover_and_range_behind_a_server_write_are_reasserted() {
     // setVolumeRange
     let (_temp, l, s) = fixture();
     adopt(&l, &s, json!({"works":[work("w", 1)]}));
-    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
+    l.set_collection_volume_range("w", Some(2), Some(4), true, false).unwrap();
     let sent = RefCell::new(Vec::new());
     let send = |body: &Value| {
         sent.borrow_mut().push(body.clone());
@@ -5228,7 +5228,7 @@ fn collection_authority_cover_and_range_behind_a_server_write_are_reasserted() {
     assert!(l.flush_collection_outbox_with(&s, &send, 0).unwrap());
     let sent = sent.borrow();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[1]["expectedRange"], json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":false}));
+    assert_eq!(sent[1]["expectedRange"], json!({"minVolume":3,"maxVolume":5,"hideConnectionPrompt":false,"restartNumbering":false}));
     assert_eq!((sent[1]["minVolume"].clone(), sent[1]["maxVolume"].clone()), (json!(2), json!(4)));
     assert_eq!(l.authority_sync_health().unwrap().collections.blocked_count, 0);
     let range = crate::library::collection_volume_range::load(&*l.connection().unwrap(), "w").unwrap();
@@ -5239,7 +5239,7 @@ fn collection_authority_cover_and_range_behind_a_server_write_are_reasserted() {
 fn collection_authority_work_intent_retries_are_capped_and_never_block() {
     let (_temp, l, s) = fixture();
     adopt(&l, &s, json!({"works":[work("w", 1)]}));
-    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
+    l.set_collection_volume_range("w", Some(2), Some(4), true, false).unwrap();
     let revision = Cell::new(1);
     let sends = Cell::new(0);
     l.flush_collection_outbox_with(&s, &|_| {
@@ -5262,8 +5262,8 @@ fn collection_authority_work_intent_retries_are_capped_and_never_block() {
 fn two_range_edits() -> (tempfile::TempDir, Library, CollectionAuthorityStatus) {
     let (temp, l, s) = fixture();
     adopt(&l, &s, json!({"works":[work("w", 1)]}));
-    l.set_collection_volume_range("w", Some(2), Some(4), true).unwrap();
-    l.set_collection_volume_range("w", Some(3), Some(5), true).unwrap();
+    l.set_collection_volume_range("w", Some(2), Some(4), true, false).unwrap();
+    l.set_collection_volume_range("w", Some(3), Some(5), true, false).unwrap();
     (temp, l, s)
 }
 

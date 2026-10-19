@@ -11,6 +11,8 @@ use super::{
 pub struct KakaoReview {
     pub collection_id: String,
     pub query: String,
+    pub original_title: Option<String>,
+    pub restart_numbering: bool,
     pub query_source: &'static str,
     pub bound: bool,
     pub volumes: Vec<i64>,
@@ -123,14 +125,13 @@ pub(crate) fn snapshot_volumes(snapshot: &Value) -> Vec<i64> {
     numbers
 }
 
-pub(crate) fn is_partial(volumes: &[i64], highest_owned: i64) -> bool {
-    let highest = volumes
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or(0)
-        .max(highest_owned);
-    (volumes.len() as i64) < highest
+pub(crate) fn is_partial(volumes: &[i64], highest_owned: i64, bounds: super::collection_volume_range::CollectionVolumeRange) -> bool {
+    let (low, high) = bounds.mapped_bounds();
+    let observed = highest_owned.max(volumes.iter().copied().max().unwrap_or(0));
+    let high = if bounds.restart_numbering { high.unwrap_or(highest_owned) }
+        else { high.unwrap_or(observed).min(observed) };
+    let low = low.unwrap_or(1).max(1);
+    (volumes.iter().filter(|n| low <= **n && **n <= high).count() as i64) < (high - low + 1).max(0)
 }
 
 pub(crate) fn dismissed_for_volumes(
@@ -167,7 +168,8 @@ pub(crate) fn load(db: &Connection, id: &str) -> Result<KakaoReview, LibraryErro
     let range = super::collection_volume_range::load(db, id)?;
     let mut review = compute_review(id, &name, &config, &snapshot, bound, volumes,
         highest_owned_volume, owned_count,
-        &json!({"minVolume":range.min_volume,"maxVolume":range.max_volume,"hideConnectionPrompt":range.hide_connection_prompt}));
+        &json!({"minVolume":range.min_volume,"maxVolume":range.max_volume,"hideConnectionPrompt":range.hide_connection_prompt,"restartNumbering":range.restart_numbering}));
+    review.original_title = db.query_row("SELECT original_title FROM collections WHERE id=?1", [id], |r| r.get(0))?;
     review.dismissal_supported = !super::collection_authority::collection_authority_active(db)?
         || super::collection_authority::collection_write_status(db)?.features.iter().any(|f| f == "kakaoReview");
     Ok(review)
@@ -176,6 +178,13 @@ pub(crate) fn load(db: &Connection, id: &str) -> Result<KakaoReview, LibraryErro
 fn compute_review(id: &str, name: &str, config: &Value, snapshot: &Value, bound: bool,
     volumes: Vec<i64>, highest_owned_volume: i64, owned_count: i64, range: &Value) -> KakaoReview {
     let (default, source) = default_query(name, snapshot);
+    let bounds = super::collection_volume_range::CollectionVolumeRange {
+        min_volume: range["minVolume"].as_i64(), max_volume: range["maxVolume"].as_i64(),
+        restart_numbering: range["restartNumbering"].as_bool().unwrap_or(false),
+        hide_connection_prompt: false,
+    };
+    let partial = is_partial(&volumes, highest_owned_volume, bounds);
+
     let group_fingerprints = config["groups"]
         .as_array()
         .map(|groups| {
@@ -197,11 +206,13 @@ fn compute_review(id: &str, name: &str, config: &Value, snapshot: &Value, bound:
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(&default)
             .chars().take(2000).collect(),
+        original_title: None,
+        restart_numbering: range["restartNumbering"].as_bool().unwrap_or(false),
         query_source: source,
         bound,
         partial_dismissed: bound
             && config["reviewDismissedVolumes"] == json!(volumes)
-            && is_partial(&volumes, highest_owned_volume),
+            && partial,
         volumes,
         highest_owned_volume,
         owned_count,
@@ -312,10 +323,10 @@ mod tests {
     }
     #[test]
     fn kakao_review_partial_includes_owned_tail_and_internal_gaps() {
-        assert!(!is_partial(&[1, 2, 3], 2));
-        assert!(is_partial(&[1, 3], 0));
-        assert!(is_partial(&[1, 2], 4));
-        assert!(!is_partial(&[], 0));
+        assert!(!is_partial(&[1, 2, 3], 2, Default::default()));
+        assert!(is_partial(&[1, 3], 0, Default::default()));
+        assert!(is_partial(&[1, 2], 4, Default::default()));
+        assert!(!is_partial(&[], 0, Default::default()));
     }
     #[test]
     fn kakao_review_query_uses_stored_korean_alt_title() {

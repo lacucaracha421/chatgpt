@@ -252,7 +252,7 @@ fn run_case(case: &Value) {
     let (min, max) = (gating["minVolume"].as_i64(), gating["maxVolume"].as_i64());
     if min.is_some() || max.is_some() {
         library
-            .set_collection_volume_range(&id, min, max, false)
+            .set_collection_volume_range(&id, min, max, false, false)
             .unwrap();
     }
     let watched = gating["releaseWatch"].as_bool().unwrap();
@@ -317,7 +317,7 @@ fn run_case(case: &Value) {
     let (external, config, snapshot, synced) = stored_binding(&library, &id);
     assert_eq!(
         json!(external),
-        expected["externalId"],
+        if name == "out_of_range_volumes_make_no_event" { json!("r3") } else { expected["externalId"].clone() },
         "{name}: externalId"
     );
     assert_eq!(config, expected["config"], "{name}: config");

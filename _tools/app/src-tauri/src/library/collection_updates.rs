@@ -455,7 +455,7 @@ pub(super) fn reconcile_mangadex_volumes(
     let mut newly_detected = BTreeSet::new();
     for (volume, edition) in slots {
         let inserted=transaction.execute("INSERT OR IGNORE INTO collection_mangadex_seen_volumes(collection_id,volume_number,edition_index) VALUES(?1,?2,?3)",params![id,volume,edition])?;
-        if initialized && inserted > 0 && volume <= 999 && volume_range.contains(volume) {
+        if initialized && inserted > 0 && volume <= 999 && (volume_range.restart_numbering || volume_range.contains(volume)) {
             if authority.active {
                 super::collection_authority::enqueue_release_event(
                     transaction,

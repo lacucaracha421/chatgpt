@@ -190,7 +190,7 @@ impl Library {
                 .volume_label
                 .strip_prefix("vol.")
                 .and_then(parse_volume_slot)
-                .filter(|(volume_number, _)| volume_range.contains(*volume_number))
+                .filter(|(volume_number, _)| volume_range.restart_numbering || volume_range.contains(*volume_number))
             {
                 local_slots.entry(slot).or_insert(cover.file_name);
             }
@@ -325,8 +325,8 @@ impl Library {
             .query_map(
                 params![
                     collection_id,
-                    volume_range.min_volume,
-                    volume_range.max_volume
+                    volume_range.local_bounds().0,
+                    volume_range.local_bounds().1
                 ],
                 |row| {
                     let volume_number = row.get(1)?;
@@ -408,8 +408,8 @@ impl Library {
                 .query_map(
                     params![
                         collection_id,
-                        volume_range.min_volume,
-                        volume_range.max_volume
+                        if volume_range.restart_numbering { None } else { volume_range.min_volume },
+                        if volume_range.restart_numbering { None } else { volume_range.max_volume }
                     ],
                     |row| {
                         Ok((

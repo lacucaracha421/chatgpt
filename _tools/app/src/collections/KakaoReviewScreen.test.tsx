@@ -44,10 +44,10 @@ it("uses the edited query and moves keyboard focus between rows", async () => {
 it("excludes and undoes without losing the configured volume range", async () => {
   render(<Harness />);
   fireEvent.click(within(document.querySelector('[data-review-id="a"]')!).getByRole("button", {name: "연결 안 함"}));
-  await waitFor(() => expect(gateway.setCollectionVolumeRange).toHaveBeenCalledWith("a", {minVolume: 2, maxVolume: 20, hideConnectionPrompt: true}));
+  await waitFor(() => expect(gateway.setCollectionVolumeRange).toHaveBeenCalledWith("a", {minVolume: 2, maxVolume: 20, restartNumbering: false, hideConnectionPrompt: true}));
   expect(await screen.findByRole("radio", {name: "제외 1"})).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "되돌리기"}));
-  await waitFor(() => expect(gateway.setCollectionVolumeRange).toHaveBeenLastCalledWith("a", {minVolume: 2, maxVolume: 20, hideConnectionPrompt: false}));
+  await waitFor(() => expect(gateway.setCollectionVolumeRange).toHaveBeenLastCalledWith("a", {minVolume: 2, maxVolume: 20, restartNumbering: false, hideConnectionPrompt: false}));
 });
 it("shows missing ranges and persists the partial dismissal separately", async () => {
   render(<Harness initial={[review("a", {bound: true, volumes: Array.from({length: 12}, (_, i) => i + 1)})]} />);

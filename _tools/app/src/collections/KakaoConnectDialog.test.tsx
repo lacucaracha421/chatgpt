@@ -8,6 +8,18 @@ import { MAX_KAKAO_GROUPS } from "./kakaoGroupLimit";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
+it("uses the original title after an empty initial query and preserves an edited query", async () => {
+  const searchKakao = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce(candidates).mockResolvedValue([]);
+  render(<LibraryProvider gateway={{searchKakao} as unknown as LibraryGateway}><KakaoConnectDialog open collectionId="work" initialQuery="한국어" originalTitle="日本語" autoSearch onClose={vi.fn()} onApplied={vi.fn()} /></LibraryProvider>);
+  expect(await screen.findByText("일본어 원제로 찾았어요")).toBeInTheDocument();
+  expect(searchKakao.mock.calls).toEqual([["한국어"], ["日本語"]]);
+  fireEvent.change(screen.getByRole("searchbox"), {target: {value: "Edited"}});
+  fireEvent.click(screen.getByRole("button", {name: "검색"}));
+  await waitFor(() => expect(searchKakao).toHaveBeenLastCalledWith("Edited"));
+  await waitFor(() => expect(screen.queryByText("일본어 원제로 찾았어요")).toBeNull());
+  expect(searchKakao).toHaveBeenCalledTimes(3);
+});
+
 it('keeps a server-pending selection separate from confirmed completion and checks the same choice again', async () => {
   const user = userEvent.setup();
   const applyKakao = vi.fn().mockResolvedValueOnce({outcome: 'pending', message: null}).mockResolvedValueOnce({outcome: 'applied', message: null});

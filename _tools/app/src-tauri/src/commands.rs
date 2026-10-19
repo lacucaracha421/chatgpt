@@ -1868,6 +1868,7 @@ pub fn set_collection_volume_range(
     min_volume: Option<i64>,
     max_volume: Option<i64>,
     hide_connection_prompt: bool,
+    restart_numbering: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CollectionSummary, CommandError> {
     current_required(state)?
@@ -1876,6 +1877,7 @@ pub fn set_collection_volume_range(
             min_volume,
             max_volume,
             hide_connection_prompt,
+            restart_numbering.unwrap_or(false),
         )
         .map_err(CommandError::from)
 }

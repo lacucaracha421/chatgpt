@@ -99,7 +99,7 @@ impl Library {
              ORDER BY edition_index,volume_number",
         )?;
         let result = statement.query_map(
-            rusqlite::params![collection_id, volume_range.min_volume, volume_range.max_volume],
+            rusqlite::params![collection_id, volume_range.local_bounds().0, volume_range.local_bounds().1],
             |row| Ok(VolumeOwnership {
                 volume_number: row.get(0)?,
                 edition_index: row.get(1)?,

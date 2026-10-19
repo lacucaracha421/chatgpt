@@ -13,12 +13,43 @@ pub(crate) struct CollectionVolumeRange {
     pub(crate) min_volume: Option<i64>,
     pub(crate) max_volume: Option<i64>,
     pub(crate) hide_connection_prompt: bool,
+    pub(crate) restart_numbering: bool,
 }
 
 impl CollectionVolumeRange {
     pub(crate) fn contains(self, volume_number: i64) -> bool {
-        self.min_volume.is_none_or(|min| volume_number >= min)
-            && self.max_volume.is_none_or(|max| volume_number <= max)
+        let (low, high) = self.local_bounds();
+        low.is_none_or(|min| volume_number >= min) && high.is_none_or(|max| volume_number <= max)
+    }
+    pub(crate) fn local_bounds(self) -> (Option<i64>, Option<i64>) {
+        if self.restart_numbering {
+            (None, None)
+        } else {
+            (self.min_volume, self.max_volume)
+        }
+    }
+    pub(crate) fn mapped_bounds(self) -> (Option<i64>, Option<i64>) {
+        if self.restart_numbering {
+            (
+                Some(1),
+                self.max_volume
+                    .map(|max| max - self.min_volume.unwrap_or(1) + 1),
+            )
+        } else {
+            (self.min_volume, self.max_volume)
+        }
+    }
+    pub(crate) fn provider_number(self, number: i64) -> Option<i64> {
+        if self.min_volume.is_some_and(|min| number < min)
+            || self.max_volume.is_some_and(|max| number > max)
+        {
+            return None;
+        }
+        Some(if self.restart_numbering {
+            number - self.min_volume.unwrap_or(1) + 1
+        } else {
+            number
+        })
     }
 }
 
@@ -28,7 +59,7 @@ pub(crate) fn load(
 ) -> Result<CollectionVolumeRange, LibraryError> {
     connection
         .query_row(
-            "SELECT min_volume, max_volume, hide_connection_prompt
+            "SELECT min_volume, max_volume, hide_connection_prompt, restart_numbering
              FROM collection_volume_ranges WHERE collection_id = ?1",
             [collection_id],
             |row| {
@@ -36,6 +67,7 @@ pub(crate) fn load(
                     min_volume: row.get(0)?,
                     max_volume: row.get(1)?,
                     hide_connection_prompt: row.get::<_, i64>(2)? != 0,
+                    restart_numbering: row.get::<_, i64>(3)? != 0,
                 })
             },
         )
@@ -49,6 +81,23 @@ pub(crate) fn load_transaction(
     collection_id: &str,
 ) -> Result<CollectionVolumeRange, LibraryError> {
     load(transaction, collection_id)
+}
+
+pub(crate) fn kakao_item_available(
+    connection: &Connection,
+    collection_id: &str,
+    item: &str,
+    range: CollectionVolumeRange,
+) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        "SELECT NOT EXISTS(
+            SELECT 1 FROM collection_volume_sources source
+            LEFT JOIN collection_volume_ranges bounds ON bounds.collection_id=source.collection_id
+            WHERE source.provider='kakao' AND source.provider_item_id=?1 AND source.collection_id<>?2
+              AND (?3=0 OR (bounds.min_volume IS NULL AND bounds.max_volume IS NULL)))",
+        rusqlite::params![item, collection_id, range.min_volume.is_some() || range.max_volume.is_some()],
+        |row| row.get(0),
+    )?)
 }
 
 fn validate(min_volume: Option<i64>, max_volume: Option<i64>) -> Result<(), LibraryError> {
@@ -68,6 +117,7 @@ impl Library {
         min_volume: Option<i64>,
         max_volume: Option<i64>,
         hide_connection_prompt: bool,
+        restart_numbering: bool,
     ) -> Result<CollectionSummary, LibraryError> {
         validate(min_volume, max_volume)?;
         let mut connection = self.connection()?;
@@ -87,6 +137,7 @@ impl Library {
             min_volume,
             max_volume,
             hide_connection_prompt,
+            restart_numbering,
         };
         let row_exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM collection_volume_ranges WHERE collection_id = ?1)",
@@ -106,7 +157,7 @@ impl Library {
                     "setVolumeRange",
                     collection_id,
                     serde_json::json!({
-                        "workId":collection_id,"minVolume":min_volume,"maxVolume":max_volume,"hideConnectionPrompt":hide_connection_prompt,
+                        "workId":collection_id,"minVolume":min_volume,"maxVolume":max_volume,"hideConnectionPrompt":hide_connection_prompt,"restartNumbering":restart_numbering,
                         "expectedRange":super::collection_authority::expected_volume_range(&transaction,collection_id)?,"expectedRevision":null
                     }),
                 )?;
@@ -120,12 +171,13 @@ impl Library {
         } else {
             transaction.execute(
                 "INSERT INTO collection_volume_ranges(
-                    collection_id, min_volume, max_volume, hide_connection_prompt, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5)
+                    collection_id, min_volume, max_volume, hide_connection_prompt, updated_at, restart_numbering
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(collection_id) DO UPDATE SET
                     min_volume = excluded.min_volume,
                     max_volume = excluded.max_volume,
                     hide_connection_prompt = excluded.hide_connection_prompt,
+                    restart_numbering = excluded.restart_numbering,
                     updated_at = excluded.updated_at",
                 rusqlite::params![
                     collection_id,
@@ -133,6 +185,7 @@ impl Library {
                     desired.max_volume,
                     desired.hide_connection_prompt as i64,
                     chrono::Utc::now().to_rfc3339(),
+                    desired.restart_numbering as i64,
                 ],
             )?;
         }
@@ -204,7 +257,7 @@ mod tests {
             .unwrap();
 
         let summary = library
-            .set_collection_volume_range(&first, Some(1), Some(11), true)
+            .set_collection_volume_range(&first, Some(1), Some(11), true, false)
             .unwrap();
         assert_eq!(summary.min_volume, Some(1));
         assert_eq!(summary.max_volume, Some(11));
@@ -239,7 +292,18 @@ mod tests {
         assert_eq!(after_generation, before_generation + 1);
 
         library
-            .set_collection_volume_range(&first, None, None, false)
+            .set_collection_volume_range(&first, Some(64), Some(80), false, true)
+            .unwrap();
+        // Local/MangaDex slots keep their own numbering, including Japanese volumes
+        // beyond the Korean provider's currently configured range.
+        assert_eq!(
+            library.list_collection_volumes(&first).unwrap().iter()
+                .map(|volume| volume.volume_number).collect::<Vec<_>>(),
+            vec![1, 12, 23]
+        );
+
+        library
+            .set_collection_volume_range(&first, None, None, false, false)
             .unwrap();
         assert_eq!(
             library
@@ -276,7 +340,7 @@ mod tests {
             })
             .unwrap();
         assert!(matches!(
-            library.set_collection_volume_range(&game.id, Some(1), Some(2), false),
+            library.set_collection_volume_range(&game.id, Some(1), Some(2), false, false),
             Err(LibraryError::InvalidCollectionType)
         ));
     }

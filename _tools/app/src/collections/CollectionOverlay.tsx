@@ -504,6 +504,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
           open
           collectionId={collection.id}
           initialQuery={kakaoConnection?.query ?? collection.name}
+          originalTitle={collection.originalTitle}
           onClose={() => setKakaoOpen(false)}
           onApplied={async (result) => {
             const refreshed = await gateway.listCollectionVolumes(collection.id);

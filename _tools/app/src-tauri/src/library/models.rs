@@ -942,6 +942,8 @@ pub struct CollectionSummary {
     pub min_volume: Option<i64>,
     pub max_volume: Option<i64>,
     pub hide_connection_prompt: bool,
+    #[serde(default)]
+    pub restart_numbering: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1837,6 +1839,7 @@ mod tests {
             min_volume: None,
             max_volume: None,
             hide_connection_prompt: false,
+            restart_numbering: false,
         })
         .unwrap();
 

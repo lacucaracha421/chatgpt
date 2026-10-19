@@ -1187,7 +1187,7 @@ pub(crate) fn expected_volume_range(db: &Connection, work: &str) -> Result<Value
     let mut expected = confirmed["derived"]
         .get("volumeRange")
         .cloned()
-        .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false}));
+        .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false,"restartNumbering":false}));
     let pending: Option<String> = db.query_row(
         "SELECT payload FROM collection_authority_outbox WHERE state='pending' AND command_type='setVolumeRange' AND json_extract(payload,'$.workId')=?1 ORDER BY seq DESC LIMIT 1",
         [work], |r| r.get(0),
@@ -1195,10 +1195,11 @@ pub(crate) fn expected_volume_range(db: &Connection, work: &str) -> Result<Value
     if let Some(raw) = pending {
         let body: Value =
             serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
-        for field in ["minVolume", "maxVolume", "hideConnectionPrompt"] {
+        for field in ["minVolume", "maxVolume", "hideConnectionPrompt", "restartNumbering"] {
             expected[field] = body[field].clone();
         }
     }
+    if expected["restartNumbering"].is_null() { expected["restartNumbering"] = json!(false); }
     Ok(expected)
 }
 
@@ -1211,13 +1212,14 @@ pub(crate) fn project_volume_range(
     if range["minVolume"].is_null()
         && range["maxVolume"].is_null()
         && range["hideConnectionPrompt"] == false
+        && !range["restartNumbering"].as_bool().unwrap_or(false)
     {
         tx.execute(
             "DELETE FROM collection_volume_ranges WHERE collection_id=?1",
             [work],
         )?;
     } else {
-        tx.execute("INSERT INTO collection_volume_ranges(collection_id,min_volume,max_volume,hide_connection_prompt,updated_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(collection_id) DO UPDATE SET min_volume=excluded.min_volume,max_volume=excluded.max_volume,hide_connection_prompt=excluded.hide_connection_prompt,updated_at=excluded.updated_at",params![work,sql_value(&range["minVolume"])?,sql_value(&range["maxVolume"])?,boolean(range,"hideConnectionPrompt")?,now])?;
+        tx.execute("INSERT INTO collection_volume_ranges(collection_id,min_volume,max_volume,hide_connection_prompt,updated_at,restart_numbering) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(collection_id) DO UPDATE SET min_volume=excluded.min_volume,max_volume=excluded.max_volume,hide_connection_prompt=excluded.hide_connection_prompt,restart_numbering=excluded.restart_numbering,updated_at=excluded.updated_at",params![work,sql_value(&range["minVolume"])?,sql_value(&range["maxVolume"])?,boolean(range,"hideConnectionPrompt")?,now,range["restartNumbering"].as_bool().unwrap_or(false) as i64])?;
     }
     Ok(())
 }
@@ -2971,7 +2973,10 @@ fn reapply_pending_core_edits(tx: &Transaction<'_>) -> Result<(), LibraryError> 
                             tx.execute("DELETE FROM collection_volume_sources WHERE collection_id=?1 AND volume_number=?2 AND provider=?3 AND provider_item_id=?4", params![work, number, provider, item])?;
                             return Ok(());
                         }
-                        if tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_volume_sources WHERE collection_id<>?1 AND provider=?2 AND provider_item_id=?3)", params![work, provider, item], |r| r.get::<_, bool>(0))? {
+                        if provider == "kakao" && !super::collection_volume_range::kakao_item_available(tx, work, item, super::collection_volume_range::load(tx, work)?)? {
+                            return Ok(());
+                        }
+                        if provider != "kakao" && tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_volume_sources WHERE collection_id<>?1 AND provider=?2 AND provider_item_id=?3)", params![work, provider, item], |r| r.get::<_, bool>(0))? {
                             return Ok(());
                         }
                         // Pending commands replay in order over the current state. A product that
@@ -3864,16 +3869,17 @@ impl Library {
                 }
             }
             "setVolumeRange" => {
-                let desired = json!({"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"]});
-                let served = current["derived"]
+                let desired = json!({"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"],"restartNumbering":body["restartNumbering"].as_bool().unwrap_or(false)});
+                let mut served = current["derived"]
                     .get("volumeRange")
                     .filter(|v| v.is_object())
                     .cloned()
-                    .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false}));
+                    .unwrap_or(json!({"minVolume":null,"maxVolume":null,"hideConnectionPrompt":false,"restartNumbering":false}));
+                served["restartNumbering"] = json!(served["restartNumbering"].as_bool().unwrap_or(false));
                 if served == desired {
                     None
                 } else {
-                    Some(json!({"workId":work,"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"],"expectedRange":expected_volume_range(&tx, work)?,"expectedRevision":null}))
+                    Some(json!({"workId":work,"minVolume":body["minVolume"],"maxVolume":body["maxVolume"],"hideConnectionPrompt":body["hideConnectionPrompt"],"restartNumbering":body["restartNumbering"].as_bool().unwrap_or(false),"expectedRange":expected_volume_range(&tx, work)?,"expectedRevision":null}))
                 }
             }
             "setOwnershipTracking" => {

@@ -36,7 +36,7 @@ fn kakao_review_replica_feature_carries_query_binding_and_range_without_cropping
         provider_config_json: Some(json!({"version":1,"query":"저장 검색어","groupFingerprint":"group","knownItemIds":[]}).to_string()),
         provider_data_json: Some(json!({"volumes":[{"volumeNumber":1},{"volumeNumber":3}]}).to_string()), last_synced_at: None,
     }).unwrap();
-    library.set_collection_volume_range("m", Some(2), Some(10), true).unwrap();
+    library.set_collection_volume_range("m", Some(2), Some(10), true, false).unwrap();
     library.connection().unwrap().execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES('m',5,0,1,0)",[]).unwrap();
     library.set_kakao_partial_dismissed("m", true).unwrap();
     let old: Value = serde_json::from_str(&body(&library, ALL)).unwrap();

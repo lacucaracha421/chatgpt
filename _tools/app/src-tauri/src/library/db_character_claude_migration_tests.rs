@@ -5,7 +5,7 @@
         let mut connection = fixture.library.connection().unwrap();
         connection
             .execute_batch(
-                "ALTER TABLE character_member_items DROP COLUMN plan_id;
+                "ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id;
                  ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
                  DROP TABLE character_claude_opinions;
                  DROP TABLE character_claude_settings;",
@@ -58,7 +58,7 @@
         let mut connection = library.connection().unwrap();
         connection
             .execute_batch(
-                "ALTER TABLE character_member_items DROP COLUMN plan_id;
+                "ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id;
                  ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
                  DROP TABLE character_claude_settings;
                  DROP TABLE character_claude_opinions;
@@ -95,7 +95,7 @@ fn member_run_migrates_134_without_changing_pairwise_settings() {
     let library = crate::library::Library::open(temp.path()).unwrap();
     library.set_claude_settings(true, 20.0).unwrap();
     let mut connection = library.connection().unwrap();
-    connection.execute_batch("DROP VIEW character_member_pending;
+    connection.execute_batch("ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; DROP VIEW character_member_pending;
         DROP TABLE character_member_recommendations;
         DROP TABLE character_member_requests;
         DROP TABLE character_member_items;
@@ -116,7 +116,7 @@ fn member_run_migrates_136_so_a_running_plan_keeps_its_items() {
     let mut connection = library.connection().unwrap();
     connection.execute_batch("INSERT INTO character_member_items(mode,asset_id,sample_json) VALUES('backlog','a','{}'),('ongoing','b','{}');
         UPDATE character_member_control SET state='running',plan_id='plan-1';
-        ALTER TABLE character_member_items DROP COLUMN plan_id;
+        ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id;
         ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;
         PRAGMA user_version=136;").unwrap();
     super::migrate_to_latest(&mut connection, 136).unwrap();

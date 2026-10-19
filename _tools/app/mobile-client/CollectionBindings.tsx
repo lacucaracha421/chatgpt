@@ -1,3 +1,4 @@
+import { searchKakaoWithOriginal } from "../src/collections/kakaoSearch";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {usePrivacyMode} from './privacyMode';
 import {useEffect, useRef, useState, type FormEvent} from 'react';
@@ -184,7 +185,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
   const name = PROVIDER_NAMES[provider];
   const input = useRef<HTMLInputElement>(null), search = useRef<AbortController | null>(null), send = useRef<AbortController | null>(null);
   // MangaDex knows a manga by its original (Japanese) title; Kakao by the Korean edition title.
-  const [initialQuery] = useState(() => reviewQuery ?? ((provider === 'mangadex' && item.originalTitle?.trim()) || item.name));
+  const [initialQuery] = useState(() => reviewQuery ?? (provider === 'mangadex' ? item.originalTitle?.trim() || item.name : item.kakaoReview?.query ?? item.name));
   const [query, setQuery] = useState(initialQuery);
   const [busy, setBusy] = useState(false), [found, setFound] = useState<Found | null>(null), [failure, setFailure] = useState<BindFailure | null>(null);
   const [waitUntil, setWaitUntil] = useState(0), [now, setNow] = useState(() => Date.now());
@@ -192,6 +193,8 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
   // Checked Kakao groups of the current results, by group fingerprint.
   const [checked, setChecked] = useState<string[]>([]);
   const lastQuery = useRef('');
+  const initialSearchUsed = useRef(false), queryEdited = useRef(false);
+  const [usedOriginalTitle, setUsedOriginalTitle] = useState(false);
   const unavailable = provider === 'kakao' && status?.kakaoSearch === false;
   const wait = Math.max(0, Math.ceil((waitUntil - now) / 1000));
   useEffect(() => { if (waitUntil <= Date.now()) return; const timer = window.setInterval(() => { setNow(Date.now()); if (Date.now() >= waitUntil) clearInterval(timer); }, 1000); return () => clearInterval(timer); }, [waitUntil]);
@@ -199,15 +202,26 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
 
   const run = (raw: string) => {
     const value = raw.trim();
+    const fallbackAllowed = !initialSearchUsed.current && !queryEdited.current && (!reviewMode || reviewQuery === item.kakaoReview?.query);
+    initialSearchUsed.current = true;
     if (value.length < 2 || value.length > 100) { setFailure({text: '검색어를 두 글자 이상 100자 이하로 적어 주세요.', retry: false}); return; }
     search.current?.abort();
     const controller = search.current = new AbortController();
     lastQuery.current = value; setBusy(true); setFailure(null); setPicked(null); setSendFailure(null);
-    void api<SearchReply<MangaDexCandidate | KakaoCandidate>>(searchPath(provider, value), controller.signal).then(reply => {
+    let normalizedQuery = value;
+    void searchKakaoWithOriginal<MangaDexCandidate | KakaoCandidate>(value,
+      provider === 'kakao' ? item.kakaoReview?.originalTitle ?? item.originalTitle : null,
+      async q => {
+        const reply = await api<SearchReply<MangaDexCandidate | KakaoCandidate>>(searchPath(provider, q), controller.signal);
+        normalizedQuery = typeof reply.query === 'string' ? reply.query : q;
+        return Array.isArray(reply.items) ? reply.items : [];
+      }, () => fallbackAllowed && !queryEdited.current && !controller.signal.aborted).then(reply => {
       if (controller.signal.aborted) return;
+      setUsedOriginalTitle(reply.usedOriginalTitle);
+      if (reply.usedOriginalTitle) { setQuery(normalizedQuery); lastQuery.current = normalizedQuery; }
       const rank = (candidate: KakaoCandidate) => item.kakaoReview?.groupFingerprints.includes(candidate.groupFingerprint) ? 0 : normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(value) ? 1 : 2;
       const items = Array.isArray(reply.items) ? reply.items : [];
-      setFound({provider, query: typeof reply.query === 'string' ? reply.query : value, items: reviewMode && provider === 'kakao' ? [...items as KakaoCandidate[]].sort((a, b) => rank(a) - rank(b)) : items} as Found);
+      setFound({provider, query: normalizedQuery, items: reviewMode && provider === 'kakao' ? [...items as KakaoCandidate[]].sort((a, b) => rank(a) - rank(b)) : items} as Found);
       const exact = provider === 'kakao' ? (items as KakaoCandidate[]).filter(candidate => normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(value)) : [];
       setChecked(reviewMode && provider === 'kakao' ? (items as KakaoCandidate[]).filter(candidate => item.kakaoReview?.groupFingerprints.includes(candidate.groupFingerprint) || (exact.length === 1 && candidate === exact[0])).slice(0, MAX_KAKAO_GROUPS).map(candidate => candidate.groupFingerprint) : []); setBusy(false);
     }, reason => {
@@ -272,7 +286,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       {reviewMode && <div className="book-connect__work">{workCover}<span><strong>{item.name}</strong><small>보유 {item.kakaoReview?.ownedCount ?? 0}권</small></span></div>}
       <form className="bind-search" role="search" onSubmit={submit}>
         <MagnifyingGlassIcon aria-hidden="true"/>
-        <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} disabled={sending} maxLength={100} onChange={event => setQuery(event.target.value)}/>
+        <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} disabled={sending} maxLength={100} onChange={event => { queryEdited.current = true; search.current?.abort(); setBusy(false); setQuery(event.target.value); }}/>
         <Button type="submit" variant="primary" disabled={searchDisabled}><BusyLabel busy={!!(busy)} idle={'검색'}>검색 중…</BusyLabel></Button>
       </form>
       {!providerCanApply(status, provider) && <p className="collection-bindings-note">{unavailableNote(provider)}</p>}
@@ -280,6 +294,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       {failure && <div className="bind-message is-error" role="alert"><span>{failure.text}{failure.waitSeconds ? (wait > 0 ? ` ${wait}초 후에 다시 검색할 수 있어요.` : ' 이제 다시 검색할 수 있어요.') : ''}</span>
         {failure.retry && <Button size="sm" variant="ghost" disabled={searchDisabled} onClick={() => run(lastQuery.current)}>다시 시도</Button>}</div>}
       <BusyLabel busy={!!(busy)}><p className="hint" role="status">{name}에서 찾는 중…</p></BusyLabel>
+      {usedOriginalTitle && <p role="status">일본어 원제로 찾았어요</p>}
       {found && !busy && found.items.length === 0 && <EmptyState inline className="bind-empty" title="검색 결과 없음" />}
       {found && found.items.length > 0 && <ul className="bind-results" aria-label={`${name} 검색 결과`} aria-busy={busy || undefined}>
         {found.provider === 'mangadex'

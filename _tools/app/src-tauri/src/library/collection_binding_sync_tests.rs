@@ -1038,6 +1038,14 @@ fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
         library.binding_precheck(&item, &target_now).unwrap(),
         Precheck::Decided(Decision::Applied)
     ));
+    library.set_collection_volume_range("m", Some(2), Some(3), false, true).unwrap();
+    assert!(matches!(
+        library.binding_precheck(&item, &target_now).unwrap(),
+        Precheck::Apply(Some(_))
+    ));
+    let Target::Kakao(request) = target_now else { panic!("Kakao request"); };
+    library.book_flow().apply_requested_items(request, split_kakao_items(), None).unwrap();
+    assert_eq!(binding(&library, "kakao").as_deref(), Some("k-2"));
     let mut single = split_groups_choice();
     single["groups"].as_array_mut().unwrap().truncate(1);
     let item = bind_item(single);

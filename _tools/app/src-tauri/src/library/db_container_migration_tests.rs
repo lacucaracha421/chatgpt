@@ -3,7 +3,7 @@
     fn container_migration_133_to_134_preserves_folders_without_defaults() {
         let mut c=Connection::open_in_memory().unwrap();
         migrate_to_latest(&mut c,0).unwrap();
-        c.execute_batch("ALTER TABLE character_member_items DROP COLUMN plan_id; ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;  DROP TRIGGER classification_container_top_level;
+        c.execute_batch("ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id; ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;  DROP TRIGGER classification_container_top_level;
           DROP TRIGGER classification_container_move; DROP TRIGGER classification_container_empty;
           DROP TRIGGER classification_container_series; DROP TRIGGER classification_container_target;
           DROP TRIGGER classification_container_target_move; DROP TABLE classification_containers;

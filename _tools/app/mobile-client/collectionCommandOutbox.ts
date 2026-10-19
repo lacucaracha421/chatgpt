@@ -22,7 +22,7 @@ export type ArtworkReply = ArtworkReceipt & {thumbnail?: BlobReceipt | null};
 export type CommandReceipt = AuthorityIdentity & {operationId: string; commandType: string; authorityCursor?: number; changed?: boolean; entities?: {works?: {workId: string; entityRevision: number}[]}; person?: CollectionPerson};
 export type WorkCommand =
   | {commandType: 'setKakaoPartialDismissed'; workId: string; dismissed: boolean; expectedVolumes: number[]}
-  | {commandType: 'setVolumeRange'; workId: string; minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean; expectedRange: {minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean}; expectedRevision: null}
+  | {commandType: 'setVolumeRange'; workId: string; minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean; restartNumbering?: boolean; expectedRange: {minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean; restartNumbering?: boolean}; expectedRevision: null}
   | ({commandType: 'providerApply'} & ProviderApply)
   | ({commandType: 'addArtwork'; workId: string; artworkId: string; kind: string; language: string | null; thumbnail: BlobReceipt | null} & ArtworkReceipt)
   | {commandType: 'selectArtwork'; workId: string; slot: 'work' | 'hero' | 'backdrop' | 'spine' | 'back'; artworkId: string | null; expectedArtworkId: string | null}
@@ -285,7 +285,7 @@ export function reconcileCommands(identity: AuthorityIdentity, item: CollectionS
       if (!review || latest.state !== 'accepted') return true;
       if (latest.command.commandType === 'setKakaoPartialDismissed' && JSON.stringify(review.volumes) !== JSON.stringify(latest.command.expectedVolumes)) return false;
       return latest.command.commandType === 'setKakaoPartialDismissed' ? review.partialDismissed !== latest.command.dismissed
-        : latest.command.commandType === 'setVolumeRange' && (review.hideConnectionPrompt !== latest.command.hideConnectionPrompt || review.minVolume !== latest.command.minVolume || review.maxVolume !== latest.command.maxVolume);
+        : latest.command.commandType === 'setVolumeRange' && (review.hideConnectionPrompt !== latest.command.hideConnectionPrompt || review.minVolume !== latest.command.minVolume || review.maxVolume !== latest.command.maxVolume || !!review.restartNumbering !== !!latest.command.restartNumbering);
     }
     if (command.commandType === 'providerApply') return command.operation === 'create' ? source !== 'list'
       : source !== 'detail' || readStartedAt === undefined || readStartedAt < (row.acceptedAt ?? Infinity);
@@ -329,7 +329,7 @@ export function optimisticWork<T extends CollectionSummary>(item: T, rows: Comma
   let next = item;
   for (const {command, avOverlay} of rows.filter(row => row.command.workId === item.id)) {
     if (next.kakaoReview && command.commandType === 'setKakaoPartialDismissed' && JSON.stringify(next.kakaoReview.volumes) === JSON.stringify(command.expectedVolumes)) next = {...next, kakaoReview: {...next.kakaoReview, partialDismissed: command.dismissed}};
-    if (next.kakaoReview && command.commandType === 'setVolumeRange') next = {...next, kakaoReview: {...next.kakaoReview, minVolume: command.minVolume, maxVolume: command.maxVolume, hideConnectionPrompt: command.hideConnectionPrompt}};
+    if (next.kakaoReview && command.commandType === 'setVolumeRange') next = {...next, kakaoReview: {...next.kakaoReview, minVolume: command.minVolume, maxVolume: command.maxVolume, hideConnectionPrompt: command.hideConnectionPrompt, restartNumbering: command.restartNumbering ?? false}};
     if (command.commandType === 'updateWork') next = {...next, ...command.changes};
     if (command.commandType === 'setAvDetails') next = {...next, av: {...(next.av ?? emptyAv()), ...command.changes}};
     if (command.commandType === 'setAvCredits') {
@@ -355,7 +355,7 @@ export function confirmedWork<T extends CollectionSummary>(item: T, rows: Comman
       const changes = Object.fromEntries(Object.entries(command.changes).filter(([key]) => sameAvValue(avValue(next.av, key as AvDetailKey), command.expected[key as AvDetailKey])));
       next = {...next, av: {...(next.av ?? emptyAv()), ...changes}};
     } else if (command.commandType === 'setKakaoPartialDismissed') next = optimisticWork(next, [row]);
-    else if (command.commandType === 'setVolumeRange' && next.kakaoReview && next.kakaoReview.hideConnectionPrompt === command.expectedRange.hideConnectionPrompt && next.kakaoReview.minVolume === command.expectedRange.minVolume && next.kakaoReview.maxVolume === command.expectedRange.maxVolume) next = optimisticWork(next, [row]);
+    else if (command.commandType === 'setVolumeRange' && next.kakaoReview && next.kakaoReview.hideConnectionPrompt === command.expectedRange.hideConnectionPrompt && next.kakaoReview.minVolume === command.expectedRange.minVolume && next.kakaoReview.maxVolume === command.expectedRange.maxVolume && !!next.kakaoReview.restartNumbering === !!command.expectedRange.restartNumbering) next = optimisticWork(next, [row]);
     else if (command.commandType === 'setAvCredits' && row.avOverlay && sameAvValue(avCredits(next.av?.people ?? []), row.avOverlay.expectedCredits)) next = optimisticWork(next, [row]);
     else if (command.commandType === 'updateWork') {
       const changes = Object.fromEntries(Object.entries(command.changes).filter(([key]) => Object.is((next as unknown as Fields)[key] ?? null, command.expected[key])));

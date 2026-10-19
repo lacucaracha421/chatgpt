@@ -34,6 +34,7 @@ export function CollectionEditDialog({
   const [myScore, setMyScore] = useState<number | null>(existing?.myScore ?? null);
   const [minVolume, setMinVolume] = useState<number | null>(existing?.minVolume ?? null);
   const [maxVolume, setMaxVolume] = useState<number | null>(existing?.maxVolume ?? null);
+  const [restartNumbering, setRestartNumbering] = useState(existing?.restartNumbering ?? false);
   const [hideConnectionPrompt, setHideConnectionPrompt] = useState(existing?.hideConnectionPrompt ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export function CollectionEditDialog({
     setMinVolume(existing?.minVolume ?? null);
     setMaxVolume(existing?.maxVolume ?? null);
     setHideConnectionPrompt(existing?.hideConnectionPrompt ?? false);
+    setRestartNumbering(existing?.restartNumbering ?? false);
     setSaving(false);
     setError(null);
   }, [existing, mode]);
@@ -94,7 +96,7 @@ export function CollectionEditDialog({
       } else {
         await onSubmit(base);
         if (type === "manga" && onSubmitMangaSettings) {
-          await onSubmitMangaSettings({ minVolume, maxVolume, hideConnectionPrompt });
+          await onSubmitMangaSettings({ minVolume, maxVolume, hideConnectionPrompt, restartNumbering: restartNumbering && minVolume !== null && minVolume > 1 });
         }
       }
       onClose();
@@ -136,7 +138,11 @@ export function CollectionEditDialog({
               <TextField label="마지막 권" type="number" min="0" max="9999" step="1" placeholder="끝" value={maxVolume?.toString() ?? ""}
                 onChange={(event) => { setMaxVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
             </div>
-            <p className="collection-edit-dialog__volume-range-help">이 범위 밖의 권은 PC와 태블릿에서 모두 숨겨요. 같은 시리즈를 1부·2부로 나눠 둘 때 써요.</p>
+            <p className="collection-edit-dialog__volume-range-help">범위 안의 권 번호를 그대로 쓰거나, 이 부의 첫 권부터 1권으로 셀 수 있어요.</p>
+            <label className="collection-edit-dialog__volume-range-check">
+              <input type="checkbox" checked={restartNumbering && minVolume !== null && minVolume > 1} disabled={minVolume === null || minVolume <= 1} onChange={(event) => setRestartNumbering(event.target.checked)} />
+              이 부의 첫 권을 1권으로 세기
+            </label>
             <label className="collection-edit-dialog__volume-range-check">
               <input type="checkbox" checked={hideConnectionPrompt} onChange={(event) => setHideConnectionPrompt(event.target.checked)} />
               카카오 연결 안내 숨기기

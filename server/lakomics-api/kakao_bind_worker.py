@@ -326,7 +326,8 @@ class Worker:
         binding = pre["binding"]
         config = json.loads(binding["config"]) if binding is not None and binding["config"] else None
         plan = self.planner.plan_bind(choice=json.loads(pre["row"]["choice_json"]), items=items, checked_at=now,
-                                      stored_config=config, existing_sources=existing, existing_slots=slots)
+                                      stored_config=config, existing_sources=existing, existing_slots=slots,
+                                      volume_range=json.loads(pre["work"]["derived"]).get("volumeRange") or {})
         def command(kind, key, **fields):
             return {"libraryId": library_id, "epoch": epoch, "contractVersion": ca.CONTRACT_VERSION,
                     "operationId": str(uuid.uuid5(uuid.UUID(pre["batch"]), f"{kind}:{key}")), "commandType": kind,

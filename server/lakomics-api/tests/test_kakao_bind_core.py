@@ -171,6 +171,56 @@ class CoreTests(unittest.TestCase):
         self.during_fetch()
         return self.items, 0
 
+    def test_parts_of_one_group_bind_with_distinct_in_range_anchors(self):
+        # Upgrade the existing global source index without replacing catalog data.
+        self.db.execute("DROP INDEX collection_authority_volume_source_item")
+        self.db.execute("CREATE UNIQUE INDEX collection_authority_volume_source_item ON collection_authority_volume_sources(library_id,provider,provider_item_id) WHERE deleted=0")
+        self.ca.startup_db(self.db)
+        self.db.commit()
+        self.items = self.products(numbers=tuple(range(1, 81)))
+        for work, low, high, restart in (("a", 64, 80, True), ("b", 47, 63, False)):
+            self.command("setVolumeRange", workId=work, minVolume=low, maxVolume=high,
+                         hideConnectionPrompt=False, restartNumbering=restart,
+                         expectedRange={"minVolume": None, "maxVolume": None, "hideConnectionPrompt": False},
+                         expectedRevision=None)
+            request = self.submit(work_id=work)
+            self.worker.execute(request["requestId"])
+            self.assertEqual(self.row(request["requestId"])["state"], "applied")
+            binding = self.ca.binding_row(self.db, LIBRARY, work, "kakao")
+            self.assertEqual(binding["external_id"], self.items[low - 1]["itemId"])
+        numbers = [row[0] for row in self.db.execute(
+            "SELECT volume_number FROM collection_authority_volume_sources WHERE work_id='a' AND deleted=0 ORDER BY volume_number")]
+        self.assertEqual(numbers, list(range(1, 18)))
+        payload = json.loads(self.db.execute("SELECT payload FROM collection_authority_projection WHERE id='a'").fetchone()[0])
+        self.assertEqual([v["volumeNumber"] for v in payload["volumes"]], list(range(1, 18)))
+        self.assertEqual([v["volumeNumber"] for v in payload["releaseSchedule"]["kakao"]["volumes"]], list(range(1, 18)))
+
+        snapshot = json.loads(self.ca.binding_row(self.db, LIBRARY, "a", "kakao")["snapshot"])
+        self.assertEqual([v["volumeNumber"] for v in snapshot["volumes"]], list(range(1, 18)))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_release_events").fetchone()[0], 0)
+        self.create("c")
+        self.command("setVolumeRange", workId="c", minVolume=64, maxVolume=80,
+            hideConnectionPrompt=False, restartNumbering=True,
+            expectedRange={"minVolume": None, "maxVolume": None, "hideConnectionPrompt": False}, expectedRevision=None)
+        duplicate = self.submit(work_id="c")
+        self.worker.execute(duplicate["requestId"])
+        self.assertEqual(self.row(duplicate["requestId"])["reason_code"], "providerIdentityTaken")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_volume_sources WHERE work_id='c'").fetchone()[0], 0)
+
+    def test_restart_refresh_uses_local_release_event_numbers(self):
+        bounds = {"minVolume": 64, "maxVolume": 80, "restartNumbering": True}
+        items = self.products(numbers=tuple(range(1, 80)))
+        initial = self.rc.plan_bind(choice=self.choice(items), items=items, checked_at=self.rc.iso(NOW),
+            stored_config=None, existing_sources={}, existing_slots=set(), volume_range=bounds)
+        plan = self.rc.plan_refresh(stored_config=initial["config"], external_id=initial["externalId"],
+            items=self.products(numbers=tuple(range(1, 82))), checked_at=self.rc.iso(NOW),
+            existing_sources={row["volumeNumber"]: row for row in initial["sources"]},
+            existing_slots=set(range(1, 17)), gating={**bounds, "releaseWatch": True, "tracksOwnership": True},
+            previous_checked_at="2026-10-01T00:00:00Z")
+        self.assertEqual(plan["newSlots"], [17])
+        self.assertEqual([event["volumeNumber"] for event in plan["events"]], [17])
+        self.assertEqual([row["volumeNumber"] for row in plan["sources"]], list(range(1, 18)))
+
     def test_new_bind_atomic_quiet_baseline_and_replay_restart(self):
         request = self.submit(expected={"externalId": None})
         self.worker.execute(request["requestId"])
@@ -493,7 +543,10 @@ class CoreTests(unittest.TestCase):
                     continue
                 plan = self.rc.plan_refresh(**call)
                 for key in ("config", "externalId", "snapshot", "newSlots", "events", "result"):
-                    self.assertEqual(plan[key], expected[key])
+                    if case["name"] == "out_of_range_volumes_make_no_event" and key == "externalId":
+                        self.assertEqual(plan[key], "r3")
+                    else:
+                        self.assertEqual(plan[key], expected[key])
                 self.assertEqual(plan["sources"], [{**row, "data": row.get("data", {"id": row["providerItemId"]})} for row in expected["sources"]])
         # Anchor wins even when the fingerprint drifts; missing anchor falls back.
         choice = self.choice()

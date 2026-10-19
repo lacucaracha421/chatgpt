@@ -172,7 +172,7 @@ COMMAND_KEYS = {
     RELEASE_SUBSCRIPTION: {"workId", "enabled", "expectedEnabled", "expectedRevision"},
     ACK_RELEASE: {"workId", "eventIds"},
     RECORD_RELEASE: {"workId", "eventId", "provider", "kind", "volumeNumber", "previousValue", "currentValue", "detectedAt"},
-    VOLUME_RANGE: {"workId", "minVolume", "maxVolume", "hideConnectionPrompt",
+    VOLUME_RANGE: {"workId", "minVolume", "maxVolume", "hideConnectionPrompt", "restartNumbering",
                    "expectedRange", "expectedRevision"},
 }
 
@@ -359,7 +359,9 @@ CREATE TABLE IF NOT EXISTS collection_authority_volume_sources(
  updated_at TEXT NOT NULL,
  PRIMARY KEY(library_id,work_id,volume_number,provider));
 CREATE UNIQUE INDEX IF NOT EXISTS collection_authority_volume_source_item
- ON collection_authority_volume_sources(library_id,provider,provider_item_id) WHERE deleted = 0;
+ ON collection_authority_volume_sources(library_id,provider,provider_item_id) WHERE deleted = 0 AND provider <> 'kakao';
+CREATE UNIQUE INDEX IF NOT EXISTS collection_authority_kakao_source_item
+ ON collection_authority_volume_sources(library_id,provider_item_id,work_id) WHERE deleted = 0 AND provider = 'kakao';
 CREATE TABLE IF NOT EXISTS collection_authority_ownership(
  library_id TEXT NOT NULL,
  work_id TEXT NOT NULL,
@@ -462,6 +464,9 @@ def startup_db(db):
         if db.execute("SELECT 1 FROM collection_authority_works LIMIT 1").fetchone():
             raise RuntimeError("Collections AV schema upgrade requires an empty works table")
         db.execute("DROP TABLE collection_authority_works")
+    source_index = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='collection_authority_volume_source_item'").fetchone()
+    if source_index is not None and "provider <> 'kakao'" not in source_index[0]:
+        db.execute("DROP INDEX collection_authority_volume_source_item")
     db.executescript(DDL)
     additions = {
         "collection_authority_works": {"av_credits": "TEXT NOT NULL DEFAULT '[]'"},
@@ -1062,10 +1067,8 @@ def build_payload(db, library_id, row):
             " ORDER BY published_order IS NULL, published_order, edition_index, sort_order,"
             " volume_number, volume_id", [library_id, work_id]):
         volume_range = state["derived"].get("volumeRange") or {}
-        if (volume_range.get("minVolume") is not None
-                and volume["volume_number"] < volume_range["minVolume"]) or (
-                volume_range.get("maxVolume") is not None
-                and volume["volume_number"] > volume_range["maxVolume"]):
+        from collection_volume_range import local_contains
+        if not volume_range.get("restartNumbering", False) and not local_contains(volume["volume_number"], volume_range):
             continue
         source = sources.get(volume["volume_number"])
         volumes.append({"id": volume["volume_id"], "volumeNumber": volume["volume_number"],
@@ -1314,7 +1317,8 @@ def finalize_items(db, library_id, items, *, detail=False, today=None, include_r
                     review = kakao_review.validated_review(item["id"], state["name"],
                         {b["provider"]: {"snapshot": json.loads(b["snapshot"]) if b["snapshot"] else None,
                                          "config": json.loads(b["config"]) if b["config"] else None}
-                         for b in bindings}, owned[0], owned[1], state["derived"].get("volumeRange") or {})
+                         for b in bindings}, owned[0], owned[1], state["derived"].get("volumeRange") or {},
+                         item.get("originalTitle"))
                 except (ValueError, TypeError, AttributeError, KeyError):
                     review = None
                 if review is not None:
@@ -2472,21 +2476,22 @@ def _release_subscription(ctx, entity, payload_sha):
 
 
 def normalize_volume_range(value):
-    if not isinstance(value, dict) or set(value) != {"minVolume", "maxVolume", "hideConnectionPrompt"}:
+    if not isinstance(value, dict) or set(value) - {"restartNumbering"} != {"minVolume", "maxVolume", "hideConnectionPrompt"}:
         fail(422, "invalidCollectionCommand", "Invalid volume range.")
     low = _int(value["minVolume"], low=0, high=9999)
     high = _int(value["maxVolume"], low=0, high=9999)
     if low is not None and high is not None and high < low:
         fail(422, "invalidCollectionCommand", "Invalid volume range.")
     return {"minVolume": low, "maxVolume": high,
-            "hideConnectionPrompt": _bool(value["hideConnectionPrompt"])}
+            "hideConnectionPrompt": _bool(value["hideConnectionPrompt"]),
+            "restartNumbering": _bool(value.get("restartNumbering", False))}
 
 
 def _volume_range(ctx, entity, payload_sha):
     state = _tracking_work(ctx, entity["workId"])
-    current = state["derived"].get("volumeRange") or {
-        "minVolume": None, "maxVolume": None, "hideConnectionPrompt": False}
-    desired = {key: entity[key] for key in ("minVolume", "maxVolume", "hideConnectionPrompt")}
+    current = normalize_volume_range(state["derived"].get("volumeRange") or {
+        "minVolume": None, "maxVolume": None, "hideConnectionPrompt": False})
+    desired = {key: entity[key] for key in ("minVolume", "maxVolume", "hideConnectionPrompt", "restartNumbering")}
     if current == desired:
         return _finish(ctx, payload_sha, entity["workId"])
     if entity["expectedRevision"] != state["entityRevision"] and entity["expectedRange"] != current:
@@ -2570,6 +2575,20 @@ def _upsert_source(ctx, entity, payload_sha):
     current_revision = existing["entity_revision"] if existing is not None else 0
     if entity["expectedRevision"] != current_revision:
         conflict(ctx, "volumeSource", None if existing is None else source_projection(existing))
+    if provider == "kakao" and not entity["deleted"]:
+        bounds = work_state(require_work(ctx, work_id))["derived"].get("volumeRange") or {}
+        has_range = bounds.get("minVolume") is not None or bounds.get("maxVolume") is not None
+        unavailable = ctx.db.execute(
+            "SELECT 1 FROM collection_authority_volume_sources source"
+            " JOIN collection_authority_works work ON work.library_id=source.library_id AND work.work_id=source.work_id"
+            " WHERE source.library_id=? AND source.provider='kakao' AND source.provider_item_id=?"
+            " AND source.work_id<>? AND source.deleted=0"
+            " AND (?=0 OR (json_extract(work.derived,'$.volumeRange.minVolume') IS NULL"
+            " AND json_extract(work.derived,'$.volumeRange.maxVolume') IS NULL)) LIMIT 1",
+            [ctx.library_id, entity["providerItemId"], work_id, has_range]).fetchone()
+        if unavailable is not None:
+            fail(409, "providerIdentityTaken", "이미 다른 작품에 연결된 도서 정보입니다.",
+                 provider=provider, externalId=entity["providerItemId"])
     try:
         ctx.db.execute(
             "INSERT INTO collection_authority_volume_sources(library_id,work_id,volume_number,"
@@ -2671,9 +2690,8 @@ def _refresh_release_schedule(ctx, state):
         return False
     schedule = {"kakao": None, "mangadex": None}
     bounds = state["derived"].get("volumeRange") or {}
-    inside = lambda number: (1 <= number <= 999
-        and (bounds.get("minVolume") is None or number >= bounds["minVolume"])
-        and (bounds.get("maxVolume") is None or number <= bounds["maxVolume"]))
+    from collection_volume_range import local_contains
+    inside = lambda number: 1 <= number <= 999 and local_contains(number, bounds)
     for provider in schedule:
         binding = binding_row(ctx.db, ctx.library_id, state["workId"], provider)
         if binding is None or not binding["bound"]:
@@ -2704,7 +2722,7 @@ def _refresh_release_schedule(ctx, state):
                 "SELECT volume_number,edition_index FROM collection_authority_volumes"
                 " WHERE library_id=? AND work_id=? AND source_provider='mangadex' AND deleted=0",
                 [ctx.library_id, state["workId"]]))
-            volumes = [{"volumeNumber": n, "editionIndex": e} for n, e in sorted(slots) if inside(n) and 0 <= e <= 3][:999]
+            volumes = [{"volumeNumber": n, "editionIndex": e} for n, e in sorted(slots) if (1 <= n <= 999 if bounds.get("restartNumbering") else inside(n)) and 0 <= e <= 3][:999]
             schedule[provider] = {"checkedAt": checked, "latestVolume": volumes[-1]["volumeNumber"] if volumes else None,
                                   "volumes": volumes}
     if state["derived"].get("releaseSchedule") == schedule:
@@ -2913,6 +2931,8 @@ def parse_command(body):
     command_type = body["commandType"]
     if command_type not in COMMAND_TYPES:
         fail(422, "unsupportedCollectionCommand", "지원하지 않는 컬렉션 명령입니다.")
+    if command_type == VOLUME_RANGE:
+        body = {"restartNumbering": False, **body}
     if set(body) != ENVELOPE_KEYS | COMMAND_KEYS[command_type]:
         fail(422, "invalidCollectionCommand", "컬렉션 명령 필드가 올바르지 않습니다.")
     library_id, epoch = body["libraryId"], body["epoch"]
@@ -3106,7 +3126,7 @@ def parse_command(body):
         entity.update(dismissed=_bool(body["dismissed"]), expectedVolumes=volumes)
     elif command_type == VOLUME_RANGE:
         entity.update(normalize_volume_range({key: body[key] for key in
-                      ("minVolume", "maxVolume", "hideConnectionPrompt")}))
+                      ("minVolume", "maxVolume", "hideConnectionPrompt", "restartNumbering")}))
         entity["expectedRange"] = normalize_volume_range(body["expectedRange"])
         entity["expectedRevision"] = (None if body["expectedRevision"] is None
                                       else _revision(body["expectedRevision"], minimum=1))
@@ -3621,7 +3641,7 @@ def validate_staging(db, doc, *, verify=False, problems=None):
         if source["workId"] not in works:
             reject("작품에 속하지 않은 도서 정보가 있습니다.")
         key = (source["workId"], source["volumeNumber"], source["provider"])
-        item = (source["provider"], source["providerItemId"])
+        item = (source["provider"], source["providerItemId"], source["workId"] if source["provider"] == "kakao" else None)
         if key in source_keys or item in source_items:
             reject("도서 정보가 중복되었습니다.", reason="providerIdentityTaken",
                            provider=source["provider"], externalId=source["providerItemId"])

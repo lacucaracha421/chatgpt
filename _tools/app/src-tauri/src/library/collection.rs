@@ -62,6 +62,7 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
               AND NOT EXISTS (
                   SELECT 1 FROM collection_volume_ranges AS volume_range
                   WHERE volume_range.collection_id = collection.id
+                    AND volume_range.restart_numbering=0
                     AND (volume_range.min_volume IS NOT NULL AND volume.volume_number < volume_range.min_volume
                          OR volume_range.max_volume IS NOT NULL AND volume.volume_number > volume_range.max_volume)
               )
@@ -124,7 +125,8 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
        AND binding.external_id LIKE 'tv:%' AND json_extract(season.value, '$.seasonNumber') > 0),
     (SELECT min_volume FROM collection_volume_ranges WHERE collection_id = collection.id),
     (SELECT max_volume FROM collection_volume_ranges WHERE collection_id = collection.id),
-    (SELECT hide_connection_prompt FROM collection_volume_ranges WHERE collection_id = collection.id)
+    (SELECT hide_connection_prompt FROM collection_volume_ranges WHERE collection_id = collection.id),
+    (SELECT restart_numbering FROM collection_volume_ranges WHERE collection_id = collection.id)
 FROM collections AS collection";
 
 impl Library {
@@ -833,6 +835,7 @@ pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<C
         min_volume: row.get(30)?,
         max_volume: row.get(31)?,
         hide_connection_prompt: row.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
+        restart_numbering: row.get::<_, Option<i64>>(33)?.unwrap_or(0) != 0,
     })
 }
 
@@ -1786,7 +1789,7 @@ mod tests {
         );
 
         library
-            .set_collection_volume_range(&collection.id, Some(2), None, false)
+            .set_collection_volume_range(&collection.id, Some(2), None, false, false)
             .unwrap();
         assert_eq!(
             library

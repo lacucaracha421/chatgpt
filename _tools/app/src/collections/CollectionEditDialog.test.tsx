@@ -100,7 +100,20 @@ it("saves the manga volume range and connection prompt setting", async () => {
   await user.click(screen.getByRole("checkbox", { name: "카카오 연결 안내 숨기기" }));
   await user.click(screen.getByRole("button", { name: "저장" }));
 
-  expect(onSubmitMangaSettings).toHaveBeenCalledWith({ minVolume: 1, maxVolume: 11, hideConnectionPrompt: true });
+  expect(onSubmitMangaSettings).toHaveBeenCalledWith({ minVolume: 1, maxVolume: 11, hideConnectionPrompt: true, restartNumbering: false });
+});
+
+it("saves numbering from one only after a later first volume is set", async () => {
+  const user = userEvent.setup();
+  const onSubmitMangaSettings = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{kind: "edit", collection: collectionFixture}} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onSubmitMangaSettings={onSubmitMangaSettings} />);
+  const restart = screen.getByRole("checkbox", {name: "이 부의 첫 권을 1권으로 세기"});
+  expect(restart).toBeDisabled();
+  await user.type(screen.getByRole("spinbutton", {name: "처음 권"}), "64");
+  await user.type(screen.getByRole("spinbutton", {name: "마지막 권"}), "80");
+  await user.click(restart);
+  await user.click(screen.getByRole("button", {name: "저장"}));
+  expect(onSubmitMangaSettings).toHaveBeenCalledWith({minVolume: 64, maxVolume: 80, restartNumbering: true, hideConnectionPrompt: false});
 });
 
 it("rejects a reversed manga volume range before saving", async () => {

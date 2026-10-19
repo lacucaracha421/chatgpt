@@ -26,8 +26,8 @@ beforeEach(() => {
   });
 });
 afterEach(() => {cleanup(); vi.useRealTimers(); vi.unstubAllGlobals();});
-function Harness({features = ['kakaoReview'], initialRequests = []}: {features?: string[]; initialRequests?: BindRequest[]} = {}) {
-  const [items, setItems] = useState([work('a'), work('b'), work('c', {bound: true, volumes: Array.from({length: 12}, (_, i) => i + 1)})]);
+function Harness({features = ['kakaoReview'], initialRequests = [], firstReview = {}}: {features?: string[]; initialRequests?: BindRequest[]; firstReview?: Partial<KakaoReview>} = {}) {
+  const [items, setItems] = useState([work('a', firstReview), work('b'), work('c', {bound: true, volumes: Array.from({length: 12}, (_, i) => i + 1)})]);
   const [requests, setRequests] = useState<BindRequest[]>(initialRequests);
   const authority = {features, failure: '', work: (item: CollectionSummary) => item,
     enqueue: (command: {workId: string; commandType: string; dismissed?: boolean; hideConnectionPrompt?: boolean}) => {
@@ -89,9 +89,17 @@ it('undoes an unlinked exclusion against the range value that the first request 
   render(<Harness/>);
   fireEvent.click(screen.getByRole('button', {name: 'Dungeon a 더보기'}));
   fireEvent.click(await screen.findByRole('button', {name: '연결 안 함'}));
-  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({hideConnectionPrompt: true, expectedRange: {minVolume: null, maxVolume: null, hideConnectionPrompt: false}}));
+  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({hideConnectionPrompt: true, expectedRange: {minVolume: null, maxVolume: null, restartNumbering: false, hideConnectionPrompt: false}}));
   fireEvent.click(await screen.findByRole('button', {name: '되돌리기'}));
-  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({hideConnectionPrompt: false, expectedRange: {minVolume: null, maxVolume: null, hideConnectionPrompt: true}}));
+  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({hideConnectionPrompt: false, expectedRange: {minVolume: null, maxVolume: null, restartNumbering: false, hideConnectionPrompt: true}}));
+});
+it('preserves part numbering when hiding and restoring the connection prompt', async () => {
+  render(<Harness firstReview={{minVolume: 64, maxVolume: 80, restartNumbering: true}}/>);
+  fireEvent.click(screen.getByRole('button', {name: 'Dungeon a 더보기'}));
+  fireEvent.click(await screen.findByRole('button', {name: '연결 안 함'}));
+  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({restartNumbering: true, expectedRange: {minVolume: 64, maxVolume: 80, restartNumbering: true, hideConnectionPrompt: false}}));
+  fireEvent.click(await screen.findByRole('button', {name: '되돌리기'}));
+  expect(mocks.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({restartNumbering: true, expectedRange: {minVolume: 64, maxVolume: 80, restartNumbering: true, hideConnectionPrompt: true}}));
 });
 it('reads every replica and pending-request page independent of the current shelf filters', async () => {
   mocks.api.mockImplementation(async (path: string) => {

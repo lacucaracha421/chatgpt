@@ -359,6 +359,7 @@ class CollectionVolumeRange(StrictModel):
     minVolume: Annotated[StrictInt, Field(ge=0, le=9999)] | None = None
     maxVolume: Annotated[StrictInt, Field(ge=0, le=9999)] | None = None
     hideConnectionPrompt: StrictBool = False
+    restartNumbering: StrictBool = False
 
     @model_validator(mode="after")
     def ordered(self):
@@ -371,7 +372,8 @@ class KakaoReview(CollectionVolumeRange):
     dismissalSupported: StrictBool = False
     collectionId: ID
     query: str = Field(max_length=2000)
-    querySource: Literal["name", "mangadex", "none"]
+    querySource: Literal["name", "mangadex", "none", "original"]
+    originalTitle: str | None = Field(default=None, max_length=2000)
     bound: StrictBool
     volumes: list[Annotated[StrictInt, Field(gt=0)]] = Field(max_length=9999)
     highestOwnedVolume: Annotated[StrictInt, Field(ge=0)]

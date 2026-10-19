@@ -139,8 +139,8 @@ export function KakaoReviewOverlay({open, active, onClose, queue, authority, cov
     const review = work.kakaoReview!;
     if (!authority.features.includes('kakaoReview')) throw new Error('연결 점검 설정을 저장하려면 서버 업데이트가 필요합니다.');
     authority.enqueue(review.bound ? {commandType: 'setKakaoPartialDismissed', workId: work.id, dismissed: excluded, expectedVolumes: review.volumes}
-      : {commandType: 'setVolumeRange', workId: work.id, minVolume: review.minVolume, maxVolume: review.maxVolume, hideConnectionPrompt: excluded,
-        expectedRange: {minVolume: review.minVolume, maxVolume: review.maxVolume, hideConnectionPrompt: review.hideConnectionPrompt}, expectedRevision: null}, work.name);
+      : {commandType: 'setVolumeRange', workId: work.id, minVolume: review.minVolume, maxVolume: review.maxVolume, restartNumbering: review.restartNumbering ?? false, hideConnectionPrompt: excluded,
+        expectedRange: {minVolume: review.minVolume, maxVolume: review.maxVolume, restartNumbering: review.restartNumbering ?? false, hideConnectionPrompt: review.hideConnectionPrompt}, expectedRevision: null}, work.name);
   };
   const mark = async (work: CollectionSummary, excluded: boolean) => {
     exclude(work, excluded); fold(work); setMenu(null);

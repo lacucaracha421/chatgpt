@@ -15,7 +15,7 @@ def dismissal_matches(config, volumes):
     return isinstance(value, list) and all(type(n) is int for n in value) and value == volumes
 
 
-def review(work_id, name, bindings, highest_owned, owned_count, volume_range):
+def review(work_id, name, bindings, highest_owned, owned_count, volume_range, original_title=None):
     kakao = bindings.get("kakao")
     config = (kakao or {}).get("config") or {}
     config = config if isinstance(config, dict) else {}
@@ -31,16 +31,24 @@ def review(work_id, name, bindings, highest_owned, owned_count, volume_range):
     volumes = snapshot_volumes((kakao or {}).get("snapshot"))
     groups = config.get("groups")
     groups = groups if isinstance(groups, list) else [{"groupFingerprint": config.get("groupFingerprint")}]
-    partial = len(volumes) < max([highest_owned, *volumes])
+    low = 1 if volume_range.get("restartNumbering") else max(1, volume_range.get("minVolume") or 1)
+    high = volume_range.get("maxVolume")
+    if volume_range.get("restartNumbering"):
+        high = highest_owned if high is None else high - (volume_range["minVolume"] if volume_range.get("minVolume") is not None else 1) + 1
+    else:
+        observed = max([highest_owned, *volumes])
+        high = observed if high is None else min(high, observed)
+    partial = sum(low <= n <= high for n in volumes) < max(0, high - low + 1)
     stored_query = config.get("query")
     query = stored_query if isinstance(stored_query, str) and stored_query.strip() else query
     return {"collectionId": work_id, "query": query[:2000], "dismissalSupported": True,
-            "querySource": source, "bound": kakao is not None, "volumes": volumes,
+            "querySource": source, "originalTitle": original_title, "bound": kakao is not None, "volumes": volumes,
             "highestOwnedVolume": highest_owned, "ownedCount": owned_count,
             "partialDismissed": kakao is not None and partial and dismissal_matches(config, volumes),
             "groupFingerprints": [g["groupFingerprint"] for g in groups if isinstance(g, dict) and isinstance(g.get("groupFingerprint"), str)],
             "minVolume": volume_range.get("minVolume"), "maxVolume": volume_range.get("maxVolume"),
-            "hideConnectionPrompt": volume_range.get("hideConnectionPrompt", False)}
+            "hideConnectionPrompt": volume_range.get("hideConnectionPrompt", False),
+            "restartNumbering": volume_range.get("restartNumbering", False)}
 
 
 def validated_review(*args):

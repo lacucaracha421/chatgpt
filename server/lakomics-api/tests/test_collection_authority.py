@@ -182,7 +182,7 @@ class CollectionAuthorityTests(unittest.TestCase):
         with api_app.get_db() as db:
             db.execute("INSERT INTO collection_authority_bindings(library_id,work_id,provider,external_id,config,snapshot,bound,entity_revision,created_at,updated_at)"
                        " VALUES(?, 'a', 'kakao', 'one', ?, NULL, 1, 1, 'now', 'now')",
-                       [LIBRARY, json.dumps({'query': '가' * 2001, 'groups': [{'groupFingerprint': str(i)} for i in range(11)]})])
+                       [LIBRARY, json.dumps({'query': '가' * 2001, 'groups': [{'groupFingerprint': str(i)} for i in range(41)]})])
             db.commit()
         self.assertNotIn('kakaoReview', self.ok(self.client.get('/v1/collections/a', headers=self.auth, params={'kakaoReview': True}))['item'])
 
@@ -325,7 +325,7 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertTrue(receipt['changed'])
         row = receipt['entities']['works'][0]
         self.assertEqual(row['derived']['volumeRange'],
-                         {'minVolume': 2, 'maxVolume': 4, 'hideConnectionPrompt': True})
+                         {'minVolume': 2, 'maxVolume': 4, 'hideConnectionPrompt': True, 'restartNumbering': False})
         self.assertEqual(row['entityRevision'], 2)
         self.assertEqual(self.ok(self.command('setVolumeRange', operation_id=op, **fields)), receipt)
         self.assertFalse(self.ok(self.command('setVolumeRange', **fields))['changed'])

@@ -1620,7 +1620,7 @@ mod tests {
                 ('c',1,0,1,0),('c',3,0,1,0),('c',6,0,0,1);",
         ).unwrap();
         library
-            .set_collection_volume_range("c", Some(3), Some(6), false)
+            .set_collection_volume_range("c", Some(3), Some(6), false, false)
             .unwrap();
         let endpoint = "https://sync.example.test";
         let library_id = library.library_id().unwrap();
@@ -1825,7 +1825,7 @@ fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWat
              ) WHERE edition_index BETWEEN 0 AND 3 GROUP BY edition_index ORDER BY edition_index",
         )?
         .query_map(
-            rusqlite::params![id, volume_range.min_volume, volume_range.max_volume],
+            rusqlite::params![id, volume_range.local_bounds().0, volume_range.local_bounds().1],
             |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }),
         )?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1892,7 +1892,7 @@ fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<Rel
                        AND (?4 IS NULL OR volume_number <= ?4)
                      ORDER BY volume_number",
                 )?
-                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, volume_range.min_volume, volume_range.max_volume], |row| {
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, volume_range.mapped_bounds().0, volume_range.mapped_bounds().1], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
                 })?
                 .map(|row| {
@@ -1924,7 +1924,7 @@ fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<Rel
                        AND (?4 IS NULL OR volume_number <= ?4)
                      ORDER BY volume_number, edition_index LIMIT ?2",
                 )?
-                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, volume_range.min_volume, volume_range.max_volume], |row| {
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, if volume_range.restart_numbering { None } else { volume_range.min_volume }, if volume_range.restart_numbering { None } else { volume_range.max_volume }], |row| {
                     Ok(MangaDexScheduleVolume { volume_number: row.get(0)?, edition_index: Some(row.get(1)?) })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

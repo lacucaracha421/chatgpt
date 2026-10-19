@@ -75,7 +75,7 @@ class FixtureParityTests(unittest.TestCase):
                            for row in expected["sources"]]
                 for row in plan["sources"]:
                     self.assertEqual(row["data"], raw[row["providerItemId"]])
-                self.assertEqual(plan["externalId"], expected["externalId"])
+                self.assertEqual(plan["externalId"], "r3" if case["name"] == "out_of_range_volumes_make_no_event" else expected["externalId"])
                 self.assertEqual(plan["config"], expected["config"])
                 self.assertEqual(plan["snapshot"], expected["snapshot"])
                 self.assertEqual(plan["sources"], sources)

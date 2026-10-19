@@ -783,6 +783,13 @@ impl Library {
                 }
             });
         if already {
+            let range = super::collection_volume_range::load(&c, &item.collection_id)?;
+            if item.provider == "kakao" && (range.min_volume.is_some() || range.max_volume.is_some()) {
+                // A repeated selection must still apply the work's current numbering/range.
+                return Ok(Precheck::Apply(current.map(|(external, config)| {
+                    binding_identity(&item.provider, &external, config.as_deref())
+                })));
+            }
             return Ok(Precheck::Decided(Decision::Applied));
         }
         if let Some(expected) = expected_external_id(item) {

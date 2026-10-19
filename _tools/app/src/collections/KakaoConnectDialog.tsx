@@ -1,3 +1,4 @@
+import { searchKakaoWithOriginal } from "./kakaoSearch";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
@@ -18,6 +19,7 @@ type KakaoConnectDialogProps = {
   open: boolean;
   collectionId: string;
   initialQuery: string;
+  originalTitle?: string | null;
   onClose: () => void;
   onApplied: (result: KakaoSyncResult) => Promise<void> | void;
   autoSearch?: boolean;
@@ -29,7 +31,7 @@ type KakaoConnectDialogProps = {
 export function KakaoConnectDialog({
   open,
   collectionId,
-  initialQuery,
+  initialQuery, originalTitle,
   onClose,
   onApplied,
   autoSearch = false, work, initialGroupFingerprints = [], onSkip,
@@ -57,6 +59,9 @@ export function KakaoConnectDialog({
   const recheck = usePendingBindRecheck(open);
   const working = busy !== null || recheck.running;
   const searchGeneration = useRef(0);
+  const initialSearchUsed = useRef(false);
+  const queryEdited = useRef(false);
+  const [usedOriginalTitle, setUsedOriginalTitle] = useState(false);
   useEffect(() => {
     if (open && autoSearch) void search();
     return () => { searchGeneration.current++; };
@@ -132,6 +137,8 @@ export function KakaoConnectDialog({
     recheck.cancel();
     setPending(false);
     const generation = ++searchGeneration.current;
+    const fallbackAllowed = !initialSearchUsed.current && !queryEdited.current;
+    initialSearchUsed.current = true;
     const trimmed = query.trim();
     setSearchValid(false); setFailedAction("search");
     if (trimmed.length < 2) {
@@ -141,9 +148,12 @@ export function KakaoConnectDialog({
     setBusy("search");
     setError(null);
     try {
-      const nextResults = await gateway.searchKakao(trimmed);
+      const result = await searchKakaoWithOriginal(trimmed, originalTitle, q => gateway.searchKakao(q), () => fallbackAllowed && generation === searchGeneration.current && !queryEdited.current);
+      const nextResults = result.items;
       if (generation !== searchGeneration.current) return;
-      setSubmittedQuery(trimmed);
+      setSubmittedQuery(result.query);
+      setUsedOriginalTitle(result.usedOriginalTitle);
+      if (result.usedOriginalTitle) setQuery(result.query);
       setSearchValid(true); setFailedAction(null);
       const rank = (candidate: KakaoSeriesCandidate) => initialGroupFingerprints.includes(candidate.groupFingerprint) ? 0 : normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed) ? 1 : 2;
       const exact = nextResults.filter(candidate => normalizeKakaoTitle(candidate.title) === normalizeKakaoTitle(trimmed));
@@ -211,7 +221,7 @@ export function KakaoConnectDialog({
             label="카카오 작품 검색"
             type="search"
             value={query}
-            onChange={(event) => { setQuery(event.target.value); setError(null); }}
+            onChange={(event) => { queryEdited.current = true; if (busy === "search") { searchGeneration.current++; setBusy(null); } setQuery(event.target.value); setError(null); }}
             onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (autoSearch && query.trim() === submittedQuery && selected.length > 0) void apply(); else if (!busy) void search(); } }}
           />
           <Button type="button" disabled={working} onClick={() => void search()}>
@@ -219,6 +229,7 @@ export function KakaoConnectDialog({
           </Button>
         </div>
 
+        {usedOriginalTitle && <p role="status">일본어 원제로 찾았어요</p>}
         {error && <p className="book-connect__error" role="alert">{error}</p>}
         {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
         {(limitHit || selectedKeys.length >= MAX_KAKAO_GROUPS) && <p className="book-connect__note" role="status">한 번에 최대 {MAX_KAKAO_GROUPS}개 시리즈까지 연결할 수 있습니다.</p>}

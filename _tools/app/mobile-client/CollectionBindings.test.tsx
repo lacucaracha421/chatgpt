@@ -72,6 +72,21 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
+it('falls back to the original title once and keeps later typed searches', async () => {
+  routes.kakao = (path: string) => {
+    const query = new URL(path, 'https://x').searchParams.get('query');
+    return {query, items: query === '日本語' ? kakaoItems : []};
+  };
+  render(<CollectionBindings item={{...base, originalTitle: '日本語'}} active refreshKey="one" sheet="kakao" onSheet={vi.fn()}/>);
+  expect(await screen.findByText('일본어 원제로 찾았어요')).toBeTruthy();
+  expect(calls('/search/kakao')).toHaveLength(2);
+  const field = screen.getByRole('searchbox');
+  fireEvent.change(field, {target: {value: 'Edited'}});
+  fireEvent.submit(field.closest('form')!);
+  await waitFor(() => expect(calls('/search/kakao')).toHaveLength(3));
+  await waitFor(() => expect(screen.queryByText('일본어 원제로 찾았어요')).toBeNull());
+});
+
 function Harness({item}: {item: CollectionDetail}) {
   const [sheet, setSheet] = useState<BindProvider | null>(null);
   return <CollectionBindings item={item} active refreshKey="0" sheet={sheet} onSheet={setSheet}/>;

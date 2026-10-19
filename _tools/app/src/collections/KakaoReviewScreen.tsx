@@ -80,7 +80,7 @@ export function KakaoReviewScreen({ collections, data, coverUrl, onBack, onChang
       await gateway.setKakaoPartialDismissed(review.collectionId, excluded);
     } else {
       if (!gateway.setCollectionVolumeRange) throw new Error("PC 앱을 업데이트해 주세요.");
-      await gateway.setCollectionVolumeRange(review.collectionId, { minVolume: review.minVolume, maxVolume: review.maxVolume, hideConnectionPrompt: excluded });
+      await gateway.setCollectionVolumeRange(review.collectionId, { minVolume: review.minVolume, maxVolume: review.maxVolume, restartNumbering: review.restartNumbering ?? false, hideConnectionPrompt: excluded });
     }
     data.update({ ...review, ...(review.bound ? { partialDismissed: excluded } : { hideConnectionPrompt: excluded }) });
     await onChanged();
@@ -170,7 +170,7 @@ export function KakaoReviewScreen({ collections, data, coverUrl, onBack, onChang
         </div>;
       })}
     </div>
-    {dialog && <KakaoConnectDialog key={dialog.work.id} open collectionId={dialog.work.id} initialQuery={dialog.query} autoSearch
+    {dialog && <KakaoConnectDialog key={dialog.work.id} open collectionId={dialog.work.id} initialQuery={dialog.query} originalTitle={queries[dialog.work.id] === undefined ? dialog.review.originalTitle ?? dialog.work.originalTitle : null} autoSearch
       initialGroupFingerprints={dialog.review.groupFingerprints} work={{ name: dialog.work.name, coverUrl: privacyMode ? null : coverUrl(dialog.work), ownedCount: dialog.review.ownedCount }}
       onSkip={!dialog.review.bound ? () => exclude(dialog.review, true) : undefined} onClose={() => setDialog(null)} onApplied={() => void linked(dialog.work.id)} />}
     {notice && <Toast onDismiss={() => setNotice(null)} actionLabel={notice.undo ? "되돌리기" : undefined} onAction={() => { void notice.undo?.().catch(reason => setNotice({ text: commandErrorMessage(reason, "되돌리지 못했습니다.") })); }}>{notice.text}</Toast>}

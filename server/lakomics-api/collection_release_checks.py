@@ -337,7 +337,7 @@ def plan_refresh(*, stored_config, external_id, items, checked_at, existing_sour
                      gating, previous_checked_at, baseline_established, existing_volume_numbers)
 
 
-def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, existing_slots):
+def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, existing_slots, volume_range=None):
     """Delayed selection: anchor first, otherwise a unique fingerprint; quiet baseline.
 
     Display hints never enter the planner. Coincident selections become one group.
@@ -359,7 +359,7 @@ def plan_bind(*, choice, items, checked_at, stored_config, existing_sources, exi
     if not picked:
         raise Ambiguous()
     return reconcile(stored_config, choice["query"], picked, checked_at, existing_sources, existing_slots,
-                     {"releaseWatch": False, "tracksOwnership": False}, None)
+                     {"releaseWatch": False, "tracksOwnership": False, **(volume_range or {})}, None)
 
 
 def reconcile(stored_config, query, picked, checked_at, existing_sources, existing_slots, gating,
@@ -367,8 +367,16 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
     """``reconcile_aladin_at``: groups ordered by lowest volume (then fingerprint), the first
     anchor becomes the binding identity, a volume offered by several groups keeps the product
     ``compare_duplicate_preference`` prefers (the others count as ignored)."""
-    picked.sort(key=lambda pick: (max(pick["series"]["items"][0]["volumeNumber"], 1),
-                                  pick["series"]["candidate"]["groupFingerprint"]))
+    from collection_volume_range import scope_picks
+    picked = scope_picks(picked, gating)
+    if not picked:
+        raise Ambiguous()
+    def lowest(pick):
+        items = pick["series"]["items"]
+        anchor = next((item for item in items if item["itemId"] == pick["anchor"]), items[0])
+        first = anchor if gating.get("minVolume") is not None or gating.get("maxVolume") is not None else items[0]
+        return max(first["volumeNumber"], 1), pick["series"]["candidate"]["groupFingerprint"]
+    picked.sort(key=lowest)
     groups = [{"anchorItemId": pick["anchor"],
                "groupFingerprint": pick["series"]["candidate"]["groupFingerprint"],
                "knownItemIds": sorted(set(pick["known"]) | {item["itemId"] for item in pick["series"]["items"]})}
@@ -416,8 +424,8 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
             for change in pending_release_changes(previous, item, previous_checked_at, checked_at):
                 if change["kind"] == "new_volume" and number in live_volumes:
                     continue
-                low, high = gating.get("minVolume"), gating.get("maxVolume")
-                if (low is None or change["volumeNumber"] >= low) and (high is None or change["volumeNumber"] <= high):
+                from collection_volume_range import local_contains
+                if local_contains(change["volumeNumber"], gating):
                     events.append(change)
     return {"config": new_config, "externalId": picked[0]["anchor"], "snapshot": snapshot, "sources": sources,
             "retiredSources": retired_sources,
@@ -865,7 +873,8 @@ class Worker:
         derived = json.loads(work["derived"])
         watch, owned, bounds = derived.get("releaseWatch") or {}, derived.get("ownedVolumes"), derived.get("volumeRange") or {}
         gating = {"releaseWatch": bool(watch.get("enabled")), "tracksOwnership": bool(owned),
-                  "minVolume": bounds.get("minVolume"), "maxVolume": bounds.get("maxVolume")}
+                  "minVolume": bounds.get("minVolume"), "maxVolume": bounds.get("maxVolume"),
+                  "restartNumbering": bounds.get("restartNumbering", False)}
         state = db.execute("SELECT last_checked_at FROM collection_release_check_state WHERE work_id=? AND provider=?",
                            (work_id, PROVIDER)).fetchone()
         # The PC compares with the subscription's check time, which every refresh (PC ones too)

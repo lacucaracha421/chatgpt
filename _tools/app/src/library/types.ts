@@ -502,20 +502,22 @@ export type CollectionSummary = {
   minVolume?: number | null;
   maxVolume?: number | null;
   hideConnectionPrompt?: boolean;
+  restartNumbering?: boolean;
 };
 
 export type CollectionVolumeRangeInput = {
   minVolume: number | null;
   maxVolume: number | null;
   hideConnectionPrompt: boolean;
+  restartNumbering?: boolean;
 };
 
 export type KakaoReview = {
   dismissalSupported?: boolean;
-  collectionId: string; query: string; querySource: "name" | "mangadex" | "none";
+  collectionId: string; query: string; querySource: "name" | "mangadex" | "none" | "original"; originalTitle?: string | null;
   bound: boolean; volumes: number[]; highestOwnedVolume: number; ownedCount: number;
   partialDismissed: boolean; groupFingerprints: string[];
-  minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean;
+  minVolume: number | null; maxVolume: number | null; hideConnectionPrompt: boolean; restartNumbering?: boolean;
 };
 
 export type CreateCollection = {
