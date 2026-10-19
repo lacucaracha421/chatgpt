@@ -33,10 +33,10 @@ const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈
  * presentation-only, so it keeps the same wheel, drag and clipped-last-card behaviour on both
  * clients.
  */
-export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,hidden=false,appearanceKey,appearanceEnabled=true,appearancePlace,appearanceSelector='.folder-shelf__card'}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;hidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean;
-  /** The place whose cards are shown: a new place's first cards enter like the first visit's (the PC shelf's first batch). */appearancePlace?:string;appearanceSelector?:string}) {
+export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,hidden=false,appearanceKey,appearanceEnabled=true,appearanceSelector='.folder-shelf__card'}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;hidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean;
+  appearanceSelector?:string}) {
   const host=useRef<HTMLElement>(null);
-  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden&&!hidden,appearanceKey,appearanceSelector,appearancePlace);
+  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden&&!hidden,appearanceKey,appearanceSelector);
   return <section ref={host} style={{display:hidden?'none':undefined}} inert={hidden||undefined} aria-hidden={hidden||undefined} className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
     <SectionLabel as="h3" className="folder-shelf__label" title={label} actions={accessory}/>
     {cards.length>0&&<Fold keepMounted open={!cardsHidden} id={cardsId}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></Fold>}
@@ -77,11 +77,12 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
   },[id,onVisible]);
   return <button ref={host} className={`library-folder${kind?' is-character':''}`} {...press.bind} onClick={press.click(onSelect)} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><span className="folder-thumbnail"><CoverGroup items={items} paused={paused||!visible}/>{count!==undefined&&<CountBadge variant="scrim" className="folder-thumbnail__count" value={count}/>}</span><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong></span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
-export function FolderCards({items,entries,characters,paused,revision,onSelect,onActions,strip=false,place,subtree=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;/** Long press on a plain folder card; character folders have no sheet. */onActions?(entry:Entry):void;strip?:boolean;/** The folder these cards belong to; moving to another folder replays their first batch. */place?:string;/** The server serves subtree listings, so a card's cover is the newest image anywhere below it. */subtree?:boolean}) {
+export function FolderCards({items,entries,characters,paused,revision,onSelect,onActions,strip=false,subtree=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;/** Long press on a plain folder card; character folders have no sheet. */onActions?(entry:Entry):void;strip?:boolean;/** The server serves subtree listings, so a card's cover is the newest image anywhere below it. */subtree?:boolean}) {
   const host=useRef<HTMLDivElement>(null);
-  useFirstAppearance(host,items.length,!paused,"classification-folders",".library-folder",place);
+  useFirstAppearance(host,items.length,!paused,"classification-folders",".library-folder");
   const {covers,onVisible}=useFolderCovers(items,paused,revision,entries,subtree);
-  if(strip)return <FolderShelf appearanceKey="classification-folder-shelf" appearanceEnabled={!paused} appearancePlace={place} label={`폴더 ${items.length}`} cards={items.map(entry=><ShelfFolderCard key={entry.id} entry={entry} items={covers[entry.id]??[]} characters={characters} paused={paused} onSelect={()=>onSelect(entryView(entry))} onActions={onActions&&!entry.characterNode?()=>onActions(entry):undefined} onVisible={onVisible}/>)} />;
+  // The gallery's strip has no entrance of its own: it arrives with the folder's quiet fade.
+  if(strip)return <FolderShelf label={`폴더 ${items.length}`} cards={items.map(entry=><ShelfFolderCard key={entry.id} entry={entry} items={covers[entry.id]??[]} characters={characters} paused={paused} onSelect={()=>onSelect(entryView(entry))} onActions={onActions&&!entry.characterNode?()=>onActions(entry):undefined} onVisible={onVisible}/>)} />;
   return <div ref={host} className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} kind={characterKindOf(entry)} count={folderCardCount(entry)} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onActions={onActions&&!entry.characterNode?()=>onActions(entry):undefined} onVisible={onVisible}/>)}</div>;
 }
 const coverDate=(asset:Asset)=>asset.collected_at??asset.created_at??'';

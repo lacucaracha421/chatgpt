@@ -631,10 +631,13 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
   // Both orientations keep shortcuts, view and creation in the same order.
   const calendarShortcut=(tab==='game'||tab==='movie')&&<SectionTool label="발매 캘린더" icon={CalendarDaysIcon} count={calendarInterestCount||undefined} onClick={()=>{beginScreenTiming('releaseCalendar','open');setCalendarOpen(true);}}/>;
+  // An invisible calendar shortcut keeps the type switch equally wide on 만화 (shorter 신간) and AV (none).
+  const shortcutSizer=<span className="collection-shortcuts__sizer" aria-hidden="true" inert><SectionTool label="발매 캘린더" icon={CalendarDaysIcon} onClick={()=>{}}/></span>;
   const newsShortcut=tab==='manga'&&<SectionTool label="신간" icon={BellIcon} count={releases.unread||undefined} onClick={openInbox}/>;
   const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>
     <SectionTool label="쇼케이스" ariaLabel="쇼케이스" icon={showcaseAll?SparklesSolidIcon:SparklesIcon} selected={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
-    {(calendarShortcut||newsShortcut)&&<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}</div>}<span className="section-tools-divider" aria-hidden="true"/>
+    {(calendarShortcut||newsShortcut)&&<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{newsShortcut&&shortcutSizer}</div>}
+    {tab==='av'&&<div className="collection-shortcuts" aria-hidden="true" inert>{shortcutSizer}</div>}<span className="section-tools-divider" aria-hidden="true"/>
     <SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
     {edits.authority.identity&&<SectionTool label="새 작품" icon={PlusIcon} onClick={()=>setWorkForm({mode:'create',type})}/>}
   </>},{active:live&&!selected&&!overlayOpen&&!performer});

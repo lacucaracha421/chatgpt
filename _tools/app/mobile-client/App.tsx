@@ -1107,7 +1107,7 @@ export function App() {
   const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!nsfwFilter&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
-  const intro=<>{rankedServer&&plainFolder&&!!childEntries.length&&<FolderScope direct={currentEntry?.asset_count} total={currentEntry?.total_asset_count} subtree={subtreeOf(filters)} onChange={applySubtree}/>}{!!childEntries.length&&!subtreeShown&&<section className="folder-intro"><FolderCards strip subtree={rankedServer} place={currentEntry?.id} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select} onActions={folderAuthority?setFolderSheet:undefined}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?viewFilterEmptyTitle(page.filters.media,page.filters.aspect,page.filters.duration):childEntries.length&&!subtreeShown?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'} hint={hasActiveFilters(page.filters)?`${viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)} 보는 중`:undefined} action={hasActiveFilters(page.filters)?<Button variant="ghost" onClick={clearFilters}>필터 초기화</Button>:undefined}/>}</>;
+  const intro=<>{rankedServer&&plainFolder&&!!childEntries.length&&<FolderScope direct={currentEntry?.asset_count} total={currentEntry?.total_asset_count} subtree={subtreeOf(filters)} onChange={applySubtree}/>}{!!childEntries.length&&!subtreeShown&&<section className="folder-intro"><FolderCards strip subtree={rankedServer} items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select} onActions={folderAuthority?setFolderSheet:undefined}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&!busy&&<EmptyState icon={RectangleStackIcon} title={hasActiveFilters(page.filters)?viewFilterEmptyTitle(page.filters.media,page.filters.aspect,page.filters.duration):childEntries.length&&!subtreeShown?'이 폴더에 바로 들어 있는 이미지가 없습니다':'아직 자산이 없습니다'} hint={hasActiveFilters(page.filters)?`${viewFilterLabel(page.filters.media,page.filters.aspect,page.filters.duration)} 보는 중`:undefined} action={hasActiveFilters(page.filters)?<Button variant="ghost" onClick={clearFilters}>필터 초기화</Button>:undefined}/>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
   const levelDepth=(view:View)=>{
@@ -1117,11 +1117,12 @@ export function App() {
     return 1+(entry?ancestorsOf(entries,entry.id).length:0);
   };
   const libraryLevel=status.configured&&area==='assets'&&page.view.tab==='library'&&page.version>0;
-  // Folder to folder inside the gallery is the gallery's own folder move (the PC's FolderMove), so the
-  // level motion only covers the root, the character boundary and search; the gallery's first batch
-  // has the PC's entrance (useFirstAppearance), so this level adds no tile stagger of its own.
-  const libraryLevelKey=page.view.search!==undefined?'asset-search':page.view.root?'root':page.view.characters?'characters':'gallery';
-  useLevelMotion(mainRef,libraryLevel?libraryLevelKey:null,libraryLevel?levelDepth(page.view):0,false);
+  // Folder to folder inside the gallery only fades (user 2026-10-19), keyed by the committed view so it
+  // never plays over the previous folder; the root, the character boundary and search slide. The
+  // gallery's first batch has the PC's entrance (useFirstAppearance), so no tile stagger here.
+  const libraryLevelName=page.view.search!==undefined?'asset-search':page.view.root?'root':page.view.characters?'characters':'gallery';
+  const libraryLevelKey=libraryLevelName==='gallery'?`gallery:${viewKey(page.view)}`:libraryLevelName;
+  useLevelMotion(mainRef,libraryLevel?libraryLevelKey:null,libraryLevel?levelDepth(page.view):0,false,libraryLevelName);
   const folderPath=page.view.album&&albumTree?[...albumAncestors(albumTree.albums,page.view.album.id).map(album=>`album:${album.id}`),`album:${page.view.album.id}`]
     :currentEntry?[...ancestorsOf(entries,currentEntry.id).map(entry=>entry.id),currentEntry.id]:[viewKey(page.view)];
   // AreaSwitch retains the outgoing tab until the incoming content is ready.

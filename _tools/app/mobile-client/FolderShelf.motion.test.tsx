@@ -2,8 +2,8 @@ import {cleanup,render} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {FolderShelf} from './FolderCards';
 
-// A shelf that stays mounted while its folder changes (the Library subfolder strip, the
-// character shelf) replays the PC shelf's first-batch entrance for each new place.
+// A shelf with an entrance plays the PC shelf's first-batch entrance once per visit; later cards
+// (another folder's, more of the same) appear without it.
 const animate=vi.fn(()=>({cancel:vi.fn()}));
 beforeEach(()=>{
   vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});
@@ -11,14 +11,13 @@ beforeEach(()=>{
   Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
 });
 afterEach(()=>{cleanup();animate.mockClear();vi.unstubAllGlobals();delete (HTMLElement.prototype as Partial<HTMLElement>).animate;});
-const shelf=(place:string,names:string[])=><FolderShelf label="폴더" appearanceKey="classification-folder-shelf" appearancePlace={place} cards={names.map(name=><article key={name} className="folder-shelf__card">{name}</article>)}/>;
+const shelf=(names:string[])=><FolderShelf label="폴더" appearanceKey="classification-folder-shelf" cards={names.map(name=><article key={name} className="folder-shelf__card">{name}</article>)}/>;
 
-it('replays the card entrance in a new place only',()=>{
-  const view=render(shelf('a',['one','two']));
+it('plays the card entrance once per visit',()=>{
+  const view=render(shelf(['one','two']));
   expect(animate).toHaveBeenCalledTimes(2);
   expect(animate.mock.calls[0]).toEqual([[{transform:'translateY(8px) scale(.98)'},{transform:'none'}],expect.objectContaining({duration:560,delay:0})]);
-  view.rerender(shelf('a',['one','two','three']));
+  view.rerender(shelf(['one','two','three']));
+  view.rerender(shelf(['four']));
   expect(animate).toHaveBeenCalledTimes(2);
-  view.rerender(shelf('b',['four']));
-  expect(animate).toHaveBeenCalledTimes(3);
 });

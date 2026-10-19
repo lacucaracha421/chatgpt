@@ -79,22 +79,23 @@ function afterViewportImages(host:HTMLElement,animations:Animation[],run:(next:A
  * replaced at once, nothing is kept alive, and only transform and opacity move. A `null` key
  * means "no level is on screen" and cancels an unfinished entrance, so returning to a retained
  * tab shows its content and backdrop at their final opacity and position. `stagger` false leaves
- * the tiles to their own gallery entrance (the PC's first batch).
+ * the tiles to their own gallery entrance (the PC's first batch). A key change that keeps the same
+ * `level` (one folder to another inside the gallery) only fades, whatever the depths.
  */
-export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,depth:number,stagger=true){
-  const previous=useRef<{key:string|null;depth:number}|null>(null);
+export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,depth:number,stagger=true,level?:string){
+  const previous=useRef<{key:string|null;depth:number;level?:string}|null>(null);
   const run=useRunning();
   useLayoutEffect(()=>{
-    const before=previous.current;previous.current={key,depth};
+    const before=previous.current;previous.current={key,depth,level};
     if(key===null){run([]);return;}
     const element=host.current;
     if(!before||before.key===null||before.key===key||!element||prefersReducedMotion())return;
-    const step=Math.sign(depth-before.depth);
+    const step=level!==undefined&&before.level===level?0:Math.sign(depth-before.depth);
     const parts=motionParts(element);
     afterViewportImages(element,step
       ?[...animateAll(parts,[{transform:`translateX(${step*20}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:LEVEL_MOTION_MS,easing:EASE_OUT}),...(step>0&&stagger?staggerTiles(element):[])]
       :animateAll(parts,[{opacity:.6},{opacity:1}],{duration:SWAP_MOTION_MS,easing:EASE_OUT}),run);
-  },[host,key,depth]);// eslint-disable-line react-hooks/exhaustive-deps
+  },[host,key,depth,level]);// eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /**
