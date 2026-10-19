@@ -554,7 +554,9 @@ impl BookFlow<'_> {
                     pick.anchor_item_id = first.item_id.clone();
                 }
             }
-            if !volume_range.restart_numbering { continue; }
+            if !volume_range.restart_numbering && (self.provider != "kakao" || (volume_range.min_volume.is_none() && volume_range.max_volume.is_none())) {
+                continue;
+            }
             pick.series.items.retain(|item| volume_range.provider_number(item.volume_number.max(1)).is_some());
             for item in &mut pick.series.items {
                 item.volume_number = volume_range.provider_number(item.volume_number.max(1)).unwrap();
@@ -682,8 +684,17 @@ impl BookFlow<'_> {
             params![collection_id, self.provider],
             |row| row.get::<_, bool>(0),
         )?;
-        let moved_sources =
-            retire_moved_sources(self.provider, &transaction, collection_id, &merged)?;
+        let moved_sources = retire_moved_sources(
+            self.provider,
+            &transaction,
+            collection_id,
+            &merged,
+            self.provider == "kakao"
+                && (volume_range.min_volume.is_some() || volume_range.max_volume.is_some()),
+        )?;
+        if self.provider == "kakao" {
+            retire_empty_range_slots(&transaction, collection_id, volume_range)?;
+        }
         for item in merged.values() {
             // Check before reconciliation inserts the provider's edition-0 slot.
             // Other editions and providers also establish that this number is known.
@@ -793,23 +804,26 @@ fn retire_moved_sources(
     transaction: &Transaction<'_>,
     collection_id: &str,
     incoming: &BTreeMap<i64, AladinItem>,
+    scoped: bool,
 ) -> Result<BTreeMap<String, StoredAladinSource>, LibraryError> {
     let authority = super::collection_authority::collection_write_status(transaction)?;
     let mut moved = BTreeMap::new();
+    let incoming_numbers: BTreeMap<_, _> = incoming.values()
+        .map(|item| (item.item_id.as_str(), item.volume_number))
+        .collect();
     // Release all old identities before inserting destinations, including swaps.
-    // Only source rows move; slot IDs, ownership, editions and covers stay put.
-    for item in incoming.values() {
-        let previous_number: Option<i64> = transaction
-            .query_row(
-                "SELECT volume_number FROM collection_volume_sources
-             WHERE collection_id=?1 AND provider=?2 AND provider_item_id=?3",
-                params![collection_id, provider, item.item_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(number) = previous_number.filter(|number| *number != item.volume_number) else {
+    // Source retirement never moves slot IDs, ownership, editions or covers.
+    let sources = transaction.prepare(
+        "SELECT volume_number,provider_item_id FROM collection_volume_sources WHERE collection_id=?1 AND provider=?2",
+    )?.query_map(params![collection_id, provider], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,String>(1)?)))?
+        .collect::<Result<Vec<_>,_>>()?;
+    for (number, item_id) in sources {
+        let destination = incoming_numbers.get(item_id.as_str());
+        if !destination.is_some_and(|next| *next != number)
+            && !(scoped && destination.is_none())
+        {
             continue;
-        };
+        }
         let before = if authority.active {
             super::collection_authority::volume_source_state(
                 transaction,
@@ -854,9 +868,67 @@ fn retire_moved_sources(
                 retired,
             )?;
         }
-        moved.insert(item.item_id.clone(), previous);
+        moved.insert(item_id, previous);
     }
     Ok(moved)
+}
+
+fn retire_empty_range_slots(
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+    range: super::collection_volume_range::CollectionVolumeRange,
+) -> Result<(), LibraryError> {
+    if range.min_volume.is_none() && range.max_volume.is_none() {
+        return Ok(());
+    }
+    let authority = super::collection_authority::collection_write_status(transaction)?;
+    let (low, high) = range.mapped_bounds();
+    let slots = transaction.prepare(
+        "SELECT id,volume_number FROM collection_volumes v WHERE collection_id=?1 AND edition_index=0
+         AND cover_artwork_id IS NULL AND source_provider IS NULL AND source_cover_id IS NULL
+         AND source_file_name IS NULL
+         AND NOT EXISTS(SELECT 1 FROM collection_volume_ownership o WHERE o.collection_id=v.collection_id
+             AND o.volume_number=v.volume_number AND o.edition_index=0 AND (o.physical=1 OR o.digital=1))",
+    )?.query_map([collection_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?
+        .collect::<Result<Vec<_>,_>>()?;
+    let pending_owned = if authority.active {
+        super::collection_authority::pending_ownership(transaction, collection_id, 0)?.1
+    } else {
+        BTreeMap::new()
+    };
+    for (id, number) in slots {
+        if low.is_none_or(|min| number >= min) && high.is_none_or(|max| number <= max) {
+            continue;
+        }
+        if pending_owned.get(&number).is_some_and(|row| row.0 || row.1) {
+            continue;
+        }
+        let before = super::collection_authority::volume_state(transaction, &id)?;
+        // The local slot table has no custom label column; authority keeps that field.
+        let stored: Option<String> = transaction.query_row(
+            "SELECT payload FROM collection_authority_outbox WHERE command_type='upsertVolume'
+             AND entity_key=?1 AND state IN ('pending','blocked') ORDER BY seq DESC LIMIT 1",
+            [&id], |row| row.get(0),
+        ).optional()?.or(transaction.query_row(
+            "SELECT payload FROM collection_authority_revisions WHERE section='volumes' AND entity_key=?1",
+            [serde_json::json!([id]).to_string()], |row| row.get(0),
+        ).optional()?);
+        if let Some(raw) = stored {
+            let value: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            if value["displayLabel"].as_str().is_some_and(|label| !label.is_empty() && label != number.to_string())
+                || ["coverArtworkId", "sourceProvider", "sourceCoverId"]
+                    .iter().any(|field| !value[*field].is_null())
+            {
+                continue;
+            }
+        }
+        let mut retired = before.clone();
+        retired["deleted"] = serde_json::json!(true);
+        super::collection_authority::enqueue_volume_changes(transaction, &authority, &before, retired)?;
+        transaction.execute("DELETE FROM collection_volumes WHERE id=?1", [&id])?;
+    }
+    Ok(())
 }
 
 fn reconcile_source(
@@ -1683,6 +1755,63 @@ mod tests {
             }
         }
         assert_eq!(library.book_flow().refresh_aladin_items_at(&id, next, "2026-10-11T00:00:00Z").unwrap().release_event_count, 0);
+    }
+
+    #[test]
+    fn kakao_phantom_blood_range_change_refresh_and_same_group_rebind() {
+        for rebind in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let id = create_work(&library, "팬텀 블러드");
+            let items = (1..=80).map(|n| item(&format!("product-{n}"), "팬텀 블러드", n, "A", None, None)).collect::<Vec<_>>();
+            library.book_flow().apply_aladin_items(request(&id, &items), items.clone()).unwrap();
+            assert_eq!(kakao_sources(&library, &id).len(), 80);
+            {
+                let db = library.connection().unwrap();
+                db.execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES(?1,7,0,1,0),(?1,8,0,0,1)", [&id]).unwrap();
+                db.execute("UPDATE collection_volumes SET source_provider='mangadex',source_cover_id='jp-cover' WHERE collection_id=?1 AND volume_number=9", [&id]).unwrap();
+                db.execute("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('manual-cover',?1,'local','manual','volume_cover','cover.jpg','image/jpeg',100,150,0,'t','t')", [&id]).unwrap();
+                db.execute("UPDATE collection_volumes SET cover_artwork_id='manual-cover' WHERE collection_id=?1 AND volume_number=10", [&id]).unwrap();
+                db.execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at) VALUES('other-edition',?1,11,1,11,'t','t')", [&id]).unwrap();
+            }
+            library.set_collection_volume_range(&id, Some(1), Some(5), false, true).unwrap();
+            if rebind {
+                library.book_flow().apply_aladin_items(request(&id, &items), items.clone()).unwrap();
+            } else {
+                library.book_flow().refresh_aladin_items_at(&id, items.clone(), "2026-10-19T00:00:00Z").unwrap();
+            }
+            assert_eq!(kakao_sources(&library, &id), (1..=5).map(|n| (n, format!("product-{n}"))).collect::<Vec<_>>());
+            let slots = library.list_collection_volumes(&id).unwrap();
+            assert_eq!(slots.iter().map(|v| (v.volume_number, v.edition_index)).collect::<Vec<_>>(),
+                vec![(1,0),(2,0),(3,0),(4,0),(5,0),(7,0),(8,0),(9,0),(10,0),(11,1)]);
+        }
+        // The same cleanup must enqueue revisioned authority tombstones.
+        use crate::library::collection_authority::tests::{adopt, fixture, work};
+        let (_temp, library, status) = fixture();
+        adopt(&library, &status, serde_json::json!({"works":[work("w", 1)]}));
+        let items = (1..=80).map(|n| item(&format!("product-{n}"), "팬텀 블러드", n, "A", None, None)).collect::<Vec<_>>();
+        library.book_flow().apply_aladin_items(request("w", &items), items.clone()).unwrap();
+        // This ownership is pending, so it is absent from the confirmed local table.
+        library.set_owned_volume_count("w", 0, 7).unwrap();
+        {
+            let mut db = library.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            let before = crate::library::collection_authority::volume_slot_state(&tx, "w", 10, 0).unwrap();
+            let mut after = before.clone();
+            after["displayLabel"] = serde_json::json!("Special");
+            crate::library::collection_authority::enqueue_volume_changes(&tx, &status, &before, after).unwrap();
+            tx.commit().unwrap();
+        }
+        library.set_collection_volume_range("w", Some(1), Some(5), false, true).unwrap();
+        library.book_flow().apply_aladin_items(request("w", &items), items).unwrap();
+        let db = library.connection().unwrap();
+        for (kind, expected) in [("upsertVolumeSource", 75), ("upsertVolume", 72)] {
+            let commands = db.prepare("SELECT payload FROM collection_authority_outbox WHERE command_type=?1 AND json_extract(payload,'$.deleted')=1").unwrap()
+                .query_map([kind], |row| row.get::<_,String>(0)).unwrap()
+                .map(|raw| serde_json::from_str::<serde_json::Value>(&raw.unwrap()).unwrap()).collect::<Vec<_>>();
+            assert_eq!(commands.len(), expected);
+            assert!(commands.iter().all(|body| body["expectedRevision"] == 1));
+        }
     }
 
     #[test]

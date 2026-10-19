@@ -366,7 +366,7 @@
   },
   {
    "name": "out_of_range_volumes_make_no_event",
-   "comment": "Volume range 3..4: only those volumes raise events; every volume is still stored.",
+   "comment": "Volume range 3..4: only those products are stored and raise events.",
    "checkedAt": "2026-10-09T00:00:00Z",
    "previousCheckedAt": "2026-10-01T00:00:00Z",
    "gating": {
@@ -390,13 +390,14 @@
    ],
    "expected": {
     "error": null,
-    "externalId": "r1",
+    "externalId": "r3",
     "config": {"version": 1, "query": "봇치 더 록", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "knownItemIds": ["r1", "r2", "r3", "r4", "r5"]},
-    "snapshot": {"anchorItemId": "r1", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "title": "봇치 더 록", "author": "하마지 아키", "publisher": "학산문화사", "volumes": [{"volumeNumber": 1, "providerItemId": "r1", "title": "봇치 더 록 1", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 2, "providerItemId": "r2", "title": "봇치 더 록 2", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 5, "providerItemId": "r5", "title": "봇치 더 록 5", "publicationDate": "2026-11-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
-    "sources": [{"volumeNumber": 1, "providerItemId": "r1", "title": "봇치 더 록 1", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 2, "providerItemId": "r2", "title": "봇치 더 록 2", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 5, "providerItemId": "r5", "title": "봇치 더 록 5", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}],
-    "newSlots": [1, 2, 3, 4, 5],
+    "snapshot": {"anchorItemId": "r1", "groupFingerprint": "660852bab7c27ee30bbec3ef87f5e6470d440d11d758b0e04f171e16bb412a48", "title": "봇치 더 록", "author": "하마지 아키", "publisher": "학산문화사", "volumes": [{"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "publicationDate": "2026-11-01", "isbn13": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "publicationDate": "2026-11-01", "isbn13": null}], "ignoredCount": 0, "unparsedCount": 0},
+    "sources": [{"volumeNumber": 3, "providerItemId": "r3", "title": "봇치 더 록 3", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}, {"volumeNumber": 4, "providerItemId": "r4", "title": "봇치 더 록 4", "author": "하마지 아키", "publisher": "학산문화사", "isbn13": null, "publicationDate": "2026-11-01", "itemUrl": null}],
+    "newSlots": [3, 4],
     "events": [{"kind": "new_volume", "volumeNumber": 3, "previousValue": null, "currentValue": "2026-11-01"}, {"kind": "new_volume", "volumeNumber": 4, "previousValue": null, "currentValue": "2026-11-01"}],
-    "result": {"added": 4, "updated": 0, "unchanged": 1, "ignored": 0}
+    "result": {"added": 2, "updated": 0, "unchanged": 0, "ignored": 0},
+    "retiredSourceNumbers": [1]
    }
   },
   {

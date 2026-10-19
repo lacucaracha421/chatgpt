@@ -128,5 +128,59 @@ class BindRenumberingTests(RenumberingFixtures, unittest.TestCase):
         self.scenario((31,), (30,), new=True)
 
 
+class RangeCleanupTests(RenumberingFixtures, unittest.TestCase):
+    def test_phantom_blood_range_change_refresh_and_same_group_rebind(self):
+        for action in ("refresh", "rebind"):
+            with self.subTest(action=action):
+                if action == "rebind":
+                    self.tearDown()
+                    self.setUp()
+                self.items = self.products(name="팬텀 블러드", numbers=range(1, 81))
+                choice = self.choice()
+                request = self.submit(choice=choice)
+                self.worker.execute(request["requestId"])
+                self.assertEqual(len(self.sources()), 80)
+                # Keep an owned slot, a source cover, a custom label and another edition.
+                self.command("setVolumeOwnership", workId="a", volumeNumber=7, editionIndex=0,
+                             physical=True, digital=False, expectedRevision=0)
+                self.command("setVolumeOwnership", workId="a", volumeNumber=8, editionIndex=0,
+                             physical=False, digital=True, expectedRevision=0)
+                for number, label, provider, cover in ((9, "9", "mangadex", "jp-cover"),
+                                                     (10, "Special", None, None)):
+                    row = self.db.execute("SELECT * FROM collection_authority_volumes WHERE work_id='a'"
+                                          " AND volume_number=?", (number,)).fetchone()
+                    self.command("upsertVolume", workId="a", volumeId=row["volume_id"], volumeNumber=number,
+                                 editionIndex=0, sortOrder=number, displayLabel=label, coverArtworkId=None,
+                                 sourceProvider=provider, sourceCoverId=cover, deleted=False,
+                                 expectedRevision=row["entity_revision"])
+                self.command("upsertVolume", workId="a", volumeId="other-edition", volumeNumber=11,
+                             editionIndex=1, sortOrder=11, displayLabel=None, coverArtworkId=None,
+                             sourceProvider=None, sourceCoverId=None, deleted=False, expectedRevision=0)
+                self.command("setVolumeRange", workId="a", minVolume=1, maxVolume=5,
+                             hideConnectionPrompt=False, restartNumbering=True,
+                             expectedRange={"minVolume": None, "maxVolume": None, "hideConnectionPrompt": False},
+                             expectedRevision=None)
+                if action == "rebind":
+                    request = self.submit(choice=choice)
+                    self.assertEqual(request["state"], "pending")
+                    self.worker.execute(request["requestId"])
+                    self.assertEqual(self.row(request["requestId"])["state"], "applied")
+                else:
+                    self.rc.startup_db(self.db)
+                    self.db.commit()
+                    checker = self.rc.Worker(self.connection)
+                    self.assertFalse(checker.check_work("a", core.NOW + core.datetime.timedelta(days=1)))
+                self.assertEqual(self.sources(), [(n, self.items[n-1]["itemId"]) for n in range(1, 6)])
+                retired = self.db.execute("SELECT volume_number FROM collection_authority_volume_sources"
+                                          " WHERE work_id='a' AND deleted=1 ORDER BY volume_number").fetchall()
+                self.assertEqual([r[0] for r in retired], list(range(6, 81)))
+                slots = self.db.execute("SELECT volume_number,edition_index FROM collection_authority_volumes"
+                                        " WHERE work_id='a' AND deleted=0 ORDER BY volume_number").fetchall()
+                self.assertEqual([tuple(r) for r in slots],
+                                 [(n, 0) for n in (1, 2, 3, 4, 5, 7, 8, 9, 10)] + [(11, 1)])
+                self.assertEqual(self.db.execute("SELECT COUNT(*) FROM collection_authority_volumes"
+                                                 " WHERE work_id='a' AND deleted=1").fetchone()[0], 71)
+
+
 if __name__ == "__main__":
     unittest.main()

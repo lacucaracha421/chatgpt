@@ -333,6 +333,8 @@ class Worker:
                     "operationId": str(uuid.uuid5(uuid.UUID(pre["batch"]), f"{kind}:{key}")), "commandType": kind,
                     "workId": work_id, **fields}
         commands = self.planner.source_move_commands(plan, revisions, command)
+        commands.extend(self.planner.empty_range_slot_commands(
+            db, library_id, work_id, json.loads(pre["work"]["derived"]).get("volumeRange") or {}, command))
         for source in plan["sources"]:
             number = source["volumeNumber"]
             if existing.get(number) != source:

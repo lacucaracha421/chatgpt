@@ -17,7 +17,7 @@ def local_contains(number, bounds):
 
 
 def scope_picks(picked, bounds):
-    """Keep group history and choose a part anchor; scope products when restarting."""
+    """Scope provider products while keeping group history and choosing a part anchor."""
     result = []
     for original in picked:
         pick = deepcopy(original)
@@ -28,7 +28,7 @@ def scope_picks(picked, bounds):
             continue
         if bounds.get("minVolume") is not None or bounds.get("maxVolume") is not None:
             pick["anchor"] = min(inside, key=lambda item: max(item["volumeNumber"], 1))["itemId"]
-        if not bounds.get("restartNumbering", False):
+        if bounds.get("minVolume") is None and bounds.get("maxVolume") is None and not bounds.get("restartNumbering", False):
             result.append(pick)
             continue
         for item in inside:

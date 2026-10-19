@@ -399,9 +399,11 @@ def reconcile(stored_config, query, picked, checked_at, existing_sources, existi
     result = {"added": 0, "updated": 0, "unchanged": 0, "ignored": ignored}
     sources, events = [], []
     incoming_numbers = {item["itemId"]: number for number, item in merged.items()}
+    scoped = gating.get("minVolume") is not None or gating.get("maxVolume") is not None
     retired_sources = [row for number, row in sorted(existing_sources.items())
-                       if row["providerItemId"] in incoming_numbers
-                       and incoming_numbers[row["providerItemId"]] != number]
+                       if (row["providerItemId"] in incoming_numbers
+                           and incoming_numbers[row["providerItemId"]] != number)
+                       or (scoped and row["providerItemId"] not in incoming_numbers)]
     moved_sources = {row["providerItemId"]: row for row in retired_sources}
     retired_numbers = {row["volumeNumber"] for row in retired_sources}
     track = baseline_established and gating["releaseWatch"] and gating["tracksOwnership"]
@@ -448,6 +450,28 @@ def source_move_commands(plan, revisions, command):
                                 deleted=True, expectedRevision=revisions[number]))
         revisions[number] += 1
     return commands
+
+
+def empty_range_slot_commands(db, library_id, work_id, bounds, command):
+    """Tombstone only empty edition-0 slots outside the provider's local bounds."""
+    from collection_volume_range import local_contains
+    if bounds.get("minVolume") is None and bounds.get("maxVolume") is None:
+        return []
+    rows = db.execute(
+        "SELECT v.* FROM collection_authority_volumes v WHERE v.library_id=? AND v.work_id=?"
+        " AND v.edition_index=0 AND v.deleted=0 AND v.cover_artwork_id IS NULL"
+        " AND v.source_provider IS NULL AND v.source_cover_id IS NULL"
+        " AND NOT EXISTS(SELECT 1 FROM collection_authority_ownership o"
+        " WHERE o.library_id=v.library_id AND o.work_id=v.work_id"
+        " AND o.volume_number=v.volume_number AND o.edition_index=v.edition_index"
+        " AND (o.physical=1 OR o.digital=1))", (library_id, work_id)).fetchall()
+    return [command(ca.UPSERT_VOLUME, f"retire:{row['volume_id']}",
+                    volumeId=row["volume_id"], volumeNumber=row["volume_number"], editionIndex=0,
+                    sortOrder=row["sort_order"], displayLabel=row["display_label"],
+                    coverArtworkId=None, sourceProvider=None, sourceCoverId=None,
+                    deleted=True, expectedRevision=row["entity_revision"])
+            for row in rows if not local_contains(row["volume_number"], bounds)
+            and row["display_label"] in (None, "", str(row["volume_number"]))]
 
 
 # --- failures: the PC's backoff table (collection_updates.rs) -----------------------------
@@ -930,6 +954,7 @@ class Worker:
             if known is None and not ca._release_seen_recently(db, values, detected_ms):
                 events.setdefault(change["volumeNumber"], []).append((ident, change))
         commands = source_move_commands(plan, revisions, command)
+        commands.extend(empty_range_slot_commands(db, library_id, work_id, bounds, command))
         data_changed = bool(commands)  # a source row or slot is written
         for row in plan["sources"]:
             number = row["volumeNumber"]

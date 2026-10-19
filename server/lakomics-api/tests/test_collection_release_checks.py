@@ -471,7 +471,7 @@ class ReleaseCheckTests(unittest.TestCase):
                              expectedRange={"minVolume": None, "maxVolume": None, "hideConnectionPrompt": False},
                              expectedRevision=None))
         self.assertTrue(self.check(day=1))
-        self.assertEqual(sorted(self.sources()), [1, 2, 3, 4, 5])
+        self.assertEqual(sorted(self.sources()), [3, 4])
         self.assertEqual([e["volume_number"] for e in self.events()], [3, 4])
 
     def test_first_check_counts_from_the_bindings_last_sync(self):

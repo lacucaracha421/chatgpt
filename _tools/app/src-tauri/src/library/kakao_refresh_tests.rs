@@ -328,8 +328,13 @@ fn run_case(case: &Value) {
         "{name}: last_synced_at"
     );
 
-    // Rows of volumes the search no longer offers are kept as they were.
+    // Unscoped refreshes keep missing history; ranged refreshes may retire it.
     let mut sources = seeded;
+    if let Some(retired) = expected["retiredSourceNumbers"].as_array() {
+        for number in retired {
+            sources.remove(&number.as_i64().unwrap());
+        }
+    }
     for row in expected["sources"].as_array().unwrap() {
         // The fixture omits `data` unless it matters: then it is `{"id": providerItemId}`.
         let mut row = row.clone();
