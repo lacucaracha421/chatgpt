@@ -98,7 +98,7 @@ shows a toast. The menu fades in over 80 ms (opacity only) like Chrome's native
 menu and closes instantly; result blocks and toasts keep their own motion, and
 `prefers-reduced-motion` disables the animations.
 
-Translation uses the existing OpenRouter/Anthropic settings (`translation:context`
+Translation uses the existing OpenRouter/Anthropic/Neuralwatt settings (`translation:context`
 requests; page scripts never see keys). 한국어로 번역 shows a result block below the
 selected paragraph, 일본어/영어로 번역해서 복사 copies through an offscreen
 document, and 일본어/영어/한국어로 바꾸기 replaces the selection in a field with
@@ -129,7 +129,7 @@ image translation also close it).
 redirects followed, 8 MB, `image/*`; an auth/CORS failure falls back to the
 already loaded `<img>` drawn on a canvas by the page), shrinks the long edge to
 1568 px as JPEG, and asks the vision-capable "이미지 글자 번역 모델" (options; Claude
-or Gemini only, default Haiku 5.5) for `{lines:[{original, korean}]}`. The result
+or Gemini, plus Neuralwatt DeepSeek V4.1 Flash; default Sonnet 5.5) for `{lines:[{original, korean}]}`. The result
 opens in a popover beside the image with a skeleton after 400 ms, the original
 under each Korean line, 모두 복사, Escape/close, and a 다시 시도 on failure.
 Equivalent original and Korean text (NFKC and whitespace normalized) appears
@@ -167,7 +167,8 @@ shows the progress and toggles 원문만 보기 / 번역 보기; the menu item s
 사용량 (`src/usage.js`, 3.5.29): every paid AI call is logged in `chrome.storage.local`
 (`lakomics:usage:v1`) by feature (X 번역, 우클릭 번역, 페이지 번역, 이미지 글자, 유튜브 자막),
 with model, input and output tokens and cost in USD. Anthropic cost comes from a built-in
-list-price table (Haiku 5.5, Sonnet 5.5; other models count tokens only), OpenRouter cost from
+list-price table (Haiku 5.5, Sonnet 5.5). Neuralwatt cost uses prompt/completion tokens
+and verified 2026-10-21 rates for DeepSeek V4 Flash and V4.1 Flash. OpenRouter cost comes from
 `usage.cost` in its answer (requested with `usage: { include: true }`); a call whose cost is
 unknown shows as "비용 모름". Calls that were billed but rejected and retried are counted too.
 The log keeps per-day totals for 400 days and the last 50 jobs (one page translation run, one
@@ -463,10 +464,11 @@ existing X session sends a bounded FavoriteTweet request for that exact post ID.
 Like failure is reported separately from successful media capture. X can change
 this private web endpoint; a fixture success does not establish live acceptance.
 
-AI translation uses OpenRouter into Korean, with `google/gemini-3.1-flash-lite`
+AI translation translates into Korean through OpenRouter, Anthropic or Neuralwatt, with `google/gemini-3.1-flash-lite`
 as the default and `google/gemini-3.5-flash-lite` and `google/gemma-4-26b-a4b-it`
-as optional models. Options
-retain an API key, model selection, one automatic on/off switch and Clear cache.
+as optional models. Direct Anthropic models (Claude Haiku 5.5 and Sonnet 5.5) and
+Neuralwatt models (DeepSeek V4 Flash and V4.1 Flash) each use a separate API key.
+Options retain provider keys, model selection, one automatic on/off switch and Clear cache.
 Changing models clears the shared translation cache so results from different
 models are not mixed. On X, a
 compact floating translation icon opens the same controls in a small popover.
@@ -477,8 +479,8 @@ batch items the main model answered badly are re-asked of the sub model first.
 Auth/payment failures never fall back. Without a sub model the main model is retried
 once as before. Requests turn reasoning off (3.1 Flash Lite, Gemma) or keep it at the
 minimum where it is mandatory (3.5 Flash Lite), and ask OpenRouter to route to the
-lowest-latency provider. Other providers, manual translate, diagnostics and tuning
-remain removed. Existing OpenRouter keys and automatic preferences migrate
+lowest-latency provider. Neuralwatt also turns reasoning off with `reasoning_effort: "none"`.
+Manual translate, diagnostics and tuning remain removed. Existing OpenRouter keys and automatic preferences migrate
 locally; retired provider settings and pre-3.1 translation caches are removed.
 Keys stay in extension storage and the worker: they are never returned to X
 content scripts or synced with the server profile. The worker is warmed as soon as

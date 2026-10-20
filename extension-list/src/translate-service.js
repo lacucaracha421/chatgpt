@@ -41,7 +41,10 @@
     // Neither accepts sampling values. Paid API limits allow more requests in flight.
     { id: "anthropic:claude-haiku-5-5", label: "Claude Haiku 5.5 (Anthropic)", provider: "anthropic", thinking: { type: "disabled" }, concurrency: 6 },
     { id: "anthropic:claude-sonnet-5-5", label: "Claude Sonnet 5.5 (Anthropic)", provider: "anthropic", thinking: { type: "between_tools" }, effort: "low", concurrency: 6 },
+    { id: "neuralwatt:deepseek-v4-flash", label: "DeepSeek V4 Flash (Neuralwatt)", provider: "neuralwatt" },
+    { id: "neuralwatt:deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash (Neuralwatt)", provider: "neuralwatt" },
   ]);
+  const NEURALWATT_URL = "https://api.neuralwatt.com/v1/chat/completions";
   const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
   const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
   const DEFAULT_MODEL = MODELS[0].id, DEFAULT_FALLBACK = "google/gemma-4-26b-a4b-it", DEFAULT_IMAGE_MODEL = "anthropic:claude-sonnet-5-5";
@@ -79,6 +82,7 @@
       settings = {
         apiKey: typeof current.apiKey === "string" ? current.apiKey.trim() : String(legacy.openrouterApiKey || "").trim(),
         anthropicApiKey: typeof current.anthropicApiKey === "string" ? current.anthropicApiKey.trim() : "",
+        neuralwattApiKey: typeof current.neuralwattApiKey === "string" ? current.neuralwattApiKey.trim() : "",
         enabled: typeof current.enabled === "boolean" ? current.enabled : stored.xTranslateEnabled !== false && legacy.autoTranslate === true,
         model: MODEL_BY_ID.has(current.model) ? current.model : DEFAULT_MODEL,
         contextModel: validContextModel(current.contextModel),
@@ -99,20 +103,21 @@
   function validFallback(value, model) { return MODEL_BY_ID.has(value) && value !== model ? value : ""; }
   // The right-click menu model: "" follows the X translation model, otherwise any known model.
   function validContextModel(value) { return MODEL_BY_ID.has(value) ? value : ""; }
-  // Image text translation needs a model that reads pictures: Claude (Anthropic) or Gemini.
+  // Image text translation needs a model that reads pictures: Claude (Anthropic), Gemini or DeepSeek V4.1 Flash.
   // Gemini 3.5 Flash Lite is left out: its image answers kept failing (user 2026-10-16).
-  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.id.startsWith("google/gemini-"))); }
+  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.id.startsWith("google/gemini-") || model.id === "neuralwatt:deepseek-v4.1-flash")); }
   function validImageModel(value) { return isVisionModel(value) ? value : DEFAULT_IMAGE_MODEL; }
   function concurrency() { return MODEL_BY_ID.get(settings?.model)?.concurrency || DEFAULT_CONCURRENCY; }
-  function isAnthropic(model) { return MODEL_BY_ID.get(model)?.provider === "anthropic"; }
-  function keyFor(model) { return isAnthropic(model) ? settings.anthropicApiKey : settings.apiKey; }
+  function providerFor(model) { return MODEL_BY_ID.get(model)?.provider || "openrouter"; }
+  function isAnthropic(model) { return providerFor(model) === "anthropic"; }
+  function keyFor(model) { return providerFor(model) === "neuralwatt" ? settings.neuralwattApiKey : isAnthropic(model) ? settings.anthropicApiKey : settings.apiKey; }
   function publicSettings() {
     const model = MODEL_BY_ID.get(settings.model) || MODEL_BY_ID.get(DEFAULT_MODEL);
     return { enabled: settings.enabled === true, hasApiKey: Boolean(keyFor(model.id)), hasContextApiKey: Boolean(keyFor(settings.contextModel || model.id)), contextModel: settings.contextModel,
       imageModel: settings.imageModel, hasImageApiKey: Boolean(keyFor(settings.imageModel)),
       imageModels: MODELS.filter(item => isVisionModel(item.id)).map(({ id, label }) => ({ id, label })), model: model.id, modelLabel: model.label,
-      provider: isAnthropic(model.id) ? "anthropic" : "openrouter", concurrency: concurrency(),
-      hasOpenRouterKey: Boolean(settings.apiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey),
+      provider: providerFor(model.id), concurrency: concurrency(),
+      hasOpenRouterKey: Boolean(settings.apiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey), hasNeuralwattKey: Boolean(settings.neuralwattApiKey),
       userTerms: settings.userTerms, dictionaryRevision: settings.dictionaryRevision,
       fallbackModel: settings.fallbackModel, models: MODELS.map(({ id, label }) => ({ id, label })) };
   }
@@ -137,6 +142,11 @@
     return { model: model.slice("anthropic:".length), max_tokens: body.max_tokens, ...(system ? { system } : {}),
       messages: body.messages.filter(item => item.role !== "system").map(item => ({ ...item, content: anthropicContent(item.content) })),
       ...(meta.thinking ? { thinking: meta.thinking } : {}), ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}) };
+  }
+  // Neuralwatt accepts standard chat-completions fields, without OpenRouter routing or usage flags.
+  function neuralwattBody(body, model) {
+    const { provider, reasoning, usage, ...standard } = body;
+    return { ...standard, model: model.slice("neuralwatt:".length), reasoning_effort: "none" };
   }
   // Anthropic's answer in the chat-completions shape the rest of this file reads.
   function asChatCompletion(data) {
@@ -202,10 +212,10 @@
   // Usage log: meta is {feature, job, tally}. Every answer the provider billed is recorded, also one
   // that is rejected later (invalid JSON, kana left over) and retried, and one that arrives after a
   // setting change. The tally sums what one page translation request cost, for its status line.
-  function account(meta, anthropic, model, data) {
+  function account(meta, model, data) {
     const usage = globalThis.LakomicsUsage;
     if (!usage || !meta) return;
-    const measured = usage.measure(anthropic ? "anthropic" : "openrouter", model, data?.usage);
+    const measured = usage.measure(providerFor(model), model, data?.usage);
     usage.record(meta.feature, measured, meta.job);
     if (meta.tally) usage.tallyAdd(meta.tally, measured);
   }
@@ -235,23 +245,23 @@
         if (attempt === 0) last = { ok: false, code: "api_key_missing" };
         continue;
       }
-      const anthropic = isAnthropic(model);
+      const anthropic = isAnthropic(model), neuralwatt = providerFor(model) === "neuralwatt";
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
         const { response, data } = await budget.run(async signal => {
-          const response = await fetch(anthropic ? ANTHROPIC_URL : "https://openrouter.ai/api/v1/chat/completions", {
+          const response = await fetch(anthropic ? ANTHROPIC_URL : neuralwatt ? NEURALWATT_URL : "https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", credentials: "omit", redirect: "error", signal,
             headers: anthropic
               ? { "content-type": "application/json", "x-api-key": settings.anthropicApiKey, "anthropic-version": "2023-06-01",
                 "anthropic-dangerous-direct-browser-access": "true" }
-              : { "content-type": "application/json", authorization: `Bearer ${settings.apiKey}` },
-            // OpenRouter reports the cost of a call only when asked; Anthropic's body never carries this field.
-            body: JSON.stringify(anthropic ? anthropicBody(makeBody(model), model) : { ...makeBody(model), usage: { include: true } }),
+              : { "content-type": "application/json", authorization: `Bearer ${keyFor(model)}` },
+            // Only OpenRouter needs the usage flag to report cost.
+            body: JSON.stringify(anthropic ? anthropicBody(makeBody(model), model) : neuralwatt ? neuralwattBody(makeBody(model), model) : { ...makeBody(model), usage: { include: true } }),
           });
           return { response, data: response.ok ? await response.json() : undefined };
         }, timeoutMs, controller);
-        if (response.ok) { try { account(meta, anthropic, model, data); } catch { /* the log never breaks a translation */ } }
+        if (response.ok) { try { account(meta, model, data); } catch { /* the log never breaks a translation */ } }
         if (epoch !== generation || (!manual && !settings.enabled)) return { ok: false, code: "disabled" };
         if (response.ok) {
           return { ok: true, data: anthropic ? asChatCompletion(data) : data, model };
@@ -749,6 +759,7 @@
         // An empty save is a no-op. Only the options page's confirmed clear removes a key.
         apiKey: message.clearApiKey === true ? "" : typeof message.apiKey === "string" && message.apiKey.trim() ? message.apiKey.trim() : settings.apiKey,
         anthropicApiKey: message.clearAnthropicApiKey === true ? "" : typeof message.anthropicApiKey === "string" && message.anthropicApiKey.trim() ? message.anthropicApiKey.trim() : settings.anthropicApiKey,
+        neuralwattApiKey: message.clearNeuralwattApiKey === true ? "" : typeof message.neuralwattApiKey === "string" && message.neuralwattApiKey.trim() ? message.neuralwattApiKey.trim() : settings.neuralwattApiKey,
         enabled: typeof message.enabled === "boolean" ? message.enabled : settings.enabled,
         model: nextModel,
         contextModel: Object.hasOwn(message, "contextModel") ? validContextModel(message.contextModel) : settings.contextModel,

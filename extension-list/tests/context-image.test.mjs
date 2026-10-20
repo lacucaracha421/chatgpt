@@ -112,7 +112,7 @@ test('imageModel defaults to Sonnet 5.5, is validated, and changes only from ext
   const f = worker({stored: {imageModel: 'google/gemma-4-26b-a4b-it'}});
   const settings = await f.handle({type: 'translation:settings'});
   assert.equal(settings.imageModel, 'anthropic:claude-sonnet-5-5', 'a text-only stored model falls back to the default');
-  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5']);
+  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5', 'neuralwatt:deepseek-v4.1-flash']);
   assert.equal(settings.imageModels.some(item => item.id.includes('gemma')), false);
   assert.equal(settings.hasImageApiKey, true);
   assert.equal((await f.handle({type: 'translation:update', imageModel: 'google/gemma-4-26b-a4b-it'}, own)).code, 'invalid_model');
@@ -1428,7 +1428,7 @@ test('no text, failure with retry, close button and Escape', async () => {
   const replies = [{ok: false, code: 'http_500'}, {ok: true, lines: [{original: 'a', korean: '가'}]}];
   const g = page(undefined, {send: async () => replies.shift()});
   await g.actions.activate('image.translate', g.context(), origin, gesture);
-  assert.equal(g.popover().querySelector('.none').textContent, '번역하지 못했어요');
+  assert.equal(g.popover().querySelector('.none').textContent, '번역하지 못했어요 · http_500');
   assert.equal(g.popover().querySelector('[role="alert"]') !== null, true);
   const retry = g.popover().querySelector('.retry');
   assert.equal(retry.textContent, '다시 시도');
@@ -2037,4 +2037,8 @@ test('parseLines without a convention still reads the old 0-1000 object', () => 
   assert.deepEqual(plain(image.parseLines({lines: [{original: 'a', korean: '가', box: {x0: 100, y0: 200, x1: 300, y1: 400}}]})[0].box), {x0: 100, y0: 200, x1: 300, y1: 400});
   assert.equal(image.convention('google/gemini-3.5-flash-lite'), 'gemini'); assert.equal(image.convention('anthropic:claude-haiku-5-5'), 'pixel');
   assert.match(image.instruction([], {convention: 'pixel', width: 640, height: 900}), /640 px wide and 900 px high/);
+  // DeepSeek V4.1 Flash answers 0-1000 even when asked for pixels, so it is asked for 0-1000 and read as such.
+  const deepseek = {convention: image.convention('neuralwatt:deepseek-v4.1-flash'), width: 1124, height: 1568};
+  assert.match(image.instruction([], deepseek), /normalized to 0–1000/);
+  assert.deepEqual(plain(image.parseLines({lines: [{original: 'a', korean: '가', box: {x0: 700, y0: 740, x1: 800, y1: 860}}]}, deepseek)[0].box), {x0: 700, y0: 740, x1: 800, y1: 860});
 });

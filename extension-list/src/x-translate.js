@@ -653,7 +653,7 @@
     blocked = false;
     ui.toggle.checked = enabled;
     if (settings.modelLabel) ui.model.textContent = settings.modelLabel;
-    setNotice(hasApiKey ? "" : `설정에서 ${settings.provider === "anthropic" ? "Anthropic" : "OpenRouter"} API 키를 입력하세요`, hasApiKey ? "" : "error");
+    setNotice(hasApiKey ? "" : `설정에서 ${settings.provider === "neuralwatt" ? "Neuralwatt" : settings.provider === "anthropic" ? "Anthropic" : "OpenRouter"} API 키를 입력하세요`, hasApiKey ? "" : "error");
     if (enabled && hasApiKey) scan(true);
     else updateControlState();
   }

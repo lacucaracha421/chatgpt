@@ -422,3 +422,67 @@ test('background: only the options page may empty the usage log', async () => {
   assert.equal(plain(await ask({id: 'test', frameId: 0, url: 'chrome-extension://test/options/options.html#usage-section'})).ok, true);
   assert.equal(cleared, 1);
 });
+
+
+test('Neuralwatt measures both DeepSeek models from token prices, ignoring response cost', () => {
+  const {usage} = loadUsage();
+  for (const [model, costUsd] of [['deepseek-v4-flash', 0.000196], ['deepseek-v4.1-flash', 0.00027]]) {
+    for (const id of [model, `neuralwatt:${model}`]) {
+      assert.deepEqual(plain(usage.measure('neuralwatt', id, {prompt_tokens: 1000, completion_tokens: 200, cost: 99})),
+        {model, input: 1000, output: 200, costUsd});
+    }
+  }
+  assert.equal(usage.measure('neuralwatt', 'neuralwatt:deepseek-v4-flash', undefined).costUsd, null);
+  assert.equal(usage.measure('neuralwatt', 'unknown', {prompt_tokens: 1000}).costUsd, null);
+});
+
+test('Neuralwatt routes X, right-click, page and image requests with standard bodies and records their cost', async () => {
+  for (const model of ['neuralwatt:deepseek-v4-flash', 'neuralwatt:deepseek-v4.1-flash']) {
+    const bytes = Buffer.from(new Uint8Array(100).fill(7)).toString('base64');
+    const cases = [
+      ['x', {type: 'translation:request', text: 'Hello'}, '안녕하세요'],
+      ['x', {type: 'translation:request-batch', items: [{id: 'a', text: 'Hello'}]}, reply(['a', '안녕하세요'])],
+      ['context', {type: 'translation:context', kind: 'translate.ko.inline', text: 'Hello'}, '안녕하세요'],
+      ['page', {type: 'translation:page', items: [{id: 'a', text: 'Hello'}]}, reply(['a', '안녕하세요'])],
+    ];
+    if (model.endsWith('v4.1-flash')) cases.push(['image', {type: 'translation:image', dataUrl: `data:image/png;base64,${bytes}`},
+      JSON.stringify({lines: [{original: 'Hello', korean: '안녕하세요', box: {x0: 80, y0: 60, x1: 400, y1: 300}}]})]);
+    for (const [feature, message, content] of cases) {
+      const f = worker({stored: {model, contextModel: model, imageModel: model, fallbackModel: '', neuralwattApiKey: 'nw-key'},
+        replies: [{content, usage: {prompt_tokens: 1000, completion_tokens: 200}}]});
+      const result = await f.handle(message);
+      assert.equal(result.ok, true, `${model} ${message.type}`);
+      if (feature === 'image') assert.equal(result.lines[0].korean, '안녕하세요');
+      else if (message.items) assert.equal(result.items[0].text, '안녕하세요');
+      else assert.equal(result.text, '안녕하세요');
+      assert.equal(f.calls.length, 1);
+      const {url, init, body} = f.calls[0];
+      assert.equal(url, 'https://api.neuralwatt.com/v1/chat/completions');
+      assert.equal(init.headers.authorization, 'Bearer nw-key');
+      assert.equal(body.model, model.slice('neuralwatt:'.length));
+      assert.equal(body.reasoning_effort, 'none');
+      for (const field of ['provider', 'reasoning', 'usage']) assert.equal(field in body, false);
+      if (message.items || feature === 'image') {
+        assert.equal(body.response_format.type, 'json_schema');
+        assert.equal(body.response_format.json_schema.strict, true);
+      }
+      if (feature === 'image') {
+        const part = body.messages.find(item => item.role === 'user').content[0];
+        assert.equal(part.type, 'image_url');
+        assert.match(part.image_url.url, /^data:image\/png;base64,/);
+        assert.ok(body.response_format.json_schema.schema.properties.lines.items.properties.box.properties.x0);
+      }
+      const log = await f.log();
+      const costUsd = model.endsWith('v4.1-flash') ? 0.00027 : 0.000196;
+      assert.deepEqual(plain(log.rows[feature].total), {requests: 1, input: 1000, output: 200, costUsd, unknownCostRequests: 0});
+    }
+  }
+});
+
+test('Neuralwatt malformed structured answers still fail validation and billed usage is counted', async () => {
+  const f = worker({stored: {model: 'neuralwatt:deepseek-v4-flash', fallbackModel: '', neuralwattApiKey: 'nw-key'},
+    replies: [{content: '{bad json', usage: {prompt_tokens: 1000, completion_tokens: 200}}]});
+  const result = await f.handle({type: 'translation:request-batch', items: [{id: 'a', text: 'Hello'}]});
+  assert.equal(result.code, 'invalid_translation');
+  assert.equal((await f.log()).rows.x.total.costUsd, 0.000196);
+});

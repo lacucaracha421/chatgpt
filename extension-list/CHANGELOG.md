@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.5.57 — 2026-10-21
+
+- Add Neuralwatt as a third translation provider with DeepSeek V4 Flash and V4.1 Flash,
+  a separate API key and token-based cost tracking. Both models support X, right-click
+  and page translation; V4.1 Flash also supports image text. Reasoning is disabled.
+  YouTube subtitles remain Anthropic-only.
+- DeepSeek V4.1 Flash image text boxes are asked for and read on the 0–1000 scale it
+  actually answers in, so overlays land on their balloons instead of shrinking toward
+  the top-left.
+
 ## 3.5.56 — 2026-10-21
 
 - X photo viewer (full-size photo): a long press on touch now opens the collector and

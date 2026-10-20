@@ -1131,3 +1131,29 @@ test('empty key saves retain credentials; confirmed clears remove only the named
   assert.equal(both.hasAnthropicKey, false);
   assert.equal(both.apiKey, undefined); assert.equal(both.anthropicApiKey, undefined);
 });
+
+
+test('Neuralwatt key saves privately, blank saves preserve it, and explicit clear blocks requests', async () => {
+  const f = fixture(claudeSettings());
+  const saved = await f.handle({type: 'translation:update', neuralwattApiKey: '  nw-key  ', model: 'neuralwatt:deepseek-v4-flash'});
+  assert.equal(saved.provider, 'neuralwatt'); assert.equal(saved.hasApiKey, true); assert.equal(saved.hasNeuralwattKey, true);
+  assert.equal(saved.concurrency, 4); assert.equal(saved.neuralwattApiKey, undefined);
+  assert.equal(f.memory['lakomics:translation:v1'].apiKey, 'or-key');
+  assert.equal(f.memory['lakomics:translation:v1'].anthropicApiKey, 'ant-key');
+  assert.equal(f.memory['lakomics:translation:v1'].neuralwattApiKey, 'nw-key');
+  for (const neuralwattApiKey of ['', '   ']) assert.equal((await f.handle({type: 'translation:update', neuralwattApiKey})).hasNeuralwattKey, true);
+  assert.ok(saved.imageModels.some(item => item.id === 'neuralwatt:deepseek-v4.1-flash'));
+  assert.ok(!saved.imageModels.some(item => item.id === 'neuralwatt:deepseek-v4-flash'));
+  assert.equal((await f.handle({type: 'translation:update', imageModel: 'neuralwatt:deepseek-v4-flash'})).code, 'invalid_model');
+  const cleared = await f.handle({type: 'translation:update', clearNeuralwattApiKey: true});
+  assert.equal(cleared.hasNeuralwattKey, false); assert.equal(cleared.hasApiKey, false);
+  assert.equal((await f.handle({type: 'translation:request', text: 'Hello'})).code, 'api_key_missing');
+  assert.equal(f.calls.length, 0);
+});
+
+test('a Neuralwatt sub model without its key preserves the main provider failure', async () => {
+  const f = fixture(claudeSettings({fallbackModel: 'neuralwatt:deepseek-v4-flash'}), async () => ({ok: false, status: 503, headers: {get: () => null}}));
+  assert.equal((await f.handle({type: 'translation:request', text: 'Hello'})).code, 'http_503');
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].url, 'https://api.anthropic.com/v1/messages');
+});

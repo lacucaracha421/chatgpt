@@ -18,11 +18,14 @@
     // Haiku 5.5 bills a request whose input is above 100K tokens at the larger rates.
     "claude-haiku-5-5": Object.freeze({ input: 0.10, output: 0.50, largeAbove: 100000, largeInput: 0.50, largeOutput: 2.50 }),
     "claude-sonnet-5-5": Object.freeze({ input: 2.00, output: 10.00, cacheRead: 0.20 }),
+    // Neuralwatt list prices, verified 2026-10-21 (USD per 1M tokens).
+    "deepseek-v4-flash": Object.freeze({ input: 0.14, output: 0.28 }),
+    "deepseek-v4.1-flash": Object.freeze({ input: 0.15, output: 0.60 }),
   });
 
   const count = value => Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
   const money = value => Math.round(value * 1e9) / 1e9;
-  const modelId = model => String(model || "").replace(/^anthropic:/, "");
+  const modelId = model => String(model || "").replace(/^(anthropic|neuralwatt):/, "");
   const pad = value => String(value).padStart(2, "0");
   // The user's local calendar day, e.g. 2026-10-13.
   function localDay(ms = Date.now()) {
@@ -44,14 +47,19 @@
   }
   // One response as {model, input, output, costUsd}; costUsd is null when unknown.
   // provider "anthropic": usage.input_tokens/output_tokens (+ cache tokens, counted as input).
+  // provider "neuralwatt": usage.prompt_tokens/completion_tokens, priced from the table.
   // provider "openrouter": usage.prompt_tokens/completion_tokens and usage.cost (USD credits).
   function measure(provider, model, usage) {
-    const id = provider === "anthropic" ? modelId(model) : String(model || "");
+    const id = (provider === "anthropic" || provider === "neuralwatt") ? modelId(model) : String(model || "");
     const body = usage && typeof usage === "object" ? usage : null;
     if (!body) return { model: id, input: 0, output: 0, costUsd: null };
     if (provider === "anthropic") {
       return { model: id, costUsd: anthropicCost(id, body), output: count(body.output_tokens),
         input: count(body.input_tokens) + count(body.cache_creation_input_tokens) + count(body.cache_read_input_tokens) };
+    }
+    if (provider === "neuralwatt") {
+      const price = PRICES[id], input = count(body.prompt_tokens), output = count(body.completion_tokens);
+      return { model: id, input, output, costUsd: price ? money((input * price.input + output * price.output) / 1e6) : null };
     }
     return { model: id, input: count(body.prompt_tokens), output: count(body.completion_tokens),
       costUsd: Number.isFinite(body.cost) && body.cost >= 0 ? money(body.cost) : null };

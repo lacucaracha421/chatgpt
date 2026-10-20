@@ -11,7 +11,8 @@
     image_unavailable: "이미지를 불러오지 못했어요", image_too_large: "이미지가 너무 커요", image_type: "지원하지 않는 이미지 형식이에요",
     image_unreadable: "이미지를 읽지 못했어요", api_key_missing: "API 키가 필요해요", worker_timeout: "시간이 너무 오래 걸렸어요", timeout: "시간이 너무 오래 걸렸어요",
   };
-  function failureText(code) { return messages[code] || "번역하지 못했어요"; }
+  // The code stays visible on the generic text so a model or API failure can be told apart.
+  function failureText(code) { return messages[code] || (code ? `번역하지 못했어요 · ${code}` : "번역하지 못했어요"); }
   function normalized(text) { return String(text || "").normalize("NFKC").trim().replace(/\s+/g, " "); }
   // The already-loaded picture drawn small; null when it is not an <img> or the canvas is tainted.
   function captureImage(image, doc = document) {

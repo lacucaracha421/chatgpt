@@ -231,10 +231,10 @@
     if (activeHelp && !activeHelp.panel.contains(event.target) && !activeHelp.button.contains(event.target)) closeHelp();
   });
 
-  const provider = id => String(id).startsWith("anthropic:") ? "anthropic" : "openrouter";
-  const keyId = p => p === "anthropic" ? "translation-anthropic-key" : "translation-key";
-  const hasKey = p => Boolean(p === "anthropic" ? translation.hasAnthropicKey : translation.hasOpenRouterKey);
-  const providerLabel = p => p === "anthropic" ? "Anthropic" : "OpenRouter";
+  const provider = id => String(id).startsWith("neuralwatt:") ? "neuralwatt" : String(id).startsWith("anthropic:") ? "anthropic" : "openrouter";
+  const keyId = p => p === "openrouter" ? "translation-key" : `translation-${p}-key`;
+  const hasKey = p => Boolean(p === "neuralwatt" ? translation.hasNeuralwattKey : p === "anthropic" ? translation.hasAnthropicKey : translation.hasOpenRouterKey);
+  const providerLabel = p => p === "neuralwatt" ? "Neuralwatt" : p === "anthropic" ? "Anthropic" : "OpenRouter";
   function goKey(p) { const field = $(keyId(p)); scroll(field.closest(".key"), "center"); field.focus({ preventScroll: true }); }
   function keyMeta(id, p, visible = true, prefix = "") {
     const node = $(id); node.hidden = !visible; node.replaceChildren();
@@ -252,7 +252,7 @@
   function grouped(id, models, value, first = null) {
     const children = first ? [new Option(first, "")] : [];
     const selected = document.activeElement === $(id) ? $(id).value : value;
-    for (const p of ["openrouter", "anthropic"]) {
+    for (const p of ["openrouter", "anthropic", "neuralwatt"]) {
       const group = document.createElement("optgroup"); group.label = providerLabel(p);
       for (const m of models.filter(m => provider(m.id) === p)) group.append(new Option(m.label + (hasKey(p) ? "" : " · 키 필요"), m.id));
       if (group.children.length) children.push(group);
@@ -274,7 +274,7 @@
       ["이미지 글자 번역", image, context.enabled], ["YouTube 자막", "anthropic", $("youtube-enabled").checked],
     ];
     let needed = false;
-    for (const p of ["openrouter", "anthropic"]) {
+    for (const p of ["openrouter", "anthropic", "neuralwatt"]) {
       const id = keyId(p), present = hasKey(p), relevant = uses.filter(([,key]) => key === p);
       const missing = relevant.filter(([, ,enabled]) => enabled);
       const stateNode = $(id + "-state"); stateNode.textContent = present ? "✓ 저장됨" : "없음"; stateNode.classList.toggle("miss", !present);
@@ -327,7 +327,7 @@
     };
   }
   $("translation-enabled").onchange = () => { relationships(); return updateTranslation({ enabled: $("translation-enabled").checked }, "x-status"); };
-  for (const [p, field, clearFlag] of [["openrouter", "apiKey", "clearApiKey"], ["anthropic", "anthropicApiKey", "clearAnthropicApiKey"]]) {
+  for (const [p, field, clearFlag] of [["openrouter", "apiKey", "clearApiKey"], ["anthropic", "anthropicApiKey", "clearAnthropicApiKey"], ["neuralwatt", "neuralwattApiKey", "clearNeuralwattApiKey"]]) {
     const id = keyId(p), input = $(id), button = $(id + "-save");
     input.oninput = () => { button.disabled = Boolean(input.dataset.saving) || !input.value.trim(); };
     $(id + "-form").onsubmit = async event => {

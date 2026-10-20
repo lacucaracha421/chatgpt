@@ -122,7 +122,11 @@
   });
   // How each model family is asked for boxes: Claude in pixels of the exact image it receives,
   // Gemini in its trained [ymin, xmin, ymax, xmax] 0-1000 form. Without a size, the old 0-1000 object.
-  function convention(model) { return String(model || "").startsWith("google/gemini-") ? "gemini" : "pixel"; }
+  // DeepSeek V4.1 Flash answers 0-1000 even when asked for pixels (2026-10-21), so it gets that object.
+  function convention(model) {
+    const id = String(model || "");
+    return id.startsWith("google/gemini-") ? "gemini" : id === "neuralwatt:deepseek-v4.1-flash" ? "normalized" : "pixel";
+  }
   function boxRule(options) {
     if (options?.convention === "gemini") return "\"box\" is the tight box of that text as an array [ymin, xmin, ymax, xmax] of integers on a 0–1000 scale over the whole image (y first, then x; (0,0) is the top-left; ymin/ymax are fractions of the image height and xmin/xmax of its width). ";
     if (options?.convention === "pixel" && options.width > 0 && options.height > 0)
