@@ -236,6 +236,16 @@ Status: `IDEA` — user 2026-10-11: put readable manga volume files into Collect
 - **Storage direction to evaluate:** originals stay on the PC library disk; a lighter reading copy goes to object storage (Cloudflare R2, ~$0.015/GB-month, no egress fee; ~$3/month for 200 GB) because the new VPS disk (80 GB) cannot hold it; the tablet streams pages on demand and keeps only recently read volumes cached, like the catalog reader.
 - **Open questions:** import flow (attach files to a volume, folder/zip/cbz), which volumes count (owned only?), reading position sync between PC and tablet, privacy mode and NSFW masking in the reader, and whether the catalog reader component is reused.
 
+<a id="somi-001--in-app-kone-somisoft-board-browsing-and-reading"></a>
+## SOMI-001 — In-app kone.gg 소미소프트 board browsing and reading (2026-10-21)
+
+Status: `IDEA` (user, 2026-10-21) — inspired by the third-party VCK 0.8.0 launcher (Electron, based on project-violet's violet-web; reviewed read-only from the user's desktop copy, not run). Use it as a reference for behavior only; do not copy its code (license not checked) or its K-Hentai/hitomi catalog.
+
+- **Decided:** log in to kone.gg inside the Lakomics PC app (the user types credentials into kone's own page; Lakomics never sees the password); list the 소미소프트 board like a catalog with search and sort; open a work and read it in the Lakomics viewer directly from kone without importing first, with an explicit save into the library when the user wants it. PC first; tablet later (synced saved works only until then).
+- **Behavior to match from VCK:** a view is counted only when a work is opened, recommend/comment only on the user's explicit action, nothing visible while logged out, one request at a time, low rate.
+- **Technical risk (spike first):** kone sits behind Cloudflare and answers only a logged-in browser session (httpOnly login cookie, `cf_clearance`), and its API uses a custom request encoding and a `QUERY` method. VCK sends every API call through the Chromium session of its kone window. Tauri needs an equivalent: a dedicated kone webview with its own data directory and a narrow, allow-listed bridge for page-context requests, without granting the remote origin general Tauri IPC. Confirm feasibility on Windows WebView2 before UI work.
+- **Open:** board list fields and title parsing (tags, original work, artist), caching of the list, viewer streaming/prefetch and the no-flash rule, save-to-library mapping to the manga catalog, logout behavior.
+
 <a id="catalog-archive-001--retain-removed-unbookmarked-catalog-metadata"></a>
 ## CATALOG-ARCHIVE-001 — Keep searchable records of works removed from source catalogs (2026-10-08)
 
