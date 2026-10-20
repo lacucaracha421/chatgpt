@@ -35,7 +35,7 @@ function fakeTimers(w) {
 }
 
 function mount(texts, handler, concurrency=2) {
-  const dom=new JSDOM(texts.map(text=>`<article><div data-testid="tweetText" lang="en">${text}</div></article>`).join(''),{url:'https://x.com/home',runScripts:'outside-only'});
+  const dom=new JSDOM(texts.map(text=>`<article><div data-testid="tweetText" lang="en">${text}</div></article>`).join(''),{url:'https://x.com/home',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), elements=[...w.document.querySelectorAll('[data-testid="tweetText"]')];
   const positions=texts.map((_,i)=>100+i*100), messages=[], observers=[];
   for(const [i,el] of elements.entries()) el.getBoundingClientRect=()=>({width:300,height:60,top:positions[i],bottom:positions[i]+60});
@@ -51,6 +51,39 @@ function mount(texts, handler, concurrency=2) {
   return {w,clock,elements,positions,messages,observers,scroll,reply,changed:()=>changed({'lakomics:translation:v1':{}},'local'),close:()=>w.close()};
 }
 const card=el=>el.parentElement.querySelector('.lakomics-translation');
+
+test('disabled, unconfigured and hidden tabs skip scans and resume with current text',async()=>{
+  for(const mode of ['disabled','unconfigured','hidden']) {
+    const f=mount(['Initial source'],(m,cb)=>cb({ok:true,text:'번역됨'}));
+    await f.clock.advance(20);
+    const original=f.w.chrome.runtime.sendMessage;
+    let paused=true;
+    f.w.chrome.runtime.sendMessage=(m,cb)=>m.type==='translation:settings'
+      ? cb({ok:true,enabled:!(paused && mode==='disabled'),hasApiKey:!(paused && mode==='unconfigured')})
+      : original(m,cb);
+    Object.defineProperty(f.w.document,'hidden',{configurable:true,get:()=>paused && mode==='hidden'});
+    f.changed(); await f.clock.advance(20);
+    let scans=0, measures=0;
+    const query=f.w.document.querySelectorAll.bind(f.w.document);
+    f.w.document.querySelectorAll=selector=>{if(selector==='[data-testid="tweetText"]') scans++; return query(selector);};
+    const rect=f.elements[0].getBoundingClientRect;
+    f.elements[0].getBoundingClientRect=()=>{measures++;return rect();};
+    f.elements[0].textContent='Source changed while paused';
+    f.scroll(100); f.w.dispatchEvent(new f.w.Event('resize'));
+    f.observers.at(-1).cb([{target:f.elements[0],isIntersecting:true}]);
+    const requests=f.messages.length;
+    await f.clock.advance(500);
+    assert.equal(scans,0,mode); assert.equal(measures,0,mode);
+    assert.equal(f.messages.length,requests,mode);
+    paused=false;
+    if(mode==='hidden') f.w.document.dispatchEvent(new f.w.Event('visibilitychange'));
+    else f.changed();
+    await f.clock.advance(20);
+    assert.ok(scans>0,mode);
+    assert.equal(f.messages.at(-1).text,'Source changed while paused',mode);
+    f.close();
+  }
+});
 
 test('a delayed busy callback from a reset cannot show the newer request early',async()=>{
   const f=mount(['Timer ownership'],()=>{});

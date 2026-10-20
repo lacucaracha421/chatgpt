@@ -617,6 +617,7 @@
     let articleFlushQueued = false;
     let lastPathname = location.pathname;
     let routeSyncQueued = false;
+    let countersQueued = false;
     let harvest = null;
     let harvestLoopToken = 0;
     let storeVersion = 0;
@@ -954,7 +955,7 @@
       if (routeChanged && isHomeRoute(pathname)) {
         for (const article of document.querySelectorAll(TWEET_SELECTOR)) observeArticle(article);
       }
-      updateCounters();
+      if (routeChanged) updateCounters();
     }
 
     function openGallery() {
@@ -1005,25 +1006,36 @@
     }
 
     function updateCounters() {
+      if (countersQueued) return;
+      countersQueued = true;
+      requestAnimationFrame(() => {
+        countersQueued = false;
+        refreshCounters();
+      });
+    }
+
+    function refreshCounters() {
       const imageCount = store.imageCount();
       const filteredItems = store.flatImages().filter(matchesCurrentGalleryFilter);
       const filteredImageCount = filteredItems.length;
       const filteredPostCount = new Set(filteredItems.map((item) => String(item.tweetId || ""))).size;
-      ui.triggerCount.textContent = String(imageCount);
+      if (ui.triggerCount.textContent !== String(imageCount)) ui.triggerCount.textContent = String(imageCount);
       const partial = `이미지 ${filteredImageCount}/${imageCount}장 · 게시물 ${filteredPostCount}개`;
+      let summary;
       if (galleryFilterMode === GALLERY_FILTER_RECOMMENDED) {
-        ui.summary.textContent = `${partial} · 추천`;
+        summary = `${partial} · 추천`;
       } else if (galleryFilterMode === GALLERY_FILTER_ARTISTS) {
         const filteredArtistCount = new Set(filteredItems.map((item) => normalizeAuthorKey(item.username || item.author))).size;
-        ui.summary.textContent = `${partial} · 관심 작가 ${filteredArtistCount}명`;
+        summary = `${partial} · 관심 작가 ${filteredArtistCount}명`;
       } else {
         const numericFilter = Number(galleryFilterMode) || 0;
-        ui.summary.textContent = numericFilter
+        summary = numericFilter
           ? `${partial} · ♥ ${formatLikeCount(numericFilter)}+`
           : filteredImageCount === imageCount
             ? `이미지 ${imageCount}장 · 게시물 ${store.postCount()}개`
             : `${partial} · 관심없음 제외`;
       }
+      if (ui.summary.textContent !== summary) ui.summary.textContent = summary;
       ui.trigger.classList.toggle("is-empty", imageCount === 0);
       ui.trigger.setAttribute("aria-label", `추천 이미지 갤러리 · ${imageCount}장`);
       ui.trigger.setAttribute("aria-description", isForYouTimeline(document) ? "추천 피드를 보며 수집 중" : "팔로잉 탭에서는 수집 일시정지");
@@ -1033,17 +1045,19 @@
     function updateHarvestUi(message = "") {
       const running = Boolean(harvest?.running);
       ui.auto.classList.toggle("is-running", running);
-      ui.auto.textContent = running ? "■ 중지" : "▶ 자동 수집";
+      const label = running ? "■ 중지" : "▶ 자동 수집";
+      if (ui.auto.textContent !== label) ui.auto.textContent = label;
       if (running) {
         const added = Math.max(0, store.imageCount() - harvest.startImageCount);
-        ui.harvestStatus.textContent = `자동 수집 중 · +${added}/${AUTO_TARGET_NEW_IMAGES}`;
+        const status = `자동 수집 중 · +${added}/${AUTO_TARGET_NEW_IMAGES}`;
+        if (ui.harvestStatus.textContent !== status) ui.harvestStatus.textContent = status;
         ui.harvestStatus.hidden = false;
       } else if (message) {
-        ui.harvestStatus.textContent = message;
+        if (ui.harvestStatus.textContent !== message) ui.harvestStatus.textContent = message;
         ui.harvestStatus.hidden = false;
       } else {
         ui.harvestStatus.hidden = true;
-        ui.harvestStatus.textContent = "";
+        if (ui.harvestStatus.textContent !== "") ui.harvestStatus.textContent = "";
       }
     }
 

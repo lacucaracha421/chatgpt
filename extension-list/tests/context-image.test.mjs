@@ -333,6 +333,7 @@ function clock(w) {
   let now = 0, next = 0; const timers = new Map();
   w.setTimeout = (fn, delay) => { const id = ++next; timers.set(id, {fn, at: now + delay}); return id; };
   w.clearTimeout = id => timers.delete(id); w.Date.now = () => now;
+  w.requestAnimationFrame = fn => w.setTimeout(fn, 16); w.cancelAnimationFrame = w.clearTimeout;
   const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
   return {now: () => now, async advance(ms) {
     const end = now + ms;
@@ -403,6 +404,76 @@ const notesView = f => {
     pill: root?.querySelector('.pill') || null, card: root?.querySelector('.card') || null, box: root?.querySelector('.image-notes') || null};
 };
 
+// Interpret the applied clip at a point in the host's coordinate system.
+function clipIncludes(host, x, y) {
+  const clip = host.style.clipPath, values = clip.match(/-?[\d.]+(?=px)/g)?.map(Number) || [];
+  if (clip.startsWith('inset(')) {
+    if (!values.length) return false;
+    const [top, right, bottom, left] = values;
+    return x >= left && x <= parseFloat(host.style.width) - right && y >= top && y <= parseFloat(host.style.height) - bottom;
+  }
+  let inside = false;
+  const points = Array.from({length: values.length / 2}, (_, i) => [values[i * 2], values[i * 2 + 1]]);
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [ax, ay] = points[i], [bx, by] = points[j];
+    if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) inside = !inside;
+  }
+  return inside;
+}
+
+test('document scrolling clips notes behind sticky and bottom bars in one frame and keeps touch tools reachable', async () => {
+  const f = page('<header style="background-color:#fff"></header><img id="pic" src="https://img.test/a.png"><nav style="background-color:#fff"></nav>', {touch: true, send: async () => ({ok: true, lines: noteLines})});
+  let y = 100, hits = 0;
+  mediaRect(f.img, 100, y, 400, 400);
+  const header = f.doc.querySelector('header'), nav = f.doc.querySelector('nav');
+  mediaRect(header, 0, 0, 1024, 80); mediaRect(nav, 0, 430, 1024, 338);
+  f.doc.elementsFromPoint = (x, py) => { hits++; return [py < 80 ? header : py >= 430 ? nav : f.img, f.doc.body]; };
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.equal(v.host.style.position, 'absolute');
+  assert.equal(clipIncludes(v.host, 200, 350), false, 'bottom navigation covers the notes');
+  assert.equal(v.pill.style.visibility, '', 'a free image corner keeps the touch toolbar reachable');
+  hits = 0; y = 40; f.w.scrollY = 60; mediaRect(f.img, 100, y, 400, 400);
+  for (let i = 0; i < 8; i++) f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(hits, 0, 'scroll bursts share one scheduled evaluation');
+  await f.timer.advance(16);
+  assert.ok(hits > 0 && hits <= 35, `${hits} bounded hit tests`);
+  assert.equal(clipIncludes(v.host, 200, 20), false, 'sticky header covers the top of the picture');
+  assert.equal(clipIncludes(v.host, 200, 100), true, 'the exposed picture retains its notes');
+  assert.equal(clipIncludes(v.host, 200, 395), false, 'bottom navigation still covers the picture');
+  assert.equal(v.host.style.visibility, 'visible', 'measurement never hides the surface');
+  assert.equal(v.host.style.top, '100px', 'document anchoring remains unchanged');
+  mediaRect(f.img, 100, -500, 400, 400); f.w.scrollY = 600;
+  f.doc.dispatchEvent(new f.w.Event('scroll')); await f.timer.advance(16);
+  assert.equal(v.pill.style.visibility, 'hidden', 'the toolbar never detaches from an offscreen picture');
+  f.actions.destroy(); f.close();
+});
+
+test('extension shadow hosts and X background media do not self-occlude; a newly opened page dialog cuts a hole', async () => {
+  const f = page('<div><div id="background" style="background-image:url(https://img.test/a.png)"></div><img id="pic" style="opacity:0" src="https://img.test/a.png"></div><div id="swipe"></div><div id="menu" role="dialog" style="background-color:#000"></div>', {send: async () => ({ok: true, lines: noteLines})});
+  mediaRect(f.img, 100, 100, 400, 400);
+  const bg = f.doc.getElementById('background'), menu = f.doc.getElementById('menu');
+  mediaRect(bg, 100, 100, 400, 400); mediaRect(menu, 250, 250, 100, 100);
+  const swipe = f.doc.getElementById('swipe'); mediaRect(swipe, 0, 0, 1024, 768);
+  let open = false;
+  const picker = f.doc.createElement('div'); picker.id = 'lakomics-arc-collector'; f.doc.body.append(picker);
+  const toast = f.doc.createElement('div'); toast.className = 'lakomics-list-toasts'; f.doc.body.append(toast);
+  f.doc.elementsFromPoint = (x, y) => [f.doc.querySelector('lakomics-image-markers'), picker, toast,
+    ...(open && x >= 250 && x <= 350 && y >= 250 && y <= 350 ? [menu] : []), swipe, bg, f.img, f.doc.body].filter(Boolean);
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  assert.equal(clipIncludes(v.host, 200, 200), true, 'extension layers, the background div and a transparent swipe layer are ignored');
+  open = true; menu.setAttribute('aria-modal', 'true'); await f.timer.advance(16);
+  assert.equal(clipIncludes(v.host, 200, 200), false, 'dialog interior cuts through the notes surface');
+  assert.equal(clipIncludes(v.host, 100, 200), true, 'notes beside the dialog remain visible');
+  assert.equal(clipIncludes(v.host, 200, 100), true, 'notes above the dialog remain visible');
+  assert.equal(v.host.style.visibility, 'visible');
+  open = false; menu.remove(); await f.timer.advance(16);
+  assert.equal(clipIncludes(v.host, 200, 200), true, 'closing the dialog restores the same surface');
+  assert.equal(notesView(f).host, v.host);
+  f.actions.destroy(); f.close();
+});
+
 for (const touch of [false, true]) test(`X photo viewer notes offer the normal save picker for the displayed original photo (touch=${touch})`, async () => {
   const source = await readFile(new URL('../src/x-source.js', import.meta.url), 'utf8');
   let f, opened;
@@ -454,10 +525,10 @@ for (const touch of [false, true]) test(`translation notes sit over each text bl
   assert.equal(v.pill.dataset.placement, 'below');
   // Real layout changes follow resize, rather than document scroll events.
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 120, right: 420, top: 70, bottom: 170, width: 300, height: 100})});
-  f.w.dispatchEvent(new f.w.Event('resize'));
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.deepEqual([v.host.style.left, v.host.style.top, v.host.style.width, v.host.style.height], ['120px', '70px', '300px', '100px']);
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0})});
-  f.w.dispatchEvent(new f.w.Event('resize'));
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.equal(v.host.style.visibility, 'hidden', 'a vanished image hides the notes');
   f.actions.destroy(); f.close();
 });
@@ -641,7 +712,7 @@ for (const tag of ['img', 'video', 'canvas', 'picture', 'lakomics-image-markers'
     await f.timer.advance(60);
     assert.equal(v.pill.dataset.placement, 'below', 'zero-size lazy media does not block');
     mediaRect(neighbour, 100, 300, 400, 200);
-    neighbour.dispatchEvent(new f.w.Event(tag === 'video' ? 'loadedmetadata' : 'load'));
+    neighbour.dispatchEvent(new f.w.Event(tag === 'video' ? 'loadedmetadata' : 'load')); await f.timer.advance(16);
     assert.equal(v.pill.dataset.placement, 'corner', 'a captured load event immediately updates neighbours');
     mediaRect(neighbour, 100, 500, 400, 200);
     await f.timer.advance(500);
@@ -685,19 +756,21 @@ test('document notes and outside toolbar scroll natively without rewriting posit
   const observer = new f.w.MutationObserver(records => writes.push(...records));
   observer.observe(v.host, {attributes: true}); observer.observe(v.pill, {attributes: true});
   const beforeScroll = reads;
-  y = -300; f.w.scrollY = 450; f.doc.dispatchEvent(new f.w.Event('scroll'));
+  y = -50; f.w.scrollY = 200; f.doc.dispatchEvent(new f.w.Event('scroll'));
   viewport.dispatchEvent(new f.w.Event('scroll'));
-  assert.equal(reads, beforeScroll, 'scroll events do not run image geometry checks');
+  assert.equal(reads, beforeScroll, 'scroll triggers wait for the shared animation frame');
+  await f.timer.advance(16);
+  assert.ok(reads > beforeScroll, 'document scrolling rechecks occlusion');
   await f.timer.advance(1000);
   assert.equal(v.host.style.cssText, hostStyle); assert.equal(v.pill.style.cssText, pillStyle);
   assert.equal(writes.length, 0, 'neither scroll nor fallback checks rewrite unchanged document geometry');
   observer.disconnect();
   y = 400;
-  viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
+  viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.equal(v.pill.dataset.placement, 'below');
-  viewport.offsetTop = 410; viewport.height = 200; viewport.dispatchEvent(new f.w.Event('resize'));
+  viewport.offsetTop = 410; viewport.height = 200; viewport.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.equal(v.pill.dataset.placement, 'corner');
-  viewport.offsetTop = 0; viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize'));
+  viewport.offsetTop = 0; viewport.height = 800; viewport.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   f.user(() => v.pill.querySelector('[data-action="image.copy"]').click()); await f.timer.advance(0);
   assert.equal(f.clipboard.length, 1, 'outside controls retain their handlers');
   f.actions.destroy(); f.close();
@@ -710,7 +783,7 @@ test('image ResizeObserver, position mutations and the cheap fallback relayout d
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width, height: 200})});
   await f.actions.activate('image.translate', f.context(), origin, gesture);
   const v = notesView(f), firstWidth = v.notes[0].style.width;
-  width = 400; resize();
+  width = 400; resize(); await f.timer.advance(16);
   assert.equal(v.host.style.width, '400px'); assert.notEqual(v.notes[0].style.width, firstWidth);
   y = 80; f.img.parentElement.style.marginTop = '30px';
   await f.timer.advance(60); assert.equal(v.host.style.top, '80px');
@@ -730,13 +803,13 @@ test('nested overflow containers retain fixed scroll tracking, including the out
   await f.actions.activate('image.translate', f.context(), origin, gesture);
   const v = notesView(f);
   assert.equal(v.host.style.position, 'fixed');
-  y = 600; f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  y = 600; f.img.parentElement.dispatchEvent(new f.w.Event('scroll')); await f.timer.advance(16);
   assert.equal(v.host.style.top, '600px'); assert.equal(v.pill.dataset.placement, 'above');
   f.img.parentElement.style.overflow = 'visible'; await f.timer.advance(60);
   assert.equal(v.host.style.position, 'absolute', 'layout changes can leave the fallback');
   f.img.parentElement.style.overflow = 'auto'; await f.timer.advance(60);
   assert.equal(v.host.style.position, 'fixed', 'layout changes can enter the fallback');
-  y = 500; f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  y = 500; f.img.parentElement.dispatchEvent(new f.w.Event('scroll')); await f.timer.advance(16);
   assert.equal(v.host.style.top, '500px', 're-entering fallback restores scroll tracking');
   f.actions.destroy(); f.close();
 });
@@ -747,7 +820,7 @@ test('X-style corner clipping keeps document anchoring; actually scrollable hidd
   const v = notesView(f), wrapper = f.img.parentElement;
   assert.equal(v.host.style.position, 'absolute');
   Object.defineProperties(wrapper, {scrollHeight: {value: 400}, clientHeight: {value: 200}});
-  await f.timer.advance(500);
+  await f.timer.advance(516);
   assert.equal(v.host.style.position, 'fixed');
   f.actions.destroy(); f.close();
 });
@@ -857,11 +930,11 @@ test('one pixiv action owner keeps one group through duplicate activations, lazy
   f.img.src = 'https://i.pximg.net/img-original/art_p0.png';
   let y = 550;
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: y, width: 200, height: 200})});
-  f.img.parentElement.dispatchEvent(new f.w.Event('scroll'));
+  f.img.parentElement.dispatchEvent(new f.w.Event('scroll')); await f.timer.advance(16);
   assert.equal(f.assertSingle().pill.dataset.placement, 'above');
   y = 0;
   Object.defineProperty(f.w, 'innerHeight', {value: 200});
-  f.w.dispatchEvent(new f.w.Event('resize'));
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.equal(f.assertSingle().pill.dataset.placement, 'corner');
   await f.timer.advance(1000); assert.equal(f.assertSingle().host, host);
   // Reopening from cache also replaces, rather than appends, the group.
@@ -907,7 +980,7 @@ test('pixiv replacement retargets ResizeObserver and the existing save button to
   f.w.ResizeObserver = class { constructor(callback) { resize = callback; } observe(image) { observed.push(image); } disconnect() {} };
   await f.actions.activate('image.translate', f.domContext(f.img), origin, gesture);
   const replacement = f.replaceImage();
-  resize();
+  resize(); await f.timer.advance(16);
   assert.deepEqual(observed, [f.img, replacement]);
   const v = f.assertSingle();
   f.user(() => v.pill.querySelector('[data-action="image.lakomics"]').click());
@@ -930,7 +1003,7 @@ test('reopening a cached image during its exit leaves exactly one toolbar, inclu
   assert.equal(v.root.querySelectorAll('[role="toolbar"]').length, 1);
   assert.equal(v.pill.dataset.placement, 'above');
   for (let i = 0; i < 3; i++) {
-    f.w.dispatchEvent(new f.w.Event('resize'));
+    f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
     await f.actions.activate('image.translate', f.context(), origin, gesture);
     assert.equal(f.doc.querySelectorAll('lakomics-image-markers').length, 1);
     assert.equal(notesView(f).root.querySelectorAll('.pill').length, 1);
@@ -1159,7 +1232,7 @@ test('notes resolve again after resizing the visible image', async () => {
   };
   const before = assertSeparated();
   Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, top: 50, width: 300, height: 300, right: 400, bottom: 350})});
-  f.w.dispatchEvent(new f.w.Event('resize'));
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
   assert.notDeepEqual(assertSeparated(), before);
   f.actions.destroy(); f.close();
 });

@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.5.56 — 2026-10-21
+
+- X photo viewer (full-size photo): a long press on touch now opens the collector and
+  image-text translation instead of Android's native image menu, even when X's
+  transparent swipe layer sits over the photo; the displayed carousel slide is used.
+- Image-translation notes and their toolbar no longer paint over X's interface: parts
+  of the picture covered by the sticky header, bottom navigation, menus or dialogs clip
+  the notes too. Position updates are coalesced to one per frame.
+- Less work while scrolling X: post translation stops scanning while it is off, has no
+  key, is blocked or the tab is hidden, and measures each post once per pass; translated
+  cards read the original's height before inserting. Hidden gallery counters update at
+  most once per frame.
+
 ## 3.5.53 — 2026-10-18
 
 - The save half-circle opens without waiting for the settings check: it answers from

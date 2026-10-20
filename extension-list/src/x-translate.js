@@ -112,12 +112,10 @@
   // Prefetch three screens in the scroll direction, keeping a small margin behind.
   // On-screen posts always win, ordered by distance from the viewport centre.
   const AHEAD_SCREENS = 3, BEHIND_SCREENS = 0.25;
-  function near(element) {
-    const rect = element.getBoundingClientRect();
+  function near(element, rect = element.getBoundingClientRect()) {
     return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS) && rect.top < innerHeight * (1 + (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS));
   }
-  function visible(element) {
-    const rect = element.getBoundingClientRect();
+  function visible(element, rect = element.getBoundingClientRect()) {
     return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
   }
   function detectTheme() {
@@ -165,8 +163,15 @@
   }
   // With a translation shown, a long original folds to two lines behind a toggle so a
   // post does not take twice its height; the button never opens the post itself.
-  function collapseOriginal(element, node) {
-    if (element.getBoundingClientRect().height <= COLLAPSE_MIN_HEIGHT) return;
+  function originalHeights(elements) {
+    const collapsed = elements.filter(element => element.dataset.lakomicsCollapsed === "true");
+    for (const element of collapsed) element.removeAttribute("data-lakomics-collapsed");
+    const heights = new Map(elements.map(element => [element, element.getBoundingClientRect().height]));
+    for (const element of collapsed) element.dataset.lakomicsCollapsed = "true";
+    return heights;
+  }
+  function collapseOriginal(element, node, height) {
+    if (height <= COLLAPSE_MIN_HEIGHT) return;
     element.dataset.lakomicsCollapsed = "true";
     const toggle = document.createElement("button");
     toggle.type = "button"; toggle.className = "lakomics-translation-toggle";
@@ -205,8 +210,9 @@
     node.setAttribute("aria-hidden", "true"); node.textContent = text;
     element.after(node); rendered.set(element, node);
   }
-  function render(element, snapshot, text, error = false, replaceText = false) {
+  function render(element, snapshot, text, error = false, replaceText = false, height) {
     const previous = replaceText && rendered.get(element);
+    if (!error && !previous) height ??= originalHeights([element]).get(element);
     if (!previous) removeResult(element);
     const node = previous || document.createElement("div");
     if (previous) node.replaceChildren();
@@ -259,7 +265,7 @@
     header.append(title, spacer, close); headingRoot.append(headingStyle, header); node.prepend(heading);
     node.setAttribute("role", error ? "status" : "region"); node.setAttribute("aria-label", "한국어 번역");
     rendered.set(element, node);
-    if (!error && !previous) collapseOriginal(element, node);
+    if (!error && !previous) collapseOriginal(element, node, height);
     else if (error) addRetry(element, node);
   }
   function failure(code, retryable = false, autoRetry = false) {
@@ -294,7 +300,7 @@
     ui.button.dataset.state = state;
   }
   function schedule(immediate = false) {
-    if (!enabled || !hasApiKey || blocked) return;
+    if (!canRun()) return;
     if (immediate) {
       if (timer !== null) { clearTimeout(timer); timer = null; }
       drain();
@@ -311,16 +317,18 @@
     const center = innerHeight / 2;
     const lane = rect => rect.bottom > 0 && rect.top < innerHeight ? 0
       : (scrollDirection > 0 ? rect.top >= innerHeight : rect.bottom <= 0) ? 1 : 2;
-    const elements = [...pending].filter(element => element.isConnected && near(element))
+    const rects = new Map();
+    for (const element of pending) if (element.isConnected) rects.set(element, element.getBoundingClientRect());
+    const elements = [...rects.keys()].filter(element => near(element, rects.get(element)))
       .sort((a, b) => {
-        const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
+        const ar = rects.get(a), br = rects.get(b);
         return lane(ar) - lane(br) || Math.abs((ar.top + ar.bottom) / 2 - center) - Math.abs((br.top + br.bottom) / 2 - center);
       });
     const batch = [];
     let chars = 0, batchLane = null;
     for (const element of elements) {
       if (batch.length >= limit) break;
-      const elementLane = lane(element.getBoundingClientRect());
+      const elementLane = lane(rects.get(element));
       if (batch.length && (elementLane !== batchLane || (batchLane === 0 && batch.length >= 2))) break;
       // Keep an in-flight post queued: if its text changes meanwhile, the stale answer
       // is dropped and the new text is requested once the slot frees.
@@ -347,7 +355,7 @@
       chars += snapshot.text.length;
       batch.push({ id: String(++requestSerial), element, snapshot, single: forceSingle });
     }
-    for (const element of [...pending]) if (!element.isConnected || !near(element)) pending.delete(element);
+    for (const element of [...pending]) if (!element.isConnected || !near(element, rects.get(element))) pending.delete(element);
     return batch;
   }
   function requeueLater(candidates, waitMs, requestEpoch) {
@@ -445,18 +453,18 @@
     setNotice(notice || failure(code), "warning");
     return "failed";
   }
-  function accept(candidate, text) {
+  function accept(candidate, text, height) {
     // null means the model found nothing to translate (names, Latin terms): no card.
     if (text === null) removeResult(candidate.element);
-    else render(candidate.element, candidate.snapshot, text);
+    else render(candidate.element, candidate.snapshot, text, false, false, height);
     completed.set(candidate.element, candidate.snapshot.signature);
     failures.delete(candidate.element);
     authRecheckAvailable = true;
     setNotice("", "");
   }
-  function handleItem(candidate, item, requestEpoch) {
+  function handleItem(candidate, item, requestEpoch, height) {
     if (!current(candidate, requestEpoch)) return;
-    if (item?.ok && (item.text === null || typeof item.text === "string")) { accept(candidate, item.text); if (item.qualityRetry) queueQuality(candidate, item.text, requestEpoch); return; }
+    if (item?.ok && (item.text === null || typeof item.text === "string")) { accept(candidate, item.text, height); if (item.qualityRetry) queueQuality(candidate, item.text, requestEpoch); return; }
     if (item?.code === "invalid_translation" && !candidate.single) {
       // Re-ask alone in its own slot turn, without holding up other groups.
       claim(candidate, requestEpoch);
@@ -479,7 +487,8 @@
     for (const candidate of batch) release(candidate, requestEpoch);
     if (requestEpoch !== epoch || !enabled) return;
     if (!result?.ok) { handleTopFailure(batch, result || { code: "worker_failed" }, requestEpoch); return; }
-    for (const candidate of batch) handleItem(candidate, items.get(candidate.id), requestEpoch);
+    const heights = originalHeights(batch.filter(candidate => current(candidate, requestEpoch) && items.get(candidate.id)?.ok && typeof items.get(candidate.id).text === "string").map(candidate => candidate.element));
+    for (const candidate of batch) handleItem(candidate, items.get(candidate.id), requestEpoch, heights.get(candidate.element));
   }
   async function runFallback({ candidate, requestEpoch }) {
     // A batch item the main model answered badly is asked of the sub model first.
@@ -519,7 +528,7 @@
     if (result?.ok && typeof result.text === "string" && result.text !== text) render(candidate.element, candidate.snapshot, result.text, false, true);
   }
   function drain() {
-    while (inFlight < maxInFlight && enabled && hasApiKey && !blocked) {
+    while (inFlight < maxInFlight && canRun()) {
       const requestEpoch = epoch;
       let work = null, batch = [];
       if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
@@ -574,7 +583,11 @@
     return false;
   }
   let viewportState = new WeakMap();
+  const canRun = () => enabled && hasApiKey && !blocked && !document.hidden;
+  // While blocked, cards already shown still need scans to drop them from recycled posts.
+  const needsScan = () => canRun() || (!document.hidden && rendered.size > 0);
   function scan(immediate = false) {
+    if (!needsScan()) return;
     for (const element of observed) {
       if (!element.isConnected) {
         intersection?.unobserve(element);
@@ -590,7 +603,8 @@
         intersection?.observe(element);
       }
       const snapshot = source(element);
-      const onScreen = visible(element), wasOnScreen = viewportState.get(element);
+      const rect = element.getBoundingClientRect();
+      const onScreen = visible(element, rect), wasOnScreen = viewportState.get(element);
       viewportState.set(element, onScreen);
       const previousFailure = failures.get(element);
       if (onScreen && wasOnScreen === false && previousFailure) {
@@ -607,9 +621,9 @@
         failures.delete(element);
         removeResult(element);
       }
-      if (visible(element) && !pending.has(element) && !requested.has(element) && completed.get(element) !== snapshot.signature && !failures.has(element)) {
+      if (onScreen && !pending.has(element) && !requested.has(element) && completed.get(element) !== snapshot.signature && !failures.has(element)) {
         pending.add(element); fastLanePending = true;
-      } else if (near(element)) pending.add(element);
+      } else if (near(element, rect)) pending.add(element);
     }
     applyTheme();
     schedule(immediate);
@@ -733,6 +747,7 @@
       }
     });
     const onIntersection = entries => {
+      if (!canRun()) return;
       for (const entry of entries) {
         if (!entry.isIntersecting) { outsideViewport.add(entry.target); continue; }
         const record = failures.get(entry.target);
@@ -760,12 +775,17 @@
       const y = globalThis.scrollY || 0, direction = Math.sign(y - lastScrollY);
       lastScrollY = y;
       if (direction && direction !== scrollDirection) { scrollDirection = direction; observeWindow(); }
+      if (!needsScan()) return;
       if (scrollTimer !== null) return;
       scrollTimer = setTimeout(() => { scrollTimer = null; scan(true); }, 50);
     }, { passive: true });
     globalThis.addEventListener("resize", () => { observeWindow(); scan(); });
+    document.addEventListener("visibilitychange", () => {
+      if (canRun()) { observeWindow(); scan(true); }
+    });
     let scanTimer = null;
     new MutationObserver(records => {
+      if (!needsScan()) return;
       if (!records.some(relevantMutation)) return;
       if (scanTimer !== null) return;
       scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);

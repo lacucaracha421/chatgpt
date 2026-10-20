@@ -5,6 +5,53 @@ import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const source = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
 const forumSource = await readFile(new URL('../src/forum-source.js', import.meta.url), 'utf8');
+const xSource = await readFile(new URL('../src/x-source.js', import.meta.url), 'utf8');
+
+test('X mobile photo overlays open the current slide collector with translation and suppress the native menu', async () => {
+  for (const layer of ['role="dialog"', 'aria-modal="true"', '']) {
+    const translated = [], menus = [];
+    const f = fixture({canTranslateTouch: () => true, openTouch: event => { menus.push(event); return true; },
+      translateImage: image => { translated.push(image); return true; }}, 'https://x.com/artist/status/222/photo/2');
+    try {
+      f.w.eval(forumSource);
+      f.w.eval(xSource);
+      f.w.document.body.innerHTML = `<article><a href="https://x.com/behind/status/111/photo/1"><img id="behind" src="https://pbs.twimg.com/media/behind"></a></article>
+        <div ${layer}><div id="carousel"><img id="first" src="https://pbs.twimg.com/media/first">
+          <img id="second" style="opacity:0;pointer-events:none" src="https://pbs.twimg.com/media/second">
+          <a href="https://x.com/artist/status/222"><div><div><div><div><div><div><div id="overlay" title="Photo"></div></div></div></div></div></div></div></a>
+        </div></div>`;
+      const doc = f.w.document, overlay = doc.querySelector('#overlay');
+      const first = doc.querySelector('#first'), second = doc.querySelector('#second');
+      // X's swipe transform leaves neighboring slides mounted, but off the touch point.
+      first.getBoundingClientRect = () => ({left: -400, right: 0, top: 0, bottom: 400});
+      second.getBoundingClientRect = () => ({left: 0, right: 400, top: 0, bottom: 400});
+      doc.elementsFromPoint = () => [overlay, doc.querySelector('#carousel'), doc.body];
+      function fire(type, input = 'touch') {
+        const event = new f.w.MouseEvent(type, {bubbles: true, cancelable: true, clientX: 40, clientY: 40, button: 0});
+        Object.defineProperties(event, {pointerId: {value: 7}, pointerType: {value: input}});
+        overlay.dispatchEvent(event); return event;
+      }
+      fire('pointerdown', 'mouse'); await f.advance(600); fire('pointerup', 'mouse');
+      assert.equal(f.mounts.length, 0, 'desktop overlay presses keep their existing behavior');
+      fire('pointerdown');
+      assert.equal(fire('contextmenu').defaultPrevented, true, 'claim the touch before Android opens its menu');
+      assert.equal(overlay.hasAttribute('title'), false, 'ownership includes the actual touch target');
+      await f.advance(501);
+      assert.equal(f.mounts.length, 1);
+      assert.equal(menus.length, 0, 'the photo uses the collector rather than the text/link menu');
+      assert.equal(fire('contextmenu').defaultPrevented, true);
+      assert.equal(f.mounts[0].onTranslate({}), true);
+      assert.deepEqual(translated, [second]);
+      await f.mounts[0].onSave('games');
+      const candidate = f.requests.find(request => request.type === 'collector:save').payload.candidate;
+      assert.equal(candidate.mediaIndex, 2);
+      assert.equal(candidate.sourceUrl, 'https://x.com/artist/status/222/photo/2');
+      assert.equal(candidate.mediaUrl, 'https://pbs.twimg.com/media/second?format=jpg&name=orig');
+      fire('pointerup');
+      assert.equal(overlay.title, 'Photo');
+    } finally { f.close(); }
+  }
+});
 test('HTTP and inherited frame image candidates retain the local image picker context', () => {
   for(const url of ['http://example.test/page','about:blank']) {
     const dom=new JSDOM('<base href="https://example.test/page"><img src="https://media.test/image.png">',{url,runScripts:'outside-only'});
@@ -76,8 +123,8 @@ test('YouTube subtitle buttons and overlay bypass collector capture handlers, ev
   assert.equal(event.defaultPrevented, false, 'collector release click guard leaves AI button alone');
   f.close();
 });
-function fixture(menuController = {}) {
-  const dom = new JSDOM('<img id="image">', { url: 'https://example.test/', runScripts: 'outside-only' });
+function fixture(menuController = {}, url = 'https://example.test/') {
+  const dom = new JSDOM('<img id="image">', { url, runScripts: 'outside-only' });
   const w = dom.window, timers = new Map(), mounts = [], requests = [], pings = [];
   let now = 0, counter = 0;
   w.setTimeout = (callback, delay = 0) => { const id = ++counter; timers.set(id, { callback, at: now + delay }); return id; };

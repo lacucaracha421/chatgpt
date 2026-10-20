@@ -38,7 +38,7 @@ function fakeTimers(w) {
   return { advance };
 }
 function translationWindow(html, handleMessage) {
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window;
   const listeners=[];
   // The background answers an update and then announces it through storage.onChanged, which
   // is how the content script learns the new settings; that path is exercised here too.
@@ -156,7 +156,7 @@ test('Gemini 3.5 Flash Lite is offered while 3.1 Flash Lite stays the default',a
 });
 
 test('source snapshots preserve emoji, line breaks and safe clickable links without rendering model HTML',()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Hello<br><img alt="😀"><a href="https://x.com/hashtag/test">#test</a></div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Hello<br><img alt="😀"><a href="https://x.com/hashtag/test">#test</a></div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
   const api=w.LakomicsTranslateContent, element=w.document.querySelector('div'), snapshot=api.source(element);
   assert.equal(snapshot.text,'Hello\n😀[[LINK_0]]'); assert.equal(api.needsTranslation(element,snapshot.text),true);
@@ -166,7 +166,7 @@ test('source snapshots preserve emoji, line breaks and safe clickable links with
 });
 
 test('mounted translator handles initial scan, recycled tweet text, off and on without stale results', async () => {
-  const dom = new JSDOM('<div data-testid="tweetText" lang="en">Hello world</div>', {url:'https://x.com', runScripts:'outside-only'});
+  const dom = new JSDOM('<div data-testid="tweetText" lang="en">Hello world</div>', {url:'https://x.com', runScripts:'outside-only',pretendToBeVisual:true});
   const w = dom.window, element = w.document.querySelector('div'), clock = fakeTimers(dom.window);
   let enabled = true, changed, requests = 0;
   element.getBoundingClientRect = () => ({width:300,height:60,top:10,bottom:70});
@@ -227,7 +227,7 @@ test('transient server failure retries once before succeeding',async()=>{
 });
 
 test('language detection trusts explicit tags but skips tiny foreign snippets',()=>{
-  const dom=new JSDOM('<div data-testid="tweetText">text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText">text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
   const api=w.LakomicsTranslateContent, element=w.document.querySelector('div');
   element.lang='ko'; assert.equal(api.needsTranslation(element,'한국어 게시물'),false);
@@ -239,7 +239,7 @@ test('language detection trusts explicit tags but skips tiny foreign snippets',(
 
 test('visible tweets use one fast lane request and two-item batches',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Post number ${i} text</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   const batches=[]; let singles=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:10+i*50,bottom:50+i*50});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -301,7 +301,7 @@ test('content script and service worker agree on the lakomics:translation:v1 set
 });
 
 test('language detection translates short Han and Kana posts but still skips noise',()=>{
-  const dom=new JSDOM('<div data-testid="tweetText">text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText">text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
   const api=w.LakomicsTranslateContent, element=w.document.querySelector('div');
   element.lang='ja'; assert.equal(api.needsTranslation(element,'最高'),true);
@@ -409,7 +409,7 @@ test('re-enabling automatic translation resets failure state and translates once
 });
 
 test('initial intersection delivery and DOM changes during a request cannot retry its failure',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Pending post</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Pending post</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish, observer;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
@@ -483,7 +483,7 @@ test('a cache clear removes parked failures and requests the visible post again'
 });
 
 test('editing a post during an in-flight request translates its new text',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Old post text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Old post text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -499,7 +499,7 @@ test('editing a post during an in-flight request translates its new text',async(
 });
 
 test('translator uses a compact floating icon popover and themed translation card',async()=>{
-  const dom=new JSDOM('<body style="background:rgb(0,0,0)"><div data-testid="tweetText" lang="en">Hello <a href="https://x.com/hashtag/test">#test</a></div></body>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<body style="background:rgb(0,0,0)"><div data-testid="tweetText" lang="en">Hello <a href="https://x.com/hashtag/test">#test</a></div></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70}); w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
@@ -528,7 +528,7 @@ test('rate limit honors Retry-After and retries without invalidating the key',as
 
 test('invalid item in the non-fast-lane batch falls back alone without discarding valid translations',async()=>{
   const html='<div data-testid="tweetText" lang="en">Fast post</div><div data-testid="tweetText" lang="en">First post</div><div data-testid="tweetText" lang="en">Second post</div>';
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window); let batchCalls=0,singleCalls=0;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window); let batchCalls=0,singleCalls=0;
   const positions=[[350,390],[10,50],[60,100]];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:positions[i][0],bottom:positions[i][1]});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -543,7 +543,7 @@ test('invalid item in the non-fast-lane batch falls back alone without discardin
 
 test('one X tab keeps the fast lane and first batch in flight together',async()=>{
   const html=Array.from({length:8},(_,i)=>`<div data-testid="tweetText" lang="en">Concurrent post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let active=0,maxActive=0,batchCalls=0,singleCalls=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -558,7 +558,7 @@ test('one X tab keeps the fast lane and first batch in flight together',async()=
 });
 
 test('runtime mounts as soon as body exists without waiting for DOMContentLoaded',()=>{
-  const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window;
   Object.defineProperty(w.document,'readyState',{configurable:true,value:'loading'});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){if(message.type==='translation:settings') callback({ok:true,enabled:false,hasApiKey:true});}},storage:{onChanged:{addListener(){}}}};
@@ -567,7 +567,7 @@ test('runtime mounts as soon as body exists without waiting for DOMContentLoaded
 });
 
 test('initial visible tweet scan starts a translation without the 120 ms debounce',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Immediate translation text</div>',{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window; let requests=0;
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Immediate translation text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window; let requests=0;
   const element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window); element.getBoundingClientRect=()=>({width:300,height:50,top:10,bottom:60});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
@@ -579,7 +579,7 @@ test('initial visible tweet scan starts a translation without the 120 ms debounc
 });
 test('first visible tweet uses a single fast lane while the next batch starts concurrently',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Fast lane post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let singleCalls=0,batchCalls=0,releaseBatches=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:280+i*45,bottom:320+i*45});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -608,7 +608,7 @@ test('a no-translation result shows no card and is not requested again',async()=
 });
 
 test('a link the translation dropped is re-attached at the end and stays clickable',()=>{
-  const dom=new JSDOM('<div data-testid="tweetText">Hi <a href="https://x.com/hashtag/tag">#tag</a> and <a href="https://example.com/">site</a></div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText">Hi <a href="https://x.com/hashtag/tag">#tag</a> and <a href="https://example.com/">site</a></div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
   const api=w.LakomicsTranslateContent, element=w.document.querySelector('div'), snapshot=api.source(element);
   api.render(element,snapshot,'[[LINK_1]] 안녕');
@@ -619,7 +619,7 @@ test('a link the translation dropped is re-attached at the end and stays clickab
 
 test('a slow batch does not hold the other slot: the next group starts as soon as a slot frees',async()=>{
   const html=Array.from({length:9},(_,i)=>`<div data-testid="tweetText" lang="en">Slot post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let singles=0; const batches=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -639,7 +639,7 @@ test('a slow batch does not hold the other slot: the next group starts as soon a
 });
 
 test('posts scrolled into view send the one nearest the centre alone first',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">First screen post</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">First screen post</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(dom.window), sent=[]; let observer;
   const first=w.document.querySelector('div'); first.getBoundingClientRect=()=>({width:300,height:40,top:350,bottom:390});
   w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
@@ -658,7 +658,7 @@ test('posts scrolled into view send the one nearest the centre alone first',asyn
 });
 
 test('a slow request shows a quiet pending line that the result replaces, fast answers never flash it',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Slow post text</div><div data-testid="tweetText" lang="en">Fast post text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Slow post text</div><div data-testid="tweetText" lang="en">Fast post text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(dom.window), [slow,fast]=w.document.querySelectorAll('[data-testid="tweetText"]'); let release;
   slow.getBoundingClientRect=()=>({width:300,height:20,top:370,bottom:390}); fast.getBoundingClientRect=()=>({width:300,height:20,top:10,bottom:30});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -680,7 +680,7 @@ test('a slow request shows a quiet pending line that the result replaces, fast a
 });
 
 test('a long original folds to two lines behind a toggle that never opens the post; short originals stay open',async()=>{
-  const dom=new JSDOM('<article><div data-testid="tweetText" lang="en">Long post text</div></article><article><div data-testid="tweetText" lang="en">Short post text</div></article>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<article><div data-testid="tweetText" lang="en">Long post text</div></article><article><div data-testid="tweetText" lang="en">Short post text</div></article>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(dom.window), [long,short]=w.document.querySelectorAll('[data-testid="tweetText"]'); let opened=0;
   long.getBoundingClientRect=()=>({width:300,height:80,top:10,bottom:90}); short.getBoundingClientRect=()=>({width:300,height:20,top:100,bottom:120});
   w.document.addEventListener('click',()=>{opened+=1;});
@@ -701,7 +701,7 @@ test('a long original folds to two lines behind a toggle that never opens the po
 });
 
 test('the floating translation button has an accessible name and no hover tooltip',()=>{
-  const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window;
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){if(message.type==='translation:settings') callback({ok:true,enabled:false,hasApiKey:true});}},storage:{onChanged:{addListener(){}}}};
   w.eval(content);
@@ -755,7 +755,7 @@ test('auth failures never fall back to the sub model',async()=>{
 
 test('posts just below the viewport are translated ahead, after the ones on screen',async()=>{
   const html=['On screen post','Ahead post','Far below post'].map(text=>`<div data-testid="tweetText" lang="en">${text}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window), sent=[];
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window), sent=[];
   const tops=[300, w.innerHeight+400, w.innerHeight*4];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:tops[i],bottom:tops[i]+40});
   let options; w.IntersectionObserver=class{constructor(cb,opts){options=opts;} observe(){} unobserve(){}};
@@ -770,7 +770,7 @@ test('posts just below the viewport are translated ahead, after the ones on scre
 });
 
 function showMoreWindow(url, html) {
-  const dom=new JSDOM(html,{url,runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(w), sent=[];
+  const dom=new JSDOM(html,{url,runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(w), sent=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:30,top:10+i*40,bottom:40+i*40});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
@@ -975,7 +975,7 @@ test('clearing the cache cancels a pending write and announces the clear',async(
 
 test('one X tab uses the request slots the selected model allows',async()=>{
   const html=Array.from({length:16},(_,i)=>`<div data-testid="tweetText" lang="en">Concurrent post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let active=0,maxActive=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -1036,7 +1036,7 @@ test('"다시 시도" re-requests a parked failure at once without a reload',asy
 });
 
 test('a reply that never comes frees its slot after the watchdog and retries',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Lost reply</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Lost reply</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -1071,7 +1071,7 @@ test('a long rate-limit cooldown is handed back at once and a sub model answers 
 
 test('page churn outside post text does not rescan, while new or edited post text does',async()=>{
   const w=translationWindow('<article><div data-testid="tweetText" lang="en">First post</div><time>1m</time></article><div id="feed"></div>',
-    ()=>({ok:true,enabled:false,hasApiKey:true}));
+    ()=>({ok:true,enabled:true,hasApiKey:true}));
   const clock=fakeTimers(w); w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.eval(content); await clock.advance(400);
   let scans=0; const query=w.document.querySelectorAll.bind(w.document);

@@ -1,22 +1,23 @@
 (() => {
   "use strict";
 
-  function findCandidate(target) {
-    const imageCandidate = findImageCandidate(target);
+  function findCandidate(target, touchPoint) {
+    const imageCandidate = findImageCandidate(target, touchPoint);
     if (imageCandidate) return imageCandidate;
     const videoCandidate = findVideoCandidate(target);
     if (videoCandidate) return videoCandidate;
     return null;
   }
 
-  function findImageCandidate(target) {
-    const image = target?.closest?.("img");
+  function findImageCandidate(target, touchPoint) {
+    const viewer = touchPoint ? findTouchPhotoViewer(target, touchPoint) : null;
+    const image = viewer?.image ?? target?.closest?.("img");
     if (!image) return null;
     const mediaUrl = normalizeMediaUrl(
       image.getAttribute?.("data-lakomics-media-url") || imageSource(image),
     );
     if (!mediaUrl) return null;
-    const source = explicitImageSource(image) ?? findPostSource(image, mediaUrl, "photo") ?? findPhotoViewerSource(image);
+    const source = explicitImageSource(image) ?? findPostSource(image, mediaUrl, "photo") ?? findPhotoViewerSource(image, viewer?.layer);
     if (!source) return null;
     return {
       source: "x",
@@ -32,11 +33,38 @@
     };
   }
 
-  function findPhotoViewerSource(image) {
+  function findTouchPhotoViewer(target, point) {
+    const doc = target?.ownerDocument;
+    const route = parseStatusLink({ href: doc?.location?.href || "" });
+    if (route?.mediaKind !== "photo" || !(route.mediaIndex > 0) || postScope(target)) return null;
+    const atPoint = image => {
+      if (postScope(image) || image.closest('[aria-hidden="true"], [hidden]') || !normalizeMediaUrl(imageSource(image))) return false;
+      const link = findDirectStatusLink(image, "photo");
+      if (link && (link.postId !== route.postId || (link.mediaIndex && link.mediaIndex !== route.mediaIndex))) return false;
+      const rect = image.getBoundingClientRect();
+      return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
+    };
+    const hits = doc.elementsFromPoint?.(point.x, point.y) ?? [];
+    const modal = target.closest?.('[role="dialog"], [aria-modal="true"]');
+    // Opacity-zero images may have pointer-events:none, so hit testing alone
+    // misses them. Search the nearest shared layer and check slide geometry too.
+    for (let layer = modal ?? target; layer && layer !== doc.body; layer = modal ? null : layer.parentElement) {
+      const images = [...layer.querySelectorAll('img')].filter(atPoint);
+      if (layer.matches('img') && atPoint(layer)) images.unshift(layer);
+      const image = hits.find(node => images.includes(node));
+      if (image) return { image, layer };
+      const urls = new Set(images.map(image => normalizeMediaUrl(imageSource(image))));
+      if (urls.size === 1) return { image: images[0], layer };
+      if (urls.size > 1) return null;
+    }
+    return null;
+  }
+
+  function findPhotoViewerSource(image, viewerLayer) {
     // X mounts the full-size photo beside the tweet article, outside its scope.
     // The route supplies the ordinal; DOM order would count only mounted slides.
     if (postScope(image)) return null;
-    const dialog = image.closest?.('[role="dialog"]');
+    const dialog = viewerLayer ?? image.closest?.('[role="dialog"]');
     const source = parseStatusLink({ href: image.ownerDocument?.location?.href || "" });
     if (!dialog || source?.mediaKind !== "photo" || !(source.mediaIndex > 0)) return null;
     const links = [...dialog.querySelectorAll('a[href*="/status/"]')];

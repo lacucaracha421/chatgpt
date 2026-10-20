@@ -299,7 +299,7 @@ test('options dictionary saves sanitized mappings, reports count and survives re
 
 test('X request controls reject synthetic events and act directly on trusted events',async()=>{
   const content=readFileSync(new URL('../src/x-translate.js',import.meta.url),'utf8');
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Failed post text</div>',{url:'https://x.com/home',runScripts:'outside-only'}),w=dom.window;
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Failed post text</div>',{url:'https://x.com/home',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
   const messages=[]; let retryHandler;
   const add=w.EventTarget.prototype.addEventListener;
   w.EventTarget.prototype.addEventListener=function(type,fn,...rest){

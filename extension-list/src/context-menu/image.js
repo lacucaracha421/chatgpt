@@ -346,7 +346,78 @@
       }
       return neighbours;
     }
-    function placeNotes(session, { checkOnly = false } = {}) {
+    function extensionNode(node) {
+      for (; node; node = node.parentElement || node.getRootNode?.().host) {
+        if (node.localName?.startsWith("lakomics-") || node.id === "lakomics-arc-collector" || node.classList?.contains("lakomics-list-toasts")) return true;
+      }
+      return false;
+    }
+    function paints(style) {
+      return Boolean(style) && ((style.backgroundColor && style.backgroundColor !== "transparent" && !/rgba\([^)]*,\s*0\)/.test(style.backgroundColor))
+        || /url\(|gradient\(/.test(style.backgroundImage || ""));
+    }
+    function pageOccluders(image, area, toolbar = false) {
+      const found = new Map(), viewport = surfaces.viewport();
+      if (!doc.elementsFromPoint) return [];
+      const left = Math.max(area.x, viewport.offsetLeft || 0), top = Math.max(area.y, viewport.offsetTop || 0);
+      const right = Math.min(area.x + area.w, (viewport.offsetLeft || 0) + viewport.width), bottom = Math.min(area.y + area.h, (viewport.offsetTop || 0) + viewport.height);
+      if (right <= left || bottom <= top) return [];
+      const points = toolbar ? [[0, 0], [1, 0], [.5, .5], [0, 1], [1, 1]]
+        : Array.from({ length: 25 }, (_, i) => [i % 5 / 4, Math.floor(i / 5) / 4]);
+      for (const [px, py] of points) {
+        const x = left + .5 + (right - left - 1) * px, y = top + .5 + (bottom - top - 1) * py;
+        // Closed shadow roots retarget hits to their host; skip the whole stack
+        // of extension layers, including interactive notes, pills and picker UI.
+        let node = doc.elementsFromPoint(x, y).find(node => !extensionNode(node));
+        if (!node || node === image || node.contains(image) || image.contains(node)) continue;
+        if (node.parentElement === image.parentElement && /url\(/.test(win.getComputedStyle(node).backgroundImage)) continue;
+        // A label inside a header/menu represents its painted background too.
+        const hit = node;
+        for (let parent = node.parentElement; parent && !parent.contains(image); parent = parent.parentElement) {
+          if (paints(win.getComputedStyle(parent))) node = parent;
+        }
+        // X lays transparent swipe/zoom layers over viewer photos; they cover nothing.
+        if (node === hit && !paints(win.getComputedStyle(node)) && !node.textContent?.trim() && !/^(img|svg|video|canvas|picture)$/i.test(node.localName || "")) continue;
+        if (!found.has(node)) {
+          const r = node.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) found.set(node, { x: r.left, y: r.top, w: r.width, h: r.height });
+        }
+      }
+      return [...found.values()];
+    }
+    function clipNotes(session, view, occluders, pillRect) {
+      const overlay = session.overlay, viewport = surfaces.viewport();
+      let pieces = [{
+        x: Math.max(Math.min(view.x, pillRect.x), viewport.offsetLeft || 0),
+        y: Math.max(Math.min(view.y, pillRect.y), viewport.offsetTop || 0),
+        right: Math.min(Math.max(view.x + view.w, pillRect.x + pillRect.w), (viewport.offsetLeft || 0) + viewport.width),
+        bottom: Math.min(Math.max(view.y + view.h, pillRect.y + pillRect.h), (viewport.offsetTop || 0) + viewport.height),
+      }].filter(r => r.right > r.x && r.bottom > r.y);
+      for (const cut of occluders) {
+        pieces = pieces.flatMap(r => {
+          const x = Math.max(r.x, cut.x), y = Math.max(r.y, cut.y), right = Math.min(r.right, cut.x + cut.w), bottom = Math.min(r.bottom, cut.y + cut.h);
+          if (right <= x || bottom <= y) return [r];
+          return [{ x: r.x, y: r.y, right: r.right, bottom: y }, { x: r.x, y: bottom, right: r.right, bottom: r.bottom },
+            { x: r.x, y, right: x, bottom }, { x: right, y, right: r.right, bottom }].filter(r => r.right > r.x && r.bottom > r.y);
+        });
+      }
+      let clip;
+      if (pieces.length === 1) {
+        const r = pieces[0];
+        clip = `inset(${r.y - view.y}px ${view.x + view.w - r.right}px ${view.y + view.h - r.bottom}px ${r.x - view.x}px)`;
+      } else {
+        // Disjoint rectangles share doubled bridges to the origin. Even-odd
+        // filling leaves holes without cancelling overlapping page occluders.
+        const points = ["0px 0px"];
+        for (const r of pieces) {
+          const a = `${r.x - view.x}px ${r.y - view.y}px`;
+          points.push(a, `${r.right - view.x}px ${r.y - view.y}px`, `${r.right - view.x}px ${r.bottom - view.y}px`, `${r.x - view.x}px ${r.bottom - view.y}px`, a, "0px 0px");
+        }
+        clip = pieces.length ? `polygon(evenodd, ${points.join(", ")})` : "inset(50%)";
+      }
+      if (overlay.surface.node.style.clipPath !== clip) overlay.surface.node.style.clipPath = clip;
+    }
+    function placeNotes(session, { checkOnly = false, scanNeighbours = true } = {}) {
       const overlay = session.overlay;
       if (!overlay || overlay.surface.closed) return;
       const image = followImage(session);
@@ -357,20 +428,23 @@
       // Compare document geometry, not viewport geometry: ordinary scrolling
       // must not rewrite the host or flip the toolbar between above and below.
       const d = frame?.drawn;
-      const neighbours = gone ? [] : pillNeighbours(session, view);
-      const geometry = JSON.stringify([documentCoordinates, gone, session.pickerOpen, x, y, view?.w, view?.h, d && [d.x - view.x, d.y - view.y, d.w, d.h], neighbours.map(r => [r.x - view.x, r.y - view.y, r.w, r.h])]);
-      if (checkOnly && overlay.geometry === geometry) return;
+      if (!gone && (scanNeighbours || !overlay.neighbours)) overlay.neighbours = pillNeighbours(session, view).map(r => ({ ...r, x: r.x - view.x, y: r.y - view.y }));
+      const neighbours = gone ? [] : overlay.neighbours.map(r => ({ ...r, x: r.x + view.x, y: r.y + view.y }));
+      const occluders = gone ? [] : pageOccluders(image, view);
+      const viewport = surfaces.viewport();
+      const geometry = JSON.stringify([viewport.width, viewport.height, viewport.offsetLeft, viewport.offsetTop, documentCoordinates, gone, session.pickerOpen, x, y, view?.w, view?.h, d && [d.x - view.x, d.y - view.y, d.w, d.h], neighbours.map(r => [r.x - view.x, r.y - view.y, r.w, r.h])]);
+      if (checkOnly && overlay.geometry === geometry) {
+        if (!gone) updateOcclusion(session, view, neighbours, occluders, true);
+        return;
+      }
       overlay.geometry = geometry;
-      const modeChanged = overlay.documentCoordinates !== documentCoordinates;
-      overlay.documentCoordinates = documentCoordinates;
-      if (modeChanged) overlay.trackScroll?.();
       overlay.surface.node.style.position = documentCoordinates ? "absolute" : "fixed";
       overlay.surface.node.style.visibility = session.pickerOpen || gone ? "hidden" : "visible";
       if (gone) return;
       Object.assign(overlay.surface.node.style, { left: x + "px", top: y + "px", width: view.w + "px", height: view.h + "px" });
       const key = [view.w, view.h, d.x - view.x, d.y - view.y, d.w, d.h].map(Math.round).join("x");
       if (overlay.key !== key) { overlay.key = key; layoutNotes(session, { W: view.w, H: view.h, ox: d.x - view.x, oy: d.y - view.y, DW: d.w, DH: d.h }); }
-      placePill(session, view, neighbours);
+      updateOcclusion(session, view, neighbours, occluders);
     }
     function layoutNotes(session, frame) {
       const overlay = session.overlay, { W, H } = frame;
@@ -450,9 +524,45 @@
     function placePill(session, view, neighbours) {
       const overlay = session.overlay, pill = overlay.pill;
       const spot = choosePillPlacement(overlay.rects, view, overlay.pillWidth, overlay.pillHeight, surfaces.viewport(), neighbours);
-      Object.assign(pill.style, { left: spot.x + overlay.pillWidth + "px", top: spot.y + "px" });
-      pill.dataset.placement = spot.placement;
-      if (spot.corner) pill.dataset.corner = spot.corner; else delete pill.dataset.corner;
+      const left = spot.x + overlay.pillWidth + "px", top = spot.y + "px";
+      if (pill.style.left !== left) pill.style.left = left;
+      if (pill.style.top !== top) pill.style.top = top;
+      if (pill.dataset.placement !== spot.placement) pill.dataset.placement = spot.placement;
+      if (spot.corner) { if (pill.dataset.corner !== spot.corner) pill.dataset.corner = spot.corner; } else if (pill.dataset.corner) delete pill.dataset.corner;
+    }
+    function updateOcclusion(session, view, neighbours, occluders, keepPlacement = false) {
+      const overlay = session.overlay;
+      if (!keepPlacement) placePill(session, view, neighbours);
+      const pillRect = () => ({ x: view.x + parseFloat(overlay.pill.style.left) - overlay.pillWidth, y: view.y + parseFloat(overlay.pill.style.top), w: overlay.pillWidth, h: overlay.pillHeight });
+      let pill = pillRect();
+      const covered = pageOccluders(session.context.image, pill, true);
+      const viewport = surfaces.viewport(), left = viewport.offsetLeft || 0, top = viewport.offsetTop || 0;
+      const pictureVisible = view.x + view.w > left && view.y + view.h > top && view.x < left + viewport.width && view.y < top + viewport.height;
+      const outside = pill.x < left || pill.y < top || pill.x + pill.w > left + viewport.width || pill.y + pill.h > top + viewport.height;
+      if (pictureVisible && (covered.length || outside)) {
+        const obstacles = [...occluders, ...covered];
+        const free = { x: Math.max(view.x, left), y: Math.max(view.y, top), right: Math.min(view.x + view.w, left + viewport.width), bottom: Math.min(view.y + view.h, top + viewport.height) };
+        for (const r of obstacles) {
+          if (r.x <= free.x && r.x + r.w >= free.right) {
+            if (r.y <= free.y) free.y = Math.max(free.y, r.y + r.h);
+            else if (r.y + r.h >= free.bottom) free.bottom = Math.min(free.bottom, r.y);
+          }
+          if (r.y <= free.y && r.y + r.h >= free.bottom) {
+            if (r.x <= free.x) free.x = Math.max(free.x, r.x + r.w);
+            else if (r.x + r.w >= free.right) free.right = Math.min(free.right, r.x);
+          }
+        }
+        const rects = [...overlay.rects.map(r => ({ ...r, x: r.x + view.x - free.x, y: r.y + view.y - free.y })),
+          ...obstacles.map(r => ({ ...r, x: r.x - free.x, y: r.y - free.y }))];
+        const spot = chooseCorner(rects, free.right - free.x, free.bottom - free.y, overlay.pillWidth, overlay.pillHeight);
+        Object.assign(overlay.pill.style, { left: free.x - view.x + spot.x + overlay.pillWidth + "px", top: free.y - view.y + spot.y + "px" });
+        overlay.pill.dataset.placement = "corner"; overlay.pill.dataset.corner = spot.corner;
+        pill = pillRect();
+      }
+      const finalCover = covered.length || outside ? pageOccluders(session.context.image, pill, true) : [];
+      const visibility = !pictureVisible || finalCover.length || pill.x < left || pill.y < top || pill.x + pill.w > left + viewport.width || pill.y + pill.h > top + viewport.height ? "hidden" : "";
+      if (overlay.pill.style.visibility !== visibility) overlay.pill.style.visibility = visibility;
+      if (doc.elementsFromPoint) clipNotes(session, view, [...occluders, ...covered, ...finalCover], pill);
     }
     function setPeek(session, on) {
       const overlay = session.overlay; if (!overlay || overlay.surface.closed) return;
@@ -590,32 +700,38 @@
     }
     function watchFollow(session) {
       const overlay = session.overlay, surfaceHost = overlay.surface.node;
-      overlay.follow = () => placeNotes(session);
-      overlay.scroll = () => placeNotes(session);
-      overlay.trackScroll = () => {
-        doc.removeEventListener("scroll", overlay.scroll, true);
-        win.visualViewport?.removeEventListener("scroll", overlay.scroll);
-        if (!overlay.documentCoordinates) {
-          doc.addEventListener("scroll", overlay.scroll, true);
-          win.visualViewport?.addEventListener("scroll", overlay.scroll);
-        }
+      const schedule = (scanNeighbours = true) => {
+        overlay.scanNeighbours ||= scanNeighbours;
+        if (overlay.frame) return;
+        overlay.frame = win.requestAnimationFrame(() => {
+          overlay.frame = 0;
+          const scanNeighbours = overlay.scanNeighbours; overlay.scanNeighbours = false;
+          placeNotes(session, { checkOnly: true, scanNeighbours });
+        });
       };
-      overlay.trackScroll();
+      overlay.follow = () => schedule();
+      overlay.scroll = () => schedule(false);
+      doc.addEventListener("scroll", overlay.scroll, true);
+      win.visualViewport?.addEventListener("scroll", overlay.scroll);
       win.addEventListener("resize", overlay.follow);
       win.addEventListener("orientationchange", overlay.follow);
       win.visualViewport?.addEventListener("resize", overlay.follow);
       doc.addEventListener("load", overlay.follow, true);
       doc.addEventListener("loadedmetadata", overlay.follow, true);
-      if (win.ResizeObserver) { overlay.observer = new win.ResizeObserver(() => placeNotes(session)); overlay.observer.observe(session.context.image); }
+      if (win.ResizeObserver) { overlay.observer = new win.ResizeObserver(overlay.follow); overlay.observer.observe(session.context.image); }
       if (win.MutationObserver) {
         overlay.mutations = new win.MutationObserver(records => {
-          if (records.every(record => record.target === surfaceHost) || overlay.layoutTimer) return;
-          overlay.layoutTimer = win.setTimeout(() => { overlay.layoutTimer = 0; placeNotes(session, { checkOnly: true }); }, 50);
+          if (records.every(record => record.target === surfaceHost)) return;
+          const media = "img,video,canvas,picture,lakomics-image-markers";
+          const scanNeighbours = records.some(record => record.target !== surfaceHost && (record.type === "childList"
+            ? [...record.addedNodes, ...record.removedNodes].some(node => node.matches?.(media) || node.querySelector?.(media))
+            : record.target.matches?.(media) || record.target.querySelector?.(media)));
+          schedule(scanNeighbours);
         });
         overlay.mutations.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       }
       const check = () => {
-        placeNotes(session, { checkOnly: true });
+        schedule();
         overlay.checkTimer = win.setTimeout(check, 500);
       };
       overlay.checkTimer = win.setTimeout(check, 500);
@@ -634,7 +750,7 @@
       doc.removeEventListener("scroll", overlay.scroll, true); win.removeEventListener("resize", overlay.follow); win.removeEventListener("orientationchange", overlay.follow);
       doc.removeEventListener("load", overlay.follow, true); doc.removeEventListener("loadedmetadata", overlay.follow, true);
       win.visualViewport?.removeEventListener("resize", overlay.follow); win.visualViewport?.removeEventListener("scroll", overlay.scroll);
-      overlay.mutations?.disconnect(); win.clearTimeout(overlay.layoutTimer); win.clearTimeout(overlay.checkTimer);
+      overlay.mutations?.disconnect(); win.cancelAnimationFrame(overlay.frame); win.clearTimeout(overlay.checkTimer);
       overlay.observer?.disconnect(); win.removeEventListener("keydown", overlay.onKey, true); doc.removeEventListener("pointerdown", overlay.outside, true);
       overlay.surface.node.inert = true;
       overlay.box.querySelectorAll("button").forEach(button => { button.disabled = true; });

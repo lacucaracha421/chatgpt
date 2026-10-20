@@ -118,9 +118,9 @@
     };
   }
 
-  function findCandidate(target) {
+  function findCandidate(target, touchPoint) {
     return globalThis.LakomicsForumSource?.findCandidate(target)
-      ?? globalThis.LakomicsXSource?.findCandidate(target)
+      ?? globalThis.LakomicsXSource?.findCandidate(target, touchPoint)
       ?? globalThis.LakomicsForumSource?.findGenericCandidate(target) ?? null;
   }
 
@@ -531,7 +531,7 @@
       // Image candidates retain their existing collector picker gesture.
       const target = event.target;
       if (startsOnPlayerControl(event, { type: "video" }) || startsOnNativeMediaControls(event)) return;
-      if (findCandidate(target)?.type === "image" || target.closest?.("img, picture") || globalThis.LakomicsContextModel.editable?.(target)) return;
+      if (findCandidate(target, point(event))?.type === "image" || target.closest?.("img, picture") || globalThis.LakomicsContextModel.editable?.(target)) return;
       if (!target.closest?.("a[href]") && !window.getSelection?.().toString().trim()) return;
       const session = { id: event.pointerId, origin: point(event), href: location.href, path: event.composedPath() };
       menuPress = session;
@@ -590,22 +590,25 @@
       }
       touchGuardRestore = [];
     }
-    function claimTouchOwnership(element) {
+    function claimTouchOwnership(element, target) {
       clearTouchOwnership();
       document.documentElement.classList.add("lakomics-list-touch-active");
       gestureTarget = element || null;
       gestureTarget?.classList?.add("lakomics-list-gesture-target");
-      let node = element;
-      for (let depth = 0; node instanceof Element && depth < 6; depth += 1, node = node.parentElement) {
-        const names = ["-webkit-touch-callout", "-webkit-user-select", "user-select"];
-        touchGuardRestore.push({
-          node, title: node.getAttribute("title"),
-          styles: names.map((name) => [name, node.style.getPropertyValue(name), node.style.getPropertyPriority(name)]),
-        });
-        node.removeAttribute("title");
-        node.style.setProperty("-webkit-touch-callout", "none", "important");
-        node.style.setProperty("-webkit-user-select", "none", "important");
-        node.style.setProperty("user-select", "none", "important");
+      for (const start of new Set([element, target ?? element])) {
+        let node = start;
+        for (let depth = 0; node instanceof Element && depth < 6; depth += 1, node = node.parentElement) {
+          if (touchGuardRestore.some(item => item.node === node)) continue;
+          const names = ["-webkit-touch-callout", "-webkit-user-select", "user-select"];
+          touchGuardRestore.push({
+            node, title: node.getAttribute("title"),
+            styles: names.map((name) => [name, node.style.getPropertyValue(name), node.style.getPropertyPriority(name)]),
+          });
+          node.removeAttribute("title");
+          node.style.setProperty("-webkit-touch-callout", "none", "important");
+          node.style.setProperty("-webkit-user-select", "none", "important");
+          node.style.setProperty("user-select", "none", "important");
+        }
       }
     }
     function armPostOpenClickGuard(durationMs = 320) {
@@ -658,7 +661,7 @@
       const input = inputKind(event); if (!input) return;
       if (input === "touch" && touchPointers.size > 1) return;
       if (input === "touch" && menuPress) return;
-      const candidate = findCandidate(event.target); if (!candidate) return;
+      const candidate = findCandidate(event.target, input === "touch" ? point(event) : null); if (!candidate) return;
       if (startsOnPlayerControl(event, candidate)) return;
       if (input === "mouse" && startsOnNativeMediaControls(event)) return;
       if (!gate.arm(event.pointerId)) return;
@@ -666,7 +669,8 @@
       const origin = point(event);
       active = { id: event.pointerId, input, candidate, origin, latest: origin, href: location.href };
       watcher.watch(departSession);
-      if (input === "touch") claimTouchOwnership(candidate.element || event.target);
+      if (input === "touch") claimTouchOwnership(candidate.element || event.target,
+        candidate.source === "x" && candidate.type === "image" ? event.target : null);
       const session = active;
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
