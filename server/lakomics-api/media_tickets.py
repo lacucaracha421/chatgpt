@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 import library_thumbnails
 import asset_authority
 import head_cache
+import original_cache
 
 
 api: ModuleType
@@ -206,6 +207,7 @@ def create_mobile_media_ticket(
     lifecycle: Literal["trash"] | None = Query(default=None),
     fresh_head: bool = Query(default=False),
     verify_digest: bool = Query(default=False),
+    http_request: Request = None,
 ):
     api.client_guard(api.get_db, api.API_TOKEN)(authorization)
     with api.get_db() as db:
@@ -225,6 +227,8 @@ def create_mobile_media_ticket(
     if not object_key:
         raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
 
+    cached_metadata = original_cache.metadata(api, asset, request.variant)
+
     def resolve(_):
         fills = []
         metadata = api._ticket_head(asset, request.variant, object_key, fresh_head=fresh_head,
@@ -232,7 +236,7 @@ def create_mobile_media_ticket(
         return metadata, fills
 
     try:
-        resolved = _bounded_ticket_work(
+        resolved = (cached_metadata, []) if cached_metadata is not None else _bounded_ticket_work(
             [None], resolve, deadline=time.monotonic() + MEDIA_TICKET_DEADLINE_SECONDS,
             cancelled=threading.Event())[0]
     except ClientError as exc:
@@ -249,7 +253,9 @@ def create_mobile_media_ticket(
     api._persist_thumbnail_metadata(thumbnail_metadata_fills)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=api.MEDIA_TICKET_TTL_SECONDS)
     return {
-        "url": api.presign_get(object_key, api.MEDIA_TICKET_TTL_SECONDS),
+        "url": original_cache.ticket_url(api, asset, request.variant, object_key,
+                                          http_request.base_url if http_request else None,
+                                          api.MEDIA_TICKET_TTL_SECONDS),
         "expires_at": expires_at.isoformat(),
         "expires_in": api.MEDIA_TICKET_TTL_SECONDS,
         "variant": request.variant,
@@ -284,6 +290,7 @@ def create_mobile_media_tickets(
     *,
     _cancelled=None,
     _deadline=None,
+    _base_url=None,
 ):
     """바운스된 썸네일 티켓 묶음 발급. 개별 티켓과 동일한 인증/변형 화이트
     리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
@@ -329,6 +336,8 @@ def create_mobile_media_tickets(
         fills = []
         try:
             if metadata is None:
+                metadata = original_cache.metadata(api, asset, variant)
+            if metadata is None:
                 metadata = api._ticket_head(asset, variant, object_key, fresh_head=fresh_head,
                                            verify_digest=verify_digest, thumbnail_metadata_fills=fills)
         except ClientError as exc:
@@ -345,7 +354,8 @@ def create_mobile_media_tickets(
             "asset_id": asset_id,
             "variant": variant,
             "ok": True,
-            "url": api.presign_get(object_key, api.MEDIA_TICKET_TTL_SECONDS),
+            "url": original_cache.ticket_url(api, asset, variant, object_key, _base_url,
+                                              api.MEDIA_TICKET_TTL_SECONDS),
             "content_type": metadata.get("ContentType") or asset["content_type"],
             "size_bytes": metadata.get("ContentLength"),
             **api._ticket_digest(asset, variant),
@@ -363,6 +373,8 @@ def create_mobile_media_tickets(
         key = (asset["object_key"] if pair[1] == "original" else asset["thumbnail_key"]) if asset else None
         metadata = (_thumbnail_receipt(asset, key, fresh_head=fresh_head)
                     if asset and key and pair[1] == "thumbnail" else None)
+        if asset and key and metadata is None:
+            metadata = original_cache.metadata(api, asset, pair[1])
         if asset is None or not key or metadata is not None:
             completed[index] = resolve_ticket(pair, metadata)
         else:
@@ -406,7 +418,7 @@ async def _create_mobile_media_tickets_http(
 
     work = asyncio.create_task(run_in_threadpool(
         create_mobile_media_tickets, request, authorization, lifecycle, fresh_head, verify_digest,
-        _cancelled=cancelled, _deadline=deadline))
+        _cancelled=cancelled, _deadline=deadline, _base_url=getattr(http_request, 'base_url', None)))
     disconnect = asyncio.create_task(disconnected())
     try:
         done, _ = await asyncio.wait((work, disconnect), return_when=asyncio.FIRST_COMPLETED)
@@ -429,5 +441,6 @@ def register_metadata_backup(app, services):
 def register(app, services):
     global api
     api = services
+    original_cache.register(app, services)
     app.post("/v1/library/assets/{asset_id}/media-ticket")(create_mobile_media_ticket)
     app.post("/v1/library/media-tickets", name="create_mobile_media_tickets")(_create_mobile_media_tickets_http)
