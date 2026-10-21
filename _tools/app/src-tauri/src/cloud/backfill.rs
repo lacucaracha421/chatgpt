@@ -403,110 +403,73 @@ impl Library {
     /// 백필 큐의 영속 상태 요약(queued/preparing/uploading/committing/
     /// completed/failed).
     pub fn cloud_backfill_progress(&self) -> Result<BackfillProgress, LibraryError> {
-        let sync_held = self.cloud_sync_config()?.api_base_url.is_some_and(|endpoint| self.sync_held(&endpoint));
+        let sync_held = self
+            .cloud_sync_config()?
+            .api_base_url
+            .is_some_and(|endpoint| self.sync_held(&endpoint));
         let connection = self.connection()?;
-        let count = |status: &str| -> Result<u64, LibraryError> {
-            Ok(connection.query_row(
-                "SELECT COUNT(*)
-                     FROM cloud_sync_queue AS queue
-                     JOIN assets AS asset ON asset.id = queue.entity_id
-                     WHERE queue.entity_type = 'asset'
-                       AND queue.operation = 'upsert'
-                       AND queue.status = ?1
-                       AND asset.status = 'normal'
-                       AND NOT EXISTS (
-                         SELECT 1 FROM cloud_sync_queue AS newer
-                         WHERE newer.entity_type = queue.entity_type
-                           AND newer.entity_id = queue.entity_id
-                           AND newer.operation = queue.operation
-                           AND newer.revision > queue.revision
-                       )
-                       AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
-                            OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
-                [status],
-                |row| row.get::<_, i64>(0),
-            )? as u64)
-        };
-        let preparing = count("preparing")?;
-        let uploading = count("uploading")?;
-        let committing = count("committing")?;
-        let last_error = connection
-            .query_row(
-                "SELECT ?1
-                 FROM cloud_sync_queue AS queue
-                 JOIN assets AS asset ON asset.id = queue.entity_id
-                 WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
-                   AND queue.last_error IS NOT NULL
-                   AND queue.status = 'failed'
-                   AND asset.status = 'normal'
-                   AND NOT EXISTS (
-                     SELECT 1 FROM cloud_sync_queue AS newer
-                     WHERE newer.entity_type = queue.entity_type
-                       AND newer.entity_id = queue.entity_id
-                       AND newer.operation = queue.operation
-                       AND newer.revision > queue.revision
-                   )
-                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
-                        OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
-                 ORDER BY queue.updated_at DESC, queue.id DESC LIMIT 1",
-                [REPLICATION_ITEM_FAILURE_MESSAGE],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let total_assets = connection.query_row(
-            "SELECT CASE WHEN EXISTS (SELECT 1 FROM cloud_backfill_scope)
-                    THEN (SELECT COUNT(*) FROM cloud_backfill_scope)
-                    ELSE (SELECT COUNT(*) FROM assets WHERE status = 'normal') END",
+        let (scope_count, control_value, replication_enabled): (i64, String, bool) = connection.query_row(
+            "SELECT (SELECT COUNT(*) FROM cloud_backfill_scope), control.state, settings.cloud_sync_enabled
+             FROM cloud_backfill_control AS control CROSS JOIN library_settings AS settings
+             WHERE control.singleton = 1 AND settings.singleton = 1",
             [],
-            |row| row.get::<_, i64>(0),
-        )? as u64;
-        // Authority projections confirm server presence independently of PC uploads.
-        // Only add Assets without upsert history: existing queue revisions still decide
-        // completion, so a newer pending/failed revision stays visible and synced rows
-        // are never counted twice. Import source alone is not evidence of server presence.
-        let server_present_without_upsert = connection.query_row(
-            "SELECT COUNT(*) FROM assets AS asset
-             JOIN asset_authority_state AS authority ON authority.asset_id = asset.id
-             WHERE asset.status = 'normal' AND authority.lifecycle = 'normal'
-               AND NOT EXISTS (
-                 SELECT 1 FROM cloud_sync_queue AS queue
-                 WHERE queue.entity_type = 'asset' AND queue.entity_id = asset.id
-                   AND queue.operation = 'upsert'
-               )
-               AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
-                    OR asset.id IN (SELECT asset_id FROM cloud_backfill_scope))",
-            [],
-            |row| row.get::<_, i64>(0),
-        )? as u64;
-        let control_value = connection.query_row(
-            "SELECT state FROM cloud_backfill_control WHERE singleton = 1",
-            [],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        let unresolved_replication_item_error = connection.query_row(
-            "SELECT EXISTS(
-                 SELECT 1
-                 FROM cloud_sync_queue AS queue
-                 JOIN assets AS asset ON asset.id = queue.entity_id
-                 WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
-                   AND queue.status != 'synced'
-                   AND queue.last_error IS NOT NULL
-                   AND asset.status = 'normal'
-                   AND NOT EXISTS (
-                     SELECT 1 FROM cloud_sync_queue AS newer
-                     WHERE newer.entity_type = queue.entity_type
-                       AND newer.entity_id = queue.entity_id
-                       AND newer.operation = queue.operation
-                       AND newer.revision > queue.revision
-                   )
-                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
-                        OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
-             )",
-            [],
-            |row| row.get::<_, i64>(0),
-        )? != 0;
-        let queued = count("pending")?;
-        let failed = count("failed")?;
+        // Read each normal Asset once. The unique queue index on
+        // (entity_type, entity_id, operation, revision) finds its latest revision;
+        // authority presence only completes Assets with no upsert history.
+        let mut counts = std::collections::HashMap::new();
+        let mut normal_assets = 0;
+        let mut server_present_without_upsert = 0;
+        let mut unresolved_replication_item_error = false;
+        let mut last_error = None;
+        {
+            let mut statement = connection.prepare(
+                "SELECT queue.status, COUNT(*),
+                        SUM(queue.id IS NULL AND authority.lifecycle = 'normal'),
+                        MAX(queue.status != 'synced' AND queue.last_error IS NOT NULL),
+                        MAX(queue.status = 'failed' AND queue.last_error IS NOT NULL)
+                 FROM assets AS asset
+                 LEFT JOIN cloud_sync_queue AS queue ON queue.id = (
+                     SELECT latest.id FROM cloud_sync_queue AS latest
+                     WHERE latest.entity_type = 'asset' AND latest.entity_id = asset.id
+                       AND latest.operation = 'upsert'
+                     ORDER BY latest.revision DESC LIMIT 1
+                 )
+                 LEFT JOIN asset_authority_state AS authority ON authority.asset_id = asset.id
+                 WHERE asset.status = 'normal'
+                   AND (?1 = 0 OR asset.id IN (SELECT asset_id FROM cloud_backfill_scope))
+                 GROUP BY queue.status",
+            )?;
+            let mut rows = statement.query([scope_count])?;
+            while let Some(row) = rows.next()? {
+                let status: Option<String> = row.get(0)?;
+                let count = row.get::<_, i64>(1)? as u64;
+                normal_assets += count;
+                server_present_without_upsert += row.get::<_, Option<i64>>(2)?.unwrap_or(0) as u64;
+                unresolved_replication_item_error |=
+                    row.get::<_, Option<bool>>(3)?.unwrap_or(false);
+                if row.get::<_, Option<bool>>(4)?.unwrap_or(false) {
+                    last_error = Some(REPLICATION_ITEM_FAILURE_MESSAGE.to_owned());
+                }
+                if let Some(status) = status {
+                    counts.insert(status, count);
+                }
+            }
+        }
+        let count = |status: &str| counts.get(status).copied().unwrap_or(0);
+        // A bounded scope includes selected missing/trashed Assets in its total,
+        // even though they contribute no upload state.
+        let total_assets = if scope_count > 0 {
+            scope_count as u64
+        } else {
+            normal_assets
+        };
+        let preparing = count("preparing");
+        let uploading = count("uploading");
+        let committing = count("committing");
+        let queued = count("pending");
+        let failed = count("failed");
         let replication_work_remains = queued + preparing + uploading + committing + failed > 0;
         let mut activity = super::activity::read_activity(&connection)?;
         if let Some(replication) = activity
@@ -532,31 +495,66 @@ impl Library {
             preparing,
             uploading,
             committing,
-            completed: count("synced")? + server_present_without_upsert,
+            completed: count("synced") + server_present_without_upsert,
             failed,
             active_workers: preparing + uploading + committing,
             last_error,
             activity,
             sync_held,
-            replication_enabled: connection.query_row(
-                "SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1",
-                [],
-                |row| row.get(0),
-            )?,
+            replication_enabled,
         };
-        let remaining = progress.queued + progress.preparing + progress.uploading + progress.committing;
+        let remaining =
+            progress.queued + progress.preparing + progress.uploading + progress.committing;
         if remaining > 0 {
-            let reason = if !progress.replication_enabled { Some("동기화 꺼짐") }
-                else if progress.control_state == BackfillControlState::Paused { Some("일시 정지됨") }
-                else if progress.sync_held { Some("송신 보류") } else { None };
-            crate::activities::report("cloud-upload", "cloud_upload", "클라우드 업로드",
-                if reason.is_some() { "paused" } else { "running" },
-                progress.completed, Some(progress.total_assets), Some(format!("{remaining}개 남음")), Some("cloud"), reason.map(str::to_owned), None);
-        } else { crate::activities::finish("cloud-upload", None); }
+            let reason = if !progress.replication_enabled {
+                Some("동기화 꺼짐")
+            } else if progress.control_state == BackfillControlState::Paused {
+                Some("일시 정지됨")
+            } else if progress.sync_held {
+                Some("송신 보류")
+            } else {
+                None
+            };
+            crate::activities::report(
+                "cloud-upload",
+                "cloud_upload",
+                "클라우드 업로드",
+                if reason.is_some() {
+                    "paused"
+                } else {
+                    "running"
+                },
+                progress.completed,
+                Some(progress.total_assets),
+                Some(format!("{remaining}개 남음")),
+                Some("cloud"),
+                reason.map(str::to_owned),
+                None,
+            );
+        } else {
+            crate::activities::finish("cloud-upload", None);
+        }
         if progress.failed > 0 {
-            crate::activities::report("cloud-upload-problem", "cloud_upload_problem", "클라우드 업로드 문제", "failed", progress.failed, None, None, None, None,
-                Some(progress.last_error.clone().unwrap_or_else(|| format!("업로드 실패 {}개", progress.failed))));
-        } else { crate::activities::clear_dismissed("cloud-upload-problem"); }
+            crate::activities::report(
+                "cloud-upload-problem",
+                "cloud_upload_problem",
+                "클라우드 업로드 문제",
+                "failed",
+                progress.failed,
+                None,
+                None,
+                None,
+                None,
+                Some(
+                    progress
+                        .last_error
+                        .clone()
+                        .unwrap_or_else(|| format!("업로드 실패 {}개", progress.failed)),
+                ),
+            );
+        } else {
+            crate::activities::clear_dismissed("cloud-upload-problem");
+        }
         Ok(progress)
     }
 
@@ -1322,4 +1320,207 @@ fn drained_replication_tick_is_read_only() {
         before,
         "an unchanged failure needs no writes either"
     );
+}
+
+#[cfg(test)]
+impl Library {
+    pub(crate) fn legacy_cloud_backfill_progress(&self) -> Result<BackfillProgress, LibraryError> {
+        let sync_held = self
+            .cloud_sync_config()?
+            .api_base_url
+            .is_some_and(|endpoint| self.sync_held(&endpoint));
+        let connection = self.connection()?;
+        let count = |status: &str| -> Result<u64, LibraryError> {
+            Ok(connection.query_row(
+                "SELECT COUNT(*)
+                     FROM cloud_sync_queue AS queue
+                     JOIN assets AS asset ON asset.id = queue.entity_id
+                     WHERE queue.entity_type = 'asset'
+                       AND queue.operation = 'upsert'
+                       AND queue.status = ?1
+                       AND asset.status = 'normal'
+                       AND NOT EXISTS (
+                         SELECT 1 FROM cloud_sync_queue AS newer
+                         WHERE newer.entity_type = queue.entity_type
+                           AND newer.entity_id = queue.entity_id
+                           AND newer.operation = queue.operation
+                           AND newer.revision > queue.revision
+                       )
+                       AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                            OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
+                [status],
+                |row| row.get::<_, i64>(0),
+            )? as u64)
+        };
+        let preparing = count("preparing")?;
+        let uploading = count("uploading")?;
+        let committing = count("committing")?;
+        let last_error = connection
+            .query_row(
+                "SELECT ?1
+                 FROM cloud_sync_queue AS queue
+                 JOIN assets AS asset ON asset.id = queue.entity_id
+                 WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
+                   AND queue.last_error IS NOT NULL
+                   AND queue.status = 'failed'
+                   AND asset.status = 'normal'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM cloud_sync_queue AS newer
+                     WHERE newer.entity_type = queue.entity_type
+                       AND newer.entity_id = queue.entity_id
+                       AND newer.operation = queue.operation
+                       AND newer.revision > queue.revision
+                   )
+                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                        OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
+                 ORDER BY queue.updated_at DESC, queue.id DESC LIMIT 1",
+                [REPLICATION_ITEM_FAILURE_MESSAGE],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let total_assets = connection.query_row(
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                    THEN (SELECT COUNT(*) FROM cloud_backfill_scope)
+                    ELSE (SELECT COUNT(*) FROM assets WHERE status = 'normal') END",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        // Authority projections confirm server presence independently of PC uploads.
+        // Only add Assets without upsert history: existing queue revisions still decide
+        // completion, so a newer pending/failed revision stays visible and synced rows
+        // are never counted twice. Import source alone is not evidence of server presence.
+        let server_present_without_upsert = connection.query_row(
+            "SELECT COUNT(*) FROM assets AS asset
+             JOIN asset_authority_state AS authority ON authority.asset_id = asset.id
+             WHERE asset.status = 'normal' AND authority.lifecycle = 'normal'
+               AND NOT EXISTS (
+                 SELECT 1 FROM cloud_sync_queue AS queue
+                 WHERE queue.entity_type = 'asset' AND queue.entity_id = asset.id
+                   AND queue.operation = 'upsert'
+               )
+               AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                    OR asset.id IN (SELECT asset_id FROM cloud_backfill_scope))",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let control_value = connection.query_row(
+            "SELECT state FROM cloud_backfill_control WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )?;
+        let unresolved_replication_item_error = connection.query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM cloud_sync_queue AS queue
+                 JOIN assets AS asset ON asset.id = queue.entity_id
+                 WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
+                   AND queue.status != 'synced'
+                   AND queue.last_error IS NOT NULL
+                   AND asset.status = 'normal'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM cloud_sync_queue AS newer
+                     WHERE newer.entity_type = queue.entity_type
+                       AND newer.entity_id = queue.entity_id
+                       AND newer.operation = queue.operation
+                       AND newer.revision > queue.revision
+                   )
+                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                        OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
+             )",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? != 0;
+        let queued = count("pending")?;
+        let failed = count("failed")?;
+        let replication_work_remains = queued + preparing + uploading + committing + failed > 0;
+        let mut activity = super::activity::read_activity(&connection)?;
+        if let Some(replication) = activity
+            .iter_mut()
+            .find(|item| item.direction == "replication")
+        {
+            let resolved_item_error = !unresolved_replication_item_error
+                && replication.last_error.as_deref() == Some(REPLICATION_ITEM_FAILURE_MESSAGE);
+            // A pass-level failure (it carries a reason code) is only recorded when a pass
+            // runs, and a pass runs only when there is work. Once no work remains, no later
+            // pass can clear it, so it would stay visible indefinitely.
+            let stale_pass_error = !replication_work_remains && replication.last_reason.is_some();
+            if resolved_item_error || stale_pass_error {
+                replication.last_error = None;
+                replication.last_reason = None;
+                replication.problems = 0;
+            }
+        }
+        let progress = BackfillProgress {
+            control_state: BackfillControlState::from_database(&control_value)?,
+            total_assets,
+            queued,
+            preparing,
+            uploading,
+            committing,
+            completed: count("synced")? + server_present_without_upsert,
+            failed,
+            active_workers: preparing + uploading + committing,
+            last_error,
+            activity,
+            sync_held,
+            replication_enabled: connection.query_row(
+                "SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )?,
+        };
+        let remaining =
+            progress.queued + progress.preparing + progress.uploading + progress.committing;
+        if remaining > 0 {
+            let reason = if !progress.replication_enabled {
+                Some("동기화 꺼짐")
+            } else if progress.control_state == BackfillControlState::Paused {
+                Some("일시 정지됨")
+            } else if progress.sync_held {
+                Some("송신 보류")
+            } else {
+                None
+            };
+            crate::activities::report(
+                "cloud-upload",
+                "cloud_upload",
+                "클라우드 업로드",
+                if reason.is_some() {
+                    "paused"
+                } else {
+                    "running"
+                },
+                progress.completed,
+                Some(progress.total_assets),
+                Some(format!("{remaining}개 남음")),
+                Some("cloud"),
+                reason.map(str::to_owned),
+                None,
+            );
+        } else {
+            crate::activities::finish("cloud-upload", None);
+        }
+        if progress.failed > 0 {
+            crate::activities::report(
+                "cloud-upload-problem",
+                "cloud_upload_problem",
+                "클라우드 업로드 문제",
+                "failed",
+                progress.failed,
+                None,
+                None,
+                None,
+                None,
+                Some(
+                    progress
+                        .last_error
+                        .clone()
+                        .unwrap_or_else(|| format!("업로드 실패 {}개", progress.failed)),
+                ),
+            );
+        } else {
+            crate::activities::clear_dismissed("cloud-upload-problem");
+        }
+        Ok(progress)
+    }
 }

@@ -1,7 +1,17 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { listen } from "@tauri-apps/api/event";
+import { ASSET_LIFECYCLE_CHANGED_EVENT } from "./useAssetAuthoritySync";
 import type { LibraryGateway } from "../library/types";
 import { CLOUD_PROGRESS_EVENT, notifyCloudBackfillSupervisor, useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
+
+const nativeSignals = vi.hoisted(() => new Map<string, (event?: unknown) => void>());
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (event: string, callback: (event?: unknown) => void) => {
+    nativeSignals.set(event, callback);
+    return () => { nativeSignals.delete(event); };
+  }),
+}));
 
 function Harness({ gateway }: { gateway: LibraryGateway }) {
   useCloudBackfillSupervisor(gateway, "C:\\test-library");
@@ -14,14 +24,14 @@ beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("polls idle progress every 10 s focused, every 60 s blurred, and immediately on return", async () => {
+it("polls idle progress every 60 s and immediately on return", async () => {
   vi.useFakeTimers();
   const progress = vi.fn().mockResolvedValue({ ...running, controlState: "idle", queued: 0 });
   const gateway = { cloudBackfillProgress: progress } as unknown as LibraryGateway;
   const { unmount } = render(<Harness gateway={gateway} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(progress).toHaveBeenCalledTimes(1);
-  await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
   expect(progress).toHaveBeenCalledTimes(1);
   await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(progress).toHaveBeenCalledTimes(2);
@@ -35,7 +45,7 @@ it("polls idle progress every 10 s focused, every 60 s blurred, and immediately 
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(progress).toHaveBeenCalledTimes(4);
-  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
   expect(progress).toHaveBeenCalledTimes(5);
   unmount();
   await vi.advanceTimersByTimeAsync(60_000);
@@ -134,4 +144,77 @@ it("publishes fresh progress during a long worker cycle without starting another
     expect(run).toHaveBeenCalledTimes(1);
     expect(receive.mock.calls.length).toBeGreaterThanOrEqual(3);
   } finally { window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); vi.useRealTimers(); }
+});
+
+it("wakes idle progress on control and Asset change signals", async () => {
+  vi.useFakeTimers();
+  const progress = vi.fn().mockResolvedValue({ ...running, controlState: "idle", queued: 0 });
+  render(<Harness gateway={{ cloudBackfillProgress: progress } as unknown as LibraryGateway} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { notifyCloudBackfillSupervisor(); await vi.advanceTimersByTimeAsync(0); });
+  expect(progress).toHaveBeenCalledTimes(2);
+  await act(async () => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); await vi.advanceTimersByTimeAsync(0); });
+  expect(progress).toHaveBeenCalledTimes(3);
+});
+
+it("retains a wake received while an idle status read is in flight", async () => {
+  vi.useFakeTimers();
+  const idle = { ...running, controlState: "idle" as const, queued: 0 };
+  let finish!: (value: typeof idle) => void;
+  const progress = vi.fn().mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue(idle);
+  render(<Harness gateway={{ cloudBackfillProgress: progress } as unknown as LibraryGateway} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  act(() => notifyCloudBackfillSupervisor());
+  await act(async () => { finish(idle); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(progress).toHaveBeenCalledTimes(2);
+});
+
+it("uses 1.5 s for active work then backs off after completion", async () => {
+  vi.useFakeTimers();
+  const progress = vi.fn().mockResolvedValueOnce(running).mockResolvedValue({ ...running, controlState: "idle", queued: 0 });
+  render(<Harness gateway={{ cloudBackfillProgress: progress, cloudBackfillRunCycle: vi.fn().mockResolvedValue({}) } as unknown as LibraryGateway} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_499); });
+  expect(progress).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(progress).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(progress).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(progress).toHaveBeenCalledTimes(3);
+});
+
+it("wakes on existing native ingestion, Asset and workload signals and unsubscribes", async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+  try {
+    const progress = vi.fn().mockResolvedValue({ ...running, controlState: "idle", queued: 0 });
+    const { unmount } = render(<Harness gateway={{ cloudBackfillProgress: progress } as unknown as LibraryGateway} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    let calls = 1;
+    for (const event of ["extension://ingestion", "library://asset-authority-changed", "workload://changed"]) {
+      expect(listen).toHaveBeenCalledWith(event, expect.any(Function));
+      await act(async () => { nativeSignals.get(event)!(); await vi.advanceTimersByTimeAsync(0); });
+      expect(progress).toHaveBeenCalledTimes(++calls);
+    }
+    const activities = nativeSignals.get("library://activities-changed")!;
+    const send = async (jobs: unknown[]) => act(async () => {
+      activities({ payload: { jobs } }); await vi.advanceTimersByTimeAsync(0);
+    });
+    // Upload status publications must not feed another status read back into themselves.
+    await send([{ id: "upload", kind: "cloud_upload", state: "running" }]);
+    expect(progress).toHaveBeenCalledTimes(calls);
+    const ingest = { id: "import", kind: "ingestion", state: "running" };
+    await send([ingest]);
+    expect(progress).toHaveBeenCalledTimes(++calls);
+    await send([ingest, { id: "upload", kind: "cloud_upload", state: "running" }]);
+    expect(progress).toHaveBeenCalledTimes(calls);
+    await send([{ ...ingest, state: "done" }]);
+    expect(progress).toHaveBeenCalledTimes(++calls);
+    unmount();
+    expect(nativeSignals.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(progress).toHaveBeenCalledTimes(calls);
+  } finally { Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); }
 });
