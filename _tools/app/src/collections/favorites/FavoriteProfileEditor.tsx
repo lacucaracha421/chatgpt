@@ -7,12 +7,16 @@ import { Menu } from "../../shared/ui/Menu";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { matchesKoreanSearch } from "../../shared/koreanSearch";
+import { isManualFavorite } from "./model";
 
 export function FavoriteProfileEditor({ name, series, entry, collections, busy, onCancel, onSave }: {
   name: string; series: string; entry: FavoriteEntry; collections: CollectionSummary[]; busy: boolean;
   onCancel(): void; onSave(set: FavoriteSet): Promise<boolean>;
 }) {
   const [profile, setProfile] = useState<FavoriteProfile>({ ...entry.profile });
+  const manual = isManualFavorite(entry.characterId);
+  const [editedName, setEditedName] = useState(name);
+  const [seriesName, setSeriesName] = useState(series);
   const [workIds, setWorkIds] = useState(entry.workIds);
   const [extraWorks, setExtraWorks] = useState(entry.extraWorks);
   const [freeName, setFreeName] = useState("");
@@ -32,8 +36,9 @@ export function FavoriteProfileEditor({ name, series, entry, collections, busy, 
     && new Date(2000, profile.birthMonth - 1, profile.birthDay).getMonth() === profile.birthMonth - 1);
   return <form className="favorite-editor" onKeyDown={event => {
     if (event.key === "Escape" && !picker && !busy) { event.preventDefault(); event.stopPropagation(); onCancel(); }
-  }} onSubmit={event => { event.preventDefault(); if (!busy && birthdayValid) void onSave({ profile, workIds, extraWorks }).then(saved => { if (saved) onCancel(); }); }}>
-    <Field label="이름"><TextInput readOnly value={name} /></Field>
+  }} onSubmit={event => { event.preventDefault(); if (!busy && birthdayValid && (!manual || editedName.trim())) void onSave({ profile, workIds, extraWorks, ...(manual ? { name: editedName.trim(), seriesName: seriesName.trim() } : {}) }).then(saved => { if (saved) onCancel(); }); }}>
+    <Field label="이름"><TextInput readOnly={!manual} required={manual} maxLength={120} value={editedName} onChange={event => setEditedName(event.target.value)} /></Field>
+    {manual && <Field label="작품 이름"><TextInput maxLength={120} value={seriesName} onChange={event => setSeriesName(event.target.value)} /></Field>}
     {textField("원래 이름", "originalName")}
     <div className="favorite-editor__two">
       <Field label="생일 · 월"><TextInput type="number" min={1} max={12} value={profile.birthMonth ?? ""} onChange={event => patch({ birthMonth: event.target.value ? Number(event.target.value) : null })} /></Field>
@@ -57,6 +62,6 @@ export function FavoriteProfileEditor({ name, series, entry, collections, busy, 
       </div>} />
       <div className="favorite-editor__free"><TextInput aria-label="컬렉션에 없는 작품 이름" placeholder="컬렉션에 없는 작품 이름" maxLength={120} value={freeName} onChange={event => setFreeName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addFreeWork(); } }} /><Button type="button" variant="quiet" disabled={!freeName.trim() || extraWorks.length >= 30} onClick={addFreeWork}>추가</Button></div>
     </div>
-    <div className="favorite-editor__foot"><Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>취소</Button><Button type="submit" variant="primary" disabled={busy || !birthdayValid}><BusyLabel busy={busy} delay={400} idle="완료">저장 중</BusyLabel></Button></div>
+    <div className="favorite-editor__foot"><Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>취소</Button><Button type="submit" variant="primary" disabled={busy || !birthdayValid || (manual && !editedName.trim())}><BusyLabel busy={busy} delay={400} idle="완료">저장 중</BusyLabel></Button></div>
   </form>;
 }

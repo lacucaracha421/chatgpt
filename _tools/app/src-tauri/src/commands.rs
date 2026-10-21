@@ -70,6 +70,7 @@ pub(crate) mod home;
 pub(crate) mod cards;
 pub(crate) mod folder_pins;
 pub(crate) mod favorite_characters;
+pub(crate) mod clipboard_image;
 pub(crate) mod home_media;
 pub(crate) mod launchbox;
 

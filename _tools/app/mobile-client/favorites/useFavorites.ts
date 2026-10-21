@@ -37,7 +37,8 @@ export function useFavorites(enabled:boolean) {
       if(alive.current){adopt(reply);setError('');}
       return true;
     } catch(reason) {
-      if(alive.current)setError(errorText(reason)||'변경 내용을 저장하지 못했습니다. 다시 시도해 주세요.');
+      const conflict=command.op==='link'&&reason&&typeof reason==='object'&&'status' in reason&&reason.status===409;
+      if(alive.current)setError(conflict?'이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요.':errorText(reason)||'변경 내용을 저장하지 못했습니다. 다시 시도해 주세요.');
       return false;
     } finally {writing.current=false;if(alive.current)setBusy(false);}
   },[adopt]);

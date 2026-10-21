@@ -8,11 +8,16 @@ import {markViewerOpen} from '../perf';
 import {api,errorText} from '../transport';
 import type {CharacterIndex,CharacterNode} from '../characterModel';
 import type {CollectionSummary} from '../collectionModel';
-import {birthdayDays} from './model';
+import {birthdayDays,isManualFavorite,representativeAsset} from './model';
 import {CharacterPortrait,useCharacterAssets} from './CharacterAssets';
 
-export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWork,cover}:{entry:FavoriteEntry;node:CharacterNode;index:CharacterIndex;series:string;active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode}) {
-  const assets=useCharacterAssets(node.id,index.revision??'',active);
+export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWork,cover,onLink,onReady}:{entry:FavoriteEntry;node:CharacterNode;index:CharacterIndex;series:string;active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode;onLink():void;onReady():void}) {
+  const manual=isManualFavorite(entry.characterId);
+  const assets=useCharacterAssets(node.id,index.revision??'',active&&!manual);
+  const [portraitReady,setPortraitReady]=useState<string|null|undefined>();
+  const portraitId=representativeAsset(entry,{id:entry.characterId,thumbnailAssetId:node.thumbnailAssetId},assets.page?.items[0]?.id);
+  const ready=useRef(onReady);ready.current=onReady;
+  useEffect(()=>{if(portraitReady===portraitId&&(manual||assets.page||assets.error))ready.current();},[portraitReady,portraitId,manual,assets.page,assets.error]);
   const [works,setWorks]=useState<{revision:string;item:CollectionSummary}[]>([]),[workError,setWorkError]=useState(''),[retry,setRetry]=useState(0);
   const [viewer,setViewer]=useState<number|null>(null),viewerBack=useRef<(()=>boolean)|null>(null),scroll=useRef(0);
   const workKey=JSON.stringify(entry.workIds);
@@ -30,7 +35,7 @@ export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWo
   const profile=entry.profile;
   const intro=<div className="favorite-detail">
     <div className="favorite-detail-top">
-      <div className="favorite-portrait"><CharacterPortrait entry={entry} node={node} index={index} firstAsset={assets.page?.items[0]}/></div>
+      <div className="favorite-portrait"><CharacterPortrait entry={entry} node={node} index={index} firstAsset={assets.page?.items[0]} onPrepared={setPortraitReady}/></div>
       <div className="favorite-profile"><h3>{node.name}</h3><p className="favorite-meta">{[profile.originalName,series].filter(Boolean).join(' · ')}</p>
         <dl>{profile.birthMonth&&profile.birthDay&&<div><dt>생일</dt><dd>{profile.birthMonth}월 {profile.birthDay}일 <DDay as="text" className="favorite-meta" days={birthdayDays(profile.birthMonth,profile.birthDay)}/></dd></div>}
           {profile.heightCm!=null&&<div><dt>키</dt><dd>{profile.heightCm}cm</dd></div>}
@@ -44,10 +49,12 @@ export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWo
       {entry.extraWorks.map((work,i)=><p className="favorite-meta" key={i}>{work}</p>)}
       {workError&&<p role="alert">{workError}<Button variant="ghost" onClick={()=>setRetry(n=>n+1)}>다시 시도</Button></p>}
     </section>}
+    {manual?<div className="favorite-manual-assets"><span>에셋에 없는 캐릭터</span><Button variant="quiet" onClick={onLink}>에셋 캐릭터와 연결</Button></div>:<>
     <SectionLabel title="에셋" count={assets.page?.totalCount??index.scopes.find(scope=>scope.nodeId===node.id&&scope.filter==='all')?.totalCount??0} unit="장"/>
-    <BusyLabel busy={assets.busy}><span className="hint">불러오는 중…</span></BusyLabel>
+    <BusyLabel busy={assets.busy} delay={400}><span className="hint">불러오는 중…</span></BusyLabel>
     {assets.error&&<p role="alert">{assets.error}<Button variant="ghost" onClick={assets.reload}>다시 시도</Button></p>}
     {assets.page&&!assets.page.items.length&&<p className="hint">이미지 없음</p>}
+    </>}
   </div>;
   return <>
     <Gallery items={assets.page?.items??[]} columns={3} density={1} identity={node.id} restoreScroll={scroll.current} onScroll={top=>{scroll.current=top;}} intro={intro}

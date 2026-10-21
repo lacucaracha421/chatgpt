@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { subscribeWindowFocus, windowPollDelay } from "../../app/windowFocus";
 import { commandErrorMessage } from "../../library/errorMessage";
 import type { FavoriteCharacters, FavoriteCommand, LibraryGateway } from "../../library/types";
+import { isManualFavorite } from "./model";
 
 type Snapshot = { document: FavoriteCharacters | null; busy: boolean; error: string | null };
 const stores = new WeakMap<LibraryGateway, Map<string, ReturnType<typeof createStore>>>();
@@ -11,6 +12,7 @@ function createStore(gateway: LibraryGateway, root: string) {
   const pendingKey = `${key}:pending`;
   let document: FavoriteCharacters | null = null;
   let pending: FavoriteCommand[] = [];
+  const rejected = new WeakSet<FavoriteCommand>();
   try { document = JSON.parse(localStorage.getItem(key) ?? "null"); } catch { /* First read can still load from the server. */ }
   try { pending = JSON.parse(localStorage.getItem(pendingKey) ?? "[]"); } catch { /* No persisted edits yet. */ }
   let snapshot: Snapshot = { document, busy: false, error: null };
@@ -42,12 +44,24 @@ function createStore(gateway: LibraryGateway, root: string) {
           if (pending.length) {
             if (!gateway.changeFavoriteCharacters) throw new Error("캐릭터 목록을 사용할 수 없습니다.");
             const sent = pending.slice(0, 20);
-            const reply = await gateway.changeFavoriteCharacters(sent);
-            pending = pending.slice(sent.length); writePending();
-            adopt(applyCommands(reply, pending));
+            try {
+              const reply = await gateway.changeFavoriteCharacters(sent);
+              pending = pending.slice(sent.length); writePending();
+              document = reply;
+              adopt(applyCommands(reply, pending));
+            } catch (error) {
+              if (!error || typeof error !== "object" || !("code" in error) || error.code !== "favoriteCharacterExists") throw error;
+              // A link collision rejects the whole batch. It must not poison the offline queue or keep the optimistic id.
+              sent.forEach(command => rejected.add(command));
+              pending = pending.slice(sent.length); writePending();
+              try { document = await gateway.favoriteCharacters(); } catch { /* Keep the last confirmed document until the next read. */ }
+              if (document) adopt(applyCommands(document, pending));
+              publish({ error: "이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요." });
+            }
             if (pending.length) again = true;
           } else {
             const reply = await gateway.favoriteCharacters();
+            document = reply;
             adopt(applyCommands(reply, pending));
           }
         } catch (error) { publish({ error: pending.length ? "변경 내용을 PC에 보관했습니다. 연결되면 다시 저장합니다." : commandErrorMessage(error, "캐릭터 목록을 불러오지 못했습니다.") }); }
@@ -64,15 +78,33 @@ function createStore(gateway: LibraryGateway, root: string) {
     pending = [...pending, ...commands]; writePending();
     adopt(applyCommands(snapshot.document, commands));
     await refresh();
-    return true;
+    return !commands.some(command => rejected.has(command));
   };
   return { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, refresh, change };
 }
 
-function applyCommands(document: FavoriteCharacters, commands: FavoriteCommand[]): FavoriteCharacters {
+export function applyCommands(document: FavoriteCharacters, commands: FavoriteCommand[]): FavoriteCharacters {
   let entries = document.entries;
   for (const command of commands) {
-    if (command.op === "update") entries = entries.map(entry => entry.characterId === command.id ? { ...entry, ...command.set } : entry);
+    if (command.op === "update") entries = entries.map(entry => {
+      if (entry.characterId !== command.id) return entry;
+      const { name, seriesName, ...set } = command.set;
+      return { ...entry, ...set, ...(isManualFavorite(entry.characterId) ? {
+        ...(name !== undefined ? { name: name.trim() } : {}), ...(seriesName !== undefined ? { seriesName } : {}),
+      } : {}) };
+    });
+    else if (command.op === "create") {
+      if (!entries.some(entry => entry.characterId === command.id)) entries = [...entries, {
+        characterId: command.id, name: command.name.trim(), ...(command.seriesName !== undefined ? { seriesName: command.seriesName } : {}),
+        coverAssetId: null, coverY: 50, profile: {}, workIds: [], extraWorks: [],
+      }];
+    } else if (command.op === "link") {
+      if (!entries.some(entry => entry.characterId === command.characterId)) entries = entries.map(entry => {
+        if (entry.characterId !== command.id) return entry;
+        const { name: _name, seriesName: _seriesName, ...linked } = entry;
+        return { ...linked, characterId: command.characterId };
+      });
+    }
     else if (command.op === "remove") entries = entries.filter(entry => !command.ids.includes(entry.characterId));
     else if (command.op === "add") {
       const existing = new Set(entries.map(entry => entry.characterId));

@@ -21,6 +21,10 @@ pub(crate) struct FavoriteCharacters {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FavoriteEntry {
     pub(crate) character_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) series_name: Option<String>,
     pub(crate) cover_asset_id: Option<String>,
     pub(crate) cover_y: f64,
     pub(crate) profile: FavoriteProfile,
@@ -65,6 +69,18 @@ pub(crate) struct FavoriteSet {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub(crate) name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub(crate) series_name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub(crate) cover_asset_id: Option<Option<String>>,
     #[serde(
         default,
@@ -95,10 +111,35 @@ pub(crate) struct FavoriteSet {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "lowercase", deny_unknown_fields)]
 pub(crate) enum FavoriteCommand {
-    Add { ids: Vec<String> },
-    Remove { ids: Vec<String> },
-    Order { ids: Vec<String> },
-    Update { id: String, set: FavoriteSet },
+    Create {
+        id: String,
+        name: String,
+        #[serde(
+            rename = "seriesName",
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        series_name: Option<String>,
+    },
+    Link {
+        id: String,
+        #[serde(rename = "characterId")]
+        character_id: String,
+    },
+    Add {
+        ids: Vec<String>,
+    },
+    Remove {
+        ids: Vec<String>,
+    },
+    Order {
+        ids: Vec<String>,
+    },
+    Update {
+        id: String,
+        set: FavoriteSet,
+    },
 }
 
 fn valid_id(id: &str) -> bool {
@@ -107,6 +148,14 @@ fn valid_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn valid_manual_id(id: &str) -> bool {
+    id.starts_with("manual-") && id.len() > 7 && valid_id(id)
+}
+
+fn valid_name(name: &str) -> bool {
+    !name.trim().is_empty() && name.trim().chars().count() <= 120
 }
 
 fn valid_work_ids(ids: &[String]) -> bool {
@@ -152,9 +201,15 @@ fn valid_profile(profile: &FavoriteProfile) -> bool {
 }
 
 fn valid_set(set: &FavoriteSet) -> bool {
-    set.cover_asset_id
-        .as_ref()
-        .map_or(true, |value| value.as_ref().map_or(true, |id| valid_id(id)))
+    set.name.as_ref().map_or(true, |name| valid_name(name))
+        && set
+            .series_name
+            .as_ref()
+            .map_or(true, |name| name.chars().count() <= 120)
+        && set
+            .cover_asset_id
+            .as_ref()
+            .map_or(true, |value| value.as_ref().map_or(true, |id| valid_id(id)))
         && set
             .cover_y
             .map_or(true, |value| (0.0..=100.0).contains(&value))
@@ -175,9 +230,29 @@ pub(crate) fn command_body(
     if commands.is_empty()
         || commands.len() > MAX_COMMANDS
         || commands.iter().any(|command| !match command {
-            FavoriteCommand::Add { ids }
-            | FavoriteCommand::Remove { ids }
-            | FavoriteCommand::Order { ids } => {
+            FavoriteCommand::Create {
+                id,
+                name,
+                series_name,
+            } => {
+                valid_manual_id(id)
+                    && valid_name(name)
+                    && series_name
+                        .as_ref()
+                        .map_or(true, |name| name.chars().count() <= 120)
+            }
+            FavoriteCommand::Link { id, character_id } => {
+                valid_manual_id(id)
+                    && valid_id(character_id)
+                    && !character_id.starts_with("manual-")
+            }
+            FavoriteCommand::Add { ids } => {
+                ids.len() <= MAX_ENTRIES
+                    && ids
+                        .iter()
+                        .all(|id| valid_id(id) && !id.starts_with("manual-"))
+            }
+            FavoriteCommand::Remove { ids } | FavoriteCommand::Order { ids } => {
                 ids.len() <= MAX_ENTRIES && ids.iter().all(|id| valid_id(id))
             }
             FavoriteCommand::Update { id, set } => valid_id(id) && valid_set(set),
@@ -193,6 +268,16 @@ fn checked(document: FavoriteCharacters) -> Result<FavoriteCharacters, LibraryEr
         || document.entries.len() > MAX_ENTRIES
         || document.entries.iter().any(|entry| {
             !valid_id(&entry.character_id)
+                || if entry.character_id.starts_with("manual-") {
+                    !valid_manual_id(&entry.character_id)
+                        || !entry.name.as_ref().is_some_and(|name| valid_name(name))
+                        || entry
+                            .series_name
+                            .as_ref()
+                            .is_some_and(|name| name.chars().count() > 120)
+                } else {
+                    entry.name.is_some() || entry.series_name.is_some()
+                }
                 || !entry
                     .cover_asset_id
                     .as_ref()
@@ -317,5 +402,32 @@ mod tests {
             ..document
         })
         .is_err());
+    }
+
+    #[test]
+    fn manual_entries_and_commands_keep_additive_fields() {
+        let mut document: FavoriteCharacters = serde_json::from_value(serde_json::json!({
+            "version":1,"revision":0,"entries":[{"characterId":"manual-new", "name":"名前", "seriesName":"作品",
+                "coverAssetId":null,"coverY":50,"profile":{},"workIds":[],"extraWorks":[]}]
+        })).unwrap();
+        assert!(checked(document.clone()).is_ok());
+        document.entries[0].name = Some(" ".into());
+        assert!(checked(document).is_err());
+        for value in [
+            serde_json::json!({"op":"create","id":"manual-new","name":"名前","seriesName":"作品"}),
+            serde_json::json!({"op":"link","id":"manual-new","characterId":"char_1"}),
+            serde_json::json!({"op":"update","id":"manual-new","set":{"name":"名前","seriesName":""}}),
+        ] {
+            let command = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(command_body(&[command]).unwrap()["commands"][0], value);
+        }
+        for value in [
+            serde_json::json!({"op":"create","id":"char_1","name":"名前"}),
+            serde_json::json!({"op":"create","id":"manual-new","name":" "}),
+            serde_json::json!({"op":"link","id":"manual-new","characterId":"manual-other"}),
+            serde_json::json!({"op":"add","ids":["manual-new"]}),
+        ] {
+            assert!(command_body(&[serde_json::from_value(value).unwrap()]).is_err());
+        }
     }
 }

@@ -7,7 +7,7 @@ import {api,errorText} from '../transport';
 import {characterPath,type CharacterIndex,type CharacterNode,type CharacterPage} from '../characterModel';
 import type {Asset} from '../types';
 import type {FavoriteEntry} from '../../src/library/types';
-import {representativeAsset} from './model';
+import {isManualFavorite,representativeAsset} from './model';
 
 export function useFirstCharacterAsset(node:string,revision:string,enabled:boolean) {
   const [first,setFirst]=useState<Asset>();
@@ -22,30 +22,38 @@ export function useFirstCharacterAsset(node:string,revision:string,enabled:boole
   return first;
 }
 
-export function CharacterImage({id,y=50,rating,style,onError}:{id?:string|null;y?:number;rating?:Asset['contentRating'];style?:CSSProperties;onError?():void}) {
+export function CharacterImage({id,y=50,rating,style,onError,onPrepared}:{id?:string|null;y?:number;rating?:Asset['contentRating'];style?:CSSProperties;onError?():void;onPrepared?():void}) {
   const masked=useTabletAssetMask({contentRating:rating});
   const [preview,setPreview]=useState<string>();
   const failure=useRef(onError);failure.current=onError;
+  const prepared=useRef(onPrepared);prepared.current=onPrepared;
   useEffect(()=>{
-    if(!id||masked)return;
+    if(!id||masked){prepared.current?.();return;}
     const controller=new AbortController();
     void loadThumbnail({id,kind:'image',contentRating:rating},controller.signal).then(asset=>{
-      if(!controller.signal.aborted&&asset.preview)setPreview(asset.preview);
-    },()=>{if(!controller.signal.aborted)failure.current?.();});
+      if(!controller.signal.aborted){if(asset.preview)setPreview(asset.preview);else prepared.current?.();}
+    },()=>{if(!controller.signal.aborted){failure.current?.();prepared.current?.();}});
     return()=>controller.abort();
   },[id,masked,rating]);
+  useEffect(()=>{if(preview)prepared.current?.();},[preview]);
   return <span className="favorite-image" style={style}>{masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:preview&&id?<StableImage src={preview} alt="" style={{objectPosition:`50% ${y}%`}} respectReducedMotion onError={()=>failure.current?.()} onPreloadError={()=>failure.current?.()}/>:<PhotoIcon aria-hidden="true"/>}</span>;
 }
 
 /** Same fallback sequence as the PC portrait, including a removed representative asset. */
-export function CharacterPortrait({entry,node,index,firstAsset}:{entry?:FavoriteEntry;node:CharacterNode;index:CharacterIndex;firstAsset?:Asset}) {
+export function CharacterPortrait({entry,node,index,firstAsset,onPrepared}:{entry?:FavoriteEntry;node:CharacterNode;index:CharacterIndex;firstAsset?:Asset;onPrepared?(id:string|null):void}) {
+  const manual=isManualFavorite(entry?.characterId??node.sourceId);
   const [failed,setFailed]=useState<string[]>([]);
   const available=(id?:string|null)=>id&&!failed.includes(id)?id:null;
   const cover=available(entry?.coverAssetId),thumbnail=available(node.thumbnailAssetId);
-  const fallback=useFirstCharacterAsset(node.id,index.revision??'',!cover&&!thumbnail&&!firstAsset);
+  const fallback=useFirstCharacterAsset(node.id,index.revision??'',!manual&&!cover&&!thumbnail&&!firstAsset);
   const first=firstAsset??fallback;
-  const id=representativeAsset({coverAssetId:cover},{thumbnailAssetId:thumbnail},available(first?.id));
-  return <CharacterImage id={id} y={entry?.coverY} rating={index.contentRatings?.[id??'']??(id===first?.id?first?.contentRating:undefined)} onError={()=>{if(id)setFailed(before=>before.includes(id)?before:[...before,id]);}}/>;
+  const id=representativeAsset({coverAssetId:cover},{id:entry?.characterId??node.sourceId,thumbnailAssetId:thumbnail},available(first?.id));
+  const requestedId=representativeAsset(entry,{id:entry?.characterId??node.sourceId,thumbnailAssetId:node.thumbnailAssetId},firstAsset?.id);
+  const masked=useTabletAssetMask({contentRating:index.contentRatings?.[id??'']});
+  const prepared=useRef(onPrepared);prepared.current=onPrepared;
+  useEffect(()=>{if(manual&&(!id||masked))prepared.current?.(requestedId);},[manual,id,masked,requestedId]);
+  if(manual&&(!id||masked))return <span className="favorite-name-card"><strong>{entry?.name}</strong>{entry?.seriesName&&<small>{entry.seriesName}</small>}</span>;
+  return <CharacterImage id={id} y={entry?.coverY} onPrepared={()=>onPrepared?.(requestedId)} rating={index.contentRatings?.[id??'']??(id===first?.id?first?.contentRating:undefined)} onError={()=>{if(id)setFailed(before=>before.includes(id)?before:[...before,id]);}}/>;
 }
 
 export function useCharacterAssets(node:string,revision:string,enabled:boolean) {

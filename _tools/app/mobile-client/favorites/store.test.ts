@@ -14,7 +14,7 @@ afterEach(cleanup);
 it('reads the shared document and sends one batch without replacing the document',async()=>{
   mocks.api.mockResolvedValue(document(3));
   expect(await loadFavorites()).toEqual(document(3));
-  const commands:FavoriteCommand[]=[{op:'add',ids:['a','b']},{op:'order',ids:['b','sera','a']},{op:'update',id:'sera',set:{coverAssetId:'art',coverY:72}},{op:'remove',ids:['a']}];
+  const commands:FavoriteCommand[]=[{op:'create',id:'manual-new',name:'새 캐릭터'},{op:'link',id:'manual-new',characterId:'a'},{op:'add',ids:['a','b']},{op:'order',ids:['b','sera','a']},{op:'update',id:'sera',set:{coverAssetId:'art',coverY:72}},{op:'remove',ids:['a']}];
   expect(await changeFavorites(commands)).toEqual(document(3));
   expect(mocks.api.mock.calls).toEqual([
     ['/v1/library/favorite-characters',undefined],

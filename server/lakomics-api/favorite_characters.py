@@ -6,6 +6,17 @@ listed ids still present ahead of the remaining entries. Update replaces each
 supplied payload field as a whole and never brings back a removed character.
 Unknown character ids are preserved; clients hide characters that no longer exist.
 
+Manual entries use ids matching ^manual-[A-Za-z0-9_-]{1,57}$ and require a trimmed
+name of 1..120 characters, with optional seriesName of at most 120 characters.
+Create appends a manual entry with the same defaults as add; an existing id is
+ignored on replay. Add rejects manual ids. Remove and order accept them.
+Update also accepts name and seriesName, but stores them only on manual entries.
+Asset entries never carry these fields. Link replaces a present manual id with a
+non-manual characterId in place, preserving cover, profile and works and dropping
+name/seriesName. A missing source is ignored; an already-favourited target rejects
+the whole request with 409 favoriteCharacterExists. Manual covers may use any
+library asset; null means a name card. The final document has at most 300 entries.
+
 GET /v1/library/favorite-characters returns {version: 1, revision, entries} with
 an ETag. POST accepts {commands: [...]} and returns the same document. Both use
 the client credential. Revision 0 means never written; only a changed document
@@ -23,6 +34,8 @@ PREFIX = "/v1/library/favorite-characters"
 MAX_ENTRIES = 300
 
 CharacterId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+ManualId = Annotated[str, StringConstraints(pattern=r"^manual-[A-Za-z0-9_-]{1,57}$")]
+ManualName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 WorkId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_:.-]{1,128}$")]
 ShortText = Annotated[str, StringConstraints(max_length=120)]
 
@@ -59,12 +72,41 @@ class UpdateFields(BaseModel):
     profile: Profile = Field(default_factory=Profile)
     workIds: list[WorkId] = Field(default_factory=list, max_length=30)
     extraWorks: list[ShortText] = Field(default_factory=list, max_length=30)
+    name: ManualName = Field(default=None)
+    seriesName: ShortText = Field(default=None)
 
 
 class ListCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
     op: Literal["add", "remove", "order"]
     ids: list[CharacterId] = Field(max_length=MAX_ENTRIES)
+
+    @model_validator(mode="after")
+    def no_manual_add(self):
+        if self.op == "add" and any(id.startswith("manual-") for id in self.ids):
+            raise ValueError("manual entries must be created with create")
+        return self
+
+
+class CreateCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    op: Literal["create"]
+    id: ManualId
+    name: ManualName
+    seriesName: ShortText = Field(default=None)
+
+
+class LinkCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    op: Literal["link"]
+    id: ManualId
+    characterId: CharacterId
+
+    @model_validator(mode="after")
+    def asset_target(self):
+        if self.characterId.startswith("manual-"):
+            raise ValueError("characterId must not be a manual id")
+        return self
 
 
 class UpdateCommand(BaseModel):
@@ -74,7 +116,7 @@ class UpdateCommand(BaseModel):
     set: UpdateFields
 
 
-Command = Annotated[ListCommand | UpdateCommand, Field(discriminator="op")]
+Command = Annotated[ListCommand | UpdateCommand | CreateCommand | LinkCommand, Field(discriminator="op")]
 
 
 class Commands(BaseModel):
@@ -101,13 +143,28 @@ def apply(entries, command):
     """Return the entries after one command, without mutating the input."""
     if command.op == "update":
         changes = command.set.model_dump(exclude_unset=True)
+        if not command.id.startswith("manual-"):
+            changes.pop("name", None)
+            changes.pop("seriesName", None)
         return [entry | changes if entry["characterId"] == command.id else entry for entry in entries]
-    if command.op == "add":
+    if command.op == "link":
         known = {entry["characterId"] for entry in entries}
+        if command.id not in known:
+            return entries
+        if command.characterId in known:
+            raise HTTPException(409, {"code": "favoriteCharacterExists"})
+        return [
+            {key: value for key, value in entry.items() if key not in {"name", "seriesName"}}
+            | {"characterId": command.characterId}
+            if entry["characterId"] == command.id else entry for entry in entries]
+    if command.op in {"add", "create"}:
+        known = {entry["characterId"] for entry in entries}
+        ids = command.ids if command.op == "add" else [command.id]
+        manual_fields = command.model_dump(exclude={"op", "id"}, exclude_unset=True) if command.op == "create" else {}
         return entries + [
             {"characterId": id, "coverAssetId": None, "coverY": 50,
-             "profile": {}, "workIds": [], "extraWorks": []}
-            for id in dict.fromkeys(command.ids) if id not in known]
+             "profile": {}, "workIds": [], "extraWorks": [], **manual_fields}
+            for id in dict.fromkeys(ids) if id not in known]
     if command.op == "remove":
         drop = set(command.ids)
         return [entry for entry in entries if entry["characterId"] not in drop]

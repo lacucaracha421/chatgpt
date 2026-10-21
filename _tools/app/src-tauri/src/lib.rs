@@ -303,6 +303,8 @@ pub fn run() {
             commands::folder_pins::change_folder_pins,
             commands::favorite_characters::favorite_characters,
             commands::favorite_characters::change_favorite_characters,
+            commands::clipboard_image::stage_clipboard_image,
+            commands::clipboard_image::remove_clipboard_image,
             commands::cards::card_state,
             commands::cards::card_open_pack,
             commands::cards::card_keep_pack,

@@ -1,9 +1,15 @@
 .favorite-scroll { overflow:auto; padding:var(--space-4) var(--mobile-gutter) var(--space-8); }
+.favorite-layer { display:contents; }
+.favorite-name-card { display:flex; box-sizing:border-box; flex-direction:column; justify-content:flex-end; align-items:flex-start; gap:var(--space-1); width:100%; height:100%; padding:var(--space-4); background:var(--color-surface); text-align:left; overflow:hidden; }
+.favorite-name-card > strong { margin:0; max-width:100%; font-size:var(--type-title); font-weight:600; line-height:var(--line-ui); white-space:normal; overflow-wrap:anywhere; }
+.favorite-name-card > small { max-width:100%; color:var(--color-faint); font-size:var(--type-meta); white-space:normal; overflow-wrap:anywhere; }
+.favorite-manual-assets { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--space-3); color:var(--color-faint); font-size:var(--type-meta); }
+.favorite-picker-select { width:100%; background:none; border:0; border-bottom:1px solid var(--color-border); padding:0; text-align:left; }
 .favorite-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--space-6) var(--space-3); margin-top:var(--space-6); }
 .favorite-card { display:flex; flex-direction:column; gap:var(--space-1); min-width:0; padding:0; text-align:left; color:var(--color-text); background:none; border:0; touch-action:pan-y; }
 .favorite-card:active { background:var(--color-surface-pressed); }
-.favorite-card strong,.favorite-card small { width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.favorite-card strong { font-size:var(--type-body); font-weight:600; }
+.favorite-card > strong,.favorite-card > small { width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.favorite-card > strong { font-size:var(--type-body); font-weight:600; }
 .favorite-meta { color:var(--color-faint); font-size:var(--type-meta); font-weight:400; }
 .favorite-portrait { display:block; width:100%; aspect-ratio:132 / 170; position:relative; overflow:hidden; border-radius:var(--radius-mark); background:var(--color-surface); }
 .favorite-image { display:block; position:relative; width:100%; height:100%; background:var(--color-surface); overflow:hidden; }

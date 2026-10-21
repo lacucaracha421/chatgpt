@@ -46,11 +46,23 @@ pub async fn change_favorite_characters(
     state: State<'_, AppState>,
 ) -> Result<FavoriteCharacters, CommandError> {
     let library = current_required(state)?;
+    let linking = commands
+        .iter()
+        .any(|command| matches!(command, FavoriteCommand::Link { .. }));
     tauri::async_runtime::spawn_blocking(move || {
         let (client, token) = client(&library)?;
         client.change_favorite_characters(&commands, token.expose())
     })
     .await
     .map_err(|_| background_task_error())?
-    .map_err(CommandError::from)
+    .map_err(|error| {
+        if linking && matches!(error, LibraryError::CloudObjectKeyConflict) {
+            CommandError {
+                code: "favoriteCharacterExists",
+                message: "이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요.".into(),
+            }
+        } else {
+            CommandError::from(error)
+        }
+    })
 }

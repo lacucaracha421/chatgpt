@@ -6,9 +6,9 @@ import type {FavoriteCharacters as Document} from '../../src/library/types';
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('../transport',()=>({api:mocks.api,native:vi.fn(),errorText:(reason:unknown)=>String(reason)}));
 vi.mock('../media',()=>({loadThumbnail:vi.fn(async(asset:unknown)=>asset),prepareAssets:vi.fn(async(assets:unknown)=>assets)}));
-vi.mock('../Overlay',()=>({Overlay:({open,covered,title,onClose,headerActions,children}:{open:boolean;covered:boolean;title:string;onClose():void;headerActions:ReactNode;children:ReactNode})=>open&&!covered?<section role="dialog" aria-label={title}><button onClick={onClose}>뒤로</button>{headerActions}{children}</section>:null}));
+vi.mock('../Overlay',()=>({Overlay:({open,covered,preparing,title,onClose,headerActions,children}:{open:boolean;covered:boolean;preparing?:boolean;title:string;onClose():void;headerActions:ReactNode;children:ReactNode})=>open&&!covered?<section className="mobile-overlay__panel" role="dialog" aria-label={title} style={{visibility:preparing?'hidden':undefined}}><button onClick={onClose}>뒤로</button>{headerActions}{children}</section>:null}));
 vi.mock('../BottomSheet',()=>({BottomSheet:({title,heading,children,onClose}:{title:string;heading:ReactNode;children:ReactNode;onClose():void})=><section role="dialog" aria-label={title}>{heading}{children}<button onClick={onClose}>닫기</button></section>}));
-vi.mock('../Gallery',()=>({Gallery:()=>null}));
+vi.mock('../Gallery',()=>({Gallery:({intro}:{intro:ReactNode})=><div className="gallery-scroll">{intro}</div>}));
 vi.mock('../Viewer',()=>({Viewer:()=>null}));
 import {FavoriteCharacters} from './FavoriteCharacters';
 
@@ -74,4 +74,59 @@ it('holds the chosen portrait and crop until 바꾸기 sends one update',async()
   expect(posts()).toEqual([]);
   fireEvent.click(within(sheet).getByRole('button',{name:'바꾸기'}));
   await waitFor(()=>expect(posts()).toEqual([{commands:[{op:'update',id:'a',set:{coverAssetId:'art2',coverY:73}}]}]));
+});
+
+it('shows manual name cards only in 전체 and hides PC-owned cover and folder actions',async()=>{
+  document.entries.push({...entry('manual-new'),name:'새 캐릭터',seriesName:'새 작품'});
+  mount();
+  const card=await screen.findByRole('button',{name:'새 캐릭터 · 새 작품'});
+  expect(within(card).getAllByText('새 캐릭터')).toHaveLength(2);
+  expect(screen.getByRole('radio',{name:'전체 4'})).toBeTruthy();
+  expect(screen.getByRole('radio',{name:'분류함1 2'})).toBeTruthy();
+  fireEvent.keyDown(card,{key:'F10',shiftKey:true});
+  const actions=screen.getByRole('dialog',{name:'새 캐릭터'});
+  expect(within(actions).queryByRole('button',{name:'대표 이미지 바꾸기'})).toBeNull();
+  expect(within(actions).queryByRole('button',{name:'에셋 폴더 열기'})).toBeNull();
+  fireEvent.click(within(actions).getByRole('button',{name:'닫기'}));
+  fireEvent.click(screen.getByRole('radio',{name:'분류함1 2'}));
+  expect(screen.queryByRole('button',{name:'새 캐릭터 · 새 작품'})).toBeNull();
+});
+
+it('creates a manual entry from the trimmed search and closes the add sheet',async()=>{
+  mount();
+  fireEvent.click(await screen.findByRole('button',{name:'캐릭터 추가'}));
+  const sheet=screen.getByRole('dialog',{name:'캐릭터 추가'});
+  fireEvent.change(within(sheet).getByRole('textbox'),{target:{value:'  새 캐릭터  '}});
+  fireEvent.click(within(sheet).getByRole('button',{name:"'새 캐릭터' 이름으로 추가"}));
+  await waitFor(()=>expect(posts()).toEqual([{commands:[{op:'create',id:expect.stringMatching(/^manual-/),name:'새 캐릭터'}]}]));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'캐릭터 추가'})).toBeNull());
+});
+
+it('keeps a manual detail and link picker on conflict, then adopts the linked character',async()=>{
+  document.entries.push({...entry('manual-new'),name:'새 캐릭터'});
+  const handler=mocks.api.getMockImplementation()!;
+  let conflict=true;
+  mocks.api.mockImplementation(async(path:string,signal:unknown,body?:{commands:{op:string;id:string;characterId:string}[]})=>{
+    if(body?.commands[0].op==='link'){
+      if(conflict)throw Object.assign(new Error('conflict'),{status:409,details:{code:'favoriteCharacterExists'}});
+      return {...document,revision:2,entries:document.entries.map(item=>item.characterId==='manual-new'?{...item,characterId:'b',name:undefined}:item)};
+    }
+    return handler(path,signal,body);
+  });
+  document.entries=document.entries.filter(item=>item.characterId!=='b');
+  mount();
+  fireEvent.click(await screen.findByRole('button',{name:'새 캐릭터'}));
+  const detail=await screen.findByRole('dialog',{name:'새 캐릭터'});
+  expect(within(detail).getByText('에셋에 없는 캐릭터')).toBeTruthy();
+  fireEvent.click(within(detail).getByRole('button',{name:'에셋 캐릭터와 연결'}));
+  const picker=screen.getByRole('dialog',{name:'에셋 캐릭터와 연결'});
+  expect((within(picker).getByRole('button',{name:'a 추가됨'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(picker).getByRole('button',{name:'b'}));
+  await within(picker).findByText('이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요.');
+  expect(screen.getByRole('dialog',{name:'새 캐릭터'})).toBeTruthy();
+  conflict=false;
+  fireEvent.click(within(picker).getByRole('button',{name:'b'}));
+  await screen.findByRole('dialog',{name:'b'});
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'에셋 캐릭터와 연결'})).toBeNull());
+  expect(posts()).toEqual([{commands:[{op:'link',id:'manual-new',characterId:'b'}]},{commands:[{op:'link',id:'manual-new',characterId:'b'}]}]);
 });

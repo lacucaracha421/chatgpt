@@ -82,10 +82,10 @@ export function FavoriteGrid({ targets, entries, catalog, disabled, menu, onOpen
   const displayed = preview ? preview.flatMap(id => targets.find(target => target.id === id) ?? []) : targets;
   return <div className="favorite-grid" ref={root}>{displayed.map(target => {
     const entry = entries.find(item => item.characterId === target.id);
-    const series = catalog.classifications.find(folder => folder.id === target.seriesClassificationId)?.name;
+    const series = entry?.seriesName ?? catalog.classifications.find(folder => folder.id === target.seriesClassificationId)?.name;
     return <ContextMenu key={target.id} items={menu(target)}><button type="button" className="favorite-card" data-favorite-card={target.id} data-carried={carried === target.id || undefined}
       onPointerDown={event => down(event, target.id)} onClick={() => onOpen(target)} disabled={disabled}>
-      <span className="favorite-card__image"><FavoritePortrait coverId={catalog.unavailableAssets.has(entry?.coverAssetId ?? "") ? null : entry?.coverAssetId} thumbnailId={target.thumbnailAssetId} firstAssetId={catalog.firstAssets[target.id]} coverY={entry?.coverY} /><span className="favorite-card__count">{displayCount(catalog.counts[target.id] ?? 0, "장")}</span></span>
+      <span className="favorite-card__image"><FavoritePortrait name={entry?.name} seriesName={entry?.seriesName} coverId={catalog.unavailableAssets.has(entry?.coverAssetId ?? "") ? null : entry?.coverAssetId} thumbnailId={target.thumbnailAssetId} firstAssetId={catalog.firstAssets[target.id]} coverY={entry?.coverY} />{!entry?.name && <span className="favorite-card__count">{displayCount(catalog.counts[target.id] ?? 0, "장")}</span>}</span>
       <strong>{target.displayName}</strong><small>{series}</small>
     </button></ContextMenu>;
   })}</div>;

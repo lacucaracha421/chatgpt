@@ -2,7 +2,27 @@ import type { CharacterTarget } from "../../characters/api";
 import type { ClassificationEntry, FavoriteCommand, FavoriteEntry } from "../../library/types";
 import { daysUntil } from "../../shared/displayDate";
 
-export function representativeAsset(entry: Pick<FavoriteEntry, "coverAssetId"> | undefined, target: Pick<CharacterTarget, "thumbnailAssetId">, firstAssetId?: string | null): string | null {
+export const isManualFavorite = (id: string) => id.startsWith("manual-");
+
+/** A manual favourite has presentation data, but never a character folder. */
+export function favoriteTargets(entries: FavoriteEntry[], targets: CharacterTarget[]): CharacterTarget[] {
+  return entries.flatMap<CharacterTarget>(entry => isManualFavorite(entry.characterId) ? [{
+    id: entry.characterId, displayName: entry.name ?? "", seriesClassificationId: null,
+    linkedClassificationId: null, enabled: false, manualOnly: true, revision: 0,
+    references: [], ready: false, fingerprint: "",
+  }] : targets.find(target => target.id === entry.characterId) ?? []);
+}
+
+export function createFavoriteCommand(name: string): FavoriteCommand {
+  return { op: "create", id: `manual-${crypto.randomUUID()}`, name: name.trim() };
+}
+
+export function linkFavoriteCommand(id: string, characterId: string): FavoriteCommand {
+  return { op: "link", id, characterId };
+}
+
+export function representativeAsset(entry: Pick<FavoriteEntry, "coverAssetId"> | undefined, target: Pick<CharacterTarget, "thumbnailAssetId"> & { id?: string }, firstAssetId?: string | null): string | null {
+  if (target.id && isManualFavorite(target.id)) return entry?.coverAssetId ?? null;
   return entry?.coverAssetId ?? target.thumbnailAssetId ?? firstAssetId ?? null;
 }
 

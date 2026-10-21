@@ -17,31 +17,31 @@ const exitTime=(node:Element)=>prefersReducedMotion()?motionTime('--motion-micro
  * taking input. Both are transitions, so a quick reopen or close reverses from where it is. A
  * work covering the sheet hides it at once, and uncovering shows it in place: the rise plays only
  * when the sheet opens. */
-export function Overlay({open,covered=false,title,count,onClose,children,deferContent=false,headerActions,onBack}:{open:boolean;covered?:boolean;title:string;count?:number;onClose():void;children:ReactNode|((ready:boolean)=>ReactNode);deferContent?:boolean;headerActions?:ReactNode;onBack?():void}) {
+export function Overlay({open,covered=false,preparing=false,retainLayout=false,noMotion=false,title,count,onClose,children,deferContent=false,headerActions,onBack}:{open:boolean;covered?:boolean;preparing?:boolean;retainLayout?:boolean;noMotion?:boolean;title:string;count?:number;onClose():void;children:ReactNode|((ready:boolean)=>ReactNode);deferContent?:boolean;headerActions?:ReactNode;onBack?():void}) {
   const id=useId(),host=useRef<HTMLDivElement>(null),panel=useRef<HTMLDivElement>(null),opener=useRef<HTMLElement|null>(null);
-  const visible=open&&!covered;
+  const visible=open&&!covered&&!preparing;
   // A closed sheet stays painted while it slides down; covering ends that at once.
   const [leaving,setLeaving]=useState(false);
   const previous=useRef({open:false,visible:false});
   useLayoutEffect(()=>{
-    const before=previous.current;previous.current={open,visible};
+    const before=previous.current;previous.current={open:open&&!preparing,visible};
     const element=host.current;
     if(visible){
       setLeaving(false);
       // Only an opening rises: a sheet returning from under a work shows in place, and one
       // reopened while it was still leaving turns back from where it is.
-      if(before.open||leaving||!element)return;
+      if(before.open||leaving||noMotion||!element)return;
       element.dataset.entering='';
       // Establish the starting position before the first paint, then let it transition.
       for(const part of [element,...element.children])void getComputedStyle(part).translate;
       const frame=requestAnimationFrame(()=>{delete element.dataset.entering;});
       return()=>{cancelAnimationFrame(frame);delete element.dataset.entering;};
     }
-    if(!before.visible||covered||!element){setLeaving(false);return;}
+    if(!before.visible||covered||noMotion||!element){setLeaving(false);return;}
     setLeaving(true);
     const timer=window.setTimeout(()=>setLeaving(false),exitTime(element));
     return()=>window.clearTimeout(timer);
-  },[open,visible]);// eslint-disable-line react-hooks/exhaustive-deps
+  },[open,visible,noMotion]);// eslint-disable-line react-hooks/exhaustive-deps
   const [entered,setEntered]=useState(false);
   useEffect(()=>{
     if(!open){setEntered(false);return;}
@@ -87,7 +87,7 @@ export function Overlay({open,covered=false,title,count,onClose,children,deferCo
     const dy=event.clientY-from.y,dx=Math.abs(event.clientX-from.x);
     if(event.type==='pointerup'&&dy>=64&&dy>dx)onClose();
   };
-  return <div ref={host} className="mobile-overlay" data-state={visible?'open':'closed'} style={{display:visible||leaving?undefined:'none'}} aria-hidden={!visible||undefined} inert={!visible||undefined}>
+  return <div ref={host} className="mobile-overlay" data-state={visible||preparing||retainLayout&&open?'open':'closed'} data-no-motion={noMotion||undefined} style={{display:visible||leaving||preparing||retainLayout&&open?undefined:'none',visibility:!visible&&!leaving?'hidden':undefined}} aria-hidden={!visible||undefined} inert={!visible||undefined}>
     <div className="mobile-overlay__scrim" onClick={onClose}/>
     <div ref={panel} className="mobile-overlay__panel" role="dialog" aria-modal="true" aria-labelledby={id}>
       <div className="mobile-overlay__header" onPointerDown={down} onPointerUp={end} onPointerCancel={end}>

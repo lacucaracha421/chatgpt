@@ -1,5 +1,6 @@
 .favorite-view { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.favorite-view__scroll { flex: 1; min-height: 0; overflow: auto; }
+.favorite-view__body { position: relative; flex: 1; min-height: 0; }
+.favorite-view__scroll { position: absolute; inset: 0; min-height: 0; overflow: auto; }
 .favorite-view__busy { position: absolute; right: var(--space-4); bottom: var(--space-2); color: var(--color-faint); font-size: var(--type-meta); pointer-events: none; }
 .favorite-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
 /* A curated portrait is a media object, sharing the character shelf's proportions and carry face. */
@@ -73,6 +74,17 @@
 .favorite-cover-dialog__gallery > .asset-gallery { flex: 1; min-height: 0; }
 .favorite-cover-dialog__side { display: flex; flex-direction: column; gap: var(--space-3); }
 .favorite-cover-preview { position: relative; aspect-ratio: 132 / 170; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); cursor: grab; touch-action: none; }
+.favorite-name-card { display: flex; box-sizing: border-box; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: var(--space-1); width: 100%; height: 100%; padding: var(--space-4); background: var(--color-surface); text-align: left; overflow: hidden; }
+.favorite-portrait-image { position: absolute; inset: 0; }
+.favorite-name-card > strong { margin: 0; max-width: 100%; font-size: var(--type-title); font-weight: 600; line-height: var(--line-ui); white-space: normal; overflow-wrap: anywhere; }
+.favorite-name-card > small { max-width: 100%; color: var(--color-faint); font-size: var(--type-meta); white-space: normal; overflow-wrap: anywhere; }
+.favorite-picker__create, .favorite-picker__select { width: 100%; border: 0; background: none; color: var(--color-text); font: inherit; text-align: left; }
+.favorite-picker__create { color: var(--color-muted); }
+.favorite-picker__create:disabled, .favorite-picker__select:disabled { cursor: default; }
+.favorite-manual-assets { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3) 0; color: var(--color-faint); font-size: var(--type-meta); border-top: 1px solid var(--color-border); }
+.favorite-cover-drop { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px dashed var(--color-border); color: var(--color-muted); text-align: center; }
+.favorite-cover-drop[data-over] { background: var(--color-surface-hover); }
+.favorite-cover-drop p { margin: 0; font-size: var(--type-body); }
 @media (prefers-reduced-motion: reduce) {
   .favorite-card__count, .favorite-profile__swap { transition: none; }
   .favorite-editor, .favorite-grid { animation: none; }

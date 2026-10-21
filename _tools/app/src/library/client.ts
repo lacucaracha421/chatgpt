@@ -767,6 +767,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<MetadataImportPlan>("inspect_metadata_import", { folder }),
   ingestMedia: (request: IngestMediaInput) =>
     invoke<IngestOutcome>("ingest_media", { request }),
+  stageClipboardImage: (mimeType, bytes) => invoke<string>("stage_clipboard_image", { mimeType, bytes }),
+  removeClipboardImage: (path) => invoke<void>("remove_clipboard_image", { path }),
   preparePendingVideos: (limit) =>
     invoke<VideoPreparationProgress>("prepare_pending_videos", { limit }),
   retryVideoPreparation: (assetId) =>

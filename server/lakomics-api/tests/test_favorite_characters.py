@@ -118,9 +118,75 @@ class FavoriteCharactersTests(unittest.TestCase):
         with self.get_db() as db:
             self.assertEqual(favorite_characters.status_signal(db), 2)
 
+    def test_create_manual_defaults_replay_and_list_commands(self):
+        create = {"op": "create", "id": "manual-new", "name": "  New character  ",
+                  "seriesName": "Series"}
+        first = self.send({"op": "add", "ids": ["a"]}, create)
+        self.assertEqual(first["version"], 1)
+        self.assertEqual(first["entries"][1], {
+            "characterId": "manual-new", "name": "New character", "seriesName": "Series",
+            "coverAssetId": None, "coverY": 50, "profile": {}, "workIds": [], "extraWorks": []})
+        self.assertEqual(self.send({**create, "name": "Replay name"}), first)
+        ordered = self.send({"op": "order", "ids": ["manual-new", "a"]})
+        self.assertEqual([entry["characterId"] for entry in ordered["entries"]], ["manual-new", "a"])
+        removed = self.send({"op": "remove", "ids": ["manual-new"]})
+        self.assertEqual(removed["entries"], first["entries"][:1])
+        with self.get_db() as db:
+            self.assertEqual(favorite_characters.status_signal(db), removed["revision"])
+
+    def test_link_keeps_position_and_data_and_replays(self):
+        payload = {"coverAssetId": "imported-image", "coverY": 22.5,
+                   "profile": {"memo": "Keep me"}, "workIds": ["work:1"], "extraWorks": ["Other"]}
+        before = self.send({"op": "add", "ids": ["a"]},
+                           {"op": "create", "id": "manual-new", "name": "Name", "seriesName": "Series"},
+                           {"op": "update", "id": "manual-new", "set": payload},
+                           {"op": "add", "ids": ["b"]})
+        link = {"op": "link", "id": "manual-new", "characterId": "linked"}
+        linked = self.send(link)
+        self.assertEqual(linked["entries"], [before["entries"][0],
+                         {"characterId": "linked", **payload}, before["entries"][2]])
+        self.assertEqual(linked["revision"], before["revision"] + 1)
+        self.assertEqual(self.send(link), linked)
+
+    def test_link_conflict_rolls_back_whole_request(self):
+        before = self.send({"op": "add", "ids": ["a"]},
+                           {"op": "create", "id": "manual-new", "name": "Name"})
+        reply = self.client.post(PREFIX, headers=self.auth, json={"commands": [
+            {"op": "update", "id": "a", "set": {"coverY": 10}},
+            {"op": "link", "id": "manual-new", "characterId": "a"}]})
+        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(reply.json(), {"detail": {"code": "favoriteCharacterExists"}})
+        self.assertEqual(self.read(), before)
+
+    def test_update_manual_names_and_ignore_names_on_asset_entries(self):
+        before = self.send({"op": "add", "ids": ["a"]},
+                           {"op": "create", "id": "manual-new", "name": "Name"})
+        self.assertNotIn("seriesName", before["entries"][1])
+        names = {"name": "  Changed  ", "seriesName": "Series"}
+        self.assertEqual(self.send({"op": "update", "id": "a", "set": names}), before)
+        changed = self.send({"op": "update", "id": "manual-new", "set": names})
+        self.assertEqual(changed["entries"][0], before["entries"][0])
+        self.assertEqual(changed["entries"][1], {
+            **before["entries"][1], "name": "Changed", "seriesName": "Series"})
+        self.assertEqual(changed["revision"], before["revision"] + 1)
+        cleared = self.send({"op": "update", "id": "manual-new", "set": {"seriesName": ""}})
+        self.assertEqual(cleared["entries"][1]["seriesName"], "")
+
     def test_validation_rejects_invalid_payloads_without_writes(self):
         invalid_commands = [
             {"op": "add", "ids": ["character:invalid"]},
+            {"op": "add", "ids": ["manual-new"]},
+            {"op": "create", "id": "asset", "name": "Name"},
+            {"op": "create", "id": "manual-", "name": "Name"},
+            {"op": "create", "id": "manual-" + "x" * 58, "name": "Name"},
+            {"op": "create", "id": "manual-new"},
+            {"op": "create", "id": "manual-new", "name": "  "},
+            {"op": "create", "id": "manual-new", "name": "x" * 121},
+            {"op": "create", "id": "manual-new", "name": "Name", "seriesName": "x" * 121},
+            {"op": "link", "id": "a", "characterId": "b"},
+            {"op": "link", "id": "manual-new", "characterId": "manual-other"},
+            {"op": "update", "id": "manual-new", "set": {"name": "  "}},
+            {"op": "update", "id": "manual-new", "set": {"name": None}},
             {"op": "update", "id": "a", "set": {"coverAssetId": "bad/id"}},
             {"op": "update", "id": "a", "set": {"coverY": 101}},
             {"op": "update", "id": "a", "set": {"profile": {"birthMonth": 3}}},

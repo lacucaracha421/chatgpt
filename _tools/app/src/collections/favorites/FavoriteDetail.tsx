@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { FolderOpenIcon, PhotoIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { CharacterTarget } from "../../characters/api";
 import type { CharacterBrowsePage } from "../../characters/hubApi";
@@ -17,14 +17,15 @@ import { ContextMenu } from "../../shared/ui/ContextMenu";
 import { CollectionCard } from "../CollectionCard";
 import { collectionCoverUrl } from "../CollectionBrowser";
 import { FavoriteProfileEditor } from "./FavoriteProfileEditor";
-import { birthdayDays } from "./model";
+import { birthdayDays, isManualFavorite } from "./model";
 import { FavoritePortrait } from "./FavoritePortrait";
 import { browseFavoriteAssets, type FavoriteCatalog } from "./useFavoriteCatalog";
 
-export function FavoriteDetail({ target, entry, catalog, initialPage, collections, editing, busy, onEdit, onSave, onCover, onFolder, onWork }: {
+export function FavoriteDetail({ target, entry, catalog, initialPage, collections, editing, busy, onEdit, onSave, onCover, onFolder, onWork, linkPicker }: {
   target: CharacterTarget; entry: FavoriteEntry; catalog: FavoriteCatalog; initialPage: CharacterBrowsePage; collections: CollectionSummary[];
   editing: boolean; busy: boolean; onEdit(value: boolean): void; onSave(set: FavoriteSet): Promise<boolean>;
   onCover(): void; onFolder(): void; onWork(work: CollectionSummary): void;
+  linkPicker: ReactNode;
 }) {
   const { gateway } = useLibrary();
   const { privacyMode } = usePrivacy();
@@ -32,8 +33,10 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
   const [viewer, setViewer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextAsset, setContextAsset] = useState<string | null>(null);
+  useLayoutEffect(() => { setPage(initialPage); setViewer(null); setContextAsset(null); }, [initialPage]);
   const loading = useRef(false);
-  const series = catalog.classifications.find(folder => folder.id === target.seriesClassificationId)?.name ?? "";
+  const manual = isManualFavorite(entry.characterId);
+  const series = entry.seriesName ?? catalog.classifications.find(folder => folder.id === target.seriesClassificationId)?.name ?? "";
   const profile = entry.profile;
   const birthday = profile.birthMonth && profile.birthDay ? `${profile.birthMonth}월 ${profile.birthDay}일` : null;
   const rows = [
@@ -64,7 +67,7 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
   return <>
     <div className="favorite-detail">
       <aside className="favorite-profile" aria-label="캐릭터 프로필">
-        <div className="favorite-profile__image"><FavoritePortrait coverId={catalog.unavailableAssets.has(entry.coverAssetId ?? "") ? null : entry.coverAssetId} thumbnailId={target.thumbnailAssetId} firstAssetId={catalog.firstAssets[target.id] ?? page.items[0]?.id} coverY={entry.coverY} alt={target.displayName} />
+        <div className="favorite-profile__image"><FavoritePortrait name={entry.name} seriesName={entry.seriesName} coverId={catalog.unavailableAssets.has(entry.coverAssetId ?? "") ? null : entry.coverAssetId} thumbnailId={target.thumbnailAssetId} firstAssetId={catalog.firstAssets[target.id] ?? page.items[0]?.id} coverY={entry.coverY} alt={target.displayName} />
           <span className="favorite-profile__swap"><Button variant="quiet" size="sm" onClick={onCover}><PhotoIcon aria-hidden="true" />바꾸기</Button></span>
         </div>
         {editing ? <FavoriteProfileEditor name={target.displayName} series={series} entry={entry} collections={collections} busy={busy} onCancel={() => onEdit(false)} onSave={onSave} /> : <>
@@ -79,14 +82,14 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
           <div className="favorite-works__covers">{works.map(work => <CollectionCard key={work.id} collection={work} selected={false} coverUrl={collectionCoverUrl(work)} meta={false} onClick={() => onWork(work)} />)}</div>
           {!!entry.extraWorks.length && <ul className="favorite-works__extra">{entry.extraWorks.map(name => <li key={name}>{name}</li>)}</ul>}
         </section>}
-        <ContextMenu items={[{ id: "representative", label: "대표 이미지로", disabled: !contextAsset || busy, onSelect: () => { if (contextAsset) void onSave({ coverAssetId: contextAsset, coverY: 50 }); } }]}><section className="favorite-assets" aria-label="캐릭터 에셋" onContextMenuCapture={event => {
+        {manual ? <div className="favorite-manual-assets"><span>에셋에 없는 캐릭터</span>{linkPicker}</div> : <ContextMenu items={[{ id: "representative", label: "대표 이미지로", disabled: !contextAsset || busy, onSelect: () => { if (contextAsset) void onSave({ coverAssetId: contextAsset, coverY: 50 }); } }]}><section className="favorite-assets" aria-label="캐릭터 에셋" onContextMenuCapture={event => {
           setContextAsset((event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId ?? null);
         }}>
           <AssetGallery items={page.items} privacyMode={privacyMode} groupDates={false} scopeKey={`favorite:${target.id}`} totalCount={page.totalCount}
             intro={<SectionLabel title="에셋" count={page.totalCount} unit="장" actions={<Button variant="quiet" size="sm" onClick={onFolder}><FolderOpenIcon aria-hidden="true" />폴더 열기</Button>} />}
             onOpen={asset => setViewer(asset.id)} onToggleFavorite={asset => void toggleFavorite(asset.id)} hasNextPage={!!page.nextCursor} onLoadNextPage={() => void loadMore()} />
           {!page.totalCount && <EmptyState inline title="이 캐릭터의 이미지가 없습니다" />}
-        </section></ContextMenu>
+        </section></ContextMenu>}
       </div>
     </div>
     <AssetViewer items={page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} totalCount={page.totalCount} classifications={catalog.classifications}

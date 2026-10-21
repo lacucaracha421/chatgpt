@@ -14,6 +14,8 @@ export type FavoriteProfile = {
 
 export type FavoriteEntry = {
   characterId: string;
+  name?: string;
+  seriesName?: string;
   coverAssetId: string | null;
   coverY: number;
   profile: FavoriteProfile;
@@ -31,6 +33,8 @@ export type FavoriteSet = Partial<Omit<FavoriteEntry, "characterId">>;
 
 export type FavoriteCommand =
   | { op: "add" | "remove" | "order"; ids: string[] }
+  | { op: "create"; id: string; name: string; seriesName?: string }
+  | { op: "link"; id: string; characterId: string }
   | { op: "update"; id: string; set: FavoriteSet };
 
 export type LibrarySummary = {
@@ -1768,6 +1772,8 @@ export interface LibraryGateway {
   applyMangaCatalogRecoverySelection?(selections: MangaCatalogRecoverySelection[]): Promise<MangaCatalogRecoveryApplyResult>;
   inspectMetadataImport?(folder: string): Promise<MetadataImportPlan>;
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
+  stageClipboardImage?(mimeType: string, bytes: number[]): Promise<string>;
+  removeClipboardImage?(path: string): Promise<void>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
   retryVideoPreparation(assetId: string): Promise<void>;
   inspectBookImport(root: string): Promise<BookImportPlan>;
