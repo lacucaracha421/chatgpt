@@ -53,6 +53,7 @@
         const focusedId = session.items[session.index]?.id;
         rows.replaceChildren(); session.nodes = []; session.items = [];
         context.imageModel = available.imageModel || "";
+        context.imageCover = available.imageCover;
         for (const item of model.items(context, { ...available, inFrame: win !== win.top, clipboard: Boolean(win.navigator.clipboard), pageState: actions.pageState?.(), href: win.location.href, canGoBack: win.navigation?.canGoBack ?? win.history.length > 1, canGoForward: win.navigation?.canGoForward === true })) {
           if (item.separator) { const separator = doc.createElement("div"); separator.className = "sep"; separator.setAttribute("role", "separator"); rows.append(separator); continue; }
           const index = session.items.length; session.items.push(item);
@@ -95,6 +96,7 @@
           const available = await send({ type: "translation:settings" });
           if (departing || context.departed || context.href !== win.location.href || !canTranslateImage(image, event)) return;
           context.imageModel = available?.imageModel || "";
+          context.imageCover = available?.imageCover;
           const item = model.items({ imageUrl: context.imageUrl }, { ...available, pageState: null }).find(item => item.id === "image.translate");
           if (item?.setup) await send({ type: "context:settings" });
           else if (item && !item.disabled) await actions.activate("image.translate", context, origin, event);

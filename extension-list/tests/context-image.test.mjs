@@ -24,7 +24,7 @@ function image({status = 200, type = 'image/png', length, size = 2000, url, stre
   };
 }
 
-function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key', anthropicApiKey: 'ant-key'}, stored = {}, pictures = {}, reply = answer([{original: 'またね！', korean: '또 봐!'}]), dims = {width: 800, height: 600}, finish, dnr} = {}) {
+function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key', anthropicApiKey: 'ant-key'}, stored = {}, pictures = {}, reply = answer([{original: 'またね！', korean: '또 봐!'}]), dims = {width: 800, height: 600}, finish, dnr, pixels} = {}) {
   const memory = {'lakomics:translation:storage-v4': true, 'lakomics:translation:v1': {enabled: false, ...keys, model: 'google/gemini-3.1-flash-lite', fallbackModel: '', imageModel: model, ...stored}};
   const calls = [], fetched = [], canvases = [], bitmaps = [], warnings = [];
   const fetch = async (url, init) => {
@@ -40,7 +40,7 @@ function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key',
   };
   class OffscreenCanvas {
     constructor(width, height) { this.width = width; this.height = height; canvases.push(this); }
-    getContext() { return {fillRect() {}, drawImage() {}}; }
+    getContext() { return {canvas: this, fillRect() {}, drawImage() {}, getImageData() { if (!pixels) throw new Error('sampling unavailable'); return pixels; }}; }
     async convertToBlob(options) { this.options = options; return new Blob([new Uint8Array([1, 2, 3])], {type: options.type}); }
   }
   const createImageBitmap = async blob => { const bitmap = {...dims, closed: false, close() { this.closed = true; }}; bitmaps.push({bitmap, type: blob.type}); return bitmap; };
@@ -52,6 +52,55 @@ function worker({model = 'anthropic:claude-haiku-5-5', keys = {apiKey: 'or-key',
     restart: () => vm.runInContext(service, ctx), rules: ctx.LakomicsTranslationCore.koreanRules};
 }
 const IMG = 'https://img.test/page1.png';
+
+test('paper cover defaults, validation and own-page setting boundary', async () => {
+  for (const stored of [{}, {imageCover: 'unknown'}, {imageCover: null}]) {
+    const f = worker({stored});
+    assert.equal((await f.handle({type: 'translation:settings'})).imageCover, 'paper');
+  }
+  const f = worker({stored: {imageCover: 'card'}});
+  assert.equal((await f.handle({type: 'translation:settings'})).imageCover, 'card');
+  assert.equal((await f.handle({type: 'translation:update', imageCover: 'paper'})).code, 'forbidden_sender');
+  assert.equal((await f.handle({type: 'translation:settings'})).imageCover, 'card');
+  assert.equal((await f.handle({type: 'translation:update', imageCover: 'bad'}, own)).imageCover, 'paper');
+  assert.equal((await f.handle({type: 'translation:update', imageCover: 'card'}, own)).imageCover, 'card');
+  f.restart();
+  assert.equal((await f.handle({type: 'translation:settings'})).imageCover, 'card');
+});
+
+test('paper colour picks the mean of the dominant bucket within the expanded box', () => {
+  const ctx = vm.createContext({}); vm.runInContext(core.at(-1), ctx);
+  const pick = ctx.LakomicsTranslationCore.image.paperColour;
+  const width = 24, height = 24, data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = (y * width + x) * 4;
+    data.set(x < 12 && y < 12 ? [210 + (x % 4), 195, 182, 255] : [0, 0, 0, 255], i);
+  }
+  // This box plus four-pixel bleed samples x/y 0,2,...,10 only.
+  assert.equal(pick({width, height, data}, {x0: 0, y0: 0, x1: 333, y1: 333}), '#d3c3b6');
+  assert.equal(pick({width, height, data}, {x0: 500, y0: 500, x1: 1000, y1: 1000}), '#000000');
+  data.fill(0); // Transparent input is composited onto white, like prepare().
+  assert.equal(pick({width, height, data}, {x0: 0, y0: 0, x1: 1000, y1: 1000}), '#ffffff');
+  assert.equal(pick(null, {}), '#ffffff');
+});
+
+test('worker attaches sampled paper to boxed lines and falls back when sampling fails', async () => {
+  const data = new Uint8ClampedArray(20 * 20 * 4);
+  for (let i = 0; i < data.length; i += 4) data.set([32, 40, 45, 255], i);
+  for (const type of ['image/png', 'image/gif']) for (const pixels of [undefined, {width: 20, height: 20, data}]) {
+    const f = worker({pixels, dims: {width: 20, height: 20}, pictures: {[IMG]: image({type})}, reply: answer([
+      {original: 'a', korean: '가', box: {x0: 2, y0: 2, x1: 18, y1: 18}}, {original: 'b', korean: '나'},
+    ])});
+    const result = await f.handle({type: 'translation:image', url: IMG});
+    assert.equal(result.ok, true);
+    assert.equal(result.lines[0].paper, pixels ? '#20282d' : '#ffffff');
+    assert.equal(result.lines[0].paperFlat, true);
+    assert.equal('paper' in result.lines[1], false);
+    assert.equal('paperFlat' in result.lines[1], false);
+    assert.equal(f.bitmaps[0].bitmap.closed, true);
+  }
+});
+
 
 test('worker start atomically replaces the pixiv session rule and repeated wakes are idempotent', async () => {
   const updates = [], rules = new Map([[1001, {id: 1001, action: {type: 'block'}}], [999, {id: 999}]]);
@@ -193,7 +242,8 @@ test('the long edge is cut to 1568 px as JPEG; small pictures pass through uncha
 
   const small = worker({pictures: {[IMG]: image({type: 'image/png', size: 300})}, dims: {width: 800, height: 600}});
   await small.handle({type: 'translation:image', url: IMG});
-  assert.equal(small.canvases.length, 0);
+  assert.equal(small.canvases.length, 1);
+  assert.equal(small.canvases[0].options, undefined, "sampling does not re-encode small pictures");
   assert.equal(small.calls[0].body.messages[0].content[0].source.media_type, 'image/png');
   assert.equal(small.calls[0].body.messages[0].content[0].source.data, btoa(String.fromCharCode(...bytes(300))));
 
@@ -375,7 +425,7 @@ function page(html = '<img id="pic" src="https://img.test/a.png">', {send, touch
   if (img) {
     Object.defineProperty(img, 'getBoundingClientRect', {configurable: true, value: () => ({left: 100, right: 300, top: 50, bottom: 250, width: 200, height: 200})});
   }
-  const context = () => { const value = w.LakomicsContextModel.snapshot(img, w.document, w); value.imageModel = 'anthropic:claude-haiku-5-5'; return value; };
+  const context = () => { const value = w.LakomicsContextModel.snapshot(img, w.document, w); value.imageModel = 'anthropic:claude-haiku-5-5'; value.imageCover = 'card'; return value; };
   const popover = () => { const host = w.document.querySelector('lakomics-image-popover'); return host ? roots.get(host).querySelector('.popA') : null; };
   return {w, user, doc: w.document, timer, sent, clipboard, actions, context, popover, roots, watchers, img, model: w.LakomicsContextModel, close: () => w.close()};
 }
@@ -1849,6 +1899,12 @@ test('options lists only vision-capable models for 이미지 글자 번역 and s
   select.value = 'anthropic:claude-sonnet-5-5'; select.dispatchEvent(new w.Event('change'));
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(plain(sent.find(message => message.type === 'translation:update')), {type: 'translation:update', imageModel: 'anthropic:claude-sonnet-5-5'});
+  const cover = w.document.getElementById('context-menu-image-cover');
+  assert.equal(cover.value, 'paper');
+  cover.value = 'card'; cover.dispatchEvent(new w.Event('change'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(sent.find(message => message.imageCover)?.imageCover, 'card');
+  assert.equal(cover.value, 'card');
   w.close();
 });
 
@@ -2041,4 +2097,143 @@ test('parseLines without a convention still reads the old 0-1000 object', () => 
   const deepseek = {convention: image.convention('neuralwatt:deepseek-v4.1-flash'), width: 1124, height: 1568};
   assert.match(image.instruction([], deepseek), /normalized to 0–1000/);
   assert.deepEqual(plain(image.parseLines({lines: [{original: 'a', korean: '가', box: {x0: 700, y0: 740, x1: 800, y1: 860}}]}, deepseek)[0].box), {x0: 700, y0: 740, x1: 800, y1: 860});
+});
+
+test('paper geometry keeps the anchor, grows width before height and falls back instead of spilling', () => {
+  const f = page(), {fitCover} = f.w.LakomicsContextImage;
+  const box = {x: 100, y: 80, w: 40, h: 80};
+  const easy = fitCover({box, W: 400, H: 300, chars: 8, measure: size => ({overflow: 0, height: size * 1.22})});
+  assert.equal(easy.w, 48); assert.equal(easy.h, 88);
+  assert.equal(easy.x + easy.w / 2, 120); assert.equal(easy.y + easy.h / 2, 120);
+  assert.equal(easy.f, 17); assert.equal(easy.wrap, false);
+  const wide = fitCover({box, W: 400, H: 300, measure: (size, r, pad) => ({overflow: Math.max(0, 80 - (r.w - 2 * pad)), height: size * 1.22})});
+  assert.ok(wide.w >= 86); assert.equal(wide.h, 88); assert.equal(wide.wrap, false);
+  const tall = fitCover({box, W: 400, H: 300, measure: (size, r) => ({overflow: 0, height: 180})});
+  assert.equal(tall.w, 96); assert.ok(tall.h >= 186); assert.equal(tall.wrap, false);
+  const last = fitCover({box: {x: 0, y: 0, w: 40, h: 80}, W: 50, H: 90, measure: () => ({overflow: 500, height: 500})});
+  assert.equal(last.fallback, true); assert.equal(last.f, 11); assert.equal(last.wrap, false);
+  assert.ok(last.x >= 0 && last.y >= 0 && last.x + last.w <= 50 && last.y + last.h <= 90);
+  f.close();
+});
+
+test('paper growth stays inside the frame and leaves neighbouring OCR boxes clear on either axis', () => {
+  const f = page(), {fitCover} = f.w.LakomicsContextImage;
+  const box = {x: 100, y: 80, w: 40, h: 40};
+  const obstacles = [{x: 148, y: 60, w: 40, h: 100}, {x: 60, y: 132, w: 100, h: 40}];
+  const fit = fitCover({box, W: 200, H: 180, obstacles,
+    measure: (size, r, pad) => ({overflow: Math.max(0, 70 - (r.w - 2 * pad)), height: 80})});
+  assert.equal(fit.fallback, false);
+  assert.ok(fit.x + fit.w <= obstacles[0].x - 2);
+  assert.ok(fit.y + fit.h <= obstacles[1].y - 2);
+  assert.ok(fit.x <= box.x && fit.x + fit.w >= box.x + box.w);
+  assert.ok(fit.y <= box.y && fit.y + fit.h >= box.y + box.h);
+  assert.ok(fit.x >= 0 && fit.y >= 0 && fit.x + fit.w <= 200 && fit.y + fit.h <= 180);
+  assert.ok(fit.x + fit.w / 2 < box.x + box.w / 2, 'width grows into the free left side');
+  assert.ok(fit.y + fit.h / 2 < box.y + box.h / 2, 'height grows into the free top side');
+  f.close();
+});
+
+test('paper can shrink to 11px but impossible text signals a card fallback', () => {
+  const f = page(), {fitCover, MIN_FONT} = f.w.LakomicsContextImage;
+  const options = {box: {x: 10, y: 10, w: 40, h: 30}, W: 60, H: 50};
+  const small = fitCover({...options, measure: size => ({overflow: size > 11 ? 1 : 0, height: size * 1.22})});
+  assert.equal(small.f, 11); assert.equal(small.fallback, false); assert.equal(MIN_FONT, 14);
+  const dense = fitCover({...options, measure: size => ({overflow: 0, height: size * 12})});
+  assert.equal(dense.fallback, true); assert.equal(dense.wrap, false);
+  f.close();
+});
+
+test('paper sampling marks flat colours and busy backgrounds and sends the flag with the colour', async () => {
+  const ctx = vm.createContext({}); vm.runInContext(core.at(-1), ctx);
+  const sample = ctx.LakomicsTranslationCore.image.paperSample;
+  const width = 20, height = 20, data = new Uint8ClampedArray(width * height * 4);
+  const box = {x0: 0, y0: 0, x1: 1000, y1: 1000}, pixels = {width, height, data};
+  for (let i = 0; i < data.length; i += 4) data.set([240, 240, 240, 255], i);
+  assert.deepEqual(plain(sample(pixels, box)), {paper: '#f0f0f0', paperFlat: true});
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (Math.floor(x / 2) % 2) data.set([30, 30, 30, 255], (y * width + x) * 4);
+  }
+  assert.equal(sample(pixels, box).paperFlat, false);
+  const f = worker({pixels, dims: {width, height}, pictures: {[IMG]: image()},
+    reply: answer([{original: 'caption', korean: '설명', box: {x0: 0, y0: 0, x1: 20, y1: 20}}])});
+  const result = await f.handle({type: 'translation:image', url: IMG});
+  assert.equal(result.lines[0].paperFlat, false);
+  assert.match(result.lines[0].paper, /^#[0-9a-f]{6}$/);
+});
+
+test('paper rendering keeps interactive notes, original toggle and cached card choice', async () => {
+  const f = page(undefined, {send: async () => ({ok: true, lines: noteLines})});
+  const context = f.context(); delete context.imageCover;
+  await f.actions.activate('image.translate', context, origin, gesture);
+  let v = notesView(f);
+  const labels = [...v.root.querySelectorAll('.paper-text')];
+  assert.equal(labels.length, 2);
+  assert.ok(labels.every(label => label.getAttribute('aria-hidden') === 'true' && label.querySelector('[lang="ko"]')));
+  assert.ok(v.notes.every(note => !note.querySelector('.nt') && note.getAttribute('aria-label')));
+  assert.equal(v.tags.length, 1);
+  f.user(() => v.notes[0].click());
+  assert.equal(notesView(f).card.querySelector('.ko').textContent, noteLines[0].korean);
+  f.user(() => v.pill.querySelector('.peek-btn').click());
+  assert.equal(v.box.classList.contains('peek'), true);
+  assert.equal(v.notes[0].tabIndex, -1);
+  f.user(() => v.pill.querySelector('.peek-btn').click());
+  assert.equal(v.box.classList.contains('peek'), false);
+  await f.actions.activate('image.translate', {...context, imageCover: 'card'}, origin, gesture);
+  v = notesView(f);
+  assert.equal(v.root.querySelectorAll('.paper-text').length, 0);
+  assert.ok(v.notes.every(note => note.querySelector('.nt')));
+  assert.equal(f.sent.filter(message => message.type === 'translation:image').length, 1, 'cover changes reuse translated lines');
+  f.actions.destroy(); f.close();
+});
+
+test('paper pairs stack together while busy and cramped lines become cards above them', async () => {
+  const lines = [
+    {original: 'large', korean: '큰 말풍선', box: {x0: 50, y0: 50, x1: 400, y1: 400}},
+    {original: 'small', korean: '작은 글', box: {x0: 600, y0: 100, x1: 800, y1: 240}},
+    {original: 'busy', korean: '그림 속 설명', paper: '#202020', paperFlat: false, box: {x0: 100, y0: 600, x1: 400, y1: 800}},
+    {original: 'caption', korean: '작은메모에들어갈긴한국어번역문장', box: {x0: 650, y0: 650, x1: 700, y1: 700}},
+    {original: 'ドン', korean: '쿵', kind: 'sfx', box: {x0: 800, y0: 400, x1: 900, y1: 500}},
+  ];
+  const f = page(undefined, {send: async () => ({ok: true, lines})});
+  const bounds = f.w.HTMLElement.prototype.getBoundingClientRect;
+  f.w.HTMLElement.prototype.getBoundingClientRect = function() {
+    return this.matches('span.nt') ? {width: this.textContent.length * 7, height: 18} : bounds.call(this);
+  };
+  const context = f.context(); delete context.imageCover;
+  await f.actions.activate('image.translate', context, origin, gesture);
+  const v = notesView(f), covers = v.notes.filter(node => node.classList.contains('paper-cover'));
+  assert.equal(covers.length, 2);
+  const labels = covers.map(node => [...v.root.querySelectorAll('.paper-text')].find(label => label.style.left === node.style.left && label.style.top === node.style.top));
+  assert.ok(labels.every(label => label && label.style.display !== 'none'));
+  assert.equal(Number(labels[0].style.zIndex), Number(covers[0].style.zIndex) + 1);
+  assert.ok(Number(labels[0].style.zIndex) < Number(covers[1].style.zIndex));
+  assert.equal(Number(labels[1].style.zIndex), Number(covers[1].style.zIndex) + 1);
+  for (const note of v.notes.slice(2)) {
+    assert.ok(note.querySelector('.nt'), 'fallback text lives in its card');
+    assert.ok(parseFloat(note.querySelector('.nt').style.fontSize) >= 14);
+    assert.ok(Number(note.style.zIndex) > Number(labels[1].style.zIndex));
+  }
+  assert.ok(Number(v.tags[0].style.zIndex) > Number(labels[1].style.zIndex));
+  f.user(() => v.notes[2].click());
+  assert.equal(notesView(f).card.querySelector('.ko').textContent, lines[2].korean);
+  assert.ok(Number(notesView(f).card.style.zIndex) > Math.max(...v.notes.map(node => Number(node.style.zIndex))));
+  pointer(f, v.notes[2], 'pointerdown', 5, 5); await f.timer.advance(220);
+  assert.equal(v.box.classList.contains('peek'), true);
+  pointer(f, v.notes[2], 'pointerup', 5, 5);
+  assert.equal(v.box.classList.contains('peek'), false);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true,
+    value: () => ({left: 100, right: 400, top: 50, bottom: 350, width: 300, height: 300})});
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
+  assert.ok(v.notes[2].querySelector('.nt') && v.notes[3].querySelector('.nt'));
+  assert.equal([...v.root.querySelectorAll('.paper-text')].filter(label => label.style.display !== 'none').length, 2);
+  v.notes[3].dispatchEvent(new f.w.Event('pointerenter'));
+  assert.equal(v.notes[3].classList.contains('raised'), true);
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true,
+    value: () => ({left: 0, right: 1200, top: 0, bottom: 1200, width: 1200, height: 1200})});
+  f.w.dispatchEvent(new f.w.Event('resize')); await f.timer.advance(16);
+  assert.equal(v.notes[3].classList.contains('paper-cover'), true, 'the larger image now has enough room for paper');
+  assert.equal(v.notes[3].classList.contains('raised'), false, 'returning to paper restores paired stacking');
+  assert.equal(v.notes[3].querySelector('.nt'), null);
+  assert.equal([...v.root.querySelectorAll('.paper-text')].filter(label => label.style.display !== 'none').length, 3);
+  f.actions.destroy(); f.close();
 });

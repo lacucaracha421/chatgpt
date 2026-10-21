@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.5.58 — 2026-10-21
+
+- Image translation defaults to paper-colour covers: erase the original text box
+  with its sampled background and centre Korean over it, using light text on dark
+  paper. Choose the previous card style under translation cover in options.
+  Older results without a sampled colour use white.
+- Bound paper covers around neighbouring text, pair their paint order, and use cards for cramped text or busy backgrounds.
+
 ## 3.5.57 — 2026-10-21
 
 - Add Neuralwatt as a third translation provider with DeepSeek V4 Flash and V4.1 Flash,

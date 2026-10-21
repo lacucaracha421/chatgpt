@@ -141,7 +141,7 @@ for (const scenario of ['translated', 'fractional', 'ordinary', 'invalid', 'empt
   let body;
   api.request = async (path, options) => { body = options.body; return {ok: true, data: {created: true}}; };
   const line = {original: ' original ', korean: ' 번역 ', box: {x0: 0, y0: 1, x1: 1000, y1: 900}};
-  const imageText = scenario === 'translated' ? [line] : scenario === 'fractional' ? [{...line, box: {x0: 0.4, y0: 1.2, x1: 999.6, y1: 899.5}}] : scenario === 'invalid'
+  const imageText = scenario === 'translated' ? [{...line, paper: '#20282d'}] : scenario === 'fractional' ? [{...line, box: {x0: 0.4, y0: 1.2, x1: 999.6, y1: 899.5}}] : scenario === 'invalid'
     ? [null, {original: 3, korean: 'bad'}, {original: '', korean: ' '},
        {original: 'x'.repeat(900), korean: 'k'.repeat(900), box: {...line.box, x1: -1}}, ...Array(65).fill(line)]
     : scenario === 'empty' ? [] : undefined;

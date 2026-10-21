@@ -236,6 +236,16 @@ Status: `IDEA` — user 2026-10-11: put readable manga volume files into Collect
 - **Storage direction to evaluate:** originals stay on the PC library disk; a lighter reading copy goes to object storage (Cloudflare R2, ~$0.015/GB-month, no egress fee; ~$3/month for 200 GB) because the new VPS disk (80 GB) cannot hold it; the tablet streams pages on demand and keeps only recently read volumes cached, like the catalog reader.
 - **Open questions:** import flow (attach files to a volume, folder/zip/cbz), which volumes count (owned only?), reading position sync between PC and tablet, privacy mode and NSFW masking in the reader, and whether the catalog reader component is reused.
 
+## IMG-COVER-001 — Paper-colour translation covers overlap (2026-10-21)
+
+Status: `DONE` 2026-10-21 (3.5.58: covers grow only up to the midpoint toward neighbouring text, text clips to its own cover, paper text may shrink to 11px, cramped lines and busy backgrounds become card notes, crisper edge; user checked on the tablet). Original report: The selectable 지면색/카드 cover (mockup `docs/prototypes/overlay-cover-20261021/`, option C) works, but on a JoJo fan comic page the 지면색 covers collide:
+
+- Neighbouring balloons: covers stay on their own boxes and every text sits above every cover, so the Korean of one balloon (맡겨달라고) runs into the next (부서진 베이글 장비가 잔뜩 있어서~… 부탁해~).
+- A small, dense in-picture caption (a paper note) got a long Korean sentence that spills far outside its cover and over another balloon's text (죠스케 군~), unreadable.
+- The soft 3 px edge reads as a white smear over line art where the cover bleeds past the balloon.
+
+Next: keep texts inside their own cover (shrink or clip, or fall back to a card note for boxes that cannot fit), let overlapping covers resolve against each other, and reconsider the bleed/blur on non-flat backgrounds. Decide before committing 3.5.58.
+
 <a id="somi-001--in-app-kone-somisoft-board-browsing-and-reading"></a>
 ## SOMI-001 — In-app kone.gg 소미소프트 board browsing and reading (2026-10-21)
 

@@ -296,6 +296,7 @@
     grouped("translation-fallback", models.filter(m => m.id !== translation.model), translation.fallbackModel, "사용 안 함");
     grouped("context-menu-model", models, translation.contextModel, `X 번역과 같게 (${label})`);
     grouped("context-menu-image-model", translation.imageModels || [], translation.imageModel);
+    $("context-menu-image-cover").value = translation.imageCover === "card" ? "card" : "paper";
     dictionaryEditor.receive((translation.userTerms || []).map(term => `${term.source} = ${term.korean}`).join("\n"));
     $("translation-dictionary-status").textContent = `${(translation.userTerms || []).length}개`;
     relationships();
@@ -320,7 +321,7 @@
       return result;
     }), done);
   }
-  for (const [id, key, out] of [["translation-model", "model", "x-status"], ["translation-fallback", "fallbackModel", "x-status"], ["context-menu-model", "contextModel", "context-menu-status"], ["context-menu-image-model", "imageModel", "context-menu-status"]]) {
+  for (const [id, key, out] of [["translation-model", "model", "x-status"], ["translation-fallback", "fallbackModel", "x-status"], ["context-menu-model", "contextModel", "context-menu-status"], ["context-menu-image-model", "imageModel", "context-menu-status"], ["context-menu-image-cover", "imageCover", "context-menu-status"]]) {
     $(id).onchange = () => {
       translation[key] = $(id).value; relationships();
       return updateTranslation({ [key]: $(id).value }, out, key === "model" ? "저장됨 · 번역 캐시 비움" : "저장됨");

@@ -141,6 +141,13 @@ and orientation changes keep the window inside the visual viewport. Before a dra
 each content update repositions using its actual height with a 12 px bottom inset;
 long lists scroll while the header and footer remain visible. On desktop,
 before dragging it follows the image and closes when the image leaves view.
+Positioned image notes default to paper-colour covers, with centred horizontal
+Korean and light text on dark backgrounds. The translation-cover option in the
+context-menu section switches between paper and the previous card style on the next render. Covers
+stay on their own text boxes; all labels paint above all covers. The worker samples
+the prepared image's dominant background colour; older results or sampling failures
+use white. Saving still uses the existing original/Korean/box whitelist, so the
+optional in-memory `paper` field does not change the saved translation contract.
 Results are cached in memory per image URL and model for the tab session.
 
 페이지 번역 (`translation:page`, 3.5.28): Google-Translate-style in-place translation of

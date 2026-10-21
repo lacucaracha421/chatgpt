@@ -87,6 +87,7 @@
         model: MODEL_BY_ID.has(current.model) ? current.model : DEFAULT_MODEL,
         contextModel: validContextModel(current.contextModel),
         imageModel: validImageModel(current.imageModel),
+        imageCover: validImageCover(current.imageCover),
         userTerms: core.normalizeUserTerms(current.userTerms),
         dictionaryRevision: Number.isSafeInteger(current.dictionaryRevision) && current.dictionaryRevision >= 0 ? current.dictionaryRevision : 0,
       };
@@ -106,6 +107,7 @@
   // Image text translation needs a model that reads pictures: Claude (Anthropic), Gemini or DeepSeek V4.1 Flash.
   // Gemini 3.5 Flash Lite is left out: its image answers kept failing (user 2026-10-16).
   function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.id.startsWith("google/gemini-") || model.id === "neuralwatt:deepseek-v4.1-flash")); }
+  function validImageCover(value) { return value === "card" ? "card" : "paper"; }
   function validImageModel(value) { return isVisionModel(value) ? value : DEFAULT_IMAGE_MODEL; }
   function concurrency() { return MODEL_BY_ID.get(settings?.model)?.concurrency || DEFAULT_CONCURRENCY; }
   function providerFor(model) { return MODEL_BY_ID.get(model)?.provider || "openrouter"; }
@@ -114,7 +116,7 @@
   function publicSettings() {
     const model = MODEL_BY_ID.get(settings.model) || MODEL_BY_ID.get(DEFAULT_MODEL);
     return { enabled: settings.enabled === true, hasApiKey: Boolean(keyFor(model.id)), hasContextApiKey: Boolean(keyFor(settings.contextModel || model.id)), contextModel: settings.contextModel,
-      imageModel: settings.imageModel, hasImageApiKey: Boolean(keyFor(settings.imageModel)),
+      imageModel: settings.imageModel, imageCover: settings.imageCover, hasImageApiKey: Boolean(keyFor(settings.imageModel)),
       imageModels: MODELS.filter(item => isVisionModel(item.id)).map(({ id, label }) => ({ id, label })), model: model.id, modelLabel: model.label,
       provider: providerFor(model.id), concurrency: concurrency(),
       hasOpenRouterKey: Boolean(settings.apiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey), hasNeuralwattKey: Boolean(settings.neuralwattApiKey),
@@ -730,6 +732,7 @@
     if (!result.ok) return result;
     const choice = result.data?.choices?.[0];
     const lines = choice?.finish_reason === "length" ? null : core.image.parseLines(choice?.message?.content, { convention: core.image.convention(result.model || model), width: prepared.width, height: prepared.height });
+    if (lines) for (const line of lines) if (line.box) Object.assign(line, core.image.paperSample(prepared.pixels, line.box));
     return lines ? { ok: true, lines, model: result.model } : { ok: false, code: "invalid_translation" };
   }
   // The page names its translation run so every batch lands in the same usage entry.
@@ -764,6 +767,7 @@
         model: nextModel,
         contextModel: Object.hasOwn(message, "contextModel") ? validContextModel(message.contextModel) : settings.contextModel,
         imageModel: Object.hasOwn(message, "imageModel") ? message.imageModel : settings.imageModel,
+        imageCover: Object.hasOwn(message, "imageCover") ? validImageCover(message.imageCover) : settings.imageCover,
         userTerms,
         dictionaryRevision: dictionaryChanged ? settings.dictionaryRevision + 1 : settings.dictionaryRevision,
         fallbackModel: validFallback(Object.hasOwn(message, "fallbackModel") ? message.fallbackModel : settings.fallbackModel, nextModel),

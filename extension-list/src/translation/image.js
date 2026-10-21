@@ -88,7 +88,17 @@
     try {
       const { width, height } = bitmap, scale = Math.min(1, MAX_EDGE / Math.max(width, height, 1));
       if (!(width > 0 && height > 0)) throw fail("image_unreadable");
-      if (scale === 1 && PASS_THROUGH.has(image.type) && image.bytes.length <= PASS_THROUGH_BYTES) return { mediaType: image.type, base64: toBase64(image.bytes), width, height };
+      const passThrough = scale === 1 && PASS_THROUGH.has(image.type) && image.bytes.length <= PASS_THROUGH_BYTES;
+      const sample = context => { try { return context.getImageData(0, 0, context.canvas.width, context.canvas.height); } catch { return null; } };
+      if (passThrough) {
+        let pixels = null;
+        try {
+          const canvas = new Canvas(width, height), context = canvas.getContext("2d");
+          context.fillStyle = "#fff"; context.fillRect(0, 0, width, height); context.drawImage(bitmap, 0, 0);
+          pixels = sample(context);
+        } catch {} // Sampling must never prevent an otherwise readable translation.
+        return { mediaType: image.type, base64: toBase64(image.bytes), width, height, pixels };
+      }
       if (typeof Canvas !== "function") throw fail("image_unreadable");
       const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
       const canvas = new Canvas(w, h), context = canvas.getContext("2d");
@@ -96,9 +106,31 @@
       const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (bytes.length > 5 * 1024 * 1024) throw fail("image_too_large");
-      return { mediaType: "image/jpeg", base64: toBase64(bytes), width: w, height: h };
+      return { mediaType: "image/jpeg", base64: toBase64(bytes), width: w, height: h, pixels: sample(context) };
     } catch (error) { throw error?.imageCode ? error : fail("image_unreadable"); }
     finally { bitmap.close?.(); }
+  }
+  // Normalized OCR box, expanded by four prepared-image pixels, sampled every two.
+  function paperColour(pixels, box) {
+    return paperSample(pixels, box).paper;
+  }
+  function paperSample(pixels, box) {
+    if (!pixels || !box) return { paper: "#ffffff", paperFlat: true };
+    const { data, width, height } = pixels, buckets = new Map();
+    const left = Math.max(0, Math.floor(box.x0 / 1000 * width) - 4), top = Math.max(0, Math.floor(box.y0 / 1000 * height) - 4);
+    const right = Math.min(width, Math.ceil(box.x1 / 1000 * width) + 4), bottom = Math.min(height, Math.ceil(box.y1 / 1000 * height) + 4);
+    let winner, samples = 0;
+    for (let y = top; y < bottom; y += 2) for (let x = left; x < right; x += 2) {
+      const i = (y * width + x) * 4, alpha = data[i + 3] / 255;
+      const rgb = [0, 1, 2].map(c => Math.round(data[i + c] * alpha + 255 * (1 - alpha)));
+      const key = rgb.map(c => Math.floor(c / 24)).join(",");
+      let bucket = buckets.get(key);
+      if (!bucket) { bucket = { count: 0, sum: [0, 0, 0] }; buckets.set(key, bucket); }
+      bucket.count++; samples++; rgb.forEach((c, j) => { bucket.sum[j] += c; });
+    }
+    for (const bucket of buckets.values()) if (!winner || bucket.count > winner.count) winner = bucket;
+    return { paper: winner ? "#" + winner.sum.map(c => Math.round(c / winner.count).toString(16).padStart(2, "0")).join("") : "#ffffff",
+      paperFlat: !winner || winner.count / samples >= .6 };
   }
   const SCHEMA = Object.freeze({
     type: "object", additionalProperties: false,
@@ -181,5 +213,5 @@
     }
     return lines;
   }
-  core.image = { MAX_BYTES, MAX_EDGE, SCHEMA, SCHEMA_GEMINI, convention, fetchImage, fromDataUrl, prepare, instruction, parseLines, httpsUrl };
+  core.image = { MAX_BYTES, MAX_EDGE, SCHEMA, SCHEMA_GEMINI, convention, fetchImage, fromDataUrl, prepare, paperColour, paperSample, instruction, parseLines, httpsUrl };
 })();

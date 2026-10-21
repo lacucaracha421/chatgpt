@@ -28,7 +28,7 @@
   }
 
   // ---- translation notes laid over the picture (pure helpers, unit-tested) ----
-  const MIN_FONT = 14, EDGE = 4;
+  const MIN_FONT = 14, PAPER_MIN_FONT = 11, EDGE = 4;
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   // Fits one translation note over its OCR box. `measure(f, rect, padX, padY, wrap)` returns
   // {overflow, height}: how far the longest unbreakable word sticks out of the note's text
@@ -69,6 +69,39 @@
     // Last resort: a single word wider than the whole image may break.
     if (!done) { wrap = true; while (grow()) if (fits(f)) break; }
     return { x: r.x, y: r.y, w: r.w, h: r.h, f, padX, padY, wrap, widened, grown: Math.round(r.h - base.h) };
+  }
+  // Grow around the OCR anchor only into free space; cramped translations use cards.
+  function fitCover({ box, W, H, chars = 1, measure, obstacles = [] }) {
+    const short = Math.min(box.w, box.h), bleed = clamp(Math.round(short * .1), 4, 8);
+    const pad = clamp(Math.round(short * .08), 2, 6);
+    const start = clamp(Math.round(Math.sqrt(box.w * box.h / Math.max(1, chars)) * .85 * 2) / 2, PAPER_MIN_FONT, 32);
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    const r = { ...box };
+    const grow = (axis, target) => {
+      const horizontal = axis === "x", size = horizontal ? "w" : "h", cross = horizontal ? "y" : "x", span = horizontal ? "h" : "w";
+      let low = 0, high = horizontal ? W : H;
+      for (const b of obstacles) {
+        if (b[cross] >= r[cross] + r[span] + 2 || b[cross] + b[span] <= r[cross] - 2) continue;
+        // Stop at the middle of the gap so two neighbouring covers never overlap.
+        if (b[axis] + b[size] <= box[axis]) low = Math.max(low, Math.min(box[axis], (b[axis] + b[size] + box[axis]) / 2 + 1));
+        else if (b[axis] >= box[axis] + box[size]) high = Math.min(high, Math.max(box[axis] + box[size], (b[axis] + box[axis] + box[size]) / 2 - 1));
+        else return false;
+      }
+      if (low > box[axis] || high < box[axis] + box[size]) return false;
+      const next = Math.min(target, high - low);
+      if (next <= r[size]) return false;
+      r[size] = next; r[axis] = clamp((horizontal ? cx : cy) - next / 2, low, high - next);
+      return true;
+    };
+    grow("x", box.w + 2 * bleed); grow("y", box.h + 2 * bleed);
+    const fits = f => { const m = measure(f, r, pad, pad, false); return m.overflow <= .5 && m.height <= r.h - 2 * pad + .5; };
+    const blocked = obstacles.some(b => b.x < box.x + box.w + 2 && b.x + b.w > box.x - 2 && b.y < box.y + box.h + 2 && b.y + b.h > box.y - 2);
+    const largest = () => { if (!blocked) for (let f = start; f >= PAPER_MIN_FONT; f -= .5) if (fits(f)) return f; return 0; };
+    let f = largest();
+    const maxW = Math.max(r.w, Math.min(Math.max(1, W - 8), Math.max(r.w * 1.7, r.w + 48)));
+    while (!f && grow("x", Math.min(maxW, r.w + 8))) f = largest();
+    while (!f && grow("y", Math.min(H, r.h + 4))) f = largest();
+    return { ...r, f: f || PAPER_MIN_FONT, padX: pad, padY: pad, wrap: false, fallback: !f };
   }
   // All variants use premeasured whole words. Never trade legibility for separation.
   function noteVariants(fit, { W, H }, measure) {
@@ -448,7 +481,7 @@
       updateOcclusion(session, view, neighbours, occluders);
     }
     function layoutNotes(session, frame) {
-      const overlay = session.overlay, { W, H } = frame;
+      const overlay = session.overlay, { W, H } = frame, paper = session.context.imageCover !== "card";
       overlay.box.querySelector(".card")?.remove(); overlay.card = null;
       // One DOM measurement batch, followed by pure fitting/resolution and one write batch.
       // Measure whole words at 14px; widths scale with font size, preserving keep-all.
@@ -460,6 +493,7 @@
         const words = item.inner.textContent.trim().split(/\s+/);
         const probes = [...words, " "].map(word => {
           const span = doc.createElement("span"); span.className = "nt"; span.textContent = word;
+          if (paper) span.classList.add("paper-nt");
           span.style.cssText = "display:inline-block;width:auto;font-size:14px;white-space:pre";
           rack.append(span); return span;
         });
@@ -475,9 +509,9 @@
       overlay.pillWidth = pw;
       overlay.pillHeight = overlay.pill.offsetHeight || (touchMode(session) ? 44 : 32);
       rack.remove();
-      const rects = [], visible = [];
+      const rects = [], visible = [], geometries = new Map(overlay.items.map(item => [item, lineGeometry(item.line, W, H, frame)]));
       for (const item of overlay.items) {
-        const geometry = lineGeometry(item.line, W, H, frame);
+        const geometry = geometries.get(item);
         // Text cropped out of the visible picture (X's timeline crop) gets no note.
         if (!geometry) continue;
         visible.push(item);
@@ -492,6 +526,7 @@
           continue;
         }
         const { widths, words } = measured.get(item), gap = widths.at(-1);
+        let card = !paper || item.line.paperFlat === false;
         const measure = (f, r, padX, padY, wrap) => {
           const available = Math.max(1, r.w - 2 * padX), scale = f / MIN_FONT;
           let lines = 1, used = 0, longest = 0;
@@ -503,21 +538,48 @@
             if (wrap && width > available) { lines += Math.ceil(width / available) - 1; used = width % available; }
             else used += (used ? gap * scale : 0) + width;
           }
-          return { overflow: wrap ? 0 : Math.max(0, longest - available), height: lines * f * 1.28 };
+          return { overflow: wrap ? 0 : Math.max(0, longest - available), height: lines * f * (card ? 1.28 : 1.22) };
         };
-        const fit = fitNote({ box: geometry.box, W, H, vertical: geometry.vertical, chars: geometry.chars, measure });
-        rects.push({ ...fit, variants: noteVariants(fit, frame, measure) });
+        const options = { box: geometry.box, W, H, vertical: geometry.vertical, chars: geometry.chars, measure };
+        let fit;
+        if (!card) {
+          const obstacles = [...geometries].filter(([other, g]) => other !== item && g).map(([, g]) => g.box);
+          fit = fitCover({ ...options, obstacles }); card = fit.fallback;
+        }
+        if (card) { fit = { ...fitNote(options), card: true }; fit.variants = noteVariants(fit, frame, measure); }
+        rects.push(fit);
       }
-      const resolved = resolveOverlaps(rects, frame), raised = resolved.length + 2;
+      const resolved = paper ? rects : resolveOverlaps(rects, frame);
+      if (paper) {
+        const indices = rects.map((r, i) => r.card ? i : -1).filter(i => i >= 0);
+        resolveOverlaps(indices.map(i => rects[i]), frame).forEach((r, i) => { resolved[indices[i]] = r; });
+      }
+      const raised = paper ? 2 * resolved.length + 4 : resolved.length + 2;
+      const paintOrder = paper ? resolved.map((r, i) => !r.card && visible[i].inner ? i : -1).filter(i => i >= 0)
+        .sort((a, b) => resolved[b].w * resolved[b].h - resolved[a].w * resolved[a].h) : [];
       overlay.box.style.setProperty("--note-top", String(raised));
       overlay.pill.style.zIndex = String(raised + 1);
-      for (const item of overlay.items) item.node.style.display = visible.includes(item) ? "" : "none";
+      for (const item of overlay.items) {
+        item.node.style.display = visible.includes(item) ? "" : "none";
+        if (item.label) item.label.style.display = item.node.style.display;
+      }
       visible.forEach((item, i) => {
         const fit = resolved[i], { node, inner } = item;
-        Object.assign(node.style, { left: fit.x + "px", top: fit.y + "px", zIndex: String(fit.zIndex || 1) });
+        const cover = paper && inner && !fit.card;
+        if (cover) node.classList.remove("raised");
+        const z = cover ? 2 * paintOrder.indexOf(i) + 1 : 2 * paintOrder.length + (item.kind === "sfx" ? 1 : 2 + (fit.zIndex || 1));
+        Object.assign(node.style, { left: fit.x + "px", top: fit.y + "px", zIndex: String(paper ? z : fit.zIndex || 1) });
         node.classList.toggle("stacked", Boolean(fit.stacked));
         if (!inner) return;
-        Object.assign(node.style, { width: fit.w + "px", height: fit.h + "px", padding: `${fit.padY}px ${fit.padX}px`, borderRadius: Math.min(6, fit.h / 4, fit.w / 4) + "px" });
+        node.classList.toggle("paper-cover", Boolean(cover));
+        Object.assign(node.style, { width: fit.w + "px", height: fit.h + "px", padding: `${fit.padY}px ${fit.padX}px`, borderRadius: (cover ? clamp(.3 * Math.min(fit.w, fit.h), 6, 16) : Math.min(6, fit.h / 4, fit.w / 4)) + "px" });
+        if (item.label) {
+          item.label.style.display = cover ? "" : "none";
+          const parent = cover ? item.label : node;
+          if (inner.parentNode !== parent) parent.append(inner);
+          for (const prop of ["left", "top", "width", "height", "padding", "borderRadius"]) item.label.style[prop] = node.style[prop];
+          item.label.style.zIndex = String(z + 1);
+        }
         inner.style.fontSize = fit.f + "px"; inner.style.overflowWrap = fit.wrap ? "anywhere" : "normal";
       });
       overlay.rects = resolved;
@@ -610,7 +672,7 @@
       if (overlay.card && overlay.card.anchor === anchor) { closeCard(session); return; }
       closeCard(session);
       const card = doc.createElement("div"); card.className = "card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-label", "원문과 번역");
-      card.style.zIndex = String(overlay.items.length + 4);
+      card.style.zIndex = String(session.context.imageCover !== "card" ? Number(overlay.pill.style.zIndex) + 1 : overlay.items.length + 4);
       const showOriginal = line.original && normalized(line.original) !== normalized(line.korean);
       if (showOriginal) {
         const label = doc.createElement("span"); label.className = "lbl"; label.textContent = "원문";
@@ -658,6 +720,15 @@
           // ~ ! ? … is glued to the word before it (word joiner) so it never starts a line of its own.
           inner.textContent = line.korean.replace(/(\S)\s*([~〜!?！？…]+)/g, "$1\u2060$2");
           node.className = "note"; node.setAttribute("aria-label", `번역: ${line.korean}`); node.append(inner); item.inner = inner;
+          if (session.context.imageCover !== "card") {
+            const paper = /^#[0-9a-f]{6}$/i.test(line.paper) ? line.paper : "#ffffff";
+            const rgb = [1, 3, 5].map(i => parseInt(paper.slice(i, i + 2), 16));
+            const label = doc.createElement("div"); label.className = "paper-text"; label.setAttribute("aria-hidden", "true");
+            label.style.setProperty("--paper", paper);
+            if ((.2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2]) / 255 < .45) label.style.color = "#f6f5f1";
+            label.append(inner); item.label = label;
+            node.classList.add("paper-cover"); node.style.setProperty("--paper", paper);
+          }
         }
         if (reduced()) node.style.animation = "none";
         node.addEventListener("click", event => {
@@ -668,10 +739,11 @@
         });
         bindHold(session, node);
         const raise = () => {
+          if (node.classList.contains("paper-cover")) return;
           for (const other of overlay.items) other.node.classList.toggle("raised", other.node === node);
         };
         node.addEventListener("pointerenter", raise); node.addEventListener("pointerdown", raise); node.addEventListener("focus", raise);
-        box.append(node); overlay.items.push(item);
+        box.append(node); if (item.label) box.append(item.label); overlay.items.push(item);
       });
       buildPill(session, lines);
       // Popovers are display:none until revealed. Mount invisibly first so the
@@ -1055,5 +1127,5 @@
     }
     return { translate, close: dismiss, get open() { return Boolean(current?.popover || current?.overlay); }, destroy() { dismiss(0); cache.clear(); } };
   }
-  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, noteVariants, resolveOverlaps, chooseCorner, choosePillPlacement, lineGeometry, imageFrame, MIN_FONT };
+  globalThis.LakomicsContextImage = { create, captureImage, failureText, fitNote, fitCover, noteVariants, resolveOverlaps, chooseCorner, choosePillPlacement, lineGeometry, imageFrame, MIN_FONT };
 })();
