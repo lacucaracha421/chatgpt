@@ -28,7 +28,7 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 <a id="fav-char-001"></a>
 ## FAV-CHAR-001 — Favourite characters in Collections (2026-10-22)
 
-Status: `PARTIAL` — user request 2026-10-22; user picked card A + detail A. Server module deployed 2026-10-22 (uncommitted at deploy); PC release build opens the view and the add picker (271 characters listed); grid/detail feedback round 1 (quiet whole-grid fade, no profile scrollbar, no count on the 캐릭터 button) applied; tablet 0.9.137 installed 2026-10-22, device check pending. A curated "캐릭터" view in Collections (beside 쇼케이스) that references existing asset characters; it is not a new Collection type and does not duplicate character records.
+Status: `PARTIAL` — user request 2026-10-22; user picked card A + detail A. Server module deployed 2026-10-22 (uncommitted at deploy); PC release build opens the view and the add picker (271 characters listed); grid/detail feedback round 1 (quiet whole-grid fade, no profile scrollbar, no count on the 캐릭터 button) applied; tablet 0.9.139 installed 2026-10-22 (work covers now load; works row wraps instead of scrolling), device check pending. A curated "캐릭터" view in Collections (beside 쇼케이스) that references existing asset characters; it is not a new Collection type and does not duplicate character records.
 
 - Grid of user-chosen representative images in a user-set order; opening one shows a profile (birthday, height, appearing works and similar basics), links to the related Collection works, and the character's assets gathered automatically from the asset character folders.
 - First pass: only characters that already exist in 에셋. Characters without assets come later.

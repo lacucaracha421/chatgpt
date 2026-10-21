@@ -782,7 +782,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
-    <FavoriteCharacters open={favoritesOpen} active={live} covered={!!performer} onClose={()=>setFavoritesOpen(false)} backRef={favoritesBack} onOpenFolder={node=>onOpenCharacterFolder?.(node)} onOpenWork={id=>openWork(id)} cover={(work,revision)=><Artwork item={work} revision={revision} active={live}/>}/>
+    <FavoriteCharacters open={favoritesOpen} active={live} covered={!!performer} onClose={()=>setFavoritesOpen(false)} backRef={favoritesBack} onOpenFolder={node=>onOpenCharacterFolder?.(node)} onOpenWork={id=>openWork(id)} cover={(work,revision)=><Artwork item={work} id={collectionCover(work)} revision={revision} active={live} label={work.name}/>}/>
     <Overlay deferContent open={showcaseAll} covered={!live||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
     {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
