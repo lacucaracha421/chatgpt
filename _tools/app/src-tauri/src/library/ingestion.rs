@@ -29,7 +29,7 @@ use super::{
         AssetSummary, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
         SetAssetClassification, VideoPreparationState,
     },
-    similarity::perceptual_hash_from_file,
+    similarity::{decode_image_for_fingerprint, perceptual_hash_from_image},
     video_media::{probe_video, VideoProbe},
     Library,
 };
@@ -40,6 +40,13 @@ const THUMBNAIL_BOUND: u32 = 360;
 const THUMBNAIL_WEBP_QUALITY: f32 = 85.0;
 
 mod thumbnail_decode;
+
+#[cfg(test)]
+mod concurrency_tests;
+#[cfg(test)]
+pub(super) mod performance;
+#[cfg(test)]
+mod shared_decode_tests;
 
 fn normalize_collected_at(value: Option<&str>) -> Result<String, LibraryError> {
     let timestamp = match value {
@@ -80,10 +87,14 @@ impl Library {
         request.creator_url = normalized.creator_url;
         let collected_at = normalize_collected_at(request.collected_at.as_deref())?;
         request.collected_at = Some(collected_at.clone());
-        let _ingestion_guard = self
-            .ingestion_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Direct drops can prepare private staging files independently. Cloud
+        // materialization and the other import paths retain their original gate.
+        let _ingestion_guard =
+            (identity.is_some() || request.import_source != ImportSource::Direct).then(|| {
+                self.ingestion_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            });
         let kind = ingest_kind(&request.source_path)?;
         let source_metadata = fs::metadata(&request.source_path)
             .map_err(|source| read_source_error(&request.source_path, source))?;
@@ -119,12 +130,16 @@ impl Library {
         let staging_path = staging_directory.join(format!("{}.part", uuid::Uuid::new_v4()));
         let mut pending = PendingFiles::new();
         let maximum_bytes = matches!(kind, IngestKind::Image).then_some(MAX_IMAGE_BYTES);
+        #[cfg(test)]
+        let phase = performance::Phase::start("copy_hash");
         let (content_hash, byte_size) = copy_and_hash(
             &request.source_path,
             &staging_path,
             &mut pending,
             maximum_bytes,
         )?;
+        #[cfg(test)]
+        drop(phase);
         if let Some(identity) = identity {
             if identity.sha256 != content_hash || identity.size_bytes != byte_size {
                 // Bytes differ from the replica's identity: an integrity mismatch, retried
@@ -180,13 +195,30 @@ impl Library {
         staging_path: PathBuf,
         content_hash: String,
         byte_size: u64,
-        mut pending: PendingFiles,
+        pending: PendingFiles,
         original_modified_at: Option<String>,
         collected_at: String,
         identity: Option<&super::asset_authority::MaterializationIdentity>,
     ) -> Result<IngestOutcome, LibraryError> {
-        let (format, mut width, mut height) = inspect_image(pending.owned_file(&staging_path)?)?;
+        #[cfg(test)]
+        let phase = performance::Phase::start("inspect");
+        let (format, _, _) = inspect_image(pending.owned_file(&staging_path)?)?;
+        #[cfg(test)]
+        drop(phase);
+        let parallel_preparation =
+            identity.is_none() && request.import_source == ImportSource::Direct;
+        let ingestion_guard = parallel_preparation.then(|| {
+            self.ingestion_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
+        // Pending files must roll back before releasing the publication gate.
+        let pending = pending;
+        #[cfg(test)]
+        let phase = performance::Phase::start("exact_lookup");
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
+        #[cfg(test)]
+        drop(phase);
         if let Some(existing_asset_id) = existing_asset_id {
             if let Some(identity) = identity {
                 if existing_asset_id != identity.asset_id { return Err(LibraryError::InvalidCloudResponse); }
@@ -202,32 +234,69 @@ impl Library {
             return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
-        let skip_similarity = identity.is_some() || request.import_source == ImportSource::LegacyLakomics;
-        let (perceptual_hash, similar) = if skip_similarity {
-            (None, None)
+        drop(ingestion_guard);
+        let skip_similarity =
+            identity.is_some() || request.import_source == ImportSource::LegacyLakomics;
+        let (image, perceptual_hash) = if skip_similarity {
+            (
+                decode_staging_image(staging_image_reader(pending.owned_file(&staging_path)?)?)?,
+                None,
+            )
         } else {
-            match perceptual_hash_from_file(pending.owned_file(&staging_path)?) {
-                Ok(result) => {
-                    width = result.width;
-                    height = result.height;
-                    let similar = self.find_similar_asset(&result.fingerprint, (width, height))?;
-                    (Some(result.fingerprint), similar)
-                }
-                Err(LibraryError::UnsupportedImage) => (None, None),
-                Err(error) => return Err(error),
-            }
+            decode_and_fingerprint(pending.owned_file(&staging_path)?)?
         };
+        let (width, height) = (image.width(), image.height());
+
+        #[cfg(test)]
+        let phase = performance::Phase::start("thumbnail_prepare");
+        let encoded = encode_thumbnail_webp(&image)?;
+        drop(image);
+        #[cfg(test)]
+        drop(phase);
+
+        let _ingestion_guard = parallel_preparation.then(|| {
+            self.ingestion_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
+        let mut pending = pending;
+        // Another prepared file may have committed while decoding. Keep this
+        // decision, similarity lookup and publication in the same critical section
+        // so identical bytes cannot publish twice and batch neighbours see each other.
+        if parallel_preparation {
+            #[cfg(test)]
+            let phase = performance::Phase::start("exact_lookup");
+            let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
+            #[cfg(test)]
+            drop(phase);
+            if let Some(existing_asset_id) = existing_asset_id {
+                return self.finish_exact_duplicate(existing_asset_id, &request);
+            }
+        }
+        #[cfg(test)]
+        let phase = performance::Phase::start("similarity_lookup");
+        let similar = perceptual_hash
+            .as_ref()
+            .map(|fingerprint| self.find_similar_asset(fingerprint, (width, height)))
+            .transpose()?
+            .flatten();
+        #[cfg(test)]
+        drop(phase);
 
         let prefix = &content_hash[..2];
         let thumbnail_relative_path = format!("thumbnails/{prefix}/{content_hash}.webp");
         let thumbnail_path = self.root().join(&thumbnail_relative_path);
         create_parent_directory(&thumbnail_path)?;
+        #[cfg(test)]
+        let phase = performance::Phase::start("thumbnail_install");
         self.install_thumbnail(
-            pending.owned_file(&staging_path)?,
+            &encoded,
             &thumbnail_path,
             &thumbnail_relative_path,
             &mut pending,
         )?;
+        #[cfg(test)]
+        drop(phase);
 
         let relative_path = format!(
             "assets/{prefix}/{content_hash}.{}",
@@ -235,7 +304,11 @@ impl Library {
         );
         let asset_path = self.root().join(&relative_path);
         create_parent_directory(&asset_path)?;
+        #[cfg(test)]
+        let phase = performance::Phase::start("install");
         install_staged_asset(&staging_path, &asset_path, &mut pending)?;
+        #[cfg(test)]
+        drop(phase);
 
         let asset = AssetSummary {
             content_rating: None,
@@ -268,6 +341,8 @@ impl Library {
             distance: candidate.distance,
             review_id: uuid::Uuid::new_v4().to_string(),
         });
+        #[cfg(test)]
+        let phase = performance::Phase::start("register");
         let auto_kept = self.register_asset(
             &asset,
             &content_hash,
@@ -277,6 +352,8 @@ impl Library {
             &registration,
             identity.is_some(),
         )?;
+        #[cfg(test)]
+        drop(phase);
 
         pending.commit();
         if let Some(kept) = auto_kept {
@@ -290,13 +367,22 @@ impl Library {
         })
     }
 
-    fn install_thumbnail(&self, staging: File, path: &Path, relative: &str, pending: &mut PendingFiles) -> Result<(), LibraryError> {
+    fn install_thumbnail(
+        &self,
+        encoded: &[u8],
+        path: &Path,
+        relative: &str,
+        pending: &mut PendingFiles,
+    ) -> Result<(), LibraryError> {
         // Never expose the final name before decoding/encoding and disk writes finish.
-        let image = decode_staging_image(staging_image_reader(staging)?)?;
-        let encoded = encode_thumbnail_webp(&image)?;
-        let error = |source| LibraryError::WriteAsset { path: path.to_path_buf(), source };
-        let mut temporary = tempfile::NamedTempFile::new_in(path.parent().expect("thumbnail parent")).map_err(error)?;
-        temporary.write_all(&encoded).map_err(error)?;
+        let error = |source| LibraryError::WriteAsset {
+            path: path.to_path_buf(),
+            source,
+        };
+        let mut temporary =
+            tempfile::NamedTempFile::new_in(path.parent().expect("thumbnail parent"))
+                .map_err(error)?;
+        temporary.write_all(encoded).map_err(error)?;
         temporary.as_file().sync_all().map_err(error)?;
 
         if let Ok(metadata) = fs::symlink_metadata(path) {
@@ -338,12 +424,19 @@ impl Library {
         staging_path: PathBuf,
         content_hash: String,
         byte_size: u64,
-        mut pending: PendingFiles,
+        pending: PendingFiles,
         extension: &'static str,
         original_modified_at: Option<String>,
         collected_at: String,
         identity: Option<&super::asset_authority::MaterializationIdentity>,
     ) -> Result<IngestOutcome, LibraryError> {
+        let _ingestion_guard =
+            (identity.is_none() && request.import_source == ImportSource::Direct).then(|| {
+                self.ingestion_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            });
+        let mut pending = pending;
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
             if let Some(identity) = identity {
                 if existing_asset_id != identity.asset_id { return Err(LibraryError::InvalidCloudResponse); }
@@ -837,6 +930,30 @@ fn staging_image_reader(mut staging: File) -> Result<ImageReader<BufReader<File>
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
+fn decode_and_fingerprint(
+    file: File,
+) -> Result<(DynamicImage, Option<ImageFingerprint>), LibraryError> {
+    // Use the fingerprint decoder's pixels, not a different WebP decoder's approximation:
+    // existing assets must keep exactly the same stored bits. A rejected decode can still
+    // succeed through the thumbnail-only WebP path, without gaining a fingerprint.
+    let image = match decode_image_for_fingerprint(
+        file.try_clone()
+            .map_err(|_| LibraryError::UnsupportedImage)?,
+    ) {
+        Ok(image) => image,
+        Err(LibraryError::UnsupportedImage) => {
+            return decode_staging_image(staging_image_reader(file)?).map(|image| (image, None));
+        }
+        Err(error) => return Err(error),
+    };
+    let fingerprint = match perceptual_hash_from_image(&image) {
+        Ok(result) => Some(result.fingerprint),
+        Err(LibraryError::UnsupportedImage) => None,
+        Err(error) => return Err(error),
+    };
+    Ok((image, fingerprint))
+}
+
 /// An image file of the library decoded with its EXIF orientation applied, within the same
 /// pixel bound ingestion enforces. For model inputs (the Claude judgment encodes from it).
 pub(super) fn decode_oriented_image(file: File) -> Result<DynamicImage, LibraryError> {
@@ -845,6 +962,8 @@ pub(super) fn decode_oriented_image(file: File) -> Result<DynamicImage, LibraryE
 }
 
 fn decode_staging_image(reader: ImageReader<BufReader<File>>) -> Result<DynamicImage, LibraryError> {
+    #[cfg(test)]
+    let _decode_phase = performance::Phase::start("thumbnail_decode");
     if reader.format() == Some(ImageFormat::WebP) {
         return thumbnail_decode::decode_webp(reader.into_inner());
     }

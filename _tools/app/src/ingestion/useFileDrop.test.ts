@@ -84,6 +84,61 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it("bounds a batch to three active ingests and counts out-of-order completions", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const pending = Array.from({ length: 5 }, () => deferred<IngestOutcome>());
+  let active = 0;
+  let maximumActive = 0;
+  const ingestMedia = vi.fn(async (input: IngestMediaInput) => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    const index = Number(input.sourcePath);
+    try {
+      if (index === 3) throw new Error("broken image");
+      return await pending[index].promise;
+    } finally {
+      active -= 1;
+    }
+  });
+  const subscribe: DropSubscriber = async (handler) => {
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
+    return () => undefined;
+  };
+  const { result } = renderHook(() => useFileDrop({
+    enabled: true, subscribe, classificationId: "tag-a", ingestMedia,
+  }));
+  await waitFor(() => expect(drop).toBeDefined());
+  act(() => drop?.(["0", "1", "2", "3", "4"]));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(3));
+  expect(active).toBe(3);
+  expect(result.current.progress).toEqual({ current: 0, total: 5 });
+
+  act(() => pending[1].resolve({ status: "exact_duplicate", existingAssetId: "existing", classificationChanged: false }));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(5));
+  expect(result.current.progress).toEqual({ current: 2, total: 5 });
+  expect(result.current.works[0]).toMatchObject({ completed: 2, added: 0, status: "running" });
+
+  act(() => pending[2].resolve({ status: "review_pending", reviewId: "review" }));
+  await waitFor(() => expect(result.current.works[0].completed).toBe(3));
+  act(() => pending[4].resolve({ status: "added", asset: fixtureAsset }));
+  await waitFor(() => expect(result.current.works[0].completed).toBe(4));
+  act(() => pending[0].resolve({ status: "added", asset: fixtureAsset }));
+  await waitFor(() => expect(result.current.progress).toBeNull());
+  expect(maximumActive).toBe(3);
+  expect(result.current.works[0]).toMatchObject({
+    completed: 5, total: 5, added: 2, status: "failed",
+    exactDuplicates: [{ fileName: "1", existingAssetId: "existing" }],
+    reviewPending: [{ fileName: "2", reviewId: "review" }],
+    failures: [{ fileName: "3", message: "broken image" }],
+  });
+  expect(new Set(ingestMedia.mock.calls.map(([input]) => input.importBatchId)).size).toBe(1);
+  ingestMedia.mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
+  act(() => result.current.retryFailed(result.current.works[0].id));
+  await waitFor(() => expect(result.current.works[0].status).toBe("completed"));
+  expect(ingestMedia.mock.calls[5][0].sourcePath).toBe("3");
+  expect(result.current.works[0]).toMatchObject({ completed: 1, total: 1, added: 1, failures: [] });
+});
+
 it("ingests dropped paths with the selected classification", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
@@ -160,7 +215,7 @@ it("ignores disabled drops and accepts the next drop after being enabled", async
   expect(subscribe).toHaveBeenCalledOnce();
 });
 
-it("ingests files from one drop sequentially", async () => {
+it("ingests files from one drop concurrently with one batch identity", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const first = deferred<{
     status: "added";
@@ -186,7 +241,7 @@ it("ingests files from one drop sequentially", async () => {
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
 
-  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(2));
   expect(ingestMedia).toHaveBeenNthCalledWith(1, {
     sourcePath: "C:\\images\\first.png",
     classificationId: null,
@@ -239,7 +294,7 @@ it("records an ingest error and continues with the next file", async () => {
   }]);
 });
 
-it("reports the current file and total while a drop is processing", async () => {
+it("reports completed files and total while a drop is processing", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const first = deferred<{ status: "added"; asset: AssetSummary }>();
   const second = deferred<{ status: "added"; asset: AssetSummary }>();
@@ -263,9 +318,9 @@ it("reports the current file and total while a drop is processing", async () => 
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
 
-  await waitFor(() => expect(result.current.progress).toEqual({ current: 1, total: 2 }));
+  await waitFor(() => expect(result.current.progress).toEqual({ current: 0, total: 2 }));
   act(() => first.resolve({ status: "added", asset: fixtureAsset }));
-  await waitFor(() => expect(result.current.progress).toEqual({ current: 2, total: 2 }));
+  await waitFor(() => expect(result.current.progress).toEqual({ current: 1, total: 2 }));
   act(() => second.resolve({ status: "added", asset: fixtureAsset }));
   await waitFor(() => expect(result.current.progress).toBeNull());
 });
@@ -321,8 +376,8 @@ it("queues overlapping drops in arrival order without clearing progress", async 
   );
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\a1.png", "C:\\images\\a2.png"]));
-  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(1));
-  expect(result.current).toEqual({ current: 1, total: 2 });
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(2));
+  expect(result.current).toEqual({ current: 0, total: 2 });
 
   rerender({ classificationId: "tag-b" });
   await act(async () => {
@@ -330,7 +385,7 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     await Promise.resolve();
   });
 
-  expect(ingestMedia).toHaveBeenCalledTimes(1);
+  expect(ingestMedia).toHaveBeenCalledTimes(2);
   act(() => a1.resolve({ status: "added", asset: assetA1 }));
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(2));
   expect(ingestMedia).toHaveBeenNthCalledWith(2, {
@@ -340,7 +395,7 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     importSource: "direct",
     importBatchId: ingestMedia.mock.calls[0][0].importBatchId,
   });
-  expect(result.current).toEqual({ current: 2, total: 2 });
+  await waitFor(() => expect(result.current).toEqual({ current: 1, total: 2 }));
 
   act(() => a2.resolve({ status: "added", asset: assetA2 }));
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(3));
@@ -351,12 +406,12 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     importSource: "direct",
     importBatchId: expect.any(String),
   });
-  expect(result.current).toEqual({ current: 1, total: 1 });
+  expect(result.current).toEqual({ current: 0, total: 1 });
 
   act(() => b1.resolve({ status: "added", asset: assetB1 }));
   await waitFor(() => expect(result.current).toBeNull());
   const activeStart = progressHistory.findIndex(
-    (progress) => progress?.current === 1 && progress.total === 2,
+    (progress) => progress?.current === 0 && progress.total === 2,
   );
   expect(activeStart).toBeGreaterThanOrEqual(0);
   expect(progressHistory.slice(activeStart, -1)).not.toContain(null);
@@ -423,7 +478,7 @@ it("keeps the classification captured when a drop starts", async () => {
   );
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
-  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(2));
 
   rerender({ classificationId: "tag-after-drop" });
   act(() => first.resolve({ status: "added", asset: fixtureAsset }));
@@ -486,8 +541,7 @@ it("stops progress and queued ingestion after unmount", async () => {
   const first = deferred<{ status: "added"; asset: AssetSummary }>();
   const ingestMedia = vi
     .fn()
-    .mockImplementationOnce(() => first.promise)
-    .mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
+    .mockImplementation(() => first.promise);
   const subscribe: DropSubscriber = async (handler) => {
     drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
@@ -502,8 +556,8 @@ it("stops progress and queued ingestion after unmount", async () => {
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
-  act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
-  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(1));
+  act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png", "C:\\images\\third.png", "C:\\images\\fourth.png"]));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(3));
   act(() => drop?.(["C:\\images\\queued.png"]));
 
   unmount();
@@ -512,7 +566,7 @@ it("stops progress and queued ingestion after unmount", async () => {
     await Promise.resolve();
   });
 
-  expect(ingestMedia).toHaveBeenCalledTimes(1);
+  expect(ingestMedia).toHaveBeenCalledTimes(3);
 });
 
 it("reports a drop subscription error while mounted", async () => {

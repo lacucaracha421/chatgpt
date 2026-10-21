@@ -96,43 +96,52 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
         const reviewPending: IngestionWork["reviewPending"] = [];
         const failures: IngestionWork["failures"] = [];
         const failedPaths: string[] = [];
-        for (const [index, sourcePath] of paths.entries()) {
-          if (!active) return;
-          setProgress({ current: index + 1, total: paths.length });
-          try {
-            const result = await optionsRef.current.ingestMedia({
-              sourcePath,
-              classificationId: destination,
-              sourceUrl: null,
-              importSource: "direct",
-              importBatchId: workId,
-            });
-            if (!active) return;
-            if (result.status === "added") added += 1;
-            if (result.status === "exact_duplicate") {
-              exactDuplicates.push({ fileName: fileName(sourcePath), existingAssetId: result.existingAssetId });
-            }
-            if (result.status === "review_pending") {
-              reviewPending.push({ fileName: fileName(sourcePath), reviewId: result.reviewId });
-            }
-            optionsRef.current.onIngested?.(result);
-          } catch (error) {
-            if (!active) return;
-            const message = commandErrorMessage(error, "파일을 저장하지 못했습니다.");
-            failures.push({ fileName: fileName(sourcePath), message });
-            failedPaths.push(sourcePath);
-          }
-          setWorks((current) => current.map((work) => work.id === workId
-            ? {
-                ...work,
-                completed: index + 1,
-                added,
-                exactDuplicates: [...exactDuplicates],
-                reviewPending: [...reviewPending],
-                failures: [...failures],
+        let nextIndex = 0;
+        let completed = 0;
+        if (!active) return;
+        setProgress({ current: 0, total: paths.length });
+        const ingestNext = async () => {
+          while (active && nextIndex < paths.length) {
+            const sourcePath = paths[nextIndex++];
+            try {
+              const result = await optionsRef.current.ingestMedia({
+                sourcePath,
+                classificationId: destination,
+                sourceUrl: null,
+                importSource: "direct",
+                importBatchId: workId,
+              });
+              if (!active) return;
+              if (result.status === "added") added += 1;
+              if (result.status === "exact_duplicate") {
+                exactDuplicates.push({ fileName: fileName(sourcePath), existingAssetId: result.existingAssetId });
               }
-            : work));
-        }
+              if (result.status === "review_pending") {
+                reviewPending.push({ fileName: fileName(sourcePath), reviewId: result.reviewId });
+              }
+              optionsRef.current.onIngested?.(result);
+            } catch (error) {
+              if (!active) return;
+              const message = commandErrorMessage(error, "파일을 저장하지 못했습니다.");
+              failures.push({ fileName: fileName(sourcePath), message });
+              failedPaths.push(sourcePath);
+            }
+            completed += 1;
+            setProgress({ current: completed, total: paths.length });
+            const counts = {
+              completed,
+              added,
+              exactDuplicates: [...exactDuplicates],
+              reviewPending: [...reviewPending],
+              failures: [...failures],
+            };
+            setWorks((current) => current.map((work) => work.id === workId
+              ? { ...work, ...counts }
+              : work));
+          }
+        };
+        // Keep other drops queued and bound CPU/decode load within this batch.
+        await Promise.all(Array.from({ length: Math.min(3, paths.length) }, ingestNext));
         if (!active) return;
         workContexts.current.set(workId, { classificationId: destination, failedPaths });
         setWorks((current) => current.map((work) => work.id === workId

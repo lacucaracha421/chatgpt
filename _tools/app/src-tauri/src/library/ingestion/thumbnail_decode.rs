@@ -159,6 +159,12 @@ mod tests {
                     if rotated { (479, 721) } else { (721, 479) }
                 );
                 assert_eq!(actual.as_bytes(), expected.as_bytes());
+                assert_eq!(
+                    crate::library::similarity::perceptual_hash_from_image(&expected)
+                        .unwrap()
+                        .fingerprint,
+                    crate::library::image_fingerprint::fingerprint(&actual).unwrap()
+                );
                 let thumbnail = encode_thumbnail_webp(&actual).unwrap();
                 assert_eq!(thumbnail, encode_thumbnail_webp(&expected).unwrap());
                 let decoded = image::load_from_memory(&thumbnail).unwrap().to_rgba8();
@@ -190,6 +196,12 @@ mod tests {
         let actual = decode_webp(Cursor::new(&*bytes)).unwrap();
         let expected = reference(&bytes);
         assert_eq!(actual.as_bytes(), expected.as_bytes());
+        assert_eq!(
+            crate::library::similarity::perceptual_hash_from_image(&expected)
+                .unwrap()
+                .fingerprint,
+            crate::library::image_fingerprint::fingerprint(&actual).unwrap()
+        );
         assert_eq!(
             encode_thumbnail_webp(&actual).unwrap(),
             encode_thumbnail_webp(&expected).unwrap()

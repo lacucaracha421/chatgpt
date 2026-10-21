@@ -40,6 +40,19 @@
     }
 
     impl IngestionFixture {
+        fn install_thumbnail(
+            &self,
+            path: &Path,
+            relative: &str,
+            pending: &mut PendingFiles,
+        ) -> Result<(), LibraryError> {
+            let image = super::decode_staging_image(super::staging_image_reader(
+                File::open(&self.source).unwrap(),
+            )?)?;
+            let encoded = encode_thumbnail_webp(&image)?;
+            self.library.install_thumbnail(&encoded, path, relative, pending)
+        }
+
     /// Ingest an Asset with a Classification so the assignment path is exercised.
     fn ingest_with_classification(&self, classification_id: &str) -> IngestOutcome {
         self.library
@@ -1181,13 +1194,13 @@
         let path = fixture.library.root().join(relative);
         std::fs::write(&path, []).unwrap();
         let mut pending = PendingFiles::new();
-        fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut pending).unwrap();
+        fixture.install_thumbnail(&path, relative, &mut pending).unwrap();
         assert!(image::open(&path).is_ok());
         assert!(std::fs::read_dir(path.parent().unwrap()).unwrap().any(|entry| entry.unwrap().path().extension().is_some_and(|ext| ext == "orphan")));
         pending.commit();
         std::fs::write(&path, b"unrelated existing thumbnail").unwrap();
         let original = std::fs::read(&path).unwrap();
-        let result = fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut PendingFiles::new());
+        let result = fixture.install_thumbnail(&path, relative, &mut PendingFiles::new());
         assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
         assert_eq!(std::fs::read(path).unwrap(), original);
     }
@@ -1198,7 +1211,7 @@
         std::fs::write(&fixture.source, b"broken image").unwrap();
         let relative = "thumbnails/test.webp";
         let path = fixture.library.root().join(relative);
-        assert!(fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut PendingFiles::new()).is_err());
+        assert!(fixture.install_thumbnail(&path, relative, &mut PendingFiles::new()).is_err());
         assert!(!path.exists());
     }
 
@@ -1223,7 +1236,7 @@
         let relative = asset.thumbnail_relative_path.unwrap();
         let path = fixture.library.root().join(&relative);
         std::fs::write(&path, []).unwrap();
-        let result = fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, &relative, &mut PendingFiles::new());
+        let result = fixture.install_thumbnail(&path, &relative, &mut PendingFiles::new());
         assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
         assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
     }

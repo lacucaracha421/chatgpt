@@ -1378,9 +1378,17 @@ fn run_after_review_resolving_hook() -> Result<(), LibraryError> {
     Ok(())
 }
 
-pub(crate) fn perceptual_hash_from_file(
+pub(crate) fn perceptual_hash_from_file(file: File) -> Result<PerceptualHashResult, LibraryError> {
+    let image = decode_image_for_fingerprint(file)?;
+    perceptual_hash_from_image(&image)
+}
+
+/// Decode with the same decoder and limits used for stored fingerprints.
+pub(super) fn decode_image_for_fingerprint(
     mut file: File,
-) -> Result<PerceptualHashResult, LibraryError> {
+) -> Result<image::DynamicImage, LibraryError> {
+    #[cfg(test)]
+    let decode_phase = super::ingestion::performance::Phase::start("fingerprint_decode");
     file.seek(SeekFrom::Start(0))
         .map_err(|_| LibraryError::UnsupportedImage)?;
     let reader = ImageReader::new(BufReader::new(file))
@@ -1395,7 +1403,18 @@ pub(crate) fn perceptual_hash_from_file(
     let mut image =
         image::DynamicImage::from_decoder(decoder).map_err(|_| LibraryError::UnsupportedImage)?;
     image.apply_orientation(orientation);
-    let fingerprint = fingerprint(&image)?;
+    #[cfg(test)]
+    drop(decode_phase);
+    Ok(image)
+}
+
+/// The caller must apply EXIF orientation before sharing these pixels with other consumers.
+pub(super) fn perceptual_hash_from_image(
+    image: &image::DynamicImage,
+) -> Result<PerceptualHashResult, LibraryError> {
+    #[cfg(test)]
+    let _compute_phase = super::ingestion::performance::Phase::start("fingerprint_compute");
+    let fingerprint = fingerprint(image)?;
     Ok(PerceptualHashResult {
         fingerprint,
         width: image.width(),
