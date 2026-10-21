@@ -199,6 +199,7 @@ pub mod statistics;
 pub mod thumbnail_maintenance;
 pub(crate) mod tmdb;
 mod tmdb_flow;
+mod staging_cleanup;
 mod trash;
 mod video_media;
 pub(crate) mod video_similarity;
@@ -481,6 +482,7 @@ impl Library {
         library.recover_video_similarity_scans()?;
         library.recover_character_autotag()?;
         library.requeue_interrupted_cloud_sync()?;
+        staging_cleanup::sweep(library.root());
         // Best effort: a locked or read-only orphan (antivirus, a sync client, a viewer)
         // must not stop the library from opening; the next open retries (review M3).
         if let Err(error) = library.cleanup_unreferenced_work_artwork() {

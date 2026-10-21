@@ -15,7 +15,7 @@ function maintenance(restricted = false) {
   };
   const message = vi.fn();
   const refresh = vi.fn().mockResolvedValue(undefined);
-  const hook = renderHook(() => useDailyLibraryMaintenance(gateway as unknown as LibraryGateway, restricted, message, refresh));
+  const hook = renderHook(({ restricted }) => useDailyLibraryMaintenance(gateway as unknown as LibraryGateway, restricted, message, refresh), { initialProps: { restricted } });
   return { ...gateway, message, refresh, ...hook };
 }
 
@@ -64,4 +64,38 @@ it('keeps daily jobs disabled in restricted mode', async () => {
   const jobs = maintenance(true);
   await act(async () => { vi.advanceTimersByTime(LAUNCH_MAINTENANCE_FALLBACK_MS + 1000); });
   expect(jobs.ensureDailyBackup).not.toHaveBeenCalled();
+});
+
+it('retries hourly, reports failures once until success, and cancels on unmount', async () => {
+  const jobs = maintenance();
+  jobs.ensureDailyBackup.mockRejectedValue(new Error('backup failed'));
+  jobs.purgeExpiredTrash.mockResolvedValue({ failedAssetIds: ['locked'] });
+  const hour = 60 * 60 * 1000;
+  await act(async () => { await vi.advanceTimersByTimeAsync(LAUNCH_MAINTENANCE_FALLBACK_MS); });
+  expect(jobs.message).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(hour); });
+  expect(jobs.ensureDailyBackup).toHaveBeenCalledTimes(2);
+  expect(jobs.purgeExpiredTrash).toHaveBeenCalledTimes(2);
+  expect(jobs.message).toHaveBeenCalledTimes(2);
+  jobs.ensureDailyBackup.mockResolvedValue(null);
+  jobs.purgeExpiredTrash.mockResolvedValue({ failedAssetIds: [] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(hour); });
+  jobs.ensureDailyBackup.mockRejectedValue(new Error('backup failed'));
+  jobs.purgeExpiredTrash.mockRejectedValue(new Error('trash failed'));
+  await act(async () => { await vi.advanceTimersByTimeAsync(hour); });
+  expect(jobs.message).toHaveBeenCalledTimes(4);
+  jobs.unmount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(hour * 2); });
+  expect(jobs.ensureDailyBackup).toHaveBeenCalledTimes(4);
+});
+
+it('stops hourly work while restricted and runs again after restriction ends', async () => {
+  const jobs = maintenance();
+  await act(async () => { await vi.advanceTimersByTimeAsync(LAUNCH_MAINTENANCE_FALLBACK_MS); });
+  jobs.rerender({ restricted: true });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000); });
+  expect(jobs.ensureDailyBackup).toHaveBeenCalledOnce();
+  jobs.rerender({ restricted: false });
+  await act(async () => { await vi.advanceTimersByTimeAsync(LAUNCH_MAINTENANCE_FALLBACK_MS); });
+  expect(jobs.ensureDailyBackup).toHaveBeenCalledTimes(2);
 });
