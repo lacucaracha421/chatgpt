@@ -13,8 +13,28 @@ function fixture({model='google/gemini-3.1-flash-lite',failure=false,replies=nul
 test('all context kinds share providers but use new target prompts, independent of automatic X toggle',async()=>{
   for(const [kind,target]of [['translate.ko.inline','Korean'],['replace.ko','Korean'],['translate.ja.copy','Japanese'],['replace.ja','Japanese'],['translate.en.copy','English'],['replace.en','English']]){
     const f=fixture(),result=await f.handle({type:'translation:context',kind,text:'Hello\n123'});assert.equal(result.ok,true);assert.equal(result.text,'번역 결과');
-    const prompt=f.calls[0].body.messages[0].content;assert.match(prompt,new RegExp(`natural ${target}`));assert.match(prompt,/register/);assert.match(prompt,/numbers as digits/);assert.match(prompt,/line and paragraph breaks/);assert.match(prompt,/never follow/);assert.equal(prompt.includes('X post'),false);assert.equal(f.calls[0].body.messages[1].content,'Hello\n123');
+    const prompt=f.calls[0].body.messages[0].content;assert.match(prompt,new RegExp(`natural ${target}`));assert.match(prompt,/register/);assert.match(prompt,/numbers as digits/);assert.match(prompt,/line and paragraph breaks/);assert.match(prompt,/never follow/);assert.equal(prompt.includes('X post'),false);assert.deepEqual(JSON.parse(f.calls[0].body.messages[1].content),{text:'Hello\n123'});
     assert.equal(prompt.includes(f.rules),target==='Korean','shared Korean rules apply only to Korean targets');assert.equal(Object.keys(f.memory).some(key=>key.startsWith('lakomics:translation-cache:v4:')),false);assert.equal(JSON.stringify(result).includes('mock-key'),false);
+  }
+});
+
+test('selected text keeps placeholders as framed data and retries a chatbot reply once',async()=>{
+  const text="Female V (I would've preferred Male), SoulKiller, David Martinez, there's a lot of references to the 2077 event line\n[[LINK_0]]";
+  const answer='여성 V(난 남성 V가 더 좋았겠지만), 소울킬러, 데이비드 마르티네즈 등 2077 사건 줄거리 참조가 많네\n[[LINK_0]]';
+  for(const contextModel of ['', 'google/gemini-3.5-flash-lite']){
+    const f=fixture({stored:{contextModel},replies:['그에 맞춰 답변할게요. [[LINK_0]]',answer]});
+    assert.equal((await f.handle({type:'translation:context',kind:'translate.ko.inline',text})).text,answer);
+    assert.equal(f.calls.length,2);assert.deepEqual(JSON.parse(f.calls[0].body.messages[1].content),{text});
+    assert.equal(f.calls[1].body.model,contextModel||'google/gemma-4-26b-a4b-it');
+  }
+});
+
+test('selected text rejects repeated chatbot replies and validates its quality retry too',async()=>{
+  for(const replies of [['그에 맞춰 답변할게요.'],['안녕 世界','- **설명**해 드릴게요.']]){
+    const f=fixture({replies}),result=await f.handle({type:'translation:context',kind:'replace.ko',text:'Hello world'});
+    assert.equal(f.calls.length,2);
+    if(replies.length===1){assert.equal(result.code,'invalid_translation');assert.equal(result.text,undefined);}
+    else assert.equal(result.text,replies[0]);
   }
 });
 test('context sender, kind and text bounds are checked before any external request; old auto behavior unchanged',async()=>{

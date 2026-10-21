@@ -30,7 +30,7 @@ test('worker queue orders visible before prefetch and quality, without exceeding
   const releases=[], started=[];
   const f=fixture((body,n)=>{
     if(n===1) return '한글 字';
-    started.push(body.messages[1].content);
+    started.push(JSON.parse(body.messages[1].content).text);
     return new Promise(resolve=>releases.push(()=>resolve('번역됨')));
   });
   await f.handle(request('Quality seed'));
@@ -153,7 +153,7 @@ test('quality retry retains the first valid answer on errors and respects fallba
 });
 
 test('batch retries only offending items as singles, once each, and keeps clean items',async()=>{
-  const f=fixture(body=>body.response_format?{translations:[{id:'a',text:'깨끗한 번역'},{id:'b',text:'주스 ジュース'},{id:'c',text:'날씨 字'}]}:body.messages[1].content==='Juice'?'주스':'날씨 漢字');
+  const f=fixture(body=>body.response_format?{translations:[{id:'a',text:'깨끗한 번역'},{id:'b',text:'주스 ジュース'},{id:'c',text:'날씨 字'}]}:JSON.parse(body.messages[1].content).text==='Juice'?'주스':'날씨 漢字');
   const result=await f.handle(batch([{id:'a',text:'Clean'},{id:'b',text:'Juice'},{id:'c',text:'Weather'}]));
   assert.deepEqual(Array.from(result.items,item=>item.text),['깨끗한 번역','주스 ジュース','날씨 字']);
   assert.equal(f.calls.length,1);
@@ -162,7 +162,7 @@ test('batch retries only offending items as singles, once each, and keeps clean 
   assert.equal((await f.handle({type:'translation:quality',text:'Juice',previous:result.items[1].text})).text,'주스');
   assert.equal((await f.handle({type:'translation:quality',text:'Weather',previous:result.items[2].text})).text,'날씨 字');
   assert.equal(f.calls.length,3);
-  assert.deepEqual(f.calls.slice(1).map(body=>body.messages[1].content),['Juice','Weather']);
+  assert.deepEqual(f.calls.slice(1).map(body=>JSON.parse(body.messages[1].content).text),['Juice','Weather']);
   assert.ok(f.calls.slice(1).every(body=>!body.response_format));
 });
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5.59 — 2026-10-21
+
+- Frame X posts and selected text as source data so questions and conversational
+  posts are translated instead of answered. Preserve link placeholders and return
+  only the translation.
+- Reject obvious chatbot replies, added Markdown and excessive expansion. Retry
+  invalid translations once through the existing model selection, then show the
+  existing failure state; rejected replies never enter the translation cache.
+
 ## 3.5.58 — 2026-10-21
 
 - Image translation defaults to paper-colour covers: erase the original text box

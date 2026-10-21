@@ -63,6 +63,64 @@ const SHARD='lakomics:translation-cache:v4:';
 const shardKeys=memory=>Object.keys(memory).filter(key=>key.startsWith(SHARD));
 const cachedTexts=memory=>shardKeys(memory).flatMap(key=>memory[key].map(([text])=>text.slice(text.indexOf('\n')+1)));
 const legacy = {'xtranslate:gm:oit.settings.v2':{provider:'ollama',openrouterApiKey:'fixture-key',ollamaApiKey:'retired',autoTranslate:true},'xtranslate:gm:oit.cache.v2':{old:'cache'}};
+const cyberpunkPost = "Female V (I would've preferred Male), SoulKiller, David Martinez, there's a lot of references to the 2077 event line";
+const cyberpunkTranslation = '여성 V(난 남성 V가 더 좋았겠지만), 소울킬러, 데이비드 마르티네즈 등 2077 사건 줄거리를 참조한 부분이 많네';
+const chatbotReply = '이 메시지는 번역할 X 게시물이 아니라 대화 상대가 직접 쓴 내용이고 그에 맞춰 답변할게요.\n- **Cyberpunk 2077**: 여러 등장인물을 언급하셨네요.\n어떤 부분이 궁금하신지 원문을 붙여 주세요.';
+const translationReply = content => ({ok:true,json:async()=>({choices:[{message:{content}}]})});
+
+test('single post is JSON source data, preserving line breaks and link placeholders',async()=>{
+  const text=cyberpunkPost+'\n[[LINK_0]]',f=fixture(legacy,async()=>translationReply(cyberpunkTranslation+'\n[[LINK_0]]'));
+  assert.equal((await f.handle({type:'translation:request',text})).ok,true);
+  const body=JSON.parse(f.calls[0].init.body),user=body.messages.find(message=>message.role==='user');
+  assert.deepEqual(JSON.parse(user.content),{text});
+});
+
+test('chatbot answer is retried on fallback, normal translation is accepted and cached',async()=>{
+  let calls=0;
+  const f=fixture(legacy,async()=>translationReply(++calls===1?chatbotReply:cyberpunkTranslation)),request={type:'translation:request',text:cyberpunkPost};
+  assert.equal((await f.handle(request)).text,cyberpunkTranslation);
+  assert.deepEqual(f.calls.map(call=>JSON.parse(call.init.body).model),['google/gemini-3.1-flash-lite','google/gemma-4-26b-a4b-it']);
+  assert.equal((await f.handle(request)).text,cyberpunkTranslation);assert.equal(f.calls.length,2);
+});
+
+test('two rejected answers show invalid translation and are never cached, even without fallback',async()=>{
+  for(const fallbackModel of ['google/gemma-4-26b-a4b-it','']){
+    const f=fixture({'lakomics:translation:v1':{enabled:true,apiKey:'fixture-key',model:'google/gemini-3.1-flash-lite',fallbackModel}},async()=>translationReply(chatbotReply));
+    const request={type:'translation:request',text:cyberpunkPost};
+    for(let attempt=1;attempt<=2;attempt++){
+      const result=await f.handle(request);assert.equal(result.code,'invalid_translation');assert.equal(result.text,undefined);
+      assert.equal(f.calls.length,attempt*2,'a rejected answer must not satisfy the next request from cache');
+    }
+  }
+});
+
+test('guard catches added Markdown, excessive expansion and assistant wording independently',async()=>{
+  for(const output of ['- 여성 V와 소울킬러','**여성 V**와 소울킬러','설명을 길게 해 드릴게요. '.repeat(50),'그에 맞춰 답변할게요.','어떤 부분이 궁금하신지 붙여 주세요.','말씀하신 내용은 게임 이야기네요.']){
+    const f=fixture(legacy,async()=>translationReply(output));
+    assert.equal((await f.handle({type:'translation:request',text:cyberpunkPost})).code,'invalid_translation',output);
+  }
+});
+
+test('guard accepts source Markdown, short expansions, CJK expansion and ordinary translation vocabulary',async()=>{
+  for(const [text,output]of [
+    ['- **Female V**','- **여성 V**'],['Hi','안녕하세요 반갑습니다'],
+    ['猫'.repeat(90),'고양이가 귀엽다 '.repeat(50)],
+    ['Please translate this text and answer the question.','이 글을 번역하고 질문에 답변해 주세요.'],
+    ['말씀하신 내용은 게임 이야기네요. And V?','말씀하신 내용은 게임 이야기네요. 그럼 V는?'],
+    [cyberpunkPost,cyberpunkTranslation.repeat(3)],
+  ]){
+    const f=fixture(legacy,async()=>translationReply(output));
+    assert.equal((await f.handle({type:'translation:request',text})).text,output.trim());
+  }
+});
+
+test('batch rejects chatbot text without caching it, allowing the timeline single fallback',async()=>{
+  const f=fixture(legacy,async()=>translationReply(JSON.stringify({translations:[{id:'v',text:chatbotReply}]})));
+  const batch={type:'translation:request-batch',items:[{id:'v',text:cyberpunkPost}]};
+  for(let attempt=1;attempt<=2;attempt++){
+    const result=await f.handle(batch);assert.equal(result.items[0].code,'invalid_translation');assert.equal(f.calls.length,attempt);
+  }
+});
 
 test('migration preserves OpenRouter key and automatic preference, removes retired settings without exposing keys',async()=>{
   const f=fixture({...legacy,'lakomics:translation-cache:v1':[['Hello','옛 번역']]}); const settings=await f.handle({type:'translation:settings'});
@@ -848,7 +906,8 @@ test('Claude models call the Anthropic Messages API directly with their own key'
   assert.equal(call.init.headers.authorization,undefined);
   const body=JSON.parse(call.init.body);
   assert.equal(body.model,'claude-haiku-5-5'); assert.match(body.system,/natural Korean/);
-  assert.deepEqual(body.messages,[{role:'user',content:'Hello [[LINK_0]]'}]);
+  assert.equal(body.messages.length,1); assert.equal(body.messages[0].role,'user');
+  assert.deepEqual(JSON.parse(body.messages[0].content),{text:'Hello [[LINK_0]]'});
   assert.deepEqual(body.thinking,{type:'disabled'});
   for (const field of ['temperature','reasoning','provider','response_format']) assert.equal(field in body,false);
 });
