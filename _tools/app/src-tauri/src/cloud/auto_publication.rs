@@ -3,6 +3,8 @@ use crate::library::{error::LibraryError, Library};
 use rusqlite::params;
 use std::sync::Mutex;
 mod schedule;
+#[cfg(test)]
+mod real_data_cost_tests;
 pub(crate) use schedule::Inputs;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
 static RUNNING: [Worker; 12] = [const { Worker::new() }; 12];

@@ -197,7 +197,39 @@ fn feed_due(db: &Connection, endpoint: &str, table: &str, now: i64) -> Result<bo
         rusqlite::params![endpoint, now], |r| r.get(0)).optional()?.unwrap_or(true))
 }
 
+fn server_upcoming_state(db: &Connection, endpoint: &str) -> Result<(bool, bool), LibraryError> {
+    // The legacy Home deadline stops advancing after the server takes ownership.
+    // Read only the ownership marker, never the calendar or wishlist projection.
+    let endpoint = crate::cloud::status_watch::endpoint_key(endpoint);
+    Ok(db.query_row(
+        "SELECT COALESCE(json_extract(value,'$.server')=1,0)
+                 OR json_type(value,'$.seed')='object',
+                json_type(value,'$.seed')='object' OR COALESCE(json_array_length(value,'$.outbox'),0)>0
+         FROM notes_state WHERE key=
+         'serverReleaseWishlist:' || json_array(?1,(SELECT library_id FROM library_settings WHERE singleton=1))
+         AND json_valid(value)",
+        [endpoint],
+        |row| Ok((row.get::<_, Option<bool>>(0)?.unwrap_or(false), row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
+    ).optional()?.unwrap_or_default())
+}
+
 impl Library {
+    pub(super) fn publication_upcoming_due_on(
+        &self,
+        db: &Connection,
+        endpoint: &str,
+        now: i64,
+    ) -> Result<bool, LibraryError> {
+        let (server_owned, pending) = server_upcoming_state(db, endpoint)?;
+        if server_owned {
+            // A successful pass consumes the captured generation. Failed passes,
+            // unconfirmed edits and handovers remain due. The dispatcher adds safety.
+            Ok(pending || self.publication_inputs.dirty(8))
+        } else {
+            self.home_publication_due_on(db, endpoint, "upcoming", now)
+        }
+    }
+
     /// Pending content, excluding periodic poll/build timers. Read on the existing
     /// dispatcher tick and after a lane returns, never from a new polling owner.
     pub(super) fn publication_lanes_waiting(&self, endpoint: &str) -> Result<Vec<String>, LibraryError> {
@@ -357,9 +389,13 @@ impl Library {
         due[7] |= crate::cloud::picker_display::due(&db, endpoint, now)?;
         for (slot, kind) in [(8, "upcoming"), (10, "artists")] {
             // A damaged checkpoint belongs to this lane, never to all twelve workers.
-            due[slot] = self
-                .home_publication_due_on(&db, endpoint, kind, now)
-                .unwrap_or(true);
+            due[slot] = if slot == 8 {
+                self.publication_upcoming_due_on(&db, endpoint, now)
+                    .unwrap_or(true)
+            } else {
+                self.home_publication_due_on(&db, endpoint, kind, now)
+                    .unwrap_or(true)
+            };
         }
         due[11] = !light
             && (self
@@ -634,6 +670,92 @@ mod tests {
         f.library.connection().unwrap().execute("UPDATE mobile_publication_state SET published_generation=generation WHERE kind='characters'", []).unwrap();
         assert!(f.library.publication_lanes_waiting(&f.endpoint).unwrap().is_empty());
     }
+    include!("idle_tick_cost_tests.rs");
+
+    #[test]
+    fn server_upcoming_ignores_retired_deadline_but_keeps_edits_retries_and_safety() {
+        let f = idle();
+        let normalized = status_watch::endpoint_key(&f.endpoint);
+        let key = format!(
+            "serverReleaseWishlist:{}",
+            json!([normalized, f.library.library_id().unwrap()])
+        );
+        {
+            let db = f.library.connection().unwrap();
+            db.execute(
+                "UPDATE home_publication_state SET state_json=?1 WHERE kind='upcoming'",
+                [json!({"next_build":1,"last_poll":1}).to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO notes_state(key,value) VALUES(?1,?2)",
+                rusqlite::params![
+                    key,
+                    json!({"server":true,"seed":null,"outbox":[]}).to_string()
+                ],
+            )
+            .unwrap();
+        }
+        let due = || {
+            f.library
+                .publication_lanes_due(&f.endpoint, f.now, false, false)
+                .unwrap()
+        };
+        for _ in 0..6 {
+            assert!(!due()[8]);
+        }
+        f.library.publication_inputs.signal(&[8]);
+        assert!(due()[8]);
+        // A failed lane never calls checked(), so the retry stays ready.
+        assert!(due()[8]);
+        f.library
+            .publication_inputs
+            .checked(8, f.library.publication_inputs.generation(8));
+        assert!(!due()[8]);
+        // Durable pending work must also survive reopening without an in-memory signal.
+        for value in [
+            json!({"server":true,"outbox":[{"delivered":true}]}),
+            json!({"server":false,"seed":{}}),
+        ] {
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE notes_state SET value=?2 WHERE key=?1",
+                    rusqlite::params![key, value.to_string()],
+                )
+                .unwrap();
+            assert!(due()[8]);
+        }
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE notes_state SET value=?2 WHERE key=?1",
+                rusqlite::params![
+                    key,
+                    json!({"server":true,"seed":null,"outbox":[]}).to_string()
+                ],
+            )
+            .unwrap();
+        let now = Instant::now();
+        f.library.publication_inputs.dispatched(&f.endpoint, 8, now);
+        assert!(
+            !f.library.publication_inputs.lanes_to_dispatch(
+                &f.endpoint,
+                due(),
+                now + Duration::from_secs(599)
+            )[8]
+        );
+        assert!(
+            f.library.publication_inputs.lanes_to_dispatch(
+                &f.endpoint,
+                due(),
+                now + Duration::from_secs(600)
+            )[8]
+        );
+    }
+
     #[test]
     fn idle_ticks_dispatch_zero_lanes_and_build_zero_snapshots() {
         let f = idle();
