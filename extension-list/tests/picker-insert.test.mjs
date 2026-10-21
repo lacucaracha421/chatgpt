@@ -154,6 +154,57 @@ function page(html) {
 }
 const form = '<form id="article_write_form"><div class="write-body"><div class="fr-element fr-view" contenteditable="true"><p>앞</p><p id="tail">뒤</p></div></div></form>';
 
+test('job adds one typing paragraph after the last successful image, also with partial failures', async () => {
+  for (const failures of [[], ['b'], ['c'], ['a', 'b', 'c']]) {
+    const { w, doc } = page(form);
+    const adapter = I.createEditorAdapter({ doc, win: w }); let finished = 0;
+    const inserter = {
+      async insertOne(file) {
+        if (failures.some(id => file.name.includes(`-${id}.`))) return { ok: false, reason: 'ignored' };
+        const p = doc.createElement('p'), image = doc.createElement('img');
+        image.src = `https://ac.arca.live/${file.name}`; p.append(image); adapter.find().insertBefore(p, doc.querySelector('#tail'));
+        adapter.placeCaretAfter(image); return { ok: true, image };
+      },
+      finishJob(image) { finished++; adapter.finishJob(image); },
+    };
+    const runner = I.createJobRunner({ inserter, pause: async () => {}, fetchOriginal: async () => ({ ok: true, mime: 'image/png', bytes: new Uint8Array([1]) }) });
+    await runner.run(['a', 'b', 'c']);
+    const successes = 3 - failures.length;
+    assert.equal(finished, successes ? 1 : 0);
+    const empties = [...adapter.find().querySelectorAll('p')].filter(p => !p.textContent && !p.querySelector('img'));
+    assert.equal(empties.length, successes ? 1 : 0);
+    if (successes) {
+      assert.equal(empties[0].previousElementSibling.querySelector('img'), [...adapter.find().querySelectorAll('img')].at(-1));
+      assert.equal(w.getSelection().getRangeAt(0).startContainer, empties[0]);
+      adapter.restore(); assert.equal(w.getSelection().getRangeAt(0).startContainer, empties[0], 'restore keeps the typing line');
+    }
+    w.close();
+  }
+});
+
+test('finishJob reuses an existing empty paragraph or line and survives replaced image nodes', () => {
+  for (const empty of ['<p><br></p>', '<div><br></div>', '<br>']) {
+    const { w, doc } = page(form.replace('<p>앞</p>', `<p><img src="https://ac.arca.live/one.png"></p>${empty}`));
+    const adapter = I.createEditorAdapter({ doc, win: w }), image = adapter.find().querySelector('img');
+    adapter.placeCaretAfter(image);
+    adapter.find().innerHTML = adapter.find().innerHTML;
+    const before = adapter.find().innerHTML;
+    assert.equal(adapter.finishJob(image), true);
+    assert.equal(adapter.find().innerHTML, before);
+    assert.equal(adapter.finishJob(image), true); assert.equal(adapter.find().innerHTML, before);
+    w.close();
+  }
+});
+
+test('typing line splits prose immediately after an image without losing the prose', () => {
+  const { w, doc } = page(form.replace('<p>앞</p>', '<p><img src="https://ac.arca.live/one.png"><b>keep this</b></p>'));
+  const adapter = I.createEditorAdapter({ doc, win: w }), image = adapter.find().querySelector('img');
+  adapter.placeCaretAfter(image); assert.equal(adapter.finishJob(image), true);
+  const line = image.closest('p').nextElementSibling;
+  assert.equal(line.textContent, ''); assert.equal(line.nextElementSibling.querySelector('b').textContent, 'keep this');
+  w.close();
+});
+
 test('the editor adapter sees a new Arca image appear, ignoring placeholders and old images', async () => {
   const { w, doc } = page(form.replace('<p>앞</p>', '<p><img id="old" src="https://ac.arca.live/old.png"></p>'));
   const adapter = I.createEditorAdapter({ doc, win: w });

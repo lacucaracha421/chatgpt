@@ -8,6 +8,16 @@
   const KEY_PATTERN = /^[0-9a-f]{32}$/;
   const MAX_THUMBNAIL = 8 * 1024 * 1024, MAX_ORIGINAL = 20 * 1024 * 1024;
 
+  function inlineThumbnail(item) {
+    const data = item.thumbnailBase64;
+    if (typeof data !== "string" || !Model.MIMES.includes(item.thumbnailMime)
+      || data.length > 4 * Math.ceil(MAX_THUMBNAIL / 3) || data.length % 4 !== 0) return null;
+    const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+    // Validate the decoded length without allocating/decoding a second copy before the panel.
+    if (data.length / 4 * 3 - padding > MAX_THUMBNAIL || /[^A-Za-z0-9+/]/.test(data.slice(0, data.length - padding))) return null;
+    return { thumbMime: item.thumbnailMime, thumbBase64: data };
+  }
+
   function createService({ storage = chrome.storage.local, fetchImpl = (...args) => fetch(...args), runtime = chrome.runtime, tabs = chrome.tabs, base = BASE,
     api = globalThis.LakomicsListApi, userAgent = globalThis.navigator?.userAgent || "", now = () => Date.now() } = {}) {
     const thumbnailTickets = new Map();
@@ -144,16 +154,19 @@
     }
 
     async function batch(message) {
+      const order = message.order === undefined ? "random" : message.order;
+      const offset = message.offset === undefined ? 0 : message.offset;
       const exclude = Array.isArray(message.exclude) ? message.exclude : [];
       const limit = message.limit === undefined ? Model.BATCH : Number(message.limit);
       // Exactly one of a folder and a character/group scope.
       const scope = message.scope === undefined ? null : Model.cleanScope(message.scope);
       const byScope = message.scope !== undefined, byFolder = message.folderId !== undefined;
       if (byScope === byFolder || (byScope && (!scope || scope.kind === "folder")) || (byFolder && !Model.validId(message.folderId))
+        || !["random", "newest"].includes(order) || !Number.isSafeInteger(offset) || offset < 0
         || !Number.isInteger(limit) || limit < 1 || limit > Model.MAX_BATCH
         || exclude.length > Model.MAX_EXCLUDE || !exclude.every(Model.validId)) return { ok: false, kind: "invalid", status: 400, code: "invalid" };
       const target = byScope ? { scope: { kind: scope.kind, id: scope.id } } : { folderId: message.folderId, includeDescendants: message.includeDescendants === true };
-      const result = await json("/v1/picker/batch", { method: "POST", body: { ...target, limit, exclude }, timeoutMs: 20000 });
+      const result = await json("/v1/picker/batch", { method: "POST", body: { ...target, limit, exclude, ...(message.order !== undefined ? { order } : {}), ...(message.offset !== undefined ? { offset } : {}) }, timeoutMs: 20000 });
       if (!result.ok) return fail(result);
       for (const [id, entry] of thumbnailTickets) {
         if (entry.expiresAt <= now() || !sameConnection(entry.connection, result.connection)) thumbnailTickets.delete(id);
@@ -162,15 +175,16 @@
         .filter(item => item && Model.validId(item.assetId) && Model.MIMES.includes(item.mime))
         .map(item => {
           thumbnailTickets.delete(item.assetId);
+          const inline = inlineThumbnail(item);
           const ticket = item.thumbnailTicket;
           const expiresAt = result.requestedAt + (ticket?.expiresIn - 30) * 1000;
-          if (result.source === "server" && Number.isFinite(ticket?.expiresIn) && expiresAt > now()) {
+          if (!inline && result.source === "server" && Number.isFinite(ticket?.expiresIn) && expiresAt > now()) {
             thumbnailTickets.set(item.assetId, { ticket, expiresAt, connection: result.connection });
           }
-          return { assetId: item.assetId, width: Model.clampInt(item.width), height: Model.clampInt(item.height), byteSize: Model.clampInt(item.byteSize), mime: item.mime };
+          return { ...inline, assetId: item.assetId, width: Model.clampInt(item.width), height: Model.clampInt(item.height), byteSize: Model.clampInt(item.byteSize), mime: item.mime };
         });
       while (thumbnailTickets.size > Model.MAX_EXCLUDE) thumbnailTickets.delete(thumbnailTickets.keys().next().value);
-      return { ok: true, items, remaining: Model.clampInt(result.data?.remaining) };
+      return { ok: true, items, remaining: Model.clampInt(result.data?.remaining), nextOffset: Number.isSafeInteger(result.data?.nextOffset) && result.data.nextOffset >= 0 ? result.data.nextOffset : null };
     }
 
     async function thumbnail(message) {

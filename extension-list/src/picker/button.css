@@ -7,4 +7,8 @@
 .lakomics-arca-pick[aria-pressed="true"]{background:color-mix(in srgb,currentColor 18%,transparent)}
 .lakomics-arca-pick:focus-visible{outline:2px solid var(--lk-ring);outline-offset:-2px}
 @media (forced-colors:active){.lakomics-arca-pick{color:ButtonText}.lakomics-arca-pick[aria-pressed="true"]{background:Highlight;color:HighlightText}}
-html.lakomics-arca-picker-push{margin-right:360px!important}
+html{transition:margin-right 200ms cubic-bezier(.2,0,0,1)}
+html.lakomics-arca-picker-push{margin-right:var(--lakomics-picker-width,300px)!important}
+html.lakomics-arca-picker-folded{transition-delay:90ms}
+html.lakomics-arca-picker-fitting,html.lakomics-arca-picker-dragging{transition:none!important}
+@media(prefers-reduced-motion:reduce){html{transition:none!important}}

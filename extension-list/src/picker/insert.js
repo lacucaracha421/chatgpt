@@ -48,6 +48,40 @@
         const range = doc.createRange(); range.setStartAfter(node); range.collapse(true);
         saved = range.cloneRange(); select(range); return true;
       },
+      caretRect() {
+        const editor = find();
+        if (!saved || !editor?.contains(saved.commonAncestorContainer)) return null;
+        const rect = saved.getClientRects?.()[0];
+        if (rect?.height) return rect;
+        const node = saved.startContainer.nodeType === 1 ? saved.startContainer : saved.startContainer.parentElement;
+        return node?.getBoundingClientRect?.() || null;
+      },
+      finishJob(image) {
+        const editor = find(); if (!editor) return false;
+        const src = image?.getAttribute?.("src") || afterSrc;
+        const anchor = Array.from(editor.querySelectorAll("img")).find(img => img.getAttribute("src") === src);
+        if (!anchor) return false;
+        let block = anchor.closest("p,div");
+        if (!block || block === editor) block = anchor;
+        // Split any prose following the picture before adding the typing line.
+        if (block !== anchor) {
+          const tail = doc.createRange(); tail.setStartAfter(anchor); tail.setEnd(block, block.childNodes.length);
+          const contents = tail.cloneContents();
+          if (contents.textContent.trim() || contents.querySelector("img,video,iframe,hr")) {
+            const following = block.cloneNode(false); following.removeAttribute("id"); following.append(tail.extractContents()); block.after(following);
+          }
+        }
+        let line = block.nextSibling;
+        while (line?.nodeType === 3 && !line.textContent.trim()) line = line.nextSibling;
+        const empty = line?.nodeType === 1 && (line.matches("p,div") && !line.textContent.trim() && !line.querySelector("img,video,iframe,hr") || line.matches("br"));
+        if (!empty) { line = doc.createElement("p"); line.append(doc.createElement("br")); block.after(line); }
+        const range = doc.createRange();
+        if (line.matches("br")) range.setStartBefore(line); else range.setStart(line, 0);
+        range.collapse(true); afterSrc = null; saved = range.cloneRange();
+        editor.focus({ preventScroll: true }); select(range);
+        editor.dispatchEvent(new win.Event("input", { bubbles: true }));
+        return true;
+      },
       // After an insert Froala keeps the picture selected with its image toolbar open; a paste then
       // goes nowhere. Leave that mode (Escape, as a person would) and wait until it has closed.
       async settle(wait = ms => new Promise(resolve => setTimeout(resolve, ms))) {
@@ -201,7 +235,7 @@
         return { ok: true, image };
       } finally { watcher.cancel(); waits.forEach(timer => timer.cancel()); }
     }
-    return { insertOne };
+    return { insertOne, async finishJob(image) { await editor.settle?.(); return editor.finishJob?.(image); } };
   }
 
   // ---- a queue of pictures ---------------------------------------------------------------
@@ -212,6 +246,7 @@
   function createJobRunner({ fetchOriginal, inserter, onState = () => {}, makeFile = (bytes, name, mime) => new File([bytes], name, { type: mime }), shouldStop = () => false, gapMs = 1200, retryMs = 3000, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
     async function run(ids) {
       const outcome = [];
+      let lastImage = null, inserted = false;
       for (const id of ids) {
         if (shouldStop()) break;
         onState(id, "up", "");
@@ -228,7 +263,9 @@
         if (!result.ok && result.reason === "uploadFailed" && !shouldStop()) { await pause(retryMs); result = await attempt(); }
         onState(id, result.ok ? "ok" : "bad", result.ok ? "" : result.reason);
         outcome.push({ id, ok: result.ok, kind: result.reason || "" });
+        if (result.ok) { inserted = true; lastImage = result.image; }
       }
+      if (inserted) await inserter.finishJob?.(lastImage);
       return outcome;
     }
     return { run };

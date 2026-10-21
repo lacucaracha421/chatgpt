@@ -1710,3 +1710,110 @@ fn picker_context_gate_keeps_order_and_pins_with_the_nonce_answer() {
     assert_eq!(context.order_ids, vec!["z", "a"]);
     assert_eq!(context.pinned_ids, vec!["a", "z"]);
 }
+
+#[test]
+fn newest_batches_page_past_missing_files_and_embed_thumbnail_bytes() {
+    let (_root, library) = library();
+    let folder_id = folder(&library, "Newest", None);
+    for id in ["b", "c", "a", "missing"] {
+        add_asset(&library, id, "image", "normal", "png", &[&folder_id]);
+    }
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET collected_at='2027-01-01' WHERE id='a'",
+            [],
+        )
+        .unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET collected_at='2028-01-01' WHERE id='missing'",
+            [],
+        )
+        .unwrap();
+    fs::remove_file(library.root().join("thumbnails/missing.webp")).unwrap();
+    let first = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({
+            "folderId": folder_id, "order": "newest", "limit": 2, "exclude": ["a"]
+        }),
+    );
+    assert_eq!(first.status, 200);
+    assert_eq!(batch_ids(&first), ["a", "c"]);
+    let value = json(&first);
+    assert_eq!(value["remaining"], 4);
+    assert_eq!(value["nextOffset"], 3);
+    assert_eq!(value["items"][0]["thumbnailMime"], "image/webp");
+    // Decode the standard padded base64 returned on the wire independently of the encoder.
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let encoded = value["items"][0]["thumbnailBase64"].as_str().unwrap();
+    let mut decoded = Vec::new();
+    for chunk in encoded.as_bytes().chunks_exact(4) {
+        let mut bits = 0u32;
+        for byte in chunk {
+            bits = (bits << 6)
+                | if *byte == b'=' {
+                    0
+                } else {
+                    alphabet
+                        .iter()
+                        .position(|candidate| candidate == byte)
+                        .unwrap() as u32
+                };
+        }
+        decoded.push((bits >> 16) as u8);
+        if chunk[2] != b'=' {
+            decoded.push((bits >> 8) as u8);
+        }
+        if chunk[3] != b'=' {
+            decoded.push(bits as u8);
+        }
+    }
+    assert_eq!(decoded, b"thumbnail a");
+    let last = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({
+            "folderId": folder_id, "order": "newest", "offset": 3, "limit": 2
+        }),
+    );
+    assert_eq!(batch_ids(&last), ["b"]);
+    assert_eq!(json(&last)["remaining"], 1);
+    assert!(json(&last)["nextOffset"].is_null());
+    let end = post_batch(
+        &library,
+        OFF,
+        serde_json::json!({
+            "folderId": folder_id, "order": "newest", "offset": 4
+        }),
+    );
+    assert!(batch_ids(&end).is_empty());
+    assert_eq!(json(&end)["remaining"], 0);
+    assert!(json(&end)["nextOffset"].is_null());
+}
+
+#[test]
+fn batch_rejects_invalid_order_and_offset() {
+    let (_root, library) = library();
+    let folder_id = folder(&library, "Newest", None);
+    for bad in [
+        serde_json::json!({"order": "oldest"}),
+        serde_json::json!({"order": null}),
+        serde_json::json!({"offset": -1}),
+        serde_json::json!({"offset": 0.5}),
+        serde_json::json!({"offset": "1"}),
+        serde_json::json!({"offset": null}),
+    ] {
+        let mut body = serde_json::json!({"folderId": folder_id});
+        body.as_object_mut()
+            .unwrap()
+            .extend(bad.as_object().unwrap().clone());
+        let response = post_batch(&library, OFF, body);
+        assert_eq!(response.status, 400);
+        assert_eq!(code(&response), "pickerInvalidRequest");
+    }
+}

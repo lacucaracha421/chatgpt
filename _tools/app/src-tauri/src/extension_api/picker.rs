@@ -175,17 +175,35 @@ pub(super) fn read_context(
     // in the same PC WebView instead of approximating its collation in SQLite.
     gate.read_context(
         |nonce| {
-            let folders = library.and_then(|library| library.read_without_lock(|connection| {
-                let mut statement = connection.prepare("SELECT id,name FROM classification_entries")?;
-                let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(rows)
-            }).ok());
-            let Some(folders) = folders else { return false; };
+            let folders = if !folders_requested {
+                Some(Vec::new())
+            } else {
+                library.and_then(|library| {
+                    library
+                        .read_without_lock(|connection| {
+                            let mut statement =
+                                connection.prepare("SELECT id,name FROM classification_entries")?;
+                            let rows = statement
+                                .query_map([], |row| {
+                                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                                })?
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Ok(rows)
+                        })
+                        .ok()
+                })
+            };
+            let Some(folders) = folders else {
+                return false;
+            };
             app.get_webview_window("main")
                 .is_some_and(|window| window.eval(privacy_probe_script(nonce, &folders)).is_ok())
         },
-        if folders_requested { Duration::ZERO } else { PRIVACY_FRESH },
+        if folders_requested {
+            Duration::ZERO
+        } else {
+            PRIVACY_FRESH
+        },
         PRIVACY_WAIT,
     )
 }
@@ -710,6 +728,18 @@ struct BatchRequest {
     limit: Option<u32>,
     #[serde(default)]
     exclude: Vec<String>,
+    #[serde(default)]
+    order: BatchOrder,
+    #[serde(default)]
+    offset: u64,
+}
+
+#[derive(Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum BatchOrder {
+    #[default]
+    Random,
+    Newest,
 }
 
 /// A character or character group to draw from instead of a folder.
@@ -728,12 +758,16 @@ struct BatchItem {
     byte_size: u64,
     mime: &'static str,
     thumbnail_url: String,
+    thumbnail_mime: &'static str,
+    thumbnail_base64: String,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BatchResponse {
     items: Vec<BatchItem>,
     remaining: u64,
+    next_offset: Option<u64>,
 }
 
 /// splitmix64: a small, well-mixed generator seeded per request.
@@ -803,12 +837,16 @@ fn batch(
             )
         })
         .map_err(internal)?;
-    let (items, remaining) = selection.ok_or(if request.scope.is_some() {
+    let (items, remaining, next_offset) = selection.ok_or(if request.scope.is_some() {
         ApiError::PickerScopeNotFound
     } else {
         ApiError::ClassificationNotFound
     })?;
-    Ok(json_response(&BatchResponse { items, remaining }))
+    Ok(json_response(&BatchResponse {
+        items,
+        remaining,
+        next_offset,
+    }))
 }
 
 /// `None` when the folder or the character/group does not exist. Otherwise up to `limit`
@@ -820,7 +858,7 @@ fn select_batch(
     request: &BatchRequest,
     limit: usize,
     rng: &mut Rng,
-) -> Result<Option<(Vec<BatchItem>, u64)>, LibraryError> {
+) -> Result<Option<(Vec<BatchItem>, u64, Option<u64>)>, LibraryError> {
     let candidates = match (&request.folder_id, &request.scope) {
         (Some(folder_id), _) => {
             folder_candidates(connection, eligible, folder_id, request.include_descendants)?
@@ -832,7 +870,17 @@ fn select_batch(
         return Ok(None);
     };
 
-    if !request.exclude.is_empty() {
+    let newest = request.order == BatchOrder::Newest;
+    if newest {
+        let membership: HashSet<i64> = candidates.into_iter().collect();
+        let mut statement = connection
+            .prepare("SELECT rowid FROM assets ORDER BY collected_at DESC, rowid DESC")?;
+        candidates = statement
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        candidates.retain(|rowid| membership.contains(rowid));
+    }
+    if !newest && !request.exclude.is_empty() {
         let mut excluded = HashSet::<i64>::new();
         for chunk in request.exclude.chunks(SQL_CHUNK) {
             let mut statement = connection.prepare_cached(&format!(
@@ -847,7 +895,14 @@ fn select_batch(
         }
         candidates.retain(|rowid| !excluded.contains(rowid));
     }
-    let remaining = candidates.len() as u64;
+    let total = candidates.len() as u64;
+    let offset = if newest {
+        request.offset.min(total) as usize
+    } else {
+        0
+    };
+    let remaining = total - offset as u64;
+    let candidates = &mut candidates[offset..];
 
     // Partial Fisher-Yates: each round draws only as many as the batch still needs. Rows
     // whose files are gone are skipped and replaced by the next draw.
@@ -860,6 +915,9 @@ fn select_batch(
             .min(candidates.len())
             .min(draw_limit);
         for position in cursor..end {
+            if newest {
+                break;
+            }
             let pick = position + rng.below(candidates.len() - position);
             candidates.swap(position, pick);
         }
@@ -903,7 +961,20 @@ fn select_batch(
             {
                 continue;
             }
+            let Some(thumbnail_mime) = image_mime(&thumbnail) else {
+                continue;
+            };
+            let Ok(bytes) = read_file(
+                library,
+                &thumbnail,
+                MAX_THUMBNAIL_BYTES,
+                ApiError::PickerAssetNotFound,
+            ) else {
+                continue;
+            };
             items.push(BatchItem {
+                thumbnail_mime,
+                thumbnail_base64: encode_base64(&bytes),
                 thumbnail_url: format!("{THUMBNAIL_PREFIX}{id}"),
                 asset_id: id,
                 width: width.clamp(0, u32::MAX as i64) as u32,
@@ -913,7 +984,33 @@ fn select_batch(
             });
         }
     }
-    Ok(Some((items, remaining)))
+    let next_offset = (newest && offset as u64 + (cursor as u64) < total)
+        .then_some(offset as u64 + cursor as u64);
+    Ok(Some((items, remaining, next_offset)))
+}
+
+/// Standard base64 with padding; no additional dependency is needed for batch thumbnails.
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let value = ((chunk[0] as u32) << 16)
+            | ((chunk.get(1).copied().unwrap_or(0) as u32) << 8)
+            | chunk.get(2).copied().unwrap_or(0) as u32;
+        output.push(ALPHABET[(value >> 18) as usize & 63] as char);
+        output.push(ALPHABET[(value >> 12) as usize & 63] as char);
+        output.push(if chunk.len() > 1 {
+            ALPHABET[(value >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            ALPHABET[value as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    output
 }
 
 /// Eligible row ids of a folder (and optionally its descendants); `None` for an unknown folder.

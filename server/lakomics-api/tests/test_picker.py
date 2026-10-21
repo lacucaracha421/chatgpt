@@ -1,4 +1,6 @@
 """Picker routes against temporary SQLite and fake storage, never a live library."""
+import base64
+import io
 import json
 import sys
 import tempfile
@@ -16,6 +18,7 @@ import classification_authority
 import library_search
 import folder_pins
 import head_cache
+import picker_thumbnail_cache
 from tests.test_classification_authority import activate_asset_lifecycle
 from fastapi.testclient import TestClient
 from projection_cache import install_generation_triggers
@@ -59,6 +62,9 @@ class PickerTests(unittest.TestCase):
             install_generation_triggers(db)
             db.commit()
         self.client = TestClient(api.app)
+        fill_queue = patch.object(picker_thumbnail_cache.background, 'enqueue')
+        self.fill_queue = fill_queue.start()
+        self.addCleanup(fill_queue.stop)
         self.asset('a', folder='s')
         self.asset('b', folder='f', mime='image/gif', kind='gif')
         self.asset('extra', folder='other')
@@ -93,6 +99,40 @@ class PickerTests(unittest.TestCase):
 
     def batch(self, **body):
         return self.client.post('/v1/picker/batch', headers=self.headers(), json=body)
+
+    def test_newest_pages_by_collected_time_with_created_fallback_and_skips_missing(self):
+        self.asset('c', folder='s')
+        self.asset('missing', folder='s')
+        with api.get_db() as db:
+            db.execute("UPDATE assets SET created_at='2027' WHERE id IN ('b','c')")
+            db.execute("UPDATE assets SET collected_at='2028' WHERE id='a'")
+            db.execute("UPDATE assets SET collected_at='2029' WHERE id='missing'")
+            db.commit()
+        del fake_s3.objects['thumb/missing']
+        first = self.batch(folderId='s', includeDescendants=True, order='newest', limit=2, exclude=['a'])
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual([row['assetId'] for row in first.json()['items']], ['a', 'c'])
+        self.assertEqual(first.json()['nextOffset'], 3)
+        self.assertEqual(first.json()['remaining'], 4)
+        last = self.batch(folderId='s', includeDescendants=True, order='newest', offset=3, limit=2).json()
+        self.assertEqual([row['assetId'] for row in last['items']], ['b'])
+        self.assertEqual(last['remaining'], 1)
+        self.assertIsNone(last['nextOffset'])
+        end = self.batch(folderId='s', order='newest', offset=100).json()
+        self.assertEqual(end['items'], [])
+        self.assertEqual(end['remaining'], 0)
+        self.assertIsNone(end['nextOffset'])
+        for kind, id, expected in [('character', 'c', ['a']), ('group', 'g', ['a', 'extra'])]:
+            result = self.batch(scope={'kind': kind, 'id': id}, order='newest').json()
+            self.assertEqual([row['assetId'] for row in result['items']], expected)
+            self.assertIsNone(result['nextOffset'])
+
+    def test_invalid_order_and_offset_are_rejected(self):
+        for bad in [{'order': 'oldest'}, {'order': None}, {'offset': -1},
+                    {'offset': 1.5}, {'offset': '1'}, {'offset': True}, {'offset': None}]:
+            result = self.batch(folderId='s', **bad)
+            self.assertEqual(result.status_code, 400, result.text)
+            self.assertEqual(result.json()['detail']['code'], 'pickerInvalidRequest')
 
     def test_picker_grant_does_not_widen_catalog_or_publisher_guards(self):
         for token in [self.extension, self.reader, self.publisher, api.API_TOKEN]:
@@ -268,6 +308,43 @@ class PickerTests(unittest.TestCase):
             self.assertEqual(response.json()['items'][0]['thumbnailTicket']['sizeBytes'], 4)
             self.assertEqual(self.client.get('/v1/picker/thumbnail/a', headers=self.headers()).status_code, 200)
             head.assert_not_called()
+
+    def test_cached_thumbnail_is_inlined_and_ticket_is_preserved(self):
+        key = 'derived/picker-cache-hit.webp'
+        fake_s3.objects[key] = {'body': b'webp', 'content_type': 'image/webp'}
+        with api.get_db() as db:
+            db.execute("UPDATE assets SET thumbnail_key=?,thumbnail_metadata_key=?,"
+                       "thumbnail_size_bytes=4,thumbnail_content_type='image/webp' WHERE id='a'", [key, key])
+            db.commit()
+        cache = picker_thumbnail_cache.ThumbnailCache(api.DB_PATH.parent / 'picker-thumbnails',
+                                                      ('image/webp',))
+        storage = SimpleNamespace(get_object=lambda **kwargs: {
+            'Body': io.BytesIO(b'webp'), 'ContentType': 'image/webp', 'ContentLength': 4})
+        self.assertEqual(cache.fill(storage, api.R2_BUCKET, key, 4), 'done')
+        response = self.batch(folderId='s')
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()['items'][0]
+        self.assertEqual(base64.b64decode(item['thumbnailBase64']), b'webp')
+        self.assertEqual(item['thumbnailMime'], 'image/webp')
+        self.assertEqual(item['thumbnailTicket']['sizeBytes'], 4)
+        self.assertEqual(item['thumbnailUrl'], '/v1/picker/thumbnail/a')
+        self.fill_queue.assert_not_called()
+
+    def test_cache_miss_keeps_ticket_and_queues_immutable_key(self):
+        key = 'derived/picker-cache-miss.webp'
+        fake_s3.objects[key] = {'body': b'webp', 'content_type': 'image/webp'}
+        with api.get_db() as db:
+            db.execute("UPDATE assets SET thumbnail_key=?,thumbnail_metadata_key=?,"
+                       "thumbnail_size_bytes=4,thumbnail_content_type='image/webp' WHERE id='a'", [key, key])
+            db.commit()
+        response = self.batch(folderId='s')
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()['items'][0]
+        self.assertNotIn('thumbnailBase64', item)
+        self.assertNotIn('thumbnailMime', item)
+        self.assertEqual(item['thumbnailTicket']['sizeBytes'], 4)
+        self.fill_queue.assert_called_once()
+        self.assertEqual(self.fill_queue.call_args.args[1:], (api._s3, api.R2_BUCKET, key, 4))
 
     def test_media_ticket_shape_missing_objects_and_size_refusal(self):
         for variant, size, mime in [('original', 3, 'image/png'), ('thumbnail', 4, 'image/webp')]:

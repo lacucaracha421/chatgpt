@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>그림 넣기 패널 공간</title>
+<style>
+/* ---------- page chrome (not part of the design) ---------- */
+:root{--ui:"Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;--page:#0e0f11;--card:#17181b;--line:rgb(255 255 255/10%);--text:#ecebe7;--muted:#a3a29d;--faint:#74736f;--acc:#ddd8ca}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font:400 15px/1.6 var(--ui)}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 16px 64px}
+h1{margin:0 0 4px;font-size:20px;font-weight:700}
+h2{margin:40px 0 4px;font-size:18px;font-weight:700}
+h3{margin:20px 0 4px;font-size:15px;font-weight:700}
+p{margin:4px 0 8px;color:var(--muted);max-width:880px}
+p b,li b{color:var(--text);font-weight:600}
+.tag{display:inline-block;height:20px;padding:0 8px;margin-right:8px;border-radius:2px;background:rgb(255 255 255/12%);color:var(--text);font:600 12px/20px var(--ui);vertical-align:2px}
+.tag.rec{background:var(--acc);color:#242522}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:8px 0 12px;max-width:880px}
+.pc div{background:var(--card);box-shadow:inset 0 0 0 1px var(--line);padding:12px 16px}
+.pc h4{margin:0 0 4px;font-size:12px;color:var(--faint);font-weight:600}
+.pc ul{margin:0;padding-left:16px;color:var(--muted);font-size:14px}
+@media(max-width:700px){.pc{grid-template-columns:1fr}}
+.cap{font-size:12px;color:var(--faint);margin:4px 0 0}
+.stage{position:relative;margin-top:8px;overflow:hidden;box-shadow:0 0 0 1px var(--line)}
+.stage>.frame{position:absolute;left:0;top:0;transform-origin:0 0}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.ctl button{height:32px;padding:0 12px;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--muted);font:inherit;cursor:pointer}
+.ctl button[aria-pressed="true"]{background:var(--acc);border-color:var(--acc);color:#242522;font-weight:600}
+table{border-collapse:collapse;margin:8px 0;font-size:14px;max-width:960px;width:100%}
+th,td{text-align:left;vertical-align:top;padding:8px 12px;border-top:1px solid var(--line)}
+th{color:var(--faint);font-weight:600;font-size:12px;white-space:nowrap;width:150px}
+td{color:var(--muted)}
+ol,ul.issues{color:var(--muted);max-width:900px;padding-left:20px}
+ol li,ul.issues li{margin:4px 0}
+code{font:13px/1 ui-monospace,Consolas,monospace;color:var(--text)}
+.note{background:var(--card);box-shadow:inset 0 0 0 1px var(--line);padding:12px 16px;max-width:880px;margin:12px 0}
+.note p{margin:0}
+
+/* ---------- simplified arca.live write page (dark) ---------- */
+.frame{background:#212121;overflow:hidden;font-family:"Pretendard Variable",Pretendard,"Malgun Gothic",sans-serif;color:#e3e3e3}
+.arca{position:absolute;left:0;top:0;bottom:0;right:var(--push,0px);transition:right 200ms cubic-bezier(.2,0,0,1)}
+.arca.clip{overflow:hidden}
+.nav{height:54px;border-bottom:1px solid #333;display:flex;align-items:center;gap:24px;padding:0 16px;font-size:17px;white-space:nowrap}
+.nav .logo{width:28px;height:28px;border-radius:50%;background:#e8e8e8;flex:none}
+.nav .srch{flex:0 1 300px;min-width:120px;height:36px;background:#000;border-radius:4px;color:#ccc;display:flex;align-items:center;padding:0 12px;font-size:16px}
+.cont{margin:0 auto;padding:0 16px;max-width:var(--maxw,none);min-width:var(--minw,0px)}
+.ch{display:flex;gap:16px;padding:16px 0;border-bottom:1px solid #333;white-space:nowrap;overflow:hidden}
+.ch .av{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6b4f86,#d9c7e8);flex:none}
+.ch .t{font-size:21px;line-height:30px}.ch .m{font-size:13px;color:#cfcfcf;line-height:20px}
+.fm{padding-top:16px}
+.fld{height:32px;border:1px solid #333;background:#2a2a2a;border-radius:3px;display:flex;align-items:center;padding:0 12px;font-size:14px;margin-bottom:8px}
+.fld.ti{height:38px;color:#888;font-size:15px}
+.ed{border:1px solid #333;border-radius:3px;overflow:hidden}
+.tb{min-height:42px;background:#2a2a2a;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:0 8px;font-size:17px;color:#e5e5e5}
+.tb i{font-style:normal;width:34px;height:42px;display:grid;place-items:center}
+.tb i.gap{width:12px}
+.tb i.lkb{background:rgb(125 177 255/.18);color:#7db1ff}
+.bd{background:#111;min-height:var(--bdh,440px);padding:16px 20px;font-size:15px;line-height:26px;color:#e6e6e6}
+.bd p{margin:0 0 10px;color:inherit;max-width:none}
+.bd .ex{color:#ff3b6b;letter-spacing:12px}
+.bd .img{width:200px;height:250px;margin:8px 0 10px;background:linear-gradient(160deg,#b8344d,#f2cbd2 60%,#3a1c27)}
+.bd .caret{display:inline-block;width:1.5px;height:18px;background:#e6e6e6;vertical-align:-3px;margin-left:1px}
+.edf{height:40px;background:#2a2a2a}
+.btns{display:grid;grid-template-columns:1fr 2fr;margin-top:12px;border:1px solid #444;border-radius:3px;height:38px;font-size:15px}
+.btns span{display:grid;place-items:center}.btns span+span{border-left:1px solid #444;color:#999}
+.cb{height:40px;margin-top:8px;background:#2a2a2a;border-radius:3px;display:flex;align-items:center;gap:8px;padding:0 12px;font-size:15px}
+.cb::before{content:"";width:16px;height:16px;border:1px solid #666;border-radius:2px;background:#1a1a1a}
+.back{display:inline-block;margin-top:12px;height:36px;line-height:34px;padding:0 16px;border:1px solid #555;border-radius:3px;font-size:14px}
+
+/* ---------- Lakomics panel (tokens and rules copied from extension-list/src/picker/panel-css.js, dark) ---------- */
+.lkhost{--p-bg:#232425;--p-raised:#292a2b;--p-field:#2c2d2e;--p-line:#3b3c3e;--p-line-soft:#2f3031;--p-text:#e7e9ec;--p-muted:#a0a3a5;--p-faint:#7d8184;--p-hover:#2f3031;--p-press:#3c3d3e;--p-accent:#ddd8ca;--p-on-accent:#242522;--p-accent-hover:#e8e4d8;--p-focus:#7db1ff;--p-tile:#2c2d2e;--p-scrim:rgb(18 18 19/.62);--p-shadow:-8px 0 24px rgb(0 0 0/.35);--ease:cubic-bezier(.2,0,0,1);--ui:"Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;
+  position:absolute;top:0;right:0;bottom:0;width:var(--w,360px);overflow:hidden;transition:width 200ms var(--ease);z-index:5}
+.lkhost.bottom{top:auto;left:0;width:auto;height:var(--h,296px)}
+.lk{position:absolute;top:0;right:0;bottom:0;width:var(--fw,var(--w,360px));display:flex;flex-direction:column;background:var(--p-bg);border-left:1px solid var(--p-line);box-shadow:var(--p-shadow);color:var(--p-text);font:400 15px/20px var(--ui);-webkit-font-smoothing:antialiased}
+.lkhost.overlay .lk{box-shadow:-12px 0 32px rgb(0 0 0/.5)}
+.lk .ic,.dr .ic,.rail .ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.lk button,.dr button,.rail button{font:inherit;color:inherit;cursor:pointer}
+.lk-head{flex:none;display:flex;align-items:center;gap:8px;height:48px;padding:0 8px 0 16px}
+.lk-mark{flex:none;width:14px;height:16px;color:var(--p-accent)}
+.folder{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 12px;border:0;border-radius:4px;background:var(--p-field);text-align:left}
+.folder .ic{color:var(--p-muted)}
+.folder .path{flex:1;min-width:0;display:flex;overflow:hidden;white-space:nowrap}
+.folder .par{color:var(--p-muted);overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+.folder .leaf{flex:none;font-weight:600}
+.cbtn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;flex:none;border:0;border-radius:4px;background:transparent;color:var(--p-muted)!important;white-space:nowrap}
+.cbtn.sq{width:28px;padding:0;justify-content:center}
+.cbtn.hov{background:var(--p-hover);color:var(--p-text)!important}
+.cbtn .kb{margin-left:4px;font-size:12px;color:var(--p-faint)}
+.lk-sub{flex:none;display:flex;align-items:center;gap:8px;height:36px;padding:0 16px;white-space:nowrap}
+.scope{display:flex;align-items:center;gap:8px;color:var(--p-muted)}
+.order{display:flex;height:24px;background:var(--p-field);padding:2px;border-radius:2px;gap:2px}.order span{border-radius:2px;font-size:12px;padding:0 6px;line-height:20px;color:var(--p-muted)}.order span.on{background:var(--p-accent);color:var(--p-on-accent)}
+.cnt{margin-left:auto;font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
+.sw{position:relative;width:32px;height:18px;flex:none;border-radius:9px;background:var(--p-accent)}
+.sw::before{content:"";position:absolute;left:3px;top:3px;width:12px;height:12px;border-radius:50%;background:var(--p-on-accent);transform:translateX(14px)}
+.body{flex:1;min-height:0;position:relative;display:flex;flex-direction:column;border-top:1px solid var(--p-line-soft)}
+.grid{flex:1;min-height:0;overflow:hidden;display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));grid-auto-rows:max-content;gap:2px;align-content:start}
+.tile{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;background:var(--p-tile)}
+.tile.sel::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 2px var(--p-accent),inset 0 0 0 3px rgb(0 0 0/.28)}
+.num{position:absolute;left:4px;top:4px;z-index:2;min-width:20px;height:20px;padding:0 6px;border-radius:2px;background:var(--p-accent);color:var(--p-on-accent);font:600 12px/20px var(--ui);text-align:center;font-variant-numeric:tabular-nums}
+.tile.cut{opacity:.999}
+.tray{flex:none;display:flex;align-items:center;gap:8px;height:64px;padding:0 8px 0 16px;border-top:1px solid var(--p-line)}
+.tray .strip{flex:1;min-width:0;display:flex;gap:4px;overflow:hidden}
+.tray .t{position:relative;flex:none;width:48px;height:48px;background:var(--p-tile);overflow:hidden}
+.tray .t .num{left:2px;top:2px;min-width:16px;height:16px;padding:0 4px;font-size:11px;line-height:16px}
+.foot{flex:none;display:flex;align-items:center;gap:8px;height:56px;padding:0 16px 0 8px;border-top:1px solid var(--p-line)}
+.foot .sp{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:32px;padding:0 12px;flex:none;border:1px solid var(--p-line);border-radius:4px;background:var(--p-bg);color:var(--p-text);white-space:nowrap}
+.btn.primary{border-color:var(--p-accent);background:var(--p-accent);color:var(--p-on-accent)!important;font-weight:600;font-variant-numeric:tabular-nums}
+.btn[disabled]{opacity:.4}
+/* resize handle: 8px hit area on the left edge, a neutral 1px line only on hover/drag */
+.rz{position:absolute;left:0;top:0;bottom:0;width:8px;z-index:6;cursor:col-resize}
+.rz::after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background 90ms var(--ease)}
+.rz.hov::after{background:var(--p-muted)}
+.rz.hov::before{content:"";position:absolute;left:3px;top:50%;width:3px;height:32px;margin-top:-16px;border-left:1px solid var(--p-muted);border-right:1px solid var(--p-muted)}
+/* rail */
+.rail{position:absolute;top:0;right:0;bottom:0;width:56px;display:flex;flex-direction:column;align-items:center;background:var(--p-bg);border-left:1px solid var(--p-line);color:var(--p-text);font:400 15px/20px var(--ui)}
+.rail .rh{flex:none;height:48px;display:grid;place-items:center}
+.rail .rpicks{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;border-top:1px solid var(--p-line-soft);width:100%}
+.rail .t{position:relative;width:40px;height:40px;flex:none;overflow:hidden;background:var(--p-tile)}
+.rail .t .num{left:2px;top:2px;min-width:16px;height:16px;padding:0 4px;font-size:11px;line-height:16px}
+.rail .more{width:40px;height:24px;display:grid;place-items:center;font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
+.rail .rf{flex:none;width:100%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0 12px;border-top:1px solid var(--p-line)}
+.rail .rf .c{font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
+.rail .btn.primary{width:40px;padding:0;font-size:14px}
+.rail .empty{font-size:12px;color:var(--p-faint);writing-mode:vertical-rl;letter-spacing:2px;margin-top:8px}
+/* animated host in the live demo */
+.lkhost .lk{transition:opacity 140ms var(--ease) 60ms}
+.lkhost .rail{transition:opacity 90ms var(--ease)}
+.lkhost.is-rail .lk{opacity:0;pointer-events:none;transition:opacity 90ms var(--ease)}
+.lkhost:not(.is-rail) .rail{opacity:0;pointer-events:none}
+.lkhost:not(.anim) .rail,.lkhost:not(.anim) .lk{transition:none}
+/* bottom drawer variant */
+.dr{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--p-bg);border-top:1px solid var(--p-line);box-shadow:0 -8px 24px rgb(0 0 0/.45);color:var(--p-text);font:400 15px/20px var(--ui)}
+.dr .dh{flex:none;display:flex;align-items:center;gap:12px;height:44px;padding:0 8px 0 16px;white-space:nowrap}
+.dr .dh .folder{flex:0 0 280px}
+.dr .dm{flex:1;min-height:0;display:flex;border-top:1px solid var(--p-line-soft)}
+.dr .strip2{flex:1;min-width:0;display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,1fr);grid-auto-columns:116px;gap:2px;overflow:hidden}
+.dr .strip2 .tile{aspect-ratio:auto;height:100%}
+.dr .side{flex:none;width:248px;display:flex;flex-direction:column;border-left:1px solid var(--p-line)}
+.dr .side .tray{border-top:0;flex:1;align-items:flex-start;padding-top:12px;height:auto}
+.dr .side .tray .strip{flex-wrap:wrap}
+/* callouts */
+.call{position:absolute;z-index:9;display:flex;align-items:center;gap:8px;padding:4px 8px;background:#fff;color:#111;font:600 13px/18px var(--ui);border-radius:2px;white-space:nowrap;box-shadow:0 2px 8px rgb(0 0 0/.5)}
+.zone{position:absolute;z-index:8;border:2px dashed rgb(255 255 255/.85);pointer-events:none}
+.zone.bad{background:rgb(226 103 103/.16);border-color:#e26767}
+.zone.good{background:rgb(127 184 138/.12);border-color:#7fb88a}
+
+/* ---------- tablet portrait (674 × 1078) ---------- */
+.tgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px 16px;margin-top:8px}
+.tgrid .stage{margin-top:0}
+.tgrid h4{margin:0 0 4px;font-size:15px;font-weight:700}
+.tgrid .cap{min-height:36px}
+@media(max-width:900px){.tgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.tgrid{grid-template-columns:1fr}}
+ol.flow{color:var(--muted);max-width:900px;padding-left:20px}
+ol.flow li{margin:4px 0}
+/* simplified arca mobile write page */
+.am{position:absolute;inset:0;overflow:hidden;background:#212121;color:#e3e3e3;font:400 15px/26px "Pretendard Variable",Pretendard,"Malgun Gothic",sans-serif}
+.am .pg{position:absolute;left:0;right:0;top:0;transition:transform 200ms cubic-bezier(.2,0,0,1)}
+.am .mnav{height:52px;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid #333;font-size:18px}
+.am .mnav .logo{width:28px;height:28px;border-radius:50%;background:#e8e8e8}
+.am .mnav .sp{flex:1}
+.am .mch{display:flex;align-items:center;gap:12px;height:68px;padding:0 16px;border-bottom:1px solid #333;font-size:19px;white-space:nowrap}
+.am .mch .av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#6b4f86,#d9c7e8)}
+.am .mf{padding:12px 12px 0}
+.am .fld{height:40px;font-size:15px}.am .fld.ti{height:44px;font-size:16px}
+.am .tb{padding:0 4px;gap:0}.am .tb i{width:44px;height:40px}
+.am .bd{min-height:520px;padding:16px;font-size:16px;line-height:27px}
+.am .caret.mk{width:2px;height:22px;background:#ddd8ca;box-shadow:0 0 0 1px rgb(0 0 0/.4)}
+.am .btns{height:44px}
+.am .cb{height:44px}
+.scrim{position:absolute;inset:0;background:rgb(0 0 0/.5);z-index:4}
+.kbd{position:absolute;left:0;right:0;bottom:0;height:400px;z-index:7;background:#2b2c2f;display:grid;grid-template-rows:44px repeat(4,1fr);gap:8px;padding:8px}
+.kbd .sug{display:flex;justify-content:space-around;align-items:center;color:#cfd1d4;font:400 16px/1 var(--ui)}
+.kbd .row{display:flex;gap:6px}.kbd .row i{flex:1;background:#3c3e42;border-radius:6px}.kbd .row i.w{flex:4}
+/* tablet sheet: same tokens as the panel, tablet sizes (17 / 13, 44 controls) */
+.tv{--p-bg:#232425;--p-raised:#292a2b;--p-field:#2c2d2e;--p-line:#3b3c3e;--p-line-soft:#2f3031;--p-text:#e7e9ec;--p-muted:#a0a3a5;--p-faint:#7d8184;--p-hover:#2f3031;--p-accent:#ddd8ca;--p-on-accent:#242522;--p-focus:#7db1ff;--p-tile:#2c2d2e;--p-scrim:rgb(18 18 19/.62);--ease:cubic-bezier(.2,0,0,1);--ui:"Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;
+  position:absolute;left:0;right:0;bottom:var(--b,0px);height:var(--h);z-index:6;display:flex;flex-direction:column;background:var(--p-bg);border-top:1px solid var(--p-line);border-radius:8px 8px 0 0;box-shadow:0 -8px 24px rgb(0 0 0/.4);color:var(--p-text);font:400 17px/24px var(--ui);overflow:hidden}
+.tv .ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.tv button{font:inherit;color:inherit}
+.tv .grab{flex:none;height:20px;display:grid;place-items:center}
+.tv .grab i{width:36px;height:4px;border-radius:2px;background:var(--p-line)}
+.tv .th{flex:none;display:flex;align-items:center;gap:8px;height:56px;padding:0 8px 0 16px}
+.tv .th .lk-mark{width:16px;height:18px;color:var(--p-accent)}
+.tv .folder{height:44px;font-size:17px}
+.tv .sq{width:44px;height:44px;flex:none;display:grid;place-items:center;border:0;background:transparent;color:var(--p-muted);border-radius:4px;padding:0}
+.tv .tsub{flex:none;display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;white-space:nowrap}
+.tv .tsub .sw{width:40px;height:22px;border-radius:11px}.tv .tsub .sw::before{width:16px;height:16px;transform:translateX(18px)}
+.tv .tsub .order{height:36px;padding:2px}.tv .tsub .order span{font-size:13px;line-height:32px;padding:0 12px}
+.tv .tsub .cnt{font-size:13px}
+.tv .tb2{flex:1;min-height:0;overflow:hidden;border-top:1px solid var(--p-line-soft)}
+.tv .grid{display:grid;grid-template-columns:repeat(var(--cols,5),minmax(0,1fr));gap:2px}
+.tv .num{min-width:24px;height:24px;padding:0 8px;font-size:13px;line-height:24px}
+.tv .pv{position:absolute;right:4px;bottom:4px;width:28px;height:28px;display:grid;place-items:center;background:var(--p-scrim);color:#fff;border-radius:2px}
+.tv .pv .ic{width:16px;height:16px}
+.tv .tf{flex:none;display:flex;align-items:center;gap:8px;height:72px;padding:0 16px 0 8px;border-top:1px solid var(--p-line)}
+.tv .tf .strip{flex:1;min-width:0;display:flex;gap:4px;overflow:hidden}
+.tv .tf .t,.tv .bar .t{position:relative;flex:none;width:48px;height:48px;overflow:hidden}
+.tv .tf .t .num,.tv .bar .t .num{left:2px;top:2px;min-width:20px;height:20px;padding:0 4px;font-size:12px;line-height:20px}
+.tv .tf .lbl{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 8px;color:var(--p-muted)}
+.tv .btn{height:44px;padding:0 16px;font-size:17px}
+.tv .bar{flex:1;display:flex;align-items:center;gap:8px;padding:0 16px 0 8px}
+.tv .bar .t{width:44px;height:44px}
+.tv .bar .c{font-size:13px;color:var(--p-faint);font-variant-numeric:tabular-nums}
+.tv.mini .grab{height:12px}.tv.mini .grab i{width:28px}
+.tprev{position:absolute;z-index:8;left:12px;right:12px;top:12px;bottom:var(--pb);display:flex;flex-direction:column;border:1px solid var(--p-line);background-color:#292a2b;background-image:linear-gradient(#ddd8ca,#ddd8ca),linear-gradient(#ddd8ca,#ddd8ca),linear-gradient(#ddd8ca,#ddd8ca),linear-gradient(#ddd8ca,#ddd8ca);background-repeat:no-repeat;background-size:8px 2px,2px 8px,8px 2px,2px 8px;background-position:left top,left top,right bottom,right bottom;box-shadow:0 12px 32px rgb(0 0 0/.5);color:#e7e9ec;font:400 17px/24px "Pretendard Variable",Pretendard,sans-serif;--p-line:#3b3c3e}
+.tprev .ph{flex:none;display:flex;align-items:center;gap:8px;height:52px;padding:0 4px 0 16px;border-bottom:1px solid #3b3c3e}
+.tprev .ph .pos{font-size:13px;color:#7d8184;font-variant-numeric:tabular-nums}
+.tprev .ph .sp{flex:1}
+.tprev .sel{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 12px}
+.tprev .sel .num{position:static;min-width:24px;height:24px;line-height:24px;font-size:13px;border-radius:2px;background:#ddd8ca;color:#242522;text-align:center;font-weight:600}
+.tprev .stg{flex:1;min-height:0;display:grid;place-items:center;background:#161718;position:relative}
+.tprev .stg .art{height:92%;aspect-ratio:3/4}
+.tprev .nav{position:absolute;top:50%;margin-top:-22px;width:44px;height:44px;display:grid;place-items:center;background:rgb(18 18 19/.62);color:#fff;border-radius:2px}
+.tprev .nav.l{left:12px}.tprev .nav.r{right:12px}
+.tprev .ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>아카라이브 그림 넣기 패널: 글쓰기 공간 돌려주기</h1>
+  <p>아카라이브 글쓰기 화면(어두운 테마) 위에 올린 Lakomics 그림 넣기 패널 시안입니다. 모든 화면은 실제 CSS 픽셀 크기로 그린 뒤 화면에 맞게 줄였고, 패널의 색·글자·간격은 <code>extension-list/src/picker/panel-css.js</code>에서 그대로 가져왔습니다. 썸네일은 색 블록으로 대신했습니다.</p>
+
+  <div class="note"><p><b>스크린샷에서 잰 것.</b> 스크린샷은 1752px인데 360px 패널이 540px을 차지하므로 창이 150% 배율이었습니다. 실제 페이지 폭은 <b>1168px</b>이고, 패널이 그중 31%를 차지했습니다. <b>저장 | 사본으로 저장</b> 줄(1:2 분할)이 약 861px에서 끝나 패널 왼쪽 끝(808px)을 넘으므로, 페이지 밀기는 켜져 있었던 것으로 보입니다. 다만 아카라이브 글쓰기 칸이 약 850px 밑으로 줄어들지 않아 약 50px이 패널 밑으로 들어가고, 본문 줄 끝이 가려집니다. 이 부분은 구현할 때 실제 브라우저에서 확인할 가설입니다. 어느 쪽이든 아래 디자인의 원칙은 <b>패널이 글쓰기 칸 위를 덮지 않는다</b>입니다.</p></div>
+
+  <h2>지금</h2>
+  <p>360px, 오른쪽에 붙고 페이지 밀기가 켜진 상태입니다. 글쓰기 칸이 패널 밑으로 들어가 긴 줄이 가려집니다. 18장으로는 그리드 아래 약 250px이 빕니다.</p>
+  <div class="stage" data-w="1168" data-h="1000" data-build="current"></div>
+  <p class="cap">1168 × 1000 CSS px (150% 배율에서 1752px), 스크린샷과 같은 크기</p>
+
+  <h2><span class="tag">안 A</span>진짜로 비켜 주기: 페이지가 자리를 내주고, 패널은 그 자리에 맞춤</h2>
+  <p>페이지가 <b>화면 폭 − 패널 폭</b> 안으로 다시 배치되어, 글쓰기 칸이 패널 밑에 남지 않습니다. 패널 기본 폭은 <b>300px</b>(99px 타일 3열)입니다. 밀어도 페이지가 넘치면(아카라이브 최소 폭 때문에) 패널이 그만큼 좁아지며, 최소 264px(2열)까지 줄어듭니다. 끌어서 넓히거나 좁힐 수 있고, 그 폭을 기억합니다.</p>
+  <div class="pc"><div><h4>장점</h4><ul><li>불만을 완전히 해결: 본문, 도구 막대, 버튼이 모두 보입니다.</li><li>새로 익힐 상태가 없습니다. 지금 패널이 조금 날씬해질 뿐입니다.</li><li>커서 위치와 넣기 흐름이 지금 그대로 동작합니다.</li></ul></div><div><h4>단점</h4><ul><li>기본 폭에서 타일이 119px에서 99px로 작아집니다(자세히는 크게 보기로).</li><li>아카라이브 화면에서 페이지 밀기가 실제로 먹혀야 해서, 재서 확인하는 장치와 대안이 필요합니다.</li><li>1168px 페이지에서는 패널이 열려 있는 동안 편집기가 여전히 300px 좁아집니다.</li></ul></div></div>
+  <div class="stage" data-w="1168" data-h="1000" data-build="dock"></div>
+  <p class="cap">1168 × 1000: 패널 300px, 페이지 868px(글쓰기 칸 약 861px 이상)이라 가려지는 곳이 없음</p>
+
+  <h2><span class="tag">안 B</span>접히는 막대</h2>
+  <p>패널을 <b>56px 막대</b>로 접을 수 있습니다. 막대에는 고른 그림(번호 붙은 썸네일), 장수, <b>넣기</b>가 남습니다. 접혀 있는 동안 페이지는 56px만 내주고, 클릭이나 <code>Alt+Shift+L</code>로 그리드가 다시 펼쳐집니다. 이 안만 쓰면(펼쳤을 때 지금처럼 위에 덮는 방식) 그리드가 열려 있을 때, 즉 그림을 고르는 바로 그때는 지금처럼 가립니다.</p>
+  <div class="pc"><div><h4>장점</h4><ul><li>거의 전체 폭을 글쓰기에 쓰면서 고른 그림이 계속 보입니다.</li><li>막대에서 바로 커서 위치에 넣을 수 있습니다.</li><li>패널을 붙일 자리가 없는 작은 창에서 좋습니다.</li></ul></div><div><h4>단점</h4><ul><li>상태 하나와 전환 버튼을 새로 익혀야 합니다.</li><li>글을 쓰면 저절로 접히는 방식은 뺐습니다. 그림 넣기 직전에 본문을 클릭해 커서를 놓는 순간 패널이 접혀 버리기 때문입니다.</li><li>위에 덮는 방식만으로는 펼친 상태에서 여전히 글을 가립니다.</li></ul></div></div>
+  <div class="stage" data-w="1168" data-h="1000" data-build="rail"></div>
+  <p class="cap">1168 × 1000: 글 쓰는 동안 접어 두고, 고른 3장은 막대에 남음</p>
+
+  <h2><span class="tag">안 C</span>아래쪽 서랍</h2>
+  <p>아래쪽에 296px 서랍을 두고, 타일 두 줄을 옆으로 넘기며, 고른 그림과 넣기는 오른쪽에 둡니다. 만들어 봤지만 <b>추천하지 않습니다</b>. 글쓰기 화면은 아래로 길어지므로 서랍이 입력 중인 줄, 저장 버튼, 방금 넣은 그림을 가립니다. 옆으로 넘기는 방식도 최신순의 페이지 넘김과 맞지 않습니다.</p>
+  <div class="stage" data-w="1168" data-h="1000" data-build="drawer"></div>
+  <p class="cap">1168 × 1000: 서랍이 커서 줄과 저장 줄을 가림</p>
+
+  <h2><span class="tag rec">추천</span>A + B: 진짜로 비켜 주는 패널 + 막대로 접기</h2>
+  <p>안 A가 기본이고, 안 B의 막대를 직접 누르는 접기로 더해 그 상태를 기억합니다. 페이지는 언제나 패널의 현재 폭(펼침 300, 접힘 56)만큼 비켜 주므로 어느 상태에서도 글쓰기 칸을 가리지 않습니다. 아래 버튼으로 상태를 바꿔 보세요. 페이지 끝과 패널 끝이 200ms 동안 함께 움직입니다.</p>
+  <div class="ctl" id="demoCtl"><button data-s="open" aria-pressed="true">펼침 (300)</button><button data-s="rail" aria-pressed="false">막대 (56)</button><button data-s="sel" aria-pressed="false">펼침 + 3장 선택</button></div>
+  <div class="stage" data-w="1168" data-h="1000" data-build="demo" id="demo"></div>
+  <p class="cap">1168 × 1000, 직접 눌러 볼 수 있음</p>
+
+  <h3>넓은 창, 폭을 440px로 끈 경우 (4열, 기억됨)</h3>
+  <div class="stage" data-w="1750" data-h="1000" data-build="wide"></div>
+  <p class="cap">1750 × 1000 (100%): 페이지는 남은 1310px 안에서 1100px 본문을 가운데 둠. 폭 조절 손잡이는 마우스를 올린 모습</p>
+
+  <h3>1280px 창, 기본 폭</h3>
+  <div class="stage" data-w="1280" data-h="900" data-build="mid"></div>
+  <p class="cap">1280 × 900: 패널 300, 페이지 980</p>
+
+  <h2>추천안 세부 사항</h2>
+  <table>
+    <tr><th>폭</th><td>펼침: 기억한 폭, 기본 <b>300</b>, 끌어서 <b>264–480</b>. 열 수는 폭에 따라: 288 미만 → 2열, 288–419 → 3열, 420 이상 → 4열. 접힌 막대: <b>56</b>. 손잡이를 더블클릭하면 300으로 돌아감.</td></tr>
+    <tr><th>맞추는 규칙</th><td>실제 폭 = min(기억한 폭, 남는 자리). 페이지를 민 뒤 <code>form#article_write_form</code>의 오른쪽 끝을 재서, <code>innerWidth − W</code>를 넘으면 넘친 만큼 W를 줄임. 창 크기가 바뀔 때(rAF로 묶어서)와 끌기가 끝났을 때 다시 계산. 줄인 값으로 기억한 폭을 덮어쓰지 않음.</td></tr>
+    <tr><th>페이지 밀기</th><td>글쓰기 칸 오른쪽 여백이 W + 16보다 작으면 밀기(지금 규칙에서 W만 바뀜). 머리줄, 채널 줄, 글쓰기 칸, 버튼이 모두 <code>[0, innerWidth − W]</code> 안에 들어오고 가로 스크롤이 생기지 않아야 함. 밀고 나서 재서 확인.</td></tr>
+    <tr><th>안 될 때</th><td>264px도 못 비우면(아주 좁은 창이거나 아카라이브가 밀기를 무시할 때) 펼친 패널은 264px로 위에 덮고 그림자를 진하게 하며, 막대는 붙인 채(56 밀기) 둠. 글을 드러내는 방법은 막대로 접기이고, 저절로 접히지는 않음.</td></tr>
+    <tr><th>상태</th><td><b>닫힘</b>(도구 막대 버튼 꺼짐) · <b>펼침</b>(전체 패널) · <b>접힘</b>(막대: 위에 펼치기 버튼, 고른 그림을 40 × 40 번호 썸네일로(들어가는 만큼, 나머지는 "+n"), 장수 <code>n장</code>, <b>넣기</b>(0장이면 꺼짐)). 넣는 중에는 장수가 <code>2/5</code>처럼 바뀌고, 실패하면 진행 줄이 보이도록 패널이 펼쳐짐.</td></tr>
+    <tr><th>전환</th><td>헤더의 ✕ 왼쪽에 접기 버튼(아이콘, <code>aria-label="접기"</code>). 막대의 펼치기 버튼은 <code>aria-label="펼치기"</code>. 막대의 썸네일을 누르면 펼치면서 그 타일로 이동. 마우스를 올려서 펼치는 동작은 없음.</td></tr>
+    <tr><th>키보드</th><td><code>Alt+Shift+L</code>(기존): 닫힘 → 펼침, 펼침 → 접힘, 접힘 → 펼침. ✕, <code>Esc</code>(패널에 초점이 있을 때), 도구 막대 버튼은 그대로 닫기. 편집기에서 단축키를 쓰면 커서가 그 자리에 남고, 막대를 클릭하면 기억한 타일로 초점이 감. R, 숫자 키, 화살표는 그대로이며 패널에 초점이 있을 때만 동작.</td></tr>
+    <tr><th>움직임</th><td>열기: 지금의 미끄러짐(16px + 페이드, 200ms <code>cubic-bezier(.2,0,0,1)</code>)과 페이지 오른쪽 여백을 같은 곡선으로 200ms 동안 함께 움직여 두 끝이 한 몸처럼 이동. 아카라이브 재배치가 끊겨 보이면 처음에 한 번만 재배치. 접기: 내용이 90ms에 사라지고, 폭이 300 → 56으로 200ms, 막대가 나타남. 펼치기: 폭 56 → 300으로 200ms, 내용은 60ms 뒤부터 140ms 동안 나타남. 커지는 동안 패널은 최종 폭을 유지해 그리드가 중간에 다시 배치되지 않음. 폭 끌기: 실시간, 전환 효과 없음. 고른 그림 줄 나타나기: 높이 0 → 64, 140ms. 움직임 줄이기 설정: 전부 즉시.</td></tr>
+    <tr><th>기억하는 것</th><td>기존 보기 기록(<code>VIEW_KEY</code>)에 <code>panelWidth</code>(사용자가 정한 값만)와 <code>folded</code>. 다시 열면 마지막 상태로. 고른 그림은 접어도 남음(닫아도 남는 것과 같음).</td></tr>
+    <tr><th>크게 보기</th><td>지금처럼 패널 왼쪽, 페이지 위에 잠깐 뜸: <code>right: W + 16</code>, 폭 <code>min(620, innerWidth − W − 48)</code>. 막대에서 열면 먼저 펼침.</td></tr>
+  </table>
+
+  <h2>스크린샷에서 보인 작은 문제들</h2>
+  <ul class="issues">
+    <li><b>그리드 아래 빈 공간.</b> 최신순: 그리드가 한 줄 넘칠 때까지 다음 페이지를 계속 불러옴(계획대로). <b>랜덤:</b> 보이는 그리드를 줄 단위로 꽉 채울 만큼 한 번에 불러와서, R을 누르면 정확히 한 화면이 바뀌게 함: <code>열 수 × ceil(그리드 높이 / (타일 + 2))</code>, 최소 18장. 1168 × 1067, 패널 300px이면 3 × 9 = 27장. 창 크기나 폭이 바뀌면 다시 계산하고, 다시 불러오지 않고 랜덤 그림을 더 채워 넣음(깜빡임 없음).</li>
+    <li><b>최신순의 "더 보기"</b>는 스크롤로 페이지가 불러와지면 필요 없음. 최신순에서는 <code>R</code>과 아래 버튼을 <b>새로고침</b>(맨 위로, 다시 최신부터)으로 바꾸고, 아래 줄 모양은 두 방식에서 같게 유지.</li>
+    <li><b>꺼진 "본문에 넣기"</b>가 0장일 때 회색 덩어리처럼 보임. 모양은 그대로 두고, 0장이면 <b>본문에 넣기</b>, 고르면 <b>본문에 넣기 (3장)</b>처럼 지금대로 표시. 글자 폭이 흔들리지 않는지만 확인(숫자 고정폭은 이미 켜져 있음).</li>
+    <li><b>고른 그림 줄이 튀어나옴</b>(64px 줄이 생기면서 그리드가 위로 튐). 높이와 투명도를 140ms 동안 부드럽게 나타나게 하고, 마지막 그림을 빼도 마우스가 줄을 떠날 때까지 줄을 남겨 두어, 하나씩 뺄 때 줄이 커서 밑에서 움직이지 않게 함.</li>
+    <li><b>헤더에 패널 이름 없이 폴더 경로만 있음</b>: 괜찮음(글자 필요 없음). 로고, 폴더 버튼, 새 접기 버튼, ✕ 순서로 모두 28px 작은 버튼.</li>
+    <li><b>도구 막대 버튼의 눌림 상태</b>(아카라이브 도구 막대의 파란 면)는 접혀 있어도 켜진 채로 둠. 패널은 여전히 열려 있는 상태이기 때문.</li>
+  </ul>
+
+  <h2><span class="tag rec">추천</span>태블릿 세로: 아래에서 올라오는 시트</h2>
+  <p>갤럭시 탭 세로(1600 × 2560, 밀도 380, CSS 약 <b>674 × 1078</b>, Helium 브라우저)입니다. 지금의 360px 패널은 폭의 53%를 덮고, 글쓰기 칸 옆에 붙일 자리도 없습니다. 세로에서는 PC와 같은 부품(폴더 버튼, 하위 폴더 스위치, 랜덤|최신순, 타일과 번호, 고른 그림 줄, 본문에 넣기)을 <b>아래에서 올라오는 시트</b>에 담습니다. 달라지는 것은 터치 크기(17 / 13, 44px 버튼), 세로 배치, 끌기 제스처뿐입니다. 가로(약 1078px)는 PC 설계를 그대로 씁니다.</p>
+  <div class="tgrid">
+    <div><h4>지금</h4><div class="stage" data-w="674" data-h="1078" data-build="tNow"></div><p class="cap">360px 패널이 폭의 절반 넘게 덮고, 본문 줄이 패널 밑에서 접힘</p></div>
+    <div><h4>반 높이 (기본)</h4><div class="stage" data-w="674" data-h="1078" data-build="tHalf"></div><p class="cap">시트 55%. 넣을 자리(커서 줄)가 시트 위에 오도록 페이지를 스크롤하고, 그 자리를 아이보리 막대로 표시</p></div>
+    <div><h4>전체</h4><div class="stage" data-w="674" data-h="1078" data-build="tFull"></div><p class="cap">위 36px만 남기고 어둡게. 어두운 곳을 탭하면 반 높이로</p></div>
+    <div><h4>접힘 막대</h4><div class="stage" data-w="674" data-h="1078" data-build="tBar"></div><p class="cap">넣은 직후: 막대로 내려가 방금 넣은 그림이 막대 위에 보임. PC 막대와 같은 역할(고른 그림이 있을 때의 모습은 키보드 화면 참고)</p></div>
+    <div><h4>키보드가 올라왔을 때</h4><div class="stage" data-w="674" data-h="1078" data-build="tKb"></div><p class="cap">본문을 탭하면 시트가 막대로 내려가 키보드 바로 위에 붙음. 쓰는 중에도 그 자리에 바로 넣을 수 있음</p></div>
+    <div><h4>크게 보기</h4><div class="stage" data-w="674" data-h="1078" data-build="tPrev"></div><p class="cap">시트 위 빈 곳에 뜸. 좌우로 밀어 넘기고, 아래로 밀거나 ✕로 닫음. 아래 그리드는 그대로 보임</p></div>
+  </div>
+
+  <h3>터치로 넣는 흐름</h3>
+  <ol class="flow">
+    <li>도구 막대 버튼 → 시트가 반 높이로 올라오고, 마지막 커서 줄이 시트 위에 오도록 페이지가 함께 스크롤됨. 넣을 자리에 아이보리 막대가 보임.</li>
+    <li>다른 곳에 넣으려면 본문을 탭 → 키보드가 올라오고 시트는 막대로 내려가 키보드 위에 붙음(커서는 계속 기억).</li>
+    <li>막대를 탭(또는 위로 끌기) → 키보드를 내리고 시트가 반 높이로, 새 커서 줄이 다시 시트 위로.</li>
+    <li>타일을 탭해 고르기(번호가 붙음). 타일 오른쪽 아래 ⤢ 버튼이나 길게 누르기로 크게 보기.</li>
+    <li>본문에 넣기 → 다 들어가면 시트가 막대로 내려가고, 방금 넣은 그림이 막대 위에 보이도록 스크롤. 실패가 있으면 반 높이에 남아 진행 줄을 보여 줌.</li>
+  </ol>
+
+  <h3>태블릿 세로 세부 사항</h3>
+  <table>
+    <tr><th>적용 조건</th><td><code>innerWidth &lt; 900</code>이고 세로(<code>innerHeight &gt; innerWidth</code>)일 때 시트. 그 밖에는 PC의 오른쪽 패널(가로 태블릿 약 1078px 포함). 화면을 돌리면 그 자리에서 바뀌고, 고른 그림과 스크롤은 유지.</td></tr>
+    <tr><th>상태와 높이</th><td><b>닫힘</b> · <b>막대</b> 72px(손잡이 띠 12 + 줄 60) · <b>반 높이</b> <code>round(0.55 × innerHeight)</code>(674 × 1078에서 593) · <b>전체</b> <code>innerHeight − 36</code>, 위 36px는 <code>rgb(0 0 0/.5)</code>로 어둡게. 반 높이와 막대에서는 페이지를 그대로 만질 수 있음. 전체에서는 어두운 곳을 탭하면 반 높이로.</td></tr>
+    <tr><th>시트 구성</th><td>위에서부터: 손잡이 20(36 × 4, 반지름 2) · 헤더 56(로고, 폴더 버튼 44 높이, 접기 ⌄ 44, ✕ 44) · 보조 줄 48(스위치 40 × 22 + 하위 폴더 포함, 랜덤|최신순 36 높이, 장수 13px) · 그리드 · 아래 줄 72. 세로에서는 PC의 고른 그림 줄과 아래 줄을 한 줄로 합침: [다른 그림] [고른 그림 48 × 48] [본문에 넣기 (n장)]. 고른 그림이 있으면 다른 그림은 아이콘만(44 정사각). 위 모서리만 반지름 8.</td></tr>
+    <tr><th>열과 타일</th><td>열 수 = <code>clamp(floor(폭 / 128), 4, 6)</code>, 674에서 5열(약 133px 타일). 번호 표시 24px(태블릿 배지). 터치 기기(<code>pointer: coarse</code>)에서는 ⤢ 크게 보기 버튼을 항상 보이게 하고(28px 면, 44px 누르는 범위), 길게 누르기(400ms)로도 열림. 랜덤 한 번에 불러오는 장수는 <b>전체</b> 높이를 줄 단위로 채우는 만큼(674 × 1078에서 5 × 7 = 35장), 그래서 펼쳐도 빈 곳이 없음.</td></tr>
+    <tr><th>끌기</th><td>손잡이, 헤더의 빈 곳, 막대 전체로 끌 수 있음. 그리드는 맨 위까지 올라가 있을 때 아래로 끌면 시트가 끌림(그 밖에는 그리드 스크롤). 손을 떼면 가장 가까운 높이로. 0.4px/ms보다 빠르게 튕기면 그 방향의 다음 높이로. 막대에서 아래로 끌면 닫힘(고른 그림은 남음, 지금 닫을 때와 같음). 손잡이 탭: 반 높이 ↔ 막대. 막대의 빈 곳 탭: 반 높이. 이 끌기가 세로에서 기존 <code>swipeToClose</code>(오른쪽으로 밀기)를 대신함.</td></tr>
+    <tr><th>커서 줄 보이기</th><td>열 때와 높이가 바뀔 때, 기억한 커서 위치의 아래 끝이 <code>innerHeight − 시트 높이 − 24</code>보다 아래면 그 차이만큼 페이지를 스크롤(200ms, 시트와 함께). 끝까지 스크롤할 수 있도록 시트가 열려 있는 동안 페이지 맨 아래에 시트 높이만큼 여백을 둠. 편집기에 초점이 없을 때는 기억한 커서 자리에 2 × 줄 높이의 아이보리 막대(<code>--p-accent</code>, 깜빡이지 않음)를 표시해 어디에 들어갈지 보여 줌. 전체 높이에서는 스크롤하지 않음.</td></tr>
+    <tr><th>키보드</th><td><code>visualViewport</code>의 높이가 150px 넘게 줄면 키보드가 올라온 것으로 봄. 반 높이나 전체였다면 막대로 내려가고, 막대의 아래 끝은 <code>innerHeight − (vv.offsetTop + vv.height)</code>에 붙여 키보드 바로 위에 둠(키보드를 따라가야 하므로 이 위치에는 전환 효과 없음). 키보드가 내려가면 그 때문에 접혔던 경우에만 이전 높이로 돌아감. 키보드가 있을 때 막대를 탭하면 커서를 기억하고 편집기 초점을 풀어 키보드를 내린 뒤 반 높이로. 막대의 넣기는 키보드를 내리지 않고 그 자리에 넣음.</td></tr>
+    <tr><th>넣은 뒤</th><td>모두 성공하면 막대로 내려가고, 마지막으로 넣은 그림과 커서가 막대 위에 보이도록 스크롤. 넣는 중에는 막대의 장수가 <code>2/5</code>처럼 바뀜. 실패가 있으면 반 높이로 올라와 진행 줄(최대 3줄 높이)을 아래 줄 바로 위에 보여 줌.</td></tr>
+    <tr><th>크게 보기</th><td>반 높이 시트 위의 빈 곳에 뜸: 왼쪽·오른쪽·위 12px, 아래는 시트 위 끝 − 12px. 전체 상태에서 열면 먼저 반 높이로 내려감. 헤더 52: 위치 <code>4 / 15</code>, 선택 버튼(번호 또는 빈 네모), ✕ 44. 좌우로 밀면 이전·다음(44px 화살표 버튼도 있음), 아래로 밀거나 ✕로 닫음. 모서리 괄호가 있는 떠 있는 면(DESIGN §12).</td></tr>
+    <tr><th>움직임</th><td>열기: 시트가 아래에서 올라옴(<code>translateY(100%)</code> → 0, 200ms <code>cubic-bezier(.2,0,0,1)</code>)과 페이지 스크롤이 함께. 높이 바꾸기: 손을 뗀 위치에서 목표 높이까지 200ms 같은 곡선. 닫기: 140ms. 시트 ↔ 막대 내용: 90ms에 사라지고 140ms에 나타남(PC 막대와 같음). 전체의 어두운 면: 140ms 페이드. 끄는 동안은 손가락을 그대로 따라감. 움직임 줄이기 설정이면 전부 즉시.</td></tr>
+    <tr><th>기억하는 것</th><td>PC와 같은 <code>folded</code>(true면 막대로 열림, false면 반 높이). 전체는 기억하지 않음(다시 열면 반 높이). 폭은 세로에서 쓰지 않음.</td></tr>
+    <tr><th>PC와 같은 것</th><td>색·토큰, 헤더 부품과 순서, 폴더 고르기 팝오버, 스위치, 랜덤|최신순, 타일·선택 표시·번호, 고른 그림 썸네일, 본문에 넣기 문구, 지연된 "불러오는 중", 깜빡임 없는 교체, R/숫자 키(키보드를 붙였을 때). 다른 것은 위의 크기·배치·끌기뿐.</td></tr>
+  </table>
+</div>
+
+<script>
+(() => {
+  const PAL = [["#b8344d","#f2cbd2"],["#2b3b6f","#c9d6f2"],["#1d1d22","#e7e2df"],["#e8d4e6","#5f6fb8"],["#8c1d22","#e9b9a6"],["#30364a","#d9c5a8"],["#c45a3a","#f7e6dc"],["#161013","#a4332f"],["#6a1820","#1b1b22"],["#f1e3e0","#d4545b"],["#1a1416","#e04545"],["#bfe2f4","#5d8fc8"],["#2d1d3a","#f0e2c4"],["#f08a3c","#f6dcc8"],["#cfe6f6","#ffffff"],["#4b2c6e","#d9b8ef"],["#d8a83a","#2f7fa8"],["#e9e2f1","#c86b80"],["#5a7a54","#e9efe4"],["#20262e","#89a7c4"],["#a8586e","#f5dde3"],["#3c2a22","#e3b37a"],["#7fb4d6","#f3f0e8"],["#9b2c48","#2a1a2a"]];
+  const ICON = { folder:"M3 6h6l2 2h10v11H3z", chevron:"M6 9l6 6 6-6", close:"M6 6l12 12M18 6L6 18", refresh:"M20 11a8 8 0 1 0-2 7M20 3v8h-8", left:"M15 6l-6 6 6 6", fold:"M4 4h16v16H4zM15 4v16M8 10l2 2-2 2" , unfold:"M4 4h16v16H4zM9 4v16M16 10l-2 2 2 2"};
+  const ic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
+  const mark = `<svg class="lk-mark" viewBox="0 0 22 24" aria-hidden="true"><path fill="currentColor" d="M2 2h8v2H4v16h14v-6h2v8H2zM8 8h12v4H8z"/></svg>`;
+  const grad = i => { const [a,b] = PAL[i % PAL.length]; const ang = 140 + (i * 37) % 60; return `background:radial-gradient(circle at ${30 + (i*23)%45}% ${25 + (i*17)%40}%,rgb(255 255 255/.22),transparent 38%),linear-gradient(${ang}deg,${a},${b})`; };
+
+  function tilesFor(H, w, cols, tray) {
+    const gridH = H - 48 - 36 - 1 - (tray ? 64 : 0) - 56, tile = (w - 2 * (cols - 1)) / cols;
+    return cols * Math.ceil(gridH / (tile + 2));
+  }
+  function panel({ w, cols = 3, H, sel = [], count, overlay = false, handle = false, foldBtn = true, hov = false }) {
+    const n = count ?? tilesFor(H, w, cols, sel.length > 0);
+    let tiles = "";
+    for (let i = 0; i < n; i++) { const k = sel.indexOf(i); tiles += `<div class="tile${k >= 0 ? " sel" : ""}" style="${grad(i)}">${k >= 0 ? `<span class="num">${k + 1}</span>` : ""}</div>`; }
+    const tray = sel.length ? `<div class="tray"><div class="strip">${sel.map((i, k) => `<div class="t" style="${grad(i)}"><span class="num">${k + 1}</span></div>`).join("")}</div></div>` : "";
+    return `<div class="lk" style="--fw:${w}px;--cols:${cols}">
+      ${handle ? `<div class="rz${hov ? " hov" : ""}"></div>` : ""}
+      <div class="lk-head">${mark}<button class="folder">${ic("folder")}<span class="path"><span class="par">게임 ›</span><span class="leaf">&nbsp;명조</span></span>${ic("chevron")}</button>${foldBtn ? `<button class="cbtn sq" aria-label="접기">${ic("fold")}</button>` : ""}<button class="cbtn sq" aria-label="닫기">${ic("close")}</button></div>
+      <div class="lk-sub"><span class="scope"><span class="sw"></span><span>${w < 300 ? "하위 포함" : "하위 폴더 포함"}</span></span><span class="order"><span class="on">랜덤</span><span>최신순</span></span><span class="cnt">536장</span></div>
+      <div class="body"><div class="grid">${tiles}</div></div>
+      ${tray}
+      <div class="foot"><button class="cbtn">${ic("refresh")}다른 그림<span class="kb">R</span></button><span class="sp"></span><button class="btn primary"${sel.length ? "" : " disabled"}>본문에 넣기${sel.length ? ` (${sel.length}장)` : ""}</button></div>
+    </div>`;
+  }
+  function rail({ sel = [] }) {
+    return `<div class="rail"><div class="rh"><button class="cbtn sq" aria-label="펼치기" style="background:transparent;border:0;color:var(--p-muted)">${ic("unfold")}</button></div>
+      <div class="rpicks">${sel.length ? sel.map((i, k) => `<div class="t" style="${grad(i)}"><span class="num">${k + 1}</span></div>`).join("") : `<span class="empty">선택 없음</span>`}</div>
+      <div class="rf"><span class="c">${sel.length}장</span><button class="btn primary"${sel.length ? "" : " disabled"}>넣기</button></div></div>`;
+  }
+  function arca({ push = 0, minw = 861, maxw = 0, bdh = 440, clip = true, toolbarWrap = false }) {
+    return `<div class="arca${clip ? " clip" : ""}" style="--push:${push}px;--minw:${minw}px;${maxw ? `--maxw:${maxw}px;` : ""}--bdh:${bdh}px">
+      <div class="nav"><span class="logo"></span><span>구독 채널 ▾</span><span>주요 채널 ▾</span><span>리프레셔</span><span class="srch">⌕&nbsp;&nbsp;찾기</span></div>
+      <div class="cont">
+        <div class="ch"><span class="av"></span><div><div class="t">리버스 1999 채널</div><div class="m">구독자 15978명 | 알림수신 336명 | 보유 포인트 11,421,680 | @맆챈용계정</div><div class="m">3.8 패치 &lt;세기말의 척도&gt; 업데이트 | 코너스톤 픽업중(~11/5) | 챈주는 미스 스트레인저!</div></div></div>
+        <div class="fm">
+          <div class="fld">일반</div><div class="fld ti">제목</div>
+          <div class="ed">
+            <div class="tb"><i><b>B</b></i><i><em>i</em></i><i><u>U</u></i><i><s>S</s></i><i>Aa</i><i>☰</i><i>A</i><i>✎</i><i>A⋮</i><i class="gap"></i><i>▣</i><i>▶</i><i>⛓</i><i>+⋮</i><i class="lkb">⌐</i><i>¶⋮</i><i>☺</i><i>▥</i></div>
+            <div class="bd">
+              <p>채널 공지 필독 바람. 읽지 않아서 생기는 모든 문제는 본인의 책임으로 함.</p>
+              <p><span class="ex">!!!!!!!!</span> 이중픽업은 이월 안됨</p>
+              <p>오늘 뽑은 캐릭터들 정리. 이번 픽업은 생각보다 빨리 나와서 남은 재화로 무기까지 챙겼고, 다음 패치 전까지는 파밍 위주로 돌릴 예정임. 아래는 요즘 모아 둔 팬아트 몇 장인데 출처는 각 그림 아래에 따로 적어 둠. 문제 되면 댓글로 알려 주면 바로 내림.</p>
+              <div class="img"></div>
+              <p>두 번째 그림은 지난주 이벤트 일러스트 분위기랑 비슷해서 골라 봄<span class="caret"></span></p>
+            </div>
+            <div class="edf"></div>
+          </div>
+          <div class="btns"><span>▣ 저장</span><span>+ 사본으로 저장</span></div>
+          <div class="cb">미디어 미리보기를 숨기시겠습니까?</div>
+          <div class="cb">스포일러 방지</div>
+          <span class="back">돌아가기</span>
+        </div>
+      </div></div>`;
+  }
+  const host = (w, inner, cls = "") => `<div class="lkhost ${cls}" style="--w:${w}px">${inner}</div>`;
+  const call = (x, y, t) => `<div class="call" style="left:${x}px;top:${y}px">${t}</div>`;
+  const zone = (x, y, w, h, c) => `<div class="zone ${c}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px"></div>`;
+  const SEL = [4, 9, 13];
+
+  const builds = {
+    current: (W, H) => arca({ push: 360, clip: false }) + host(360, panel({ w: 360, H, count: 18, foldBtn: false })) + zone(808, 248, 70, 690, "bad") + call(560, 214, "폼이 패널 밑으로 약 50 px 들어감 · 줄 끝이 가려짐") + call(840, 880, "그리드 아래 빈 공간"),
+    dock: (W, H) => arca({ push: 300 }) + host(300, panel({ w: 300, H, handle: true })) + zone(16, 248, 852 - 16, 690, "good") + call(620, 214, "본문 전체가 보임 · 줄은 패널 앞에서 접힘"),
+    rail: (W, H) => arca({ push: 56 }) + host(56, rail({ sel: SEL }), "is-rail") + call(950, 960, "접힌 상태: 선택 3장 + 넣기") ,
+    drawer: (W, H) => arca({ push: 0, clip: true }) + `<div class="lkhost bottom" style="--h:296px"><div class="dr">
+        <div class="dh">${mark}<button class="folder">${ic("folder")}<span class="path"><span class="par">게임 ›</span><span class="leaf">&nbsp;명조</span></span>${ic("chevron")}</button><span class="scope"><span class="sw"></span><span>하위 폴더 포함</span></span><span class="order"><span class="on">랜덤</span><span>최신순</span></span><span class="cnt">536장</span><span style="flex:1"></span><button class="cbtn">${ic("refresh")}다른 그림<span class="kb">R</span></button><button class="cbtn sq">${ic("close")}</button></div>
+        <div class="dm"><div class="strip2">${Array.from({ length: 22 }, (_, i) => `<div class="tile${SEL.includes(i) ? " sel" : ""}" style="${grad(i)}">${SEL.includes(i) ? `<span class="num">${SEL.indexOf(i) + 1}</span>` : ""}</div>`).join("")}</div>
+        <div class="side"><div class="tray"><div class="strip">${SEL.map((i, k) => `<div class="t" style="${grad(i)}"><span class="num">${k + 1}</span></div>`).join("")}</div></div><div class="foot"><span class="sp"></span><button class="btn primary">본문에 넣기 (3장)</button></div></div></div>
+      </div></div>` + zone(16, 704, 1136, 296, "bad") + call(380, 670, "입력 중인 줄 · 저장 버튼이 덮임"),
+    demo: (W, H) => arca({ push: 300 }) + `<div class="lkhost anim" id="demoHost" style="--w:300px">${panel({ w: 300, H, handle: true })}${rail({ sel: [] })}</div>`,
+    wide: (W, H) => arca({ push: 440, maxw: 1100 }) + host(440, panel({ w: 440, cols: 4, H, handle: true, hov: true, sel: [2, 7] })) + call(1150, 470, "드래그로 폭 조절 · 기억됨"),
+    mid: (W, H) => arca({ push: 300, bdh: 380 }) + host(300, panel({ w: 300, H, handle: true })),
+    tNow: (W, H) => arcaM({ marker: false }) + host(360, panel({ w: 360, H, foldBtn: false })) + zone(314, 300, 360, 560, "bad"),
+    tHalf: (W, H) => { const h = Math.round(.55 * H); return arcaM({ to: H - h - 24 }) + tSheet({ h, sel: SEL }); },
+    tFull: (W, H) => arcaM({ to: 470 }) + `<div class="scrim"></div>` + tSheet({ h: H - 36, sel: SEL }),
+    tBar: (W, H) => arcaM({ marker: false, to: H - 72 - 24, inserted: true }) + tBar({ sel: [] }),
+    tKb: (W, H) => arcaM({ marker: false, to: H - 400 - 72 - 24 }) + tBar({ sel: SEL, b: 400 }) + kbd(),
+    tPrev: (W, H) => { const h = Math.round(.55 * H); return arcaM({ to: H - h - 24 }) + tSheet({ h, sel: SEL, pv: 9 }) + tPrev({ pb: h + 12 }); },
+  };
+  function arcaM({ to = 0, marker = true, inserted = false }) {
+    return `<div class="am"><div class="pg"${to ? ` data-caret-to="${to}"` : ""}>
+      <div class="mnav"><span>☰</span><span class="logo"></span><span>리버스 1999</span><span class="sp"></span><span>⌕</span></div>
+      <div class="mch"><span class="av"></span><span>리버스 1999 채널</span></div>
+      <div class="mf"><div class="fld">일반</div><div class="fld ti">제목</div>
+        <div class="ed"><div class="tb"><i><b>B</b></i><i><em>i</em></i><i><u>U</u></i><i><s>S</s></i><i>Aa</i><i>☰</i><i>A</i><i>✎</i><i>A⋮</i><i>▣</i><i>▶</i><i>⛓</i><i>+⋮</i><i class="lkb">⌐</i><i>¶⋮</i><i>☺</i><i>▥</i></div>
+          <div class="bd"><p>채널 공지 필독 바람. 읽지 않아서 생기는 모든 문제는 본인의 책임으로 함.</p><p><span class="ex">!!!!!!</span> 이중픽업은 이월 안됨</p>
+            <p>오늘 뽑은 캐릭터들 정리. 이번 픽업은 생각보다 빨리 나와서 남은 재화로 무기까지 챙겼고, 다음 패치 전까지는 파밍 위주로 돌릴 예정임. 아래는 요즘 모아 둔 팬아트 몇 장인데 출처는 각 그림 아래에 따로 적어 둠.</p>
+            <div class="img"></div>
+            <p>두 번째 그림은 지난주 이벤트 일러스트 분위기랑 비슷해서 골라 봄${inserted ? "" : `<span class="caret${marker ? " mk" : ""}"></span>`}</p>
+            ${inserted ? `<div class="img" style="${grad(4)}"></div><div class="img" style="${grad(9)};height:180px"></div><p><span class="caret"></span></p>` : ""}
+          </div><div class="edf"></div></div>
+        <div class="btns"><span>▣ 저장</span><span>+ 사본으로 저장</span></div><div class="cb">스포일러 방지</div></div>
+    </div></div>`;
+  }
+  const tTiles = (h, cols, sel, pv) => {
+    const tile = (674 - 2 * (cols - 1)) / cols, n = cols * Math.ceil((h - 20 - 56 - 48 - 72) / (tile + 2));
+    let s = "";
+    for (let i = 0; i < n; i++) { const k = sel.indexOf(i); s += `<div class="tile${k >= 0 ? " sel" : ""}" style="${grad(i)}${i === pv ? ";outline:2px solid #7db1ff;outline-offset:-2px" : ""}">${k >= 0 ? `<span class="num">${k + 1}</span>` : ""}<span class="pv">${tic("expand")}</span></div>`; }
+    return s;
+  };
+  const TICON = { expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7", up: "M6 15l6-6 6 6", down: "M6 9l6 6 6-6", right: "M9 6l6 6-6 6", left: "M15 6l-6 6 6 6", close: ICON.close, refresh: ICON.refresh, folder: ICON.folder };
+  const tic = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${TICON[n]}"/></svg>`;
+  const thumbs = sel => sel.map((i, k) => `<div class="t" style="${grad(i)}"><span class="num">${k + 1}</span></div>`).join("");
+  function tSheet({ h, sel = [], pv = -1 }) {
+    return `<div class="tv" style="--h:${h}px"><div class="grab"><i></i></div>
+      <div class="th">${mark}<button class="folder">${tic("folder")}<span class="path"><span class="par">게임 ›</span><span class="leaf">&nbsp;명조</span></span>${tic("down")}</button><button class="sq" aria-label="접기">${tic("down")}</button><button class="sq" aria-label="닫기">${tic("close")}</button></div>
+      <div class="tsub"><span class="scope"><span class="sw"></span><span>하위 폴더 포함</span></span><span class="order"><span class="on">랜덤</span><span>최신순</span></span><span class="cnt">536장</span></div>
+      <div class="tb2"><div class="grid" style="--cols:5">${tTiles(h, 5, sel, pv)}</div></div>
+      <div class="tf">${sel.length ? `<button class="sq" aria-label="다른 그림">${tic("refresh")}</button><div class="strip">${thumbs(sel)}</div>` : `<span class="lbl">${tic("refresh")}다른 그림</span><div class="strip"></div>`}<button class="btn primary"${sel.length ? "" : " disabled"}>본문에 넣기${sel.length ? ` (${sel.length}장)` : ""}</button></div></div>`;
+  }
+  function tBar({ sel = [], b = 0 }) {
+    return `<div class="tv mini" style="--h:72px;--b:${b}px"><div class="grab"><i></i></div><div class="bar"><button class="sq" aria-label="펼치기">${tic("up")}</button>${thumbs(sel)}<span style="flex:1"></span><span class="c">${sel.length}장</span><button class="btn primary"${sel.length ? "" : " disabled"}>넣기</button></div></div>`;
+  }
+  const kbd = () => `<div class="kbd"><div class="sug"><span>그림</span><span>골라</span><span>봄</span></div>${[10, 9, 9, 0].map(n => `<div class="row">${n ? "<i></i>".repeat(n) : "<i></i><i></i><i class=\"w\"></i><i></i><i></i>"}</div>`).join("")}</div>`;
+  const tPrev = ({ pb }) => `<div class="tprev" style="--pb:${pb}px"><div class="ph"><span class="pos">10 / 35</span><span class="sp"></span><span class="sel"><span class="num">2</span>선택됨</span><span class="sq" style="width:44px;height:44px;display:grid;place-items:center;color:#a0a3a5">${tic("close")}</span></div><div class="stg"><div class="art" style="${grad(9)}"></div><span class="nav l">${tic("left")}</span><span class="nav r">${tic("right")}</span></div></div>`;
+
+  const stages = [...document.querySelectorAll(".stage")];
+  for (const st of stages) {
+    const W = +st.dataset.w, H = +st.dataset.h, f = document.createElement("div");
+    f.className = "frame"; f.style.width = W + "px"; f.style.height = H + "px";
+    f.innerHTML = builds[st.dataset.build](W, H);
+    st.append(f);
+    const pg = f.querySelector(".pg[data-caret-to]"), caret = pg?.querySelector(".caret");
+    if (caret) { const y = caret.getBoundingClientRect().bottom - f.getBoundingClientRect().top, d = Math.max(0, y - +pg.dataset.caretTo); pg.style.transition = "none"; pg.style.transform = `translateY(${-d}px)`; }
+  }
+  const fit = () => { for (const st of stages) { const W = +st.dataset.w, H = +st.dataset.h, s = st.clientWidth / W, f = st.firstElementChild; f.style.transform = `scale(${s})`; st.style.height = H * s + "px"; } };
+  fit(); addEventListener("resize", fit);
+
+  // live demo of the recommended states
+  const demo = document.getElementById("demo"), H = +demo.dataset.h;
+  const setState = s => {
+    const h = document.getElementById("demoHost"), page = demo.querySelector(".arca");
+    const w = s === "rail" ? 56 : 300, sel = s === "sel" ? SEL : s === "rail" ? (h.dataset.sel ? SEL : []) : [];
+    if (s !== "rail") { h.querySelector(".lk").outerHTML = panel({ w: 300, H, handle: true, sel }); h.dataset.sel = s === "sel" ? "1" : ""; }
+    h.querySelector(".rail").outerHTML = rail({ sel: s === "rail" && h.dataset.sel ? SEL : [] });
+    void h.offsetWidth;
+    h.classList.toggle("is-rail", s === "rail");
+    h.style.setProperty("--w", w + "px"); page.style.setProperty("--push", w + "px");
+    for (const b of document.querySelectorAll("#demoCtl button")) b.setAttribute("aria-pressed", String(b.dataset.s === s));
+  };
+  document.getElementById("demoCtl").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setState(b.dataset.s); });
+})();
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@
     });
     let toolbar = null;
     const panel = Panel.createPanel({ doc, win, css: globalThis.LakomicsPickerCss, send, storage, editor, inserter, detectTheme: Toolbar.detectTheme, onOpenChange: open => toolbar?.setPressed(open) });
-    toolbar = Toolbar.createToolbarButton({ doc, win, onClick: () => void panel.toggle() });
+    toolbar = Toolbar.createToolbarButton({ doc, win, onClick: () => { if (panel.isOpen) panel.close(); else void panel.open(); } });
     toolbar.start();
     runtime.onMessage.addListener(message => { if (message?.type === "picker:toggle") void panel.toggle(); return false; });
     return { panel, toolbar, editor };

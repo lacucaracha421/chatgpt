@@ -9,7 +9,7 @@ const page = { id: 'ext', frameId: 0, tab: { id: 5 }, url: 'https://arca.live/b/
 const options = { id: 'ext', frameId: 0, url: 'chrome-extension://ext/options/options.html#pair-section' };
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function fixture({ key = KEY, routes = {} } = {}) {
+function fixture({ key = KEY, routes = {}, api, userAgent } = {}) {
   const store = key ? { 'lakomics:picker:pc-key:v1': key } : {};
   const calls = [], created = [], sent = [];
   const storage = { async get(keys) { return Object.fromEntries(keys.filter(k => k in store).map(k => [k, store[k]])); }, async set(v) { Object.assign(store, v); }, async remove(keys) { for (const k of keys) delete store[k]; } };
@@ -21,7 +21,7 @@ function fixture({ key = KEY, routes = {} } = {}) {
     if (route instanceof Error) throw route;
     return route ? route(init) : json(404, { code: 'not_found' });
   };
-  return { service: createService({ storage, fetchImpl, runtime, tabs }), calls, store, created, sent };
+  return { service: createService({ storage, fetchImpl, runtime, tabs, api, userAgent }), calls, store, created, sent };
 }
 fixture.activeUrl = 'https://arca.live/b/channel/write';
 
@@ -42,7 +42,7 @@ test('batch validates the request, posts JSON and strips unknown fields from the
   const f = fixture({ routes: { '/v1/picker/batch': init => { body = JSON.parse(init.body); return json(200, { items: [{ assetId: 'x1', width: 10, height: 20, byteSize: 300, mime: 'image/webp', thumbnailUrl: '/v1/picker/thumbnail/x1', path: 'C:\\secret' }, { assetId: 'x2', mime: 'text/html' }], remaining: 7 }); } } });
   const reply = await f.service.handle({ type: 'picker:batch', folderId: 'f1', includeDescendants: true, exclude: ['a', 'b'], limit: 18 }, page);
   assert.deepEqual(body, { folderId: 'f1', includeDescendants: true, limit: 18, exclude: ['a', 'b'] });
-  assert.deepEqual(reply, { ok: true, items: [{ assetId: 'x1', width: 10, height: 20, byteSize: 300, mime: 'image/webp' }], remaining: 7 });
+  assert.deepEqual(reply, { ok: true, items: [{ assetId: 'x1', width: 10, height: 20, byteSize: 300, mime: 'image/webp' }], remaining: 7, nextOffset: null });
   for (const bad of [{ folderId: '../x' }, { folderId: 'f1', limit: 25 }, { folderId: 'f1', exclude: ['ok', 'no good'] }, { folderId: 'f1', exclude: Array.from({ length: 2001 }, (_, i) => 'a' + i) }]) {
     assert.equal((await f.service.handle({ type: 'picker:batch', ...bad }, page)).kind, 'invalid');
   }
@@ -167,4 +167,56 @@ test('folder and character order and pin metadata survive the service worker bou
   const reply = await f.service.handle({ type: 'picker:folders' }, page);
   assert.equal(reply.entries[0].order, 0); assert.equal(reply.entries[0].pinned, true);
   assert.equal(reply.entries[0].pinOrder, 2); assert.equal(reply.characters[0].order, 7);
+});
+
+
+test('batch passes newest paging and PC inline thumbnail bytes, rejecting invalid ordering', async () => {
+  const f = fixture({ routes: { '/v1/picker/batch': init => {
+    assert.equal(JSON.parse(init.body).order, 'newest'); assert.equal(JSON.parse(init.body).offset, 18);
+    return json(200, { items: [{ assetId: 'a', mime: 'image/png', thumbnailBase64: 'AAEC', thumbnailMime: 'image/webp' }], nextOffset: 36 });
+  } } });
+  const reply = await f.service.handle({ type: 'picker:batch', folderId: 'f1', order: 'newest', offset: 18 }, page);
+  assert.equal(reply.nextOffset, 36); assert.equal(reply.items[0].thumbMime, 'image/webp');
+  assert.deepEqual(globalThis.LakomicsPickerModel.fromBase64(reply.items[0].thumbBase64), new Uint8Array([0, 1, 2]));
+  for (const bad of [{ order: 'oldest' }, { order: null }, { offset: -1 }, { offset: 1.5 }, { offset: '1' }, { offset: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.equal((await f.service.handle({ type: 'picker:batch', folderId: 'f1', ...bad }, page)).kind, 'invalid');
+  }
+  assert.equal(f.calls.length, 1);
+});
+
+test('server batch delivers inline thumbnails for the panel without a storage request', async () => {
+  const api = { readConnection: async () => ({ origin: 'https://server.example.test', token: 'test-token' }) };
+  const f = fixture({ api, userAgent: 'Android', routes: { '/v1/picker/batch': () => json(200, {
+    items: [{ assetId: 'a', mime: 'image/png', thumbnailBase64: 'AAEC', thumbnailMime: 'image/webp',
+      thumbnailTicket: { url: 'https://storage.example.test/cached', expiresIn: 300, contentType: 'image/webp', sizeBytes: 3 } }],
+  }) } });
+  const reply = await f.service.handle({ type: 'picker:batch', folderId: 'f1' }, page);
+  assert.equal(reply.ok, true);
+  assert.equal(reply.items[0].thumbMime, 'image/webp');
+  assert.deepEqual(globalThis.LakomicsPickerModel.fromBase64(reply.items[0].thumbBase64), new Uint8Array([0, 1, 2]));
+  assert.equal(f.calls.length, 1);
+});
+
+test('invalid inline MIME or oversized decoded bytes retain the server thumbnail ticket', async () => {
+  const api = { readConnection: async () => ({ origin: 'https://server.example.test', token: 'test-token' }) };
+  const cap = 8 * 1024 * 1024;
+  // cap and cap+1 share the same encoded length; padding must count toward the bound.
+  const oversized = Buffer.alloc(cap + 1).toString('base64');
+  for (const inline of [
+    { thumbnailBase64: 'AAEC', thumbnailMime: 'text/html' },
+    { thumbnailBase64: oversized, thumbnailMime: 'image/webp' },
+  ]) {
+    const f = fixture({ api, userAgent: 'Android', routes: {
+      '/v1/picker/batch': () => json(200, { items: [{ assetId: 'a', mime: 'image/png', ...inline,
+        thumbnailTicket: { url: 'https://storage.example.test/cached', expiresIn: 300, contentType: 'image/webp', sizeBytes: 3 } }] }),
+      '/cached': () => new Response(new Uint8Array([0, 1, 2]), { headers: { 'content-type': 'image/webp' } }),
+    } });
+    const reply = await f.service.handle({ type: 'picker:batch', folderId: 'f1' }, page);
+    assert.equal(reply.ok, true);
+    assert.equal(reply.items[0].thumbBase64, undefined);
+    const thumb = await f.service.handle({ type: 'picker:thumb', assetId: 'a' }, page);
+    assert.equal(thumb.ok, true);
+    assert.equal(thumb.base64, 'AAEC');
+    assert.deepEqual(f.calls.map(call => call.url), ['https://server.example.test/v1/picker/batch', 'https://storage.example.test/cached']);
+  }
 });

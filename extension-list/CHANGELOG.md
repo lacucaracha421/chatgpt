@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.5.63 — 2026-10-21
+
+- Browse and insert pictures from a draggable bottom sheet on portrait tablets,
+  with a compact selection bar, keyboard-aware positioning and touch previews.
+  Rotating the tablet keeps your selection and current pictures.
+- Leave one empty typing line after the last inserted picture, including when
+  only part of an insert job succeeds.
+
+## 3.5.62 — 2026-10-21
+
+- Resize the Arca Live picker and fold it into a compact selection rail while writing.
+  The dock fits the write form, remembers your width and folded state, and keeps
+  selected pictures ready to insert from the rail.
+- Fill the available grid space in Random and Newest. Newest refresh now starts
+  from the latest pictures; scrolling continues to load older pictures.
+
+## 3.5.61 — 2026-10-21
+
+- Server-backed picker batches now include thumbnails, so the tablet and PC-off picker load faster.
+
+## 3.5.60 — 2026-10-21
+
+- Load picker images faster with bundled PC thumbnails and a prepared next batch.
+- Choose Random or Newest in the Arca Live picker. Newest keeps earlier images
+  on screen while More or scrolling loads the next page, up to 240 images.
+
 ## 3.5.59 — 2026-10-21
 
 - Frame X posts and selected text as source data so questions and conversational

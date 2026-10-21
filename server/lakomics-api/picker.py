@@ -1,4 +1,5 @@
 """Read-only collector picker grant, separate from catalog client authorization."""
+import base64
 import json
 import re
 import secrets
@@ -14,6 +15,8 @@ import classification_authority
 import classification_snapshot
 import folder_pins
 import media_tickets
+import picker_thumbnail_cache
+import original_cache
 from asset_list_query import shuffle_rank
 from projection_cache import ProjectionCache, heads
 
@@ -182,7 +185,9 @@ def register(app, api):
             fail(400, 'pickerInvalidRequest')
         by_folder, by_scope = 'folderId' in body, 'scope' in body
         limit, exclude = body.get('limit', 18), body.get('exclude', [])
-        if (by_folder == by_scope or set(body) - {'folderId', 'includeDescendants', 'scope', 'limit', 'exclude'}
+        order, offset = body.get('order', 'random'), body.get('offset', 0)
+        if (by_folder == by_scope or set(body) - {'folderId', 'includeDescendants', 'scope', 'limit', 'exclude', 'order', 'offset'}
+                or order not in ('random', 'newest') or type(offset) is not int or offset < 0
                 or type(limit) is not int or not 1 <= limit <= 24
                 or not isinstance(exclude, list) or len(exclude) > 2000 or not all(map(valid_id, exclude))
                 or ('includeDescendants' in body and (by_scope or type(body['includeDescendants']) is not bool))):
@@ -195,6 +200,8 @@ def register(app, api):
             fail(400, 'pickerInvalidRequest')
 
         def select():
+            thumbnails = picker_thumbnail_cache.ThumbnailCache(
+                api.DB_PATH.parent / 'picker-thumbnails', MIMES)
             with api.get_db() as db:
                 db.execute('BEGIN')
                 if by_folder:
@@ -224,14 +231,16 @@ def register(app, api):
                     predicate = ("EXISTS(SELECT 1 FROM mobile_character_members AS member "
                                  "WHERE member.asset_id=asset.id AND member.node_id=? AND member.filter='all')")
                     params = [node_id]
-                if exclude:
+                if exclude and order == 'random':
                     predicate += ' AND asset.id NOT IN (' + ','.join('?' for _ in exclude) + ')'
                     params += exclude
                 where = ELIGIBLE + ' AND LENGTH(asset.thumbnail_key)>0 AND ' + predicate
                 count = db.execute('SELECT COUNT(*) FROM visible_assets AS asset WHERE ' + where, params).fetchone()[0]
                 seed = secrets.token_hex(16)
                 db.create_function('picker_rank', 1, lambda id: shuffle_rank(seed, id), deterministic=True)
-                items, scanned = [], 0
+                start = min(offset, count) if order == 'newest' else 0
+                items, scanned = [], start
+                ordering = 'COALESCE(asset.collected_at,asset.created_at) DESC,asset.id DESC' if order == 'newest' else 'picker_rank(asset.id),asset.id'
                 deadline = time.monotonic() + media_tickets.MEDIA_TICKET_DEADLINE_SECONDS
 
                 def available(row):
@@ -249,10 +258,10 @@ def register(app, api):
 
                 # Verify only the drawn candidates, in the existing bounded HEAD pool.
                 # Missing objects are skipped and replaced, without scanning the library's storage.
-                while len(items) < limit and scanned < count:
+                while len(items) < limit and scanned < min(count, start + limit * 10 + 100):
                     rows = db.execute('SELECT asset.* FROM visible_assets AS asset WHERE ' + where +
-                                      ' ORDER BY picker_rank(asset.id),asset.id LIMIT ? OFFSET ?',
-                                      params + [limit - len(items), scanned]).fetchall()
+                                      f' ORDER BY {ordering} LIMIT ? OFFSET ?',
+                                      params + [min(limit - len(items), start + limit * 10 + 100 - scanned), scanned]).fetchall()
                     if not rows:
                         break
                     checked = media_tickets._bounded_ticket_work(rows, available, deadline=deadline,
@@ -262,22 +271,35 @@ def register(app, api):
                     scanned += len(rows)
                     for row, thumbnail_ticket in zip(rows, checked):
                         if thumbnail_ticket:
-                            items.append(dict(assetId=row['id'], width=row['width'] or 0, height=row['height'] or 0,
+                            item = dict(assetId=row['id'], width=row['width'] or 0, height=row['height'] or 0,
                                               byteSize=row['size_bytes'] or 0, mime=row['content_type'],
                                               thumbnailUrl='/v1/picker/thumbnail/' + row['id'],
-                                              thumbnailTicket=thumbnail_ticket))
+                                              thumbnailTicket=thumbnail_ticket)
+                            cached = thumbnails.read(row['thumbnail_key'], thumbnail_ticket['sizeBytes'])
+                            if cached is not None:
+                                data, mime = cached
+                                item.update(thumbnailBase64=base64.b64encode(data).decode('ascii'),
+                                            thumbnailMime=mime)
+                            elif row['thumbnail_key'].startswith('derived/'):
+                                picker_thumbnail_cache.background.enqueue(
+                                    thumbnails, api._s3, api.R2_BUCKET, row['thumbnail_key'],
+                                    thumbnail_ticket['sizeBytes'])
+                            items.append(item)
                 missing = scanned - len(items)
+                if order == 'newest':
+                    return {'items': items, 'remaining': count - start,
+                            'nextOffset': scanned if scanned < count else None}
                 return {'items': items, 'remaining': max(0, count - missing - len(items))}
         return await run_in_threadpool(select)
 
-    def signed_ticket(asset, key, metadata):
+    def signed_ticket(asset, key, metadata, url=None):
         if type(metadata.get('ContentLength')) is not int or metadata['ContentLength'] < 0:
             fail(502, 'pickerStorageUnavailable')
-        return dict(url=api.presign_get(key, 300), expiresIn=300,
+        return dict(url=url if url is not None else api.presign_get(key, 300), expiresIn=300,
                     contentType=metadata.get('ContentType') or asset['content_type'],
                     sizeBytes=metadata['ContentLength'])
 
-    def ticket(asset_id, variant, authorization):
+    def ticket(asset_id, variant, authorization, request):
         grant(authorization)
         if not valid_id(asset_id):
             fail(400, 'pickerInvalidRequest')
@@ -292,10 +314,12 @@ def register(app, api):
         if variant == 'original' and (asset['size_bytes'] or 0) > MAX_ORIGINAL:
             fail(413, 'pickerOriginalTooLarge')
         try:
-            result = media_tickets._bounded_ticket_work(
-                [None], lambda _: api._ticket_head(asset, variant, key, fresh_head=variant == 'original'),
-                deadline=time.monotonic() + media_tickets.MEDIA_TICKET_DEADLINE_SECONDS,
-                cancelled=threading.Event())[0]
+            result = original_cache.metadata(api, asset, variant)
+            if result is None:
+                result = media_tickets._bounded_ticket_work(
+                    [None], lambda _: api._ticket_head(asset, variant, key, fresh_head=variant == 'original'),
+                    deadline=time.monotonic() + media_tickets.MEDIA_TICKET_DEADLINE_SECONDS,
+                    cancelled=threading.Event())[0]
         except ClientError as error:
             if str(error.response.get('Error', {}).get('Code')) in ('404', 'NoSuchKey', 'NotFound'):
                 fail(404, 'pickerAssetNotFound')
@@ -309,14 +333,15 @@ def register(app, api):
             fail(404, 'pickerAssetNotFound')
         if variant == 'original' and result['ContentLength'] > MAX_ORIGINAL:
             fail(413, 'pickerOriginalTooLarge')
-        return signed_ticket(asset, key, result)
+        url = original_cache.ticket_url(api, asset, variant, key, request.base_url, 300) if variant == 'original' else None
+        return signed_ticket(asset, key, result, url)
 
     @app.get('/v1/picker/thumbnail/{asset_id}')
-    def thumbnail(asset_id: str, authorization: str | None = Header(default=None)):
-        return ticket(asset_id, 'thumbnail', authorization)
+    def thumbnail(asset_id: str, request: Request, authorization: str | None = Header(default=None)):
+        return ticket(asset_id, 'thumbnail', authorization, request)
 
     @app.get('/v1/picker/original/{asset_id}')
-    def original(asset_id: str, authorization: str | None = Header(default=None)):
-        return ticket(asset_id, 'original', authorization)
+    def original(asset_id: str, request: Request, authorization: str | None = Header(default=None)):
+        return ticket(asset_id, 'original', authorization, request)
 
     return startup
