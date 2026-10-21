@@ -1,0 +1,57 @@
+import {useEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import type {FavoriteEntry} from '../../src/library/types';
+import {BusyLabel} from '../../src/shared/ui/BusyLabel';
+import {Button,DDay,SectionLabel} from '../ui';
+import {Gallery} from '../Gallery';
+import {Viewer} from '../Viewer';
+import {markViewerOpen} from '../perf';
+import {api,errorText} from '../transport';
+import type {CharacterIndex,CharacterNode} from '../characterModel';
+import type {CollectionSummary} from '../collectionModel';
+import {birthdayDays} from './model';
+import {CharacterPortrait,useCharacterAssets} from './CharacterAssets';
+
+export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWork,cover}:{entry:FavoriteEntry;node:CharacterNode;index:CharacterIndex;series:string;active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode}) {
+  const assets=useCharacterAssets(node.id,index.revision??'',active);
+  const [works,setWorks]=useState<{revision:string;item:CollectionSummary}[]>([]),[workError,setWorkError]=useState(''),[retry,setRetry]=useState(0);
+  const [viewer,setViewer]=useState<number|null>(null),viewerBack=useRef<(()=>boolean)|null>(null),scroll=useRef(0);
+  const workKey=JSON.stringify(entry.workIds);
+  useEffect(()=>{
+    if(!active)return;
+    const controller=new AbortController();
+    void Promise.all(entry.workIds.map(id=>api<{revision:string;item:CollectionSummary}>(`/v1/collections/${encodeURIComponent(id)}`,controller.signal)))
+      .then(reply=>{if(!controller.signal.aborted){setWorks(reply);setWorkError('');}},reason=>{if(!controller.signal.aborted)setWorkError(errorText(reason));});
+    return()=>controller.abort();
+  },[workKey,active,retry]);
+  useEffect(()=>{
+    backRef.current=()=>{if(viewer===null)return false;if(!viewerBack.current?.())setViewer(null);return true;};
+    return()=>{backRef.current=null;};
+  },[viewer,backRef]);
+  const profile=entry.profile;
+  const intro=<div className="favorite-detail">
+    <div className="favorite-detail-top">
+      <div className="favorite-portrait"><CharacterPortrait entry={entry} node={node} index={index} firstAsset={assets.page?.items[0]}/></div>
+      <div className="favorite-profile"><h3>{node.name}</h3><p className="favorite-meta">{[profile.originalName,series].filter(Boolean).join(' · ')}</p>
+        <dl>{profile.birthMonth&&profile.birthDay&&<div><dt>생일</dt><dd>{profile.birthMonth}월 {profile.birthDay}일 <DDay as="text" className="favorite-meta" days={birthdayDays(profile.birthMonth,profile.birthDay)}/></dd></div>}
+          {profile.heightCm!=null&&<div><dt>키</dt><dd>{profile.heightCm}cm</dd></div>}
+          {profile.voiceActor&&<div><dt>성우</dt><dd>{profile.voiceActor}</dd></div>}
+          {profile.affiliation&&<div><dt>소속</dt><dd>{profile.affiliation}</dd></div>}
+          {profile.memo&&<div><dt>메모</dt><dd>{profile.memo}</dd></div>}</dl>
+      </div>
+    </div>
+    {(works.length>0||entry.extraWorks.length>0||workError)&&<section><SectionLabel title="등장 작품"/>
+      <div className="favorite-works">{works.map(work=><button key={work.item.id} onClick={()=>onOpenWork(work.item.id)}>{cover(work.item,work.revision)}<span>{work.item.name}</span></button>)}</div>
+      {entry.extraWorks.map((work,i)=><p className="favorite-meta" key={i}>{work}</p>)}
+      {workError&&<p role="alert">{workError}<Button variant="ghost" onClick={()=>setRetry(n=>n+1)}>다시 시도</Button></p>}
+    </section>}
+    <SectionLabel title="에셋" count={assets.page?.totalCount??index.scopes.find(scope=>scope.nodeId===node.id&&scope.filter==='all')?.totalCount??0} unit="장"/>
+    <BusyLabel busy={assets.busy}><span className="hint">불러오는 중…</span></BusyLabel>
+    {assets.error&&<p role="alert">{assets.error}<Button variant="ghost" onClick={assets.reload}>다시 시도</Button></p>}
+    {assets.page&&!assets.page.items.length&&<p className="hint">이미지 없음</p>}
+  </div>;
+  return <>
+    <Gallery items={assets.page?.items??[]} columns={3} density={1} identity={node.id} restoreScroll={scroll.current} onScroll={top=>{scroll.current=top;}} intro={intro}
+      onOpen={position=>{markViewerOpen();setViewer(position);}} onReady={assets.ready} onNearEnd={assets.more} hasMore={assets.page?.has_more} busy={assets.busy} paused={!active||viewer!==null} scrubberHidden={viewer!==null} scrubberSort={{kind:'fallback'}}/>
+    {active&&viewer!==null&&!!assets.page?.items.length&&<Viewer items={assets.page.items} index={viewer} onIndex={setViewer} onClose={()=>setViewer(null)} backRef={viewerBack} totalCount={assets.page.totalCount} onNearEnd={assets.more}/>}
+  </>;
+}

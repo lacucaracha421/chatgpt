@@ -1256,7 +1256,7 @@ export function App() {
     library: assetAreaNode,
     home: homeAreaNode,
     'home-work': homeWork && <Collections key={`home-work:${status.endpoint}:${homeWork.key}`} active={homeWorkOpen} paused={settings || !!viewer} backRef={homeWorkBack} directWork={homeWork.id} onReturnHome={returnHome}/>,
-    collections: (collectionsVisited||areaPrewarm.mounted) && <Collections key={`collections:${status.endpoint}`} active={area==='collections'&&!homeWorkOpen} prefetch={areaPrewarm.prefetch&&!collectionsVisited} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest}/>,
+    collections: (collectionsVisited||areaPrewarm.mounted) && <Collections key={`collections:${status.endpoint}`} active={area==='collections'&&!homeWorkOpen} prefetch={areaPrewarm.prefetch&&!collectionsVisited} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onOpenCharacterFolder={node=>select({tab:'library',characters:true,characterNode:node.id,title:node.name})}/>,
     notes: notesVisited && <Notes findStore={findStore} key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>,
     catalog: (catalogVisited||areaPrewarm.mounted) && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} prefetch={areaPrewarm.prefetch&&!catalogVisited} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>,
   };

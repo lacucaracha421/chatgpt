@@ -404,7 +404,8 @@ class RealAppStatusTests(unittest.TestCase):
         self.assertEqual(logs["captures"], {"pending": 0, "latest": None})
         signals = body["signals"]
         self.assertEqual(set(signals), {"listGeneration", "characters", "collections", "releases", "catalog",
-                                        "bindingRequests", "notes", "upcoming", "artists", "cards", "folderPins"})
+                                        "bindingRequests", "notes", "upcoming", "artists", "cards", "folderPins",
+                                        "favoriteCharacters"})
         self.assertEqual(signals["cards"], 0)
         self.assertEqual((signals["upcoming"], signals["artists"]), (0, 0))
         self.assertEqual(signals["collections"],

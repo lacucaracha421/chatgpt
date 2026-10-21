@@ -35,6 +35,7 @@ import type {
   IngestMediaInput,
   IngestOutcome,
   LibraryGateway,
+  FavoriteCharacters,
   LibrarySummary,
   MangaDexApplyRequest,
   MangaDexApplyResult,
@@ -392,6 +393,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
   folderPins: () => invoke("folder_pins"),
   changeFolderPins: commands => invoke("change_folder_pins", { commands }),
+  favoriteCharacters: () => invoke<FavoriteCharacters>("favorite_characters"),
+  changeFavoriteCharacters: commands => invoke<FavoriteCharacters>("change_favorite_characters", { commands }),
   verifyCollectionAuthorityBaseline: (onProgress) => {
     const channel = new Channel<import("./publicationJobs").PublishProgress>();
     channel.onmessage = value => onProgress?.(value);

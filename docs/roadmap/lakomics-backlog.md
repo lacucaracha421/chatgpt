@@ -25,6 +25,16 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 
 - **Laptop update:** update Lakomics before resuming Collection sync. Older builds reject the new `deletedPeople` feed entity after 17 director-only people were deleted on the server (`9bb8e8ad`; controller record 2026-10-18). Laptop update/sync is not confirmed.
 
+<a id="fav-char-001"></a>
+## FAV-CHAR-001 — Favourite characters in Collections (2026-10-22)
+
+Status: `PARTIAL` — user request 2026-10-22; user picked card A + detail A. Server module deployed 2026-10-22 (uncommitted at deploy); PC release build opens the view and the add picker (271 characters listed); grid/detail feedback round 1 (quiet whole-grid fade, no profile scrollbar, no count on the 캐릭터 button) applied; tablet 0.9.137 installed 2026-10-22, device check pending. A curated "캐릭터" view in Collections (beside 쇼케이스) that references existing asset characters; it is not a new Collection type and does not duplicate character records.
+
+- Grid of user-chosen representative images in a user-set order; opening one shows a profile (birthday, height, appearing works and similar basics), links to the related Collection works, and the character's assets gathered automatically from the asset character folders.
+- First pass: only characters that already exist in 에셋. Characters without assets come later.
+- PC first, tablet in the same round. HTML mockup first (`docs/prototypes/fav-characters-20261022/`).
+
+
 <a id="perf-20261018"></a>
 ## PERF-20261018 — Card gacha performance measurement (2026-10-18)
 

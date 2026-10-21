@@ -915,9 +915,11 @@ lifecycle(app).on_startup(home_upcoming.register(app, get_db, _home_client, requ
 lifecycle(app).on_startup(library_artists.register(app, get_db, _home_client, require_publisher))
 
 import folder_pins
+import favorite_characters
 
 lifecycle(app).on_startup(folder_pins.register(
     app, get_db, _home_client, lambda db: {row["id"] for row in picker.folder_tree(db)}))
+lifecycle(app).on_startup(favorite_characters.register(app, get_db, _home_client))
 home_publications.register_cover_tickets(app, get_db, _home_client, presign_get)
 
 from r2 import presign_put as _collection_presign_put
@@ -1027,7 +1029,8 @@ def status_signals(db):
             "upcoming": home_upcoming.status_signal(db),
             "cards": cards.status_signal(db),
             "artists": library_artists.status_signal(db),
-            "folderPins": folder_pins.status_signal(db)}
+            "folderPins": folder_pins.status_signal(db),
+            "favoriteCharacters": favorite_characters.status_signal(db)}
 
 
 startup_sync_status = register_sync_status(

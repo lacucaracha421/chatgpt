@@ -55,6 +55,7 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/library/artists") || (p.matches("/v1/library/artists/[A-Za-z0-9_%.~:-]{1,3072}") && !p.matches("/v1/library/artists/\\.+") && !new URI(p).getPath().equals("/v1/library/artists/intents"));
   // Shared folder pins: the list GET and the per-id command POST, nothing else.
   get=get || p.equals("/v1/library/folder-pins");
+  get=get || p.equals("/v1/library/favorite-characters");
   get=get || p.equals("/v1/assets/authority/status") || p.equals("/v1/assets/authority/baseline") || p.equals("/v1/assets/authority/changes");
   get=get || p.equals("/v1/collections/authority/status") || p.equals("/v1/collections/authority/baseline") || p.equals("/v1/collections/authority/changes") || p.equals("/v1/collections/authority/trash");
   boolean collectionPut=p.equals("/v1/collections/authority/commands");
@@ -82,6 +83,7 @@ final class NetworkPolicy {
   // Artist edit submission only; the ordered log GET remains publisher-only.
   post=post || p.equals("/v1/library/artists/intents");
   post=post || p.equals("/v1/library/folder-pins");
+  post=post || p.equals("/v1/library/favorite-characters");
   // HOME-DASH-001: the wishlist intent command and the Home cover ticket (see the Home GETs above).
   post=post || p.equals("/v1/home/upcoming/wishlist") || p.matches("/v1/home/covers/[a-f0-9]{64}/media-ticket");
   // CARD-GACHA-001: the daily card packs. Reads (state, one pack, the album page), the two pack

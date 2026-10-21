@@ -4450,6 +4450,9 @@ pub(crate) mod cards;
 #[path = "folder_pins.rs"]
 pub(crate) mod folder_pins;
 
+#[path = "favorite_characters.rs"]
+pub(crate) mod favorite_characters;
+
 #[path = "card_cutouts.rs"]
 pub(crate) mod card_cutouts;
 

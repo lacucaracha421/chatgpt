@@ -1,4 +1,6 @@
 import {catalogPerfEnabled} from './catalogPerf';
+import {FavoriteCharacters} from './favorites/FavoriteCharacters';
+import type {CharacterNode} from './characterModel';
 import {loadedPerformerNames} from './personNameCache';
 import {EllipsisHorizontalIcon} from "@heroicons/react/24/outline";
 import {AvInbox} from './AvInbox';
@@ -43,7 +45,7 @@ import {displayDate} from '../src/shared/displayDate';
 import {beginScreenTiming,screenReady} from './perf';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
-import {BellIcon, CalendarDaysIcon, SparklesIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon,  XMarkIcon} from '@heroicons/react/24/outline';
+import {BellIcon, CalendarDaysIcon, SparklesIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, UserGroupIcon,  XMarkIcon} from '@heroicons/react/24/outline';
 import {SparklesIcon as SparklesSolidIcon, StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -381,7 +383,7 @@ export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
 type WorkDetailRead={revision:string;item:CollectionDetail;entityRevision?:number;readAt?:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
-export function Collections({active,prefetch=false,paused,backRef,request,onReturnHome,directWork}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void;directWork?:string}) {
+export function Collections({active,prefetch=false,paused,backRef,request,onReturnHome,directWork,onOpenCharacterFolder}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void;directWork?:string;onOpenCharacterFolder?(node:CharacterNode):void}) {
   const filterWheel=useHorizontalWheel();
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [privacyMode]=usePrivacyMode();
@@ -395,6 +397,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
   const bump=useCallback(()=>{detailCache.current.clear();invalidateReleases();setRefresh(n=>n+1);},[]);
   const [showcaseAll,setShowcaseAll]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
+  const [favoritesOpen,setFavoritesOpen]=useState(false);
+  const favoritesBack=useRef<(()=>boolean)|null>(null);
   const [sheet,setSheet]=useState<'view'|'performerSort'|null>(null);
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
   const [viewOf,patchView]=useShelfViews();
@@ -433,7 +437,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
   const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null);
-  const overlayOpen=showcaseAll||inboxOpen||calendarOpen||kakaoReviewOpen;
+  const overlayOpen=showcaseAll||inboxOpen||calendarOpen||kakaoReviewOpen||favoritesOpen;
 
   // Typing searches after a short pause; Enter applies at once.
   useEffect(()=>{const value=query.trim();if(value===search)return;const timer=window.setTimeout(()=>setSearch(value),350);return()=>clearTimeout(timer);},[query,search]);
@@ -570,14 +574,19 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(bindSheet){setBindSheet(null);return true;}
     if(selected){closeWork();return true;}
     if(performer){closePerformer();return true;}
+    if(favoritesOpen&&favoritesBack.current?.())return true;
     if(inboxOpen){closeInbox();return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     if(calendarOpen){setCalendarOpen(false);return true;}
     if(kakaoReviewOpen){setKakaoReviewOpen(false);return true;}
     return false;
-  },[workForm,manage,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,kakaoReviewOpen,closeWork,closePerformer,closeInbox]);
+  },[workForm,manage,coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,kakaoReviewOpen,favoritesOpen,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
-  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet&&!manage){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage]);
+  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{
+    // A favourite's sheet or viewer consumes Escape through its own dialog first.
+    if(favoritesOpen&&(event.defaultPrevented||event.target instanceof Element&&event.target.closest('.ui-dialog')))return;
+    if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet&&!manage){if(back())event.preventDefault();}
+  };window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage,favoritesOpen]);
   useEffect(()=>{if(!active){setSheet(null);}},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
@@ -636,6 +645,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const newsShortcut=tab==='manga'&&<SectionTool label="신간" icon={BellIcon} count={releases.unread||undefined} onClick={openInbox}/>;
   const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>
     <SectionTool label="쇼케이스" ariaLabel="쇼케이스" icon={showcaseAll?SparklesSolidIcon:SparklesIcon} selected={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
+    <SectionTool label="캐릭터" icon={UserGroupIcon} selected={favoritesOpen} onClick={()=>setFavoritesOpen(open=>!open)}/>
     {(calendarShortcut||newsShortcut)&&<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{newsShortcut&&shortcutSizer}</div>}
     {tab==='av'&&<div className="collection-shortcuts" aria-hidden="true" inert>{shortcutSizer}</div>}<span className="section-tools-divider" aria-hidden="true"/>
     <SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
@@ -772,6 +782,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
+    <FavoriteCharacters open={favoritesOpen} active={live} covered={!!performer} onClose={()=>setFavoritesOpen(false)} backRef={favoritesBack} onOpenFolder={node=>onOpenCharacterFolder?.(node)} onOpenWork={id=>openWork(id)} cover={(work,revision)=><Artwork item={work} revision={revision} active={live}/>}/>
     <Overlay deferContent open={showcaseAll} covered={!live||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
     {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}

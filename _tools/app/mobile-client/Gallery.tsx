@@ -101,7 +101,7 @@ const RANGE_EDGE = 96, RANGE_SPEED = 14;
 /** A typical tile is about three-quarters as wide as it is tall; the static placeholder pattern uses it for its column count. */
 const GALLERY_PLACEHOLDER_ASPECT = .75;
 
-type GalleryRowItem = {asset: Asset; width: number; index: number; globalIndex?:number};
+type GalleryRowItem = {asset: Asset; width: number; height?:number; index: number; globalIndex?:number};
 
 const mobileGalleryRowAccessors: GalleryRowAccessors<Asset, GalleryRowItem> = {
   ratio,
@@ -118,7 +118,8 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({arrivalScope, items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onReplaceSelection, onClearSelection, sparse, folderScope, hasMore=false}: {sparse?:SparseGallerySource;
+export function Gallery({arrivalScope, items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onReplaceSelection, onClearSelection, sparse, folderScope, hasMore=false,columns}: {sparse?:SparseGallerySource;
+  /** Fixed columns for the character profile's asset section; uses the same tiles and viewer. */columns?:number;
   /** The place, filters and sort these tiles belong to, without the load generation: items that join the same scope after a refresh fade in. Defaults to `identity`, where every identity change restarts without animation. */arrivalScope?:string;
   /** Cursor-paged lists keep their reserved tail neutral only while more items can arrive. */hasMore?:boolean;
   /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
@@ -156,6 +157,14 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
   const sort = useMemo<ScrubberSort>(() => sparse ? {kind:'toc',totalCount:sparse.toc.totalCount,buckets:sparse.toc.buckets} : scrubberSort ?? {kind:'date',values:items.map(asset => asset.collected_at ?? asset.created_at)}, [items, scrubberSort, sparse?.toc]);
   const rows = useMemo<SparseRow<GalleryRowItem>[]>(() => {
     const target=rowHeight(density,width);
+    if(columns&&!sparse){
+      const cell=(width-GALLERY_TILE_GAP*(columns-1))/columns,rows:SparseRow<GalleryRowItem>[]=[];
+      for(let start=0;start<items.length;start+=columns){
+        const assets=items.slice(start,start+columns),height=Math.max(...assets.map(asset=>cell/ratio(asset)));
+        rows.push({height,items:assets.map((asset,index)=>({asset,index:start+index,width:cell,height:cell/ratio(asset)})),startIndex:start,count:assets.length,key:assets[0].id});
+      }
+      return rows;
+    }
     if(!sparse)return buildJustifiedGalleryRows(items,width,target,GALLERY_TILE_GAP,sort.kind==='date',false,mobileGalleryRowAccessors).map(row=>({...row,startIndex:row.items[0]?.index??0,count:row.items.length,key:row.items[0]?.asset.id??'empty'}));
     const visible=new Map(items.map((asset,index)=>[asset.id,{asset,index}]));
     return sparseGalleryRows(sparse,(start)=>{
@@ -167,7 +176,7 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
         return {...row,items:packed,startIndex:packed[0]?.globalIndex??start,count:packed.length?(packed[packed.length-1].globalIndex!-packed[0].globalIndex!+1):0,key:packed[0]?.asset.id??`empty:${start}`};
       });
     },rowSize,(target+GALLERY_ROW_GAP)/Math.max(1,width/target));
-  }, [items, width, density, sort.kind, sparse?.ranges,sparse?.toc]);
+  }, [items, width, density, sort.kind, sparse?.ranges,sparse?.toc,columns]);
   const rowsHeight=useMemo(()=>rows.reduce((height,row)=>height+rowSize(row),0),[rows]);
   const pagedExtent=useRef({identity,height:0});
   const seekController=useRef<AbortController|null>(null),backgroundController=useRef<AbortController|null>(null);
@@ -294,8 +303,8 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
     pagedExtent.current.height=Math.max(pagedExtent.current.height,viewportTop-introHeight+viewportHeight);
   const canvasHeight=Math.max(reportedHeight,sparse?0:pagedExtent.current.height);
   const target=rowHeight(density,width);
-  const columns=Math.max(1,Math.round((width+GALLERY_TILE_GAP)/(target*GALLERY_PLACEHOLDER_ASPECT+GALLERY_TILE_GAP)));
-  const tileWidth=(width-GALLERY_TILE_GAP*(columns-1))/columns;
+  const placeholderColumns=columns??Math.max(1,Math.round((width+GALLERY_TILE_GAP)/(target*GALLERY_PLACEHOLDER_ASPECT+GALLERY_TILE_GAP)));
+  const tileWidth=(width-GALLERY_TILE_GAP*(placeholderColumns-1))/placeholderColumns;
   // The background exists even when momentum moves beyond every mounted virtual row.
   // No offset-dependent placeholder DOM or scroll state is needed to paint it.
   const canvasStyle:CSSProperties & Record<string,string|number>={height:canvasHeight,
@@ -395,7 +404,7 @@ export function Gallery({arrivalScope, items, density, identity, restoreScroll, 
         if(row.spacer)return null;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} arrivals={arrivals} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onRangeStart={onReplaceSelection?startRange:undefined} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} arrivals={arrivals} {...item} height={item.height??row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onRangeStart={onReplaceSelection?startRange:undefined} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {

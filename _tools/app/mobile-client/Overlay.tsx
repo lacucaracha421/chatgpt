@@ -1,5 +1,5 @@
 import {useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode} from 'react';
-import {XMarkIcon} from '@heroicons/react/24/outline';
+import {ChevronLeftIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
 import {layerEnterTime} from './motion';
 import {motionDefaults,motionSpring,motionTime,prefersReducedMotion} from '../src/shared/motion/curves';
@@ -17,7 +17,7 @@ const exitTime=(node:Element)=>prefersReducedMotion()?motionTime('--motion-micro
  * taking input. Both are transitions, so a quick reopen or close reverses from where it is. A
  * work covering the sheet hides it at once, and uncovering shows it in place: the rise plays only
  * when the sheet opens. */
-export function Overlay({open,covered=false,title,count,onClose,children,deferContent=false}:{open:boolean;covered?:boolean;title:string;count?:number;onClose():void;children:ReactNode|((ready:boolean)=>ReactNode);deferContent?:boolean}) {
+export function Overlay({open,covered=false,title,count,onClose,children,deferContent=false,headerActions,onBack}:{open:boolean;covered?:boolean;title:string;count?:number;onClose():void;children:ReactNode|((ready:boolean)=>ReactNode);deferContent?:boolean;headerActions?:ReactNode;onBack?():void}) {
   const id=useId(),host=useRef<HTMLDivElement>(null),panel=useRef<HTMLDivElement>(null),opener=useRef<HTMLElement|null>(null);
   const visible=open&&!covered;
   // A closed sheet stays painted while it slides down; covering ends that at once.
@@ -92,7 +92,7 @@ export function Overlay({open,covered=false,title,count,onClose,children,deferCo
     <div ref={panel} className="mobile-overlay__panel" role="dialog" aria-modal="true" aria-labelledby={id}>
       <div className="mobile-overlay__header" onPointerDown={down} onPointerUp={end} onPointerCancel={end}>
         <div className="mobile-overlay__grab" aria-hidden="true"/>
-        <div className="mobile-overlay__title-row"><h2 id={id}>{title}</h2>{count!=null&&<span className="numeric muted">{displayCount(count)}</span>}<IconButton label={`${title} 닫기`} icon={XMarkIcon} onClick={onClose}/></div>
+        <div className="mobile-overlay__title-row">{onBack&&<IconButton label="뒤로" icon={ChevronLeftIcon} onClick={onBack}/>}<h2 id={id}>{title}</h2>{count!=null&&<span className="numeric muted">{displayCount(count)}</span>}<div className="mobile-overlay__actions">{headerActions}{!onBack&&<IconButton label={`${title} 닫기`} icon={XMarkIcon} onClick={onClose}/>}</div></div>
       </div>
       <div className="mobile-overlay__body">{typeof children==='function'?children(!deferContent||entered):children}</div>
     </div>

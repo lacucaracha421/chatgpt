@@ -1338,7 +1338,7 @@ describe('collection shortcut overlays',()=>{
     await screen.findByRole('button',{name:'쇼케이스'});
     // 쇼케이스 · 정렬 · 내 별점 · 보기 are the same on every type, so they live in the fixed top bar.
     expect(topTools().closest('.ui-section-bar__trailing')).not.toBeNull();
-    expect(within(topTools()).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['쇼케이스',...(other?[other]:[]),'보기']);
+    expect(within(topTools()).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['쇼케이스','캐릭터',...(other?[other]:[]),'보기']);
     expect(within(topTools()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
     expect(within(topTools()).queryByRole('button',{name:'정렬'})).toBeNull();
     const bar=list().querySelector('.ui-section-bar--inline') as HTMLElement;

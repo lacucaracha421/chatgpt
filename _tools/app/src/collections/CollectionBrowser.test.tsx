@@ -445,7 +445,7 @@ describe("CollectionBrowser", () => {
     expect(document.querySelector(".ui-section-bar__extra")).toBeNull();
     expect(shortcuts.nextElementSibling).toHaveClass("collection-shortcuts__divider");
     expect(shortcuts.parentElement?.lastElementChild).toHaveTextContent("보기");
-    expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스"] : ["쇼케이스", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
+    expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스", "캐릭터"] : ["쇼케이스", "캐릭터", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
     expect(shortcuts.querySelector(".is-new, .ui-segmented__thumb, [aria-checked], [aria-current]")).toBeNull();
     const showcase = within(shortcuts).getByRole("button", { name: "쇼케이스" });
     expect(showcase).toHaveAttribute("aria-pressed", "false");
@@ -607,7 +607,7 @@ describe("CollectionBrowser", () => {
     await userEvent.click(screen.getByRole("radio", { name: "AV" }));
     expect(container.querySelector(".ui-section-bar")).toBe(bar);
     expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "컬렉션 바로가기" })).getAllByRole("button")).toHaveLength(1);
+    expect(within(screen.getByRole("group", { name: "컬렉션 바로가기" })).getAllByRole("button")).toHaveLength(2);
   });
 
   it("replaces the folded Showcase row with a shortcut to the whole Showcase", async () => {

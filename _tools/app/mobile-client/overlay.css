@@ -7,7 +7,7 @@
 .mobile-overlay__title-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--touch-target); padding:var(--space-1) var(--mobile-gutter) var(--space-2); }
 .mobile-overlay__title-row h2 { margin:0; color:var(--color-text); font-size:var(--type-title); font-weight:600; }
 .mobile-overlay__title-row > span { font-size:var(--type-meta); }
-.mobile-overlay__title-row > button { margin-left:auto; }
+.mobile-overlay__actions { margin-left:auto; display:flex; align-items:center; gap:var(--space-1); }
 .mobile-overlay__body { display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
 /* Opening rises the sheet from the bottom edge (data-entering is the first frame); closing slides
    it back in 0.7x the time. Transitions reverse from the painted position on a quick toggle. */

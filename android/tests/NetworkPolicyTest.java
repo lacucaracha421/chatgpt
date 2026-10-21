@@ -280,6 +280,10 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/home/upcoming","PUT"));
  // Artist reads and the one client intent write; publisher log reads stay refused.
  pass(()->NetworkPolicy.api("/v1/library/folder-pins","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/favorite-characters","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/favorite-characters","POST"));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/favorite-characters",method));
+ for(String path:new String[]{"/v1/library/favorite-characters/","/v1/library/favorite-characters/x"})reject(()->NetworkPolicy.api(path,"POST"));
  pass(()->NetworkPolicy.api("/v1/library/folder-pins","POST"));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/folder-pins",method));
  for(String path:new String[]{"/v1/library/folder-pins/","/v1/library/folder-pins/x"})reject(()->NetworkPolicy.api(path,"POST"));

@@ -2,6 +2,37 @@ import type { AccountRole, ClueKey, Clues } from "../similarity/clues";
 import type {ProfilePerson} from "../collections/av/personProfileFields";
 import type { AvPortrait } from "../collections/avTypes";
 
+export type FavoriteProfile = {
+  originalName?: string | null;
+  birthMonth?: number | null;
+  birthDay?: number | null;
+  heightCm?: number | null;
+  voiceActor?: string | null;
+  affiliation?: string | null;
+  memo?: string | null;
+};
+
+export type FavoriteEntry = {
+  characterId: string;
+  coverAssetId: string | null;
+  coverY: number;
+  profile: FavoriteProfile;
+  workIds: string[];
+  extraWorks: string[];
+};
+
+export type FavoriteCharacters = {
+  version: 1;
+  revision: number;
+  entries: FavoriteEntry[];
+};
+
+export type FavoriteSet = Partial<Omit<FavoriteEntry, "characterId">>;
+
+export type FavoriteCommand =
+  | { op: "add" | "remove" | "order"; ids: string[] }
+  | { op: "update"; id: string; set: FavoriteSet };
+
 export type LibrarySummary = {
   root: string;
 };
@@ -1537,6 +1568,9 @@ export interface LibraryGateway {
   /** Shared folder pins (PC sidebar and tablet); the server owns the list. */
   folderPins?(): Promise<import("../app/useFolderPins").FolderPinsReply>;
   changeFolderPins?(commands: import("../app/useFolderPins").FolderPinCommand[]): Promise<import("../app/useFolderPins").FolderPinsReply>;
+  /** Server-owned favourite characters; edits merge through ordered commands. */
+  favoriteCharacters?(): Promise<FavoriteCharacters>;
+  changeFavoriteCharacters?(commands: FavoriteCommand[]): Promise<FavoriteCharacters>;
   /** Native signal that Collections changed in the background (mobile personal edits). */
   subscribeCollectionsChanged?(handler: () => void): () => void;
   /** Native signal that tablet artist edits were applied in the background. */

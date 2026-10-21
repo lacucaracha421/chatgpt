@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon as SparklesSolidIcon, StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
@@ -52,6 +52,9 @@ import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLib
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
 import { KIND_LABEL } from "./collectionFormat";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
+import { FavoriteCharactersView, favoritePlaces } from "./favorites/FavoriteCharactersView";
+import { useFavoriteCharacters } from "./favorites/useFavoriteCharacters";
+import { useFavoriteCatalog } from "./favorites/useFavoriteCatalog";
 import "./CollectionBrowser.css";
 import "../styles/collectionSpines.css";
 
@@ -118,6 +121,15 @@ export function CollectionBrowser({
   avLinkApi,
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
+  const favorites = useFavoriteCharacters(gateway, library?.root ?? "");
+  const [charactersOpen, setCharactersOpen] = useState(() => favoritePlaces.get(library?.root ?? "")?.open ?? false);
+  const favoriteCatalog = useFavoriteCatalog(gateway, library?.root ?? "", favorites.document?.entries, charactersOpen);
+  const charactersReady = Boolean(favorites.document && favoriteCatalog.data);
+  const closeCharacters = () => {
+    const root = library?.root ?? "";
+    favoritePlaces.set(root, { open: false, scope: "all", detail: null, scrollTop: 0 });
+    setCharactersOpen(false);
+  };
   // Presence only: the chrome's published title changes with every type switch, and re-rendering the whole list for it cost a frame.
   const workspace = useInWorkspaceChrome();
   const spineBatch = useLaunchBoxSpineBatch(gateway, library?.root ?? "");
@@ -147,10 +159,10 @@ export function CollectionBrowser({
   const inboxByWork = useMemo(() => groupInbox(releases.data?.inbox ?? []), [releases.data]);
   const unreadTotal = collections.reduce((sum, collection) => sum + (collection.type === "manga" ? collection.unreadReleaseCount : 0), 0);
   const today = localDay();
-  const openInbox = (provider: CollectionUpdateProvider) => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider });
+  const openInbox = (provider: CollectionUpdateProvider) => { closeCharacters(); onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider }); };
   const closeInbox = () => onViewChange({ kind: "collections", typeFilter, showcase });
   const calendarApi = gateway.releaseCalendar;
-  const openCalendar = () => onViewChange({ kind: "collections", typeFilter, showcase: false, releaseCalendar: true });
+  const openCalendar = () => { closeCharacters(); onViewChange({ kind: "collections", typeFilter, showcase: false, releaseCalendar: true }); };
   // Unread 관심 목록 events for the 발매 캘린더 row; re-read after the view changes the wishlist.
   const [wishlistUnread, setWishlistUnread] = useState(0);
   const loadWishlistUnread = useCallback(() => {
@@ -336,8 +348,14 @@ export function CollectionBrowser({
   const inbox = Boolean(releaseProvider) || releaseCalendar || kakaoReviewOpen;
   const libraryView = !inbox && !showcase;
   const shortcuts = <div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label="쇼케이스" onClick={() => setShowcase(!showcase)}>
+    <Button variant="quiet" size="sm" aria-pressed={showcase && !charactersOpen} aria-label="쇼케이스" onClick={() => { closeCharacters(); setShowcase(!showcase); }}>
       {showcase ? <SparklesSolidIcon aria-hidden="true" /> : <SparklesIcon aria-hidden="true" />}<span className="collection-shortcuts__label">쇼케이스</span>
+    </Button>
+    <Button variant="quiet" size="sm" aria-pressed={charactersOpen} aria-label="캐릭터" onClick={() => {
+      if (charactersOpen) closeCharacters();
+      else { favoritePlaces.set(library?.root ?? "", { open: true, scope: "all", detail: null, scrollTop: 0 }); setCharactersOpen(true); }
+    }}>
+      <UserGroupIcon aria-hidden="true" /><span className="collection-shortcuts__label">캐릭터</span>
     </Button>
     {(typeFilter === "game" || typeFilter === "movie") && <Button variant="quiet" size="sm"
       aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"} onClick={openCalendar}>
@@ -347,7 +365,7 @@ export function CollectionBrowser({
       aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"} onClick={() => openInbox("kakao")}>
       <BellIcon aria-hidden="true" /><span className="collection-shortcuts__label">신간</span>{unreadTotal > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}
     </Button>}
-    {typeFilter === "manga" && unlinkedCount > 0 && <Button variant="quiet" size="sm" aria-label={`연결 점검 ${unlinkedCount}`} onClick={() => setKakaoReviewOpen(true)}><LinkIcon aria-hidden="true" /><span className="collection-shortcuts__label">연결 점검</span><span className="collection-shortcuts__count">{unlinkedCount}</span></Button>}
+    {typeFilter === "manga" && unlinkedCount > 0 && <Button variant="quiet" size="sm" aria-label={`연결 점검 ${unlinkedCount}`} onClick={() => { closeCharacters(); setKakaoReviewOpen(true); }}><LinkIcon aria-hidden="true" /><span className="collection-shortcuts__label">연결 점검</span><span className="collection-shortcuts__count">{unlinkedCount}</span></Button>}
   </div>;
   const typeOptions = TYPES.map(value => ({ value, label: TYPE_LABEL[value] }));
 
@@ -399,7 +417,7 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
-  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox, "컬렉션");
+  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox && !(charactersOpen && charactersReady), "컬렉션");
 
   const chrome: ViewChromeSpec = {
     actions: collectionActions,
@@ -418,19 +436,23 @@ export function CollectionBrowser({
   const scrubberList = spineBookcase ? { onSeek: spineSeek, indexAtScroll: spineIndexAtScroll } : listScrubber;
   const shelfPutDown = useShelfPutDown(() => { setPickedId(null); setMangaPick(null); });
 
+  if (charactersOpen && charactersReady) return <FavoriteCharactersView root={library?.root ?? ""} state={favorites} catalog={favoriteCatalog.data} catalogError={favoriteCatalog.error}
+    collections={collections} shortcuts={shortcuts} onBack={closeCharacters} onNavigate={onViewChange} onWork={work => openCollection(work, collections)} onRefreshCatalog={favoriteCatalog.refresh} />;
+
   return (
     <section className="collection-browser" aria-label="컬렉션">
       {!kakaoReviewOpen && (!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
-        titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}</>}
+        titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}<BusyLabel busy={charactersOpen && !charactersReady} delay={400}>캐릭터 확인 중</BusyLabel></>}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ArrowLeftIcon aria-hidden="true" /></Button>}
         chrome={chrome}
       />}
       {spineBatch.message && <Toast tone={spineBatch.error ? "error" : "status"} onDismiss={spineBatch.dismiss}>{spineBatch.message}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-      <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
+      {charactersOpen && !charactersReady && (favorites.error || favoriteCatalog.error) && <Toast tone="error" actionLabel="다시 시도" onAction={() => { void favorites.refresh(); favoriteCatalog.refresh(); }} onDismiss={closeCharacters}>{favorites.error || favoriteCatalog.error}</Toast>}
+      <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`} inert={charactersOpen && !charactersReady}>
         {!inbox && !workspace && <div className="collection-browser__heading">
           <div>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>

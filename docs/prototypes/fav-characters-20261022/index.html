@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>좋아하는 캐릭터 시안</title>
+<!-- Self-contained mockup for FAV-CHAR-001. The app tokens below are copied from _tools/app/src/styles/tokens.css
+     (PC) and mobile-client/mobile.css (tablet overrides); the control rules are trimmed copies of controls.css /
+     shared-base.css / CollectionBrowser.css / folder-shelf.css / overlay.css. Pictures are inline SVG stand-ins. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<style>
+@font-face { font-family: "Pretendard Variable"; src: local("Pretendard Variable"), url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2"); font-weight: 45 920; font-display: swap; }
+
+/* ===== App tokens (the app is dark-only; the frames always use these) ===== */
+:root {
+  --color-bg: #161718; --color-sidebar: #1a1b1c; --color-toolbar: #191a1b; --color-surface: #222324;
+  --color-surface-elevated: #292a2b; --color-surface-raised: #292a2b; --color-surface-hover: #2d2e2f; --color-surface-pressed: #343536;
+  --color-control: #232425; --color-control-hover: #2d2e2f;
+  --color-selection-context: rgba(221, 216, 202, 0.16); --color-selection-context-text: #f1eee6; --color-selection-echo: rgba(221, 216, 202, 0.4);
+  --color-section-mark: rgba(221, 216, 202, 0.6); --section-label-rule: linear-gradient(90deg, rgba(221, 216, 202, 0.3), rgba(221, 216, 202, 0.06));
+  --color-cover-scrim: rgb(22 23 24 / 82%); --color-viewer-bg: #070a0f;
+  --color-text: #e7e9ec; --color-muted: #a0a3a5; --color-faint: #7d8184;
+  --color-accent: #ddd8ca; --color-on-accent: #202628; --color-accent-hover: #e7e2d5;
+  --color-filter-selected: #383838; --color-border: #363739; --color-border-strong: #55585a;
+  --color-danger: #e26767; --color-focus: #7db1ff; --asset-selection-tint: rgb(36 125 137 / 55%);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  --type-title: 20px; --type-body: 15px; --type-meta: 12px; --type-number: 24px; --line-ui: 20px;
+  --radius-mark: 2px; --radius-control: 4px;
+  --control-height: 32px; --control-height-compact: 28px; --touch-target: 32px; --row-height: 32px; --row-height-2: 48px;
+  --badge-height: 20px; --checkbox-size: 16px; --checkbox-inset: 3px; --toolbar-height: 40px; --gallery-gap: 6px;
+  --icon-sm: 16px; --icon-md: 20px;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1); --ease-spring: cubic-bezier(.22, 1, .36, 1);
+  --shadow-floating: 0 1px 3px rgba(0, 0, 0, 0.24), 0 8px 20px rgba(0, 0, 0, 0.3);
+  --shadow-dialog: 0 3px 10px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.38);
+  --font-ui: "Pretendard Variable", "Pretendard", "Yu Gothic UI", "Meiryo", "Segoe UI", "Malgun Gothic", sans-serif;
+
+  /* Document (page around the frames): light by default, dark below. */
+  --doc-bg: #f3f1ec; --doc-text: #1f2122; --doc-muted: #55595b; --doc-faint: #7f8385; --doc-rule: #d9d5cb;
+  --doc-mark: #3a3d40; --doc-chip: #e6e2d8; --doc-frame-edge: #cfcabf;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --doc-bg: #0e0f10; --doc-text: #e7e9ec; --doc-muted: #a0a3a5; --doc-faint: #7d8184; --doc-rule: #2a2b2d; --doc-mark: rgba(221,216,202,.6); --doc-chip: #222324; --doc-frame-edge: #2a2b2d; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --doc-bg: #0e0f10; --doc-text: #e7e9ec; --doc-muted: #a0a3a5; --doc-faint: #7d8184; --doc-rule: #2a2b2d; --doc-mark: rgba(221,216,202,.6); --doc-chip: #222324; --doc-frame-edge: #2a2b2d; color-scheme: dark; }
+
+/* ===== Document frame (not the design) ===== */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--doc-bg); color: var(--doc-text); font: 400 15px / 1.6 var(--font-ui); overflow-x: hidden; }
+h1, h2, h3, p, figure { margin: 0; }
+.doc { width: 1520px; max-width: 100%; margin: 0 auto; padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 56px; word-break: keep-all; overflow-wrap: anywhere; }
+.doc-head { display: flex; flex-direction: column; gap: 12px; }
+.doc-head__row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.doc-head h1 { font-size: 26px; font-weight: 650; letter-spacing: -.3px; flex: 1 1 auto; }
+.lead { color: var(--doc-muted); max-width: 1080px; line-height: 1.75; }
+.lead b, .note b, .plain b, figcaption b, .decide b { color: var(--doc-text); font-weight: 600; }
+.theme-switch { display: inline-flex; gap: 2px; padding: 2px; border-radius: 4px; background: var(--doc-chip); }
+.theme-switch button { border: 0; background: transparent; color: var(--doc-muted); font: 500 13px/1 var(--font-ui); padding: 6px 10px; border-radius: 2px; cursor: pointer; }
+.theme-switch button[aria-pressed="true"] { background: var(--doc-bg); color: var(--doc-text); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.toc a { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 2px; background: var(--doc-chip); color: var(--doc-text); font-size: 13px; text-decoration: none; }
+.toc a b { font-weight: 700; }
+section.part { display: flex; flex-direction: column; gap: 16px; padding-top: 20px; border-top: 1px solid var(--doc-rule); }
+section.part > h2 { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 650; flex-wrap: wrap; }
+section.part > h2::before { content: ""; width: 5px; height: 5px; background: var(--doc-mark); flex: none; }
+section.part > h2 small { color: var(--doc-faint); font-size: 14px; font-weight: 400; }
+.key { display: inline-grid; place-items: center; min-width: 28px; height: 22px; padding: 0 6px; border-radius: 2px; background: var(--doc-text); color: var(--doc-bg); font-size: 13px; font-weight: 700; }
+.ab { display: inline-grid; place-items: center; height: 20px; padding: 0 6px; border-radius: 2px; border: 1px solid var(--doc-faint); color: var(--doc-text); font-size: 12px; font-weight: 700; }
+.note { max-width: 1080px; color: var(--doc-muted); font-size: 14px; line-height: 1.75; }
+.plain { margin: 0; padding-left: 20px; color: var(--doc-muted); font-size: 14px; line-height: 1.85; max-width: 1080px; }
+.shots { display: flex; flex-wrap: wrap; gap: 32px 24px; align-items: flex-start; }
+figure.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
+figure.shot figcaption { max-width: 640px; color: var(--doc-muted); font-size: 14px; line-height: 1.7; }
+figure.shot figcaption .tag { display: inline-block; margin-right: 6px; }
+.fit { max-width: 100%; }
+.frame { position: relative; overflow: hidden; background: var(--color-bg); color: var(--color-text); font: 400 var(--type-body) / var(--line-ui) var(--font-ui); outline: 1px solid var(--doc-frame-edge); -webkit-font-smoothing: antialiased; }
+.decide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.decide > div { padding: 16px; border: 1px solid var(--doc-rule); border-radius: 4px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--doc-muted); line-height: 1.7; }
+.decide h3 { font-size: 16px; font-weight: 650; color: var(--doc-text); display: flex; align-items: center; gap: 8px; }
+.decide ul { margin: 0; padding-left: 18px; }
+@media (max-width: 640px) { .doc { padding: 24px 16px 64px; gap: 40px; } .doc-head h1 { font-size: 22px; } }
+
+/* ===== Shared app pieces (copied from the app CSS, trimmed) ===== */
+.frame svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.frame svg.i.s { width: 16px; height: 16px; }
+.frame svg.i.solid { fill: currentColor; stroke: none; }
+.num { font-variant-numeric: tabular-nums; }
+.frame button { font-family: inherit; }
+.ui-section-label { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--line-ui); color: var(--color-faint); font: 400 var(--type-meta) / 1.2 var(--font-ui); }
+.ui-section-label::before { content: ""; flex: none; width: 5px; height: 5px; background: var(--color-section-mark); }
+.ui-section-label__title { white-space: nowrap; }
+.ui-section-label__count { color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.ui-section-label__rule { flex: 1; min-width: 0; height: 1px; background: var(--section-label-rule); }
+.ui-section-label__actions { display: inline-flex; align-items: center; gap: var(--space-2); }
+.ui-segmented { position: relative; isolation: isolate; display: inline-flex; align-items: stretch; height: var(--control-height); padding: var(--space-1); border-radius: var(--radius-control); background: var(--color-surface); }
+.ui-segmented--full { display: flex; width: 100%; }
+.ui-segmented__cell { position: relative; z-index: 1; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: var(--space-1); height: 100%; padding: 0 var(--space-3); border: 0; background: transparent; color: var(--color-muted); font: 500 var(--type-body) / 1 var(--font-ui); white-space: nowrap; }
+.ui-segmented--full .ui-segmented__cell { flex: 1 1 0; min-width: 0; }
+.ui-segmented__thumb { position: absolute; top: var(--space-1); bottom: var(--space-1); z-index: 0; border-radius: var(--radius-mark); background: var(--color-accent); box-shadow: 3px 3px 0 -1px var(--color-surface), 3px 3px 0 0 var(--color-selection-echo); }
+.ui-segmented__cell[data-on] { color: var(--color-on-accent); font-weight: 600; }
+.ui-segmented__count { color: var(--color-faint); font: 500 var(--type-meta) / 1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.ui-segmented__cell[data-on] .ui-segmented__count { color: var(--color-on-accent); opacity: .7; }
+.ui-section-bar { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+.ui-section-bar > .ui-segmented { height: var(--control-height-compact); }
+.ui-section-bar__trailing { display: flex; flex: none; align-items: center; gap: var(--space-1); margin-left: auto; }
+.qbtn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); height: var(--control-height-compact); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); font: 400 var(--type-body) / 1 var(--font-ui); white-space: nowrap; }
+.qbtn svg.i { width: 16px; height: 16px; }
+.qbtn.is-hover { background: var(--color-surface-hover); color: var(--color-text); }
+.qbtn[aria-pressed="true"] { color: var(--color-accent); background: var(--color-filter-selected); }
+.qbtn .cnt { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.qdiv { flex: none; width: 1px; height: 16px; margin-inline: var(--space-2); background: var(--color-border); }
+.ibtn { display: inline-grid; place-items: center; width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); }
+.ibtn svg.i { width: 16px; height: 16px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--control-height); padding: 0 var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-control); color: var(--color-text); font: 500 var(--type-body) / 1 var(--font-ui); white-space: nowrap; }
+.btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.btn--ghost { background: transparent; border-color: transparent; color: var(--color-muted); }
+.btn svg.i { width: 16px; height: 16px; }
+.input { display: flex; align-items: center; gap: var(--space-2); height: var(--control-height); padding: 0 var(--space-3); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font-size: var(--type-body); min-width: 0; }
+.input svg.i { width: 16px; height: 16px; color: var(--color-muted); }
+.input .ph { color: var(--color-faint); }
+.input.is-typing { box-shadow: inset 0 -2px 0 var(--color-focus); border-radius: var(--radius-control) var(--radius-control) 0 0; }
+.input .unit { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.field > span { color: var(--color-muted); font-size: var(--type-meta); }
+.cbx { flex: none; width: var(--checkbox-size); height: var(--checkbox-size); border: 1.5px solid var(--color-border-strong); border-radius: var(--radius-mark); background: var(--color-control); }
+.cbx.on { border-color: var(--color-accent); background-image: linear-gradient(var(--color-accent), var(--color-accent)); background-repeat: no-repeat; background-position: center; background-size: calc(100% - 2 * var(--checkbox-inset)) calc(100% - 2 * var(--checkbox-inset)); }
+.cbx.dis { opacity: .4; }
+.badge { display: inline-flex; align-items: center; height: var(--badge-height); padding: 0 var(--space-2); gap: var(--space-1); border-radius: var(--radius-mark); background: var(--color-surface-elevated); color: var(--color-muted); font: 600 var(--type-meta) / 1 var(--font-ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.badge--scrim { background: var(--color-cover-scrim); color: var(--color-text); font-weight: 500; }
+/* Floating surface: square, 1px border, accent corner brackets (DESIGN §12). */
+.float { position: absolute; z-index: 20; border: 1px solid var(--color-border); background-color: var(--color-surface-elevated); box-shadow: var(--shadow-floating);
+  background-image: linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-accent), var(--color-accent)), linear-gradient(var(--color-accent), var(--color-accent));
+  background-repeat: no-repeat; background-size: 8px 2px, 2px 8px, 8px 2px, 2px 8px; background-position: left top, left top, right bottom, right bottom; background-origin: padding-box; }
+.menu { min-width: 216px; padding: var(--space-1); }
+.menu__item { display: flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--color-text); font-size: var(--type-body); white-space: nowrap; }
+.menu__item svg.i { width: 16px; height: 16px; color: var(--color-muted); }
+.menu__item.is-hover { background: var(--color-surface-hover); }
+.menu__item .hint { margin-left: auto; padding-left: var(--space-6); color: var(--color-faint); font-size: var(--type-meta); }
+.menu__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
+.empty-inline { padding: var(--space-3) 0; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* Pictures (stand-ins). Media tiles radius 0, covers and character cards radius 2. */
+svg.art { display: block; width: 100%; height: 100%; }
+
+/* ===== PC shell (rail + top bar) ===== */
+.pc { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-3); background: var(--color-sidebar); border-right: 1px solid var(--color-border); color: var(--color-muted); }
+.rail span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-control); }
+.rail span.on { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+.rail .push { margin-top: auto; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--toolbar-height); padding: 0 0 0 var(--space-2); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.topbar .ttl { font-weight: 600; white-space: nowrap; }
+.topbar .ttl small { margin-left: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; }
+.topbar .grow { flex: 1; }
+.winctl { display: flex; align-self: stretch; align-items: center; gap: 24px; padding: 0 16px 0 12px; color: var(--color-faint); font-size: 13px; }
+.status-chip { color: var(--color-faint); font-size: 12px; }
+.scroll { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+/* ===== P1: character grid (proposed) ===== */
+.chargrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.charcard { position: relative; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.charcard__img { position: relative; display: block; aspect-ratio: 132 / 170; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.charcard--square .charcard__img { aspect-ratio: 1 / 1; }
+.charcard__img .count { position: absolute; right: var(--space-1); bottom: var(--space-1); padding: 0 var(--space-2); background: rgba(0,0,0,.62); color: #fff; font-size: var(--type-meta); line-height: var(--line-ui); font-variant-numeric: tabular-nums; opacity: 0; }
+.charcard.is-hover .charcard__img { outline: 1px solid var(--color-muted); outline-offset: -1px; }
+.charcard.is-hover .count { opacity: 1; }
+.charcard strong { margin-top: var(--space-1); overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: var(--line-ui); text-overflow: ellipsis; white-space: nowrap; }
+.charcard small { overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+/* Carried card (shared shelf carry feedback): its own place is a slightly lighter surface; no border, no coloured line. */
+.charcard.is-carried-slot .charcard__img { background: var(--color-surface-hover); }
+.charcard.is-carried-slot .charcard__img > *, .charcard.is-carried-slot strong, .charcard.is-carried-slot small { visibility: hidden; }
+.carry-ghost { position: absolute; z-index: 15; width: 150px; transform: rotate(-2deg); box-shadow: var(--shadow-floating); pointer-events: none; }
+.carry-ghost .charcard__img { aspect-ratio: 132 / 170; }
+/* First appearance (DESIGN §10 B): rise 8px + scale .98 → 1, 560 ms, 24 ms stagger. */
+@media (prefers-reduced-motion: no-preference) {
+  .anim .charcard { animation: rise 560ms var(--ease-spring) both; animation-delay: calc(var(--i, 0) * 24ms); }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+
+/* ===== P2: character detail (proposed) ===== */
+.detail { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: var(--space-8); padding: var(--space-6) var(--space-6) var(--space-8); align-items: start; }
+.prof { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.prof__img { position: relative; aspect-ratio: 132 / 170; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.prof__swap { position: absolute; right: var(--space-2); bottom: var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); height: 28px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-mark); background: rgb(0 0 0 / 62%); color: #fff; font: 400 var(--type-meta) / 1 var(--font-ui); }
+.prof__swap svg.i { width: 16px; height: 16px; }
+.prof__name { display: flex; flex-direction: column; gap: var(--space-1); }
+.prof__name h3 { font-size: var(--type-title); font-weight: 600; line-height: 26px; }
+.prof__name span { color: var(--color-muted); font-size: var(--type-meta); }
+.facts { display: flex; flex-direction: column; margin: 0; }
+.facts > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: baseline; gap: var(--space-3); min-height: 32px; padding: 6px 0; border-top: 1px solid var(--color-border); }
+.facts > div:last-child { border-bottom: 1px solid var(--color-border); }
+.facts dt { color: var(--color-faint); font-size: var(--type-meta); }
+.facts dd { margin: 0; color: var(--color-text); font-size: var(--type-body); line-height: var(--line-ui); }
+.facts dd .dday { margin-left: var(--space-2); color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.facts dd.memo { color: var(--color-muted); }
+.add-info { align-self: flex-start; }
+.dcol { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
+.works { display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap; }
+.work { display: flex; flex-direction: column; gap: var(--space-2); width: 108px; }
+.work__obj--game { padding: 3px 4px 5px; background: var(--color-surface); border-radius: var(--radius-mark); position: relative; }
+.work__obj--game::before { content: ""; position: absolute; inset: 8px auto 10px 1px; width: 2px; background: var(--color-border); border-radius: 2px; }
+.work__obj--manga { padding-right: 3px; background: color-mix(in srgb, var(--color-text) 7%, var(--color-surface)); border-radius: var(--radius-mark); }
+.work__cover { position: relative; overflow: hidden; border-radius: var(--radius-mark); aspect-ratio: 105 / 170; }
+.work__obj--manga .work__cover { aspect-ratio: 256 / 368; }
+.work__cover b { position: absolute; left: 6px; right: 6px; top: 8px; color: #fff; font-size: 11px; font-weight: 700; line-height: 1.25; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.work strong { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.work small { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; }
+.work--text { align-self: flex-end; width: auto; max-width: 160px; padding-bottom: 18px; }
+.work--text strong { white-space: normal; color: var(--color-faint); }
+.masonry { columns: var(--cols, 5); column-gap: var(--gallery-gap); }
+.tile { position: relative; display: block; margin: 0 0 var(--gallery-gap); break-inside: avoid; overflow: hidden; background: var(--color-surface); }
+.tile.is-cover::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 2px var(--color-accent); }
+.tile .badge { position: absolute; left: var(--space-2); bottom: var(--space-2); }
+.tile.is-sel::before { content: ""; position: absolute; inset: 0; z-index: 1; background: var(--asset-selection-tint); }
+.tile .chk { position: absolute; z-index: 2; top: var(--space-2); right: var(--space-2); display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-mark); background: var(--color-accent); color: var(--color-on-accent); }
+.tile .chk svg.i { width: 14px; height: 14px; stroke-width: 2.2; }
+/* B: banner */
+.hero { position: relative; height: 340px; }
+.hero__bg { position: absolute; inset: 0; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 100%); mask-image: linear-gradient(180deg, #000 30%, transparent 100%); }
+.hero__bg svg.art { transform: scale(1.3); filter: blur(36px) saturate(1.1); opacity: .62; }
+.hero__row { position: absolute; left: var(--space-6); right: var(--space-6); bottom: -64px; display: flex; align-items: flex-end; gap: var(--space-6); }
+.hero__card { flex: none; width: 196px; aspect-ratio: 132 / 170; overflow: hidden; border-radius: var(--radius-mark); box-shadow: 0 6px 18px rgba(0,0,0,.4); position: relative; }
+.hero__text { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-bottom: var(--space-2); }
+.hero__text h3 { font-size: 30px; font-weight: 650; line-height: 36px; letter-spacing: -.3px; }
+.hero__text h3 span { margin-left: var(--space-3); color: var(--color-muted); font-size: var(--type-body); font-weight: 400; letter-spacing: 0; }
+.hfacts { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-8); margin: 0; }
+.hfacts div { display: flex; flex-direction: column; gap: 2px; }
+.hfacts dt { color: var(--color-faint); font-size: var(--type-meta); }
+.hfacts dd { margin: 0; font-size: var(--type-body); }
+.hfacts dd .dday { margin-left: var(--space-1); color: var(--color-faint); font-size: var(--type-meta); }
+.hero__memo { color: var(--color-muted); font-size: var(--type-body); }
+.bbody { display: flex; flex-direction: column; gap: var(--space-6); padding: 96px var(--space-6) var(--space-8); }
+/* Dialog (PC) */
+.dlg { position: absolute; z-index: 30; display: flex; flex-direction: column; background-color: var(--color-sidebar); box-shadow: var(--shadow-dialog); }
+.dlg__head { display: flex; align-items: center; gap: var(--space-2); height: 48px; padding: 0 var(--space-2) 0 var(--space-4); border-bottom: 1px solid var(--color-border); }
+.dlg__head h3 { font-size: var(--type-body); font-weight: 600; }
+.dlg__head .grow { flex: 1; }
+.dlg__body { display: grid; grid-template-columns: minmax(0, 1fr) 232px; gap: var(--space-4); padding: var(--space-4); min-height: 0; flex: 1; }
+.dlg__grid { overflow: hidden; min-height: 0; }
+.dlg__side { display: flex; flex-direction: column; gap: var(--space-3); }
+.dlg__side .prev { position: relative; width: 100%; aspect-ratio: 132 / 170; overflow: hidden; border-radius: var(--radius-mark); cursor: grab; }
+.dlg__side .prev svg.art { height: 150%; transform: translateY(-12%); }
+.dlg__side .prev .grab { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 2px; background: rgb(0 0 0 / 50%); color: #fff; }
+.dlg__foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border); }
+.scrim { position: absolute; inset: 0; z-index: 25; background: rgba(7, 10, 15, .62); }
+/* Edit (PC) */
+.edit { display: flex; flex-direction: column; gap: var(--space-4); }
+.edit .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.edit textarea { width: 100%; min-height: 64px; resize: none; border: 0; border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font: 400 var(--type-body) / 1.5 var(--font-ui); padding: 6px var(--space-3); }
+.chipset { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.wchip { display: inline-flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-1) 0 var(--space-1); border-radius: var(--radius-control); background: var(--color-surface); font-size: var(--type-meta); color: var(--color-text); }
+.wchip i { display: block; width: 14px; height: 20px; border-radius: 1px; }
+.wchip .x { display: grid; place-items: center; width: 20px; height: 20px; color: var(--color-muted); }
+.wchip .x svg.i { width: 14px; height: 14px; }
+.edit__foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-2); }
+
+/* ===== P3: picker popover (proposed; built like the character assign picker) ===== */
+.picker { width: 400px; display: flex; flex-direction: column; max-height: 600px; padding: 0; }
+.picker__head { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-3) var(--space-3) var(--space-2); }
+.picker__head .input { flex: 1; }
+.picker__scope { padding: 0 var(--space-3) var(--space-2); }
+.picker__scope .ui-segmented { height: 28px; width: 100%; display: flex; }
+.picker__scope .ui-segmented__cell { flex: 1 1 0; padding: 0 var(--space-1); font-size: var(--type-meta); }
+.picker__list { flex: 1; min-height: 0; overflow: hidden; padding: 0 0 var(--space-2); border-top: 1px solid var(--color-border); }
+.picker__label { height: 32px; padding: 0 var(--space-3); }
+.prow { display: flex; align-items: center; gap: var(--space-3); height: var(--row-height-2); padding: 0 var(--space-3); }
+.prow.is-hover { background: var(--color-surface-hover); }
+.prow__img { flex: none; width: 30px; height: 38px; overflow: hidden; border-radius: var(--radius-mark); }
+.prow__txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.prow__txt b { overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: var(--line-ui); text-overflow: ellipsis; white-space: nowrap; }
+.prow__txt small { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; font-variant-numeric: tabular-nums; }
+.prow__state { color: var(--color-faint); font-size: var(--type-meta); white-space: nowrap; }
+.prow.is-in .prow__txt b { color: var(--color-muted); }
+.picker__foot { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--color-border); }
+.picker__foot .sel { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.picker__foot .grow { flex: 1; }
+.help-pop { width: 260px; padding: var(--space-3); color: var(--color-muted); font-size: var(--type-meta); line-height: 1.6; }
+
+/* ===== Tablet (portrait 800 × 1280) ===== */
+.frame--tab { --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px; --line-ui: 24px;
+  --control-height: 44px; --control-height-compact: 36px; --touch-target: 44px; --row-height: 48px; --row-height-2: 64px;
+  --badge-height: 24px; --checkbox-size: 20px; --checkbox-inset: 4px; --gutter: 24px; }
+.tab { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tab-top { display: flex; align-items: center; gap: var(--space-2); flex: none; height: 64px; padding: 0 var(--space-4) 0 var(--gutter); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab-top .ttl { font-size: var(--type-title); font-weight: 600; }
+.tab-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.tab-nav { display: flex; justify-content: space-around; align-items: center; flex: none; height: 64px; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 13px; }
+.tab-nav span { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tab-nav span.on { color: var(--color-text); }
+.tab .ibtn, .ov .ibtn, .sheet .ibtn { width: 44px; height: 44px; }
+.tab .ibtn svg.i, .ov .ibtn svg.i, .sheet .ibtn svg.i { width: 24px; height: 24px; }
+.tab-dim { position: absolute; inset: 0; z-index: 4; background: color-mix(in srgb, var(--color-viewer-bg) 50%, transparent); }
+/* Tall overlay: the approved 36px glimpse above it (overlay.css). */
+.ov { position: absolute; inset: 36px 0 0; z-index: 6; display: flex; flex-direction: column; background: var(--color-bg); border-top: 1px solid var(--color-border); border-radius: 14px 14px 0 0; overflow: hidden; }
+.ov--stack { inset: 44px 0 0; z-index: 8; box-shadow: 0 -6px 24px rgba(0,0,0,.4); }
+.ov__head { flex: none; border-bottom: 1px solid var(--color-border); }
+.ov__grab { width: 36px; height: 4px; margin: var(--space-2) auto 0; border-radius: var(--radius-mark); background: var(--color-border-strong); }
+.ov__title { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: var(--space-1) var(--space-4) var(--space-2) var(--gutter); }
+.ov__title.has-back { padding-left: var(--space-2); }
+.ov__title h2 { font-size: var(--type-title); font-weight: 600; white-space: nowrap; }
+.ov__title > span { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.ov__title .grow { flex: 1; }
+.ov__body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.ov__filter { padding: var(--space-3) var(--gutter) 0; }
+.ov__filter .ui-segmented { height: calc(var(--touch-target) + 2 * var(--space-1)); }
+.frame--tab .chargrid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4) var(--gutter) var(--space-8); }
+.frame--tab .charcard strong { font-size: var(--type-body); }
+.press { position: absolute; z-index: 11; width: 56px; height: 56px; border-radius: 50%; background: rgba(125, 177, 255, .28); border: 2px solid rgba(125, 177, 255, .8); transform: translate(-50%, -50%); }
+/* Bottom sheet (tablet): radius 8 top corners. */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 12; display: flex; flex-direction: column; background: var(--color-surface-raised); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.sheet__grab { flex: none; width: 40px; height: 4px; margin: var(--space-2) auto var(--space-2); border-radius: 2px; background: var(--color-border-strong); }
+.sheet__subject { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--gutter) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.sheet__subject .prow__img { width: 44px; height: 56px; }
+.sheet__item { display: flex; align-items: center; gap: var(--space-3); height: 56px; padding: 0 var(--gutter); font-size: var(--type-body); }
+.sheet__item svg.i { width: 24px; height: 24px; color: var(--color-muted); }
+.sheet__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
+.sheet__title { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4) var(--space-2) var(--gutter); }
+.sheet__title h3 { font-size: var(--type-title); font-weight: 600; flex: 1; }
+.frame--tab .picker__head { padding: var(--space-2) var(--gutter) var(--space-3); }
+.frame--tab .picker__scope { padding: 0 var(--gutter) var(--space-3); }
+.frame--tab .picker__scope .ui-segmented { height: calc(var(--touch-target) + 2 * var(--space-1)); }
+.frame--tab .picker__scope .ui-segmented__cell { font-size: var(--type-body); }
+.frame--tab .picker__label { height: 40px; padding: 0 var(--gutter); }
+.frame--tab .prow { padding: 0 var(--gutter); gap: var(--space-4); }
+.frame--tab .prow__img { width: 40px; height: 52px; }
+.frame--tab .picker__foot { padding: var(--space-3) var(--gutter) var(--space-4); }
+.frame--tab .picker__foot .btn { min-height: 44px; flex: 1; }
+/* Tablet detail */
+.tdetail { display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-6) var(--gutter) var(--space-8); }
+.ttop { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+.frame--tab .facts > div { grid-template-columns: 64px minmax(0, 1fr); min-height: 48px; padding: 12px 0; }
+.frame--tab .prof__name h3 { line-height: 28px; }
+.shelfrow { display: flex; gap: var(--space-4); overflow: hidden; align-items: flex-end; }
+.frame--tab .work { width: 124px; }
+.frame--tab .hero { height: 400px; }
+.frame--tab .hero__card { width: 200px; }
+.frame--tab .hero__row { bottom: -56px; }
+.frame--tab .hero__text h3 { font-size: 30px; }
+.frame--tab .bbody { padding: 88px var(--gutter) var(--space-8); }
+.frame--tab .hfacts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) var(--space-6); }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<header class="doc-head">
+  <div class="doc-head__row">
+    <h1>좋아하는 캐릭터 — 컬렉션 안 ‘캐릭터’ 보기</h1>
+    <div class="theme-switch" role="group" aria-label="페이지 테마"><button type="button" data-theme-set="auto" aria-pressed="true">자동</button><button type="button" data-theme-set="dark" aria-pressed="false">어둡게</button><button type="button" data-theme-set="light" aria-pressed="false">밝게</button></div>
+  </div>
+  <p class="lead">FAV-CHAR-001 시안. 컬렉션 섹션 줄에서 <b>쇼케이스 옆에 ‘캐릭터’</b>가 생기고, 누르면 좋아하는 캐릭터만 모은 격자가 열린다. 카드는 <b>에셋에 이미 있는 캐릭터 폴더를 가리킬 뿐</b> 새 캐릭터 기록을 만들지 않는다. 카드를 열면 프로필, 등장 작품(컬렉션 작품으로 연결), 그 캐릭터 폴더의 에셋이 한 화면에 모인다. PC가 기준이고 태블릿은 같은 부품을 손가락 크기·세로 배치·시트로 옮겼다.</p>
+  <p class="lead">색·글자·간격·컨트롤 값은 앱의 실제 토큰을 옮겨 왔다. 그림과 이름은 임시 데이터다. 하늘색 원은 손가락 위치 표시일 뿐 앱 화면이 아니다. 앱은 어두운 테마만 있으므로 화면 틀은 페이지 테마와 상관없이 어둡게 보인다.</p>
+  <ul class="toc">
+    <li><a href="#p1"><b>P1</b>PC 격자</a></li>
+    <li><a href="#p2"><b>P2</b>PC 캐릭터 화면</a></li>
+    <li><a href="#p2x"><b>P2+</b>편집 · 빈 프로필 · 대표 이미지</a></li>
+    <li><a href="#p3"><b>P3</b>PC 추가 선택</a></li>
+    <li><a href="#t1"><b>T1</b>태블릿 격자</a></li>
+    <li><a href="#t2"><b>T2</b>태블릿 캐릭터 화면</a></li>
+    <li><a href="#t3"><b>T3</b>태블릿 추가 시트</a></li>
+    <li><a href="#decide">정할 것</a></li>
+  </ul>
+</header>
+
+<section class="part" id="p1">
+  <h2><span class="key">P1</span>PC 컬렉션 · 캐릭터 격자 <small>카드 모양 <span class="ab">A</span> 세로 / <span class="ab">B</span> 정사각</small></h2>
+  <p class="note">섹션 줄 오른쪽 묶음에 <b>쇼케이스 · 캐릭터 · 발매 캘린더</b>가 나란히 있고, 캐릭터를 누르면 쇼케이스처럼 눌린 상태가 되며 상단 바 제목이 ‘캐릭터’로 바뀐다(왼쪽 화살표로 컬렉션으로 돌아감). 캐릭터는 유형(게임·만화·영화·AV)을 가로지르므로, 이 보기에서는 왼쪽 탭이 <b>분류함 필터</b>(전체 · 게임 · 만화 · 오리지널 · 기타)로 바뀐다. 필터는 순서를 바꾸지 않고 걸러 보기만 한다. 정렬 메뉴는 없다 — 순서는 사용자가 정한다.</p>
+  <div class="shots">
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame anim" id="f-p1a" style="width:1440px;height:820px"></div></div>
+      <figcaption><span class="ab tag">A</span><b>세로 카드 (132:170).</b> 에셋의 시리즈 폴더 선반에 있는 캐릭터 카드와 같은 비율이라, 에셋에서 보던 얼굴이 그대로 이어진다. 이름 아래 작품 이름은 흐린 메타 한 줄. 에셋 장수는 지금 폴더 선반처럼 <b>마우스를 올릴 때만</b> 그림 오른쪽 아래에 나온다. 카드를 끌어 순서를 바꾸고(지금 폴더 선반의 끌기 표시 그대로 — 빈 자리는 조금 밝은 면, 줄이나 테두리 없음), 오른쪽 클릭 메뉴에도 앞으로/뒤로가 있다.</figcaption></figure>
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame" id="f-p1b" style="width:1440px;height:440px"></div></div>
+      <figcaption><span class="ab tag">B</span><b>정사각 카드.</b> 한 줄에 같은 수가 들어가면서 높이가 줄어 한 화면에 더 많이 보인다. 대신 전신·세로 일러스트는 얼굴 위주로 더 많이 잘리고, 에셋 폴더 선반 카드와 모양이 달라진다.</figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li>처음 열 때만 카드가 8px 올라오며 나타난다(지금 목록 첫 표시와 같은 움직임). 필터를 바꾸면 지금 세그먼트 전환처럼 고른 쪽에서 16px 밀려 들어온다. 다시 들어올 때는 움직이지 않는다.</li>
+    <li>캐릭터가 하나도 없을 때는 공용 빈 화면(흐린 아이콘 + ‘캐릭터 없음’ + <b>캐릭터 추가</b> 버튼 하나)만 보인다.</li>
+    <li>카드 클릭 = 캐릭터 화면(P2). 오른쪽 클릭 메뉴: 대표 이미지 바꾸기 · 에셋 폴더 열기 · 앞으로 · 뒤로 · 맨 앞으로 · 맨 뒤로 · <b>캐릭터 목록에서 빼기</b>(캐릭터와 에셋은 그대로 남으므로 ‘빼기’).</li>
+  </ul>
+</section>
+
+<section class="part" id="p2">
+  <h2><span class="key">P2</span>PC 캐릭터 화면 <small>배치 <span class="ab">A</span> 왼쪽 프로필 / <span class="ab">B</span> 위쪽 배너</small></h2>
+  <p class="note">두 안 모두 내용은 같다: 대표 이미지, 이름(한국어 + 원래 이름), 생일 · 키 · 성우 · 소속 · 메모, <b>등장 작품</b>(컬렉션에 있는 작품은 표지로 보이고 누르면 그 작품 화면으로 간다), 그리고 그 캐릭터 폴더의 <b>에셋</b>이 지금 에셋 격자 모양(원래 비율 · 그림만 · 간격 6px)으로 자동으로 모인다. 값이 없는 칸은 줄째 빠진다 — ‘정보 없음’ 같은 글은 어디에도 없다. 생일이 30일 안이면 날짜 옆에 흐린 D-day가 붙는다.</p>
+  <div class="shots">
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame" id="f-p2a" style="width:1440px;height:900px"></div></div>
+      <figcaption><span class="ab tag">A</span><b>왼쪽 프로필 칸.</b> 320px 칸에 대표 이미지 → 이름 → 정보 줄(가는 선으로 나눈 줄, 이름표는 흐린 메타)이 세로로 쌓이고 스크롤해도 왼쪽에 머문다. 오른쪽은 등장 작품과 에셋. 에셋을 많이 내려 봐도 누구의 화면인지 늘 보인다. 대표 이미지 위 ‘바꾸기’는 마우스를 올릴 때만 보인다.</figcaption></figure>
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame" id="f-p2b" style="width:1440px;height:900px"></div></div>
+      <figcaption><span class="ab tag">B</span><b>위쪽 배너.</b> 만화·AV 작품 무대(2026-10-02 A안)처럼 대표 이미지를 <b>흐리고 옅게 크게</b> 깔아 아래로 본문에 녹이고, 또렷한 카드를 그 위에 겹친다. 세로 그림을 넓은 배너로 자르지 않아도 되는 방법이다. 이름은 그림 위 큰 제목, 정보는 이름표-값 한 줄. 아래는 에셋이 화면 전체 폭을 쓴다. 에셋을 내려 보면 프로필은 위로 사라진다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="p2x">
+  <h2><span class="key">P2+</span>편집 · 정보가 적은 캐릭터 · 대표 이미지 바꾸기 <small>A 배치로 그림, B에서도 같다</small></h2>
+  <div class="shots">
+    <figure class="shot"><div class="fit" data-w="420"><div class="frame" id="f-edit" style="width:420px;height:900px"></div></div>
+      <figcaption><b>편집 (PC 전용).</b> 상단 바의 <b>편집</b>을 누르면 프로필 칸이 그 자리에서 입력 칸으로 바뀐다(창이 따로 뜨지 않음). 생일은 연도 없이 월/일, 키는 cm. 등장 작품은 연결된 작품이 작은 칩으로 보이고 ✕로 연결 제거, ‘작품 연결’은 컬렉션 작품 검색을 연다. 작품 폴더 이름과 같은 컬렉션 작품이 있으면 처음부터 제안해 둔다. 완료로 저장, Esc는 취소.</figcaption></figure>
+    <figure class="shot"><div class="fit" data-w="420"><div class="frame" id="f-empty" style="width:420px;height:900px"></div></div>
+      <figcaption><b>정보가 거의 없는 캐릭터.</b> 이름과 작품 이름만 있으면 그것만 보이고, 그 아래 흐린 <b>＋ 정보 추가</b> 하나가 편집을 연다. 등장 작품이 없으면 그 구역도 통째로 빠져 에셋이 바로 위로 올라온다.</figcaption></figure>
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame" id="f-swap" style="width:1440px;height:760px"></div></div>
+      <figcaption><b>대표 이미지 바꾸기.</b> 그 캐릭터 폴더의 에셋만 원래 비율로 보이고(지금 선택 표시 · 체크 그대로), 오른쪽에 카드에 실제로 보일 모양이 미리 보인다. 미리보기를 끌면 잘리는 위치를 위아래로 옮길 수 있다. 에셋 격자나 감상 화면의 오른쪽 클릭 메뉴에도 <b>대표 이미지로</b>가 있어 고르는 길이 둘이다. 대표 이미지가 휴지통으로 가면 컬렉션 대표 자산처럼 자동으로 비고, 그때는 폴더의 첫 이미지를 보여 준다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="p3">
+  <h2><span class="key">P3</span>PC 캐릭터 추가 <small>섹션 줄의 ＋ 추가에 붙는 팝오버</small></h2>
+  <p class="note">지금 캐릭터 지정 메뉴처럼 검색 칸 + 분류함 범위 + 작품별 묶음 목록이다. <b>에셋에 캐릭터 폴더가 있는 캐릭터만</b> 보인다. 여러 명을 체크하고 아래 버튼으로 한 번에 넣는다(체크 → 버튼 적용, DESIGN §12). 이미 목록에 있는 캐릭터는 체크된 채 흐리게 ‘추가됨’. 에셋이 없는 캐릭터는 나중 일이라 목록에 없고, 그 사실은 ⓘ 안에 한 줄로만 둔다.</p>
+  <div class="shots">
+    <figure class="shot" style="width:100%"><div class="fit" data-w="1440"><div class="frame" id="f-p3" style="width:1440px;height:780px"></div></div>
+      <figcaption><b>추가 팝오버.</b> 이름(한국어·원래 이름 모두)과 작품 이름으로 찾는다. 행 그림은 그 캐릭터 폴더의 대표 그림, 오른쪽 메타는 에셋 장수. 넣은 카드는 격자 맨 뒤에 붙는다. ⓘ를 누르면 오른쪽처럼 작은 설명이 열린다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="t1">
+  <h2><span class="key">T1</span>태블릿 · 캐릭터 격자 <small>세로 800 × 1280을 줄여 보임</small></h2>
+  <p class="note">태블릿의 쇼케이스·발매 캘린더처럼 섹션 줄의 캐릭터 아이콘을 누르면 <b>아래에서 올라오는 긴 창</b>(위 36px만 흐리게 남음)으로 열린다. 필터는 같은 분류함 세그먼트, 격자는 4열. 순서 바꾸기와 빼기는 <b>길게 눌러 동작 시트</b>에서 — PC 오른쪽 클릭 메뉴와 같은 항목, 같은 순서다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="fit" data-w="800" data-scale=".62"><div class="frame frame--tab anim" id="f-t1" style="width:800px;height:1280px"></div></div>
+      <figcaption><b>격자.</b> 제목 옆 숫자는 전체 수, 오른쪽 ＋는 T3 추가 시트, ✕ · 아래로 쓸기 · 뒤로가 닫기. 에셋 장수는 마우스가 없으므로 카드에 표시하지 않는다(캐릭터 화면에 있음).</figcaption></figure>
+    <figure class="shot"><div class="fit" data-w="800" data-scale=".62"><div class="frame frame--tab" id="f-t1b" style="width:800px;height:1280px"></div></div>
+      <figcaption><b>길게 누르기.</b> 0.45초 뒤 시트가 올라온다. 첫 줄은 대상(그림 + 이름 + 작품), 아래는 PC 메뉴와 같은 항목. ‘빼기’는 지우는 일이 아니므로 빨갛게 하지 않고 선으로만 뗀다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="t2">
+  <h2><span class="key">T2</span>태블릿 · 캐릭터 화면 <small><span class="ab">A</span> / <span class="ab">B</span>는 PC의 고른 쪽을 따른다</small></h2>
+  <p class="note">격자 위에 한 장 더 겹쳐 열리고 뒤로가면 격자로 돌아간다(컬렉션 바로가기 창에서 작품을 열 때와 같음). 태블릿에서는 <b>보기만</b> 한다 — 프로필 편집은 PC에서. ⋯ 시트에는 대표 이미지 바꾸기 · 에셋 폴더 열기 · 캐릭터 목록에서 빼기. 에셋은 3열, 누르면 지금 태블릿 감상 화면이 열린다.</p>
+  <div class="shots">
+    <figure class="shot"><div class="fit" data-w="800" data-scale=".62"><div class="frame frame--tab" id="f-t2a" style="width:800px;height:1280px"></div></div>
+      <figcaption><span class="ab tag">A</span><b>그림 + 프로필을 위에 나란히.</b> 세로 화면 폭에서는 왼쪽 칸을 계속 붙잡아 둘 수 없어, 그림과 정보 줄을 맨 위 한 덩어리로 두고 아래로 작품 → 에셋이 이어진다.</figcaption></figure>
+    <figure class="shot"><div class="fit" data-w="800" data-scale=".62"><div class="frame frame--tab" id="f-t2b" style="width:800px;height:1280px"></div></div>
+      <figcaption><span class="ab tag">B</span><b>위쪽 배너.</b> PC B와 같은 흐린 배경 + 겹친 카드, 정보는 2열 칸. 세로 화면에서는 위쪽이 넉넉해 B도 자연스럽다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="t3">
+  <h2><span class="key">T3</span>태블릿 · 캐릭터 추가 시트</h2>
+  <div class="shots">
+    <figure class="shot"><div class="fit" data-w="800" data-scale=".62"><div class="frame frame--tab" id="f-t3" style="width:800px;height:1280px"></div></div>
+      <figcaption><b>아래 시트.</b> PC 팝오버와 같은 내용·순서. 행 높이 64, 체크 20, 아래 큰 버튼 ‘2명 추가’. 아래로 쓸거나 바깥을 누르면 닫히고 체크는 버려진다. 검색 칸을 누르면 시트가 위로 늘어나 키보드에 가리지 않는다.</figcaption></figure>
+  </div>
+</section>
+
+<section class="part" id="decide">
+  <h2>정할 것</h2>
+  <div class="decide">
+    <div><h3><span class="ab">A</span>/<span class="ab">B</span> 카드 모양</h3>
+      <ul><li><b>A 세로 132:170</b> — 에셋 시리즈 선반 캐릭터 카드와 같은 모양. 일러스트가 덜 잘린다. <b>추천.</b></li>
+      <li><b>B 정사각</b> — 더 촘촘하고 얼굴 중심. 전신 그림은 많이 잘린다.</li></ul></div>
+    <div><h3><span class="ab">A</span>/<span class="ab">B</span> 캐릭터 화면 배치</h3>
+      <ul><li><b>A 왼쪽 프로필</b> — 에셋을 내려 봐도 프로필이 보임. 세로 대표 그림과 잘 맞는다. PC <b>추천.</b></li>
+      <li><b>B 위쪽 배너</b> — 만화·AV 작품 무대와 같은 흐린 배경 + 또렷한 카드, 더 ‘전시’ 같다. 에셋을 내리면 프로필이 위로 사라진다.</li>
+      <li>태블릿은 고른 쪽을 그대로 따른다(두 안 모두 그려 둠).</li></ul></div>
+    <div><h3>그 밖에 이 시안이 정해 둔 것 (바꿀 수 있음)</h3>
+      <ul><li>들어가는 곳: 섹션 줄 쇼케이스 옆 <b>캐릭터</b> 버튼(수 표시). 이 보기에서는 왼쪽 탭이 분류함 필터로 바뀜.</li>
+      <li>프로필 칸: 생일 · 키 · 성우 · 소속 · 메모 다섯 개만. 생일은 연도 없이 ‘3월 14일’.</li>
+      <li>편집은 PC만, 태블릿은 보기 + 대표 이미지 바꾸기 + 순서 · 빼기.</li>
+      <li>에셋이 없는 캐릭터: 이번에는 목록에 없고 ⓘ 한 줄만.</li></ul></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+/* ---------- icons (Heroicons outline 1.5) ---------- */
+const P = {
+  home: 'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  photo: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  doc: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  left: 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18',
+  chevL: 'M15.75 19.5 8.25 12l7.5-7.5',
+  down: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  x: 'M6 18 18 6M6 6l12 12',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  cal: 'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  user: 'M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z',
+  userSolid: 'M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z',
+  pencil: 'm16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10',
+  folder: 'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+  info: 'm11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z',
+  check: 'm4.5 12.75 6 6 9-13.5',
+  open: 'M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25',
+  adjust: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75',
+  up: 'M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18',
+  dn: 'M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3',
+  toTop: 'm4.5 18.75 7.5-7.5 7.5 7.5m-15-6 7.5-7.5 7.5 7.5',
+  toEnd: 'm4.5 5.25 7.5 7.5 7.5-7.5m-15 6 7.5 7.5 7.5-7.5',
+  minus: 'M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  move: 'M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5',
+  link: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244',
+  bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+const icSolid = (n) => `<svg class="i solid" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+
+/* ---------- stand-in pictures: a faceless illustrated bust on a soft gradient ---------- */
+let gid = 0;
+function art(c, o = {}) {
+  const id = 'g' + (++gid);
+  const h = c.h, [hh, hs, hl] = c.hair;
+  const s = o.s ?? 1, dx = o.dx ?? 0, dy = o.dy ?? 0;
+  const hair = `hsl(${hh} ${hs}% ${hl}%)`, skin = 'hsl(24 42% 85%)', skinD = 'hsl(22 34% 74%)';
+  const outfit = `hsl(${(h + 170) % 360} 22% ${o.dark ? 18 : 28}%)`;
+  const longHair = c.long !== false;
+  const back = longHair
+    ? 'M27 52 C24 26 38 13 50 13 C63 13 77 26 73 52 C75 70 79 88 82 104 L18 104 C21 88 25 70 27 52 Z'
+    : 'M29 54 C26 28 39 15 50 15 C62 15 75 28 71 54 L68 66 L32 66 Z';
+  const scene = o.scene ? `<path d="M0 96 L22 78 L40 90 L62 70 L100 94 L100 130 L0 130 Z" fill="hsl(${h + 20} 30% 16% / .7)"/>` : '';
+  return `<svg class="art" viewBox="0 0 100 130" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="hsl(${h} 40% ${o.bgL ?? 60}%)"/><stop offset="1" stop-color="hsl(${h + 28} 36% 20%)"/></linearGradient></defs><rect width="100" height="130" fill="url(#${id})"/><circle cx="${74 - dx / 2}" cy="28" r="26" fill="hsl(${h} 70% 86% / .22)"/>${scene}<g transform="translate(${50 + dx} ${dy}) scale(${s}) translate(-50 0)"><path d="${back}" fill="${hair}"/><path d="M10 130 C12 104 30 90 50 90 C70 90 88 104 90 130 Z" fill="${outfit}"/><path d="M40 90 L50 104 L60 90 Z" fill="hsl(40 20% 90%)"/><path d="M44 64 L56 64 L57 92 L43 92 Z" fill="${skinD}"/><ellipse cx="50" cy="50" rx="16.5" ry="19.5" fill="${skin}"/><ellipse cx="44" cy="53" rx="1.5" ry="2.1" fill="${hair}" opacity=".75"/><ellipse cx="56" cy="53" rx="1.5" ry="2.1" fill="${hair}" opacity=".75"/><path d="M33 50 C31 30 41 22 50 22 C60 22 70 30 67 50 C64 42 60 37 55 35 C52 42 45 46 33 50 Z" fill="${hair}"/><path d="M62 27 l5 -3 l2 5 l-5 3z" fill="hsl(${h} 70% 72%)"/></g></svg>`;
+}
+function coverArt(w) {
+  return `<svg class="art" viewBox="0 0 100 160" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="c${++gid}" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="hsl(${w.h} 45% 48%)"/><stop offset="1" stop-color="hsl(${w.h + 30} 40% 14%)"/></linearGradient></defs><rect width="100" height="160" fill="url(#c${gid})"/><circle cx="70" cy="90" r="40" fill="hsl(${w.h} 60% 80% / .18)"/><path d="M0 130 L30 108 L55 122 L100 96 L100 160 L0 160 Z" fill="hsl(${w.h + 40} 30% 10% / .6)"/></svg>`;
+}
+
+/* ---------- data ---------- */
+const C = [
+  { n: '세라', o: 'セラ・アルトリア', s: '별의 항해자', box: '게임', h: 212, hair: [38, 55, 70], c: 342 },
+  { n: '아델', o: 'Adele Wynn', s: '별의 항해자', box: '게임', h: 350, hair: [8, 45, 30], c: 128 },
+  { n: '하루카', o: '遥', s: '푸른 등대', box: '만화', h: 196, hair: [222, 30, 22], c: 96, long: false },
+  { n: '노엘', o: 'ノエル', s: '철의 왕관', box: '게임', h: 28, hair: [220, 8, 88], c: 211 },
+  { n: '미오', o: '澪', s: '푸른 등대', box: '만화', h: 168, hair: [260, 22, 26], c: 54 },
+  { n: '리안', o: '', s: '오리지널', box: '오리지널', h: 268, hair: [330, 40, 68], c: 37, long: false },
+  { n: '카논', o: '花音', s: '여름 정거장', box: '만화', h: 140, hair: [20, 40, 40], c: 72 },
+  { n: '시온', o: '紫苑', s: '기계 도시', box: '게임', h: 250, hair: [275, 30, 40], c: 159 },
+  { n: '유키', o: '雪', s: '얼음 성채', box: '게임', h: 200, hair: [205, 25, 84], c: 88 },
+  { n: '루나', o: 'Luna', s: '달빛 서커스', box: '게임', h: 300, hair: [48, 60, 62], c: 64 },
+  { n: '에리', o: '', s: '오리지널', box: '오리지널', h: 18, hair: [0, 0, 18], c: 23 },
+  { n: '츠바키', o: '椿', s: '붉은 숲', box: '만화', h: 4, hair: [350, 35, 22], c: 41 },
+  { n: '코하쿠', o: '琥珀', s: '모래의 왕국', box: '게임', h: 40, hair: [30, 55, 45], c: 117, long: false },
+  { n: '나기', o: '凪', s: '고요한 섬', box: '만화', h: 186, hair: [190, 20, 30], c: 29 },
+  { n: '이브', o: 'Eve', s: '은하 우편', box: '기타', h: 232, hair: [55, 30, 80], c: 18 },
+  { n: '사쿠라', o: '桜', s: '시계탑 미궁', box: '게임', h: 330, hair: [340, 45, 78], c: 76 },
+  { n: '레나', o: 'Rena', s: '오리지널', box: '오리지널', h: 120, hair: [30, 20, 25], c: 31 },
+  { n: '아오이', o: '葵', s: '바람의 노래', box: '게임', h: 222, hair: [215, 45, 35], c: 102, long: false },
+  { n: '모모', o: '桃', s: '기타', box: '기타', h: 350, hair: [10, 50, 70], c: 12 },
+  { n: '키리에', o: 'Kyrie', s: '마지막 기사', box: '게임', h: 260, hair: [0, 0, 92], c: 66 },
+  { n: '하나', o: '花', s: '푸른 등대', box: '만화', h: 100, hair: [25, 30, 30], c: 22 },
+  { n: '진', o: '', s: '오리지널', box: '오리지널', h: 210, hair: [0, 0, 12], c: 19, long: false },
+  { n: '세츠나', o: '刹那', s: '철의 왕관', box: '게임', h: 290, hair: [250, 20, 20], c: 47 },
+  { n: '리리', o: 'Lili', s: '달빛 서커스', box: '게임', h: 48, hair: [300, 30, 75], c: 33 },
+];
+const BOX = [['전체', 24], ['게임', 13], ['만화', 7], ['오리지널', 4], ['기타', 2]];
+const WORKS = [
+  { t: '별의 항해자', k: 'game', h: 215, y: '2023 · 게임' },
+  { t: '별의 항해자 코믹스', k: 'manga', h: 30, y: '만화 · 4권' },
+];
+const ASSET_AR = [0.71, 1.42, 0.75, 0.56, 1, 0.8, 1.33, 0.66, 0.75, 1.5, 0.7, 0.9, 0.6, 1.25, 0.75, 0.68, 1.1, 0.8, 0.56, 1.4, 0.72, 0.9, 0.75, 1.2, 0.66];
+
+/* ---------- builders ---------- */
+function segmented(cells, active, cls = '') {
+  return `<div class="ui-segmented ${cls}"><span class="ui-segmented__thumb"></span>${cells.map((c, i) => {
+    const [label, count] = Array.isArray(c) ? c : [c];
+    return `<button type="button" class="ui-segmented__cell" ${i === active ? 'data-on' : ''}>${label}${count != null ? `<span class="ui-segmented__count">${count}</span>` : ''}</button>`;
+  }).join('')}</div>`;
+}
+const label = (title, count = '', actions = '') => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span>${count ? `<span class="ui-section-label__count">${count}</span>` : ''}<span class="ui-section-label__rule" aria-hidden="true"></span>${actions ? `<span class="ui-section-label__actions">${actions}</span>` : ''}</div>`;
+const rail = () => `<nav class="rail">${['home', 'photo', 'stack', 'book', 'doc'].map((n, i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}</span>`).join('')}<span class="push">${ic('search')}</span><span>${ic('dots')}</span></nav>`;
+const win = `<span class="status-chip">동기화됨</span><span class="winctl"><span>—</span><span>☐</span><span>✕</span></span>`;
+function pcShell(top, body) { return `<div class="pc">${rail()}<div class="main">${top}${body}</div></div>`; }
+function topbar(title, right = '', back = true) {
+  return `<div class="topbar">${back ? `<button class="ibtn" aria-label="돌아가기">${ic('left')}</button>` : ''}<span class="ttl">${title}</span><span class="grow"></span>${right}${win}</div>`;
+}
+function sectionBar(opts = {}) {
+  return `<div class="ui-section-bar">${segmented(BOX, 0)}<div class="ui-section-bar__trailing">
+    <button class="qbtn">${ic('spark')}쇼케이스<span class="cnt">18</span></button>
+    <button class="qbtn" aria-pressed="true">${icSolid('userSolid')}캐릭터<span class="cnt">24</span></button>
+    <button class="qbtn">${ic('cal')}발매 캘린더<span class="cnt">3</span></button>
+    <span class="qdiv"></span>
+    <button class="qbtn ${opts.addOpen ? 'is-hover' : ''}" aria-expanded="${opts.addOpen ? 'true' : 'false'}">${ic('plus')}추가</button>
+    <button class="qbtn">${ic('adjust')}보기</button></div></div>`;
+}
+function card(c, i, o = {}) {
+  return `<div class="charcard ${o.square ? 'charcard--square' : ''} ${o.hover ? 'is-hover' : ''} ${o.slot ? 'is-carried-slot' : ''}" style="--i:${i}"><div class="charcard__img">${art(c, o.square ? { s: 1.15, dy: -4 } : {})}<span class="count">${c.c}장</span></div><strong>${c.n}</strong><small>${c.s}</small></div>`;
+}
+function grid(list, o = {}) { return `<div class="chargrid">${list.map((c, i) => card(c, i, { square: o.square, hover: o.hover === i, slot: o.slot === i })).join('')}</div>`; }
+function menu(items, style) {
+  return `<div class="float menu" style="${style}">${items.map(it => it === '-' ? '<div class="menu__sep"></div>' : `<div class="menu__item ${it[2] ? 'is-hover' : ''}">${ic(it[0])}${it[1]}${it[3] ? `<span class="hint">${it[3]}</span>` : ''}</div>`).join('')}</div>`;
+}
+const CARD_MENU = [['photo', '대표 이미지 바꾸기'], ['folder', '에셋 폴더 열기'], '-', ['up', '앞으로'], ['dn', '뒤로'], ['toTop', '맨 앞으로'], ['toEnd', '맨 뒤로'], '-', ['minus', '캐릭터 목록에서 빼기']];
+function works(list, extraText = true) {
+  return `<div class="works">${list.map(w => `<div class="work"><div class="work__obj--${w.k}"><div class="work__cover">${coverArt(w)}<b>${w.t}</b></div></div><strong>${w.t}</strong><small>${w.y}</small></div>`).join('')}${extraText ? `<div class="work work--text"><strong>별의 항해자: 극장판</strong></div>` : ''}</div>`;
+}
+function masonry(c, n, cols, o = {}) {
+  let out = '';
+  for (let i = 0; i < n; i++) {
+    const ar = ASSET_AR[i % ASSET_AR.length];
+    const v = { s: [1, 1.3, .8, 1.6, .6][i % 5], dx: [0, -10, 8, 4, -6][i % 5], dy: [0, -8, 14, -18, 34][i % 5], scene: i % 4 === 3, bgL: 48 + (i * 7) % 22 };
+    const cc = { ...c, h: (c.h + (i * 23) % 60 - 20 + 360) % 360 };
+    const vid = i === 4 ? '<span class="badge badge--scrim">▶ 0:42</span>' : '';
+    const cls = [o.cover === i ? 'is-cover' : '', o.sel === i ? 'is-sel' : ''].join(' ');
+    out += `<div class="tile ${cls}" style="aspect-ratio:${ar}">${art(cc, v)}${vid}${o.sel === i ? `<span class="chk">${ic('check')}</span>` : ''}</div>`;
+  }
+  return `<div class="masonry" style="--cols:${cols}">${out}</div>`;
+}
+function facts(rows) {
+  return `<dl class="facts">${rows.map(([k, v, cls]) => `<div><dt>${k}</dt><dd class="${cls || ''}">${v}</dd></div>`).join('')}</dl>`;
+}
+const SERA_FACTS = [['생일', '3월 14일<span class="dday">D-6</span>'], ['키', '158cm'], ['성우', '카토 미유'], ['소속', '성광 기사단'], ['메모', '2주년 예복 차림이 제일 좋다.', 'memo']];
+function prow(c, state) {
+  const on = state === 'on' || state === 'in';
+  return `<div class="prow ${state === 'in' ? 'is-in' : ''} ${state === 'hover' ? 'is-hover' : ''}"><span class="cbx ${on ? 'on' : ''} ${state === 'in' ? 'dis' : ''}"></span><span class="prow__img">${art(c, { s: 1.5, dy: -16 })}</span><span class="prow__txt"><b>${c.n}${c.o ? ` <small style="display:inline;color:var(--color-faint);font-weight:400">${c.o}</small>` : ''}</b><small>${c.c}장</small></span>${state === 'in' ? '<span class="prow__state">추가됨</span>' : ''}</div>`;
+}
+function pickerBody(tablet) {
+  const g1 = [C[0], C[1], { n: '카이', o: 'カイ', h: 30, hair: [20, 30, 20], c: 85, long: false }, { n: '피오나', o: 'Fiona', h: 120, hair: [40, 50, 60], c: 44 }];
+  const g2 = [C[3], C[22], { n: '그레이스', o: 'Grace', h: 0, hair: [10, 20, 82], c: 26 }];
+  const g3 = [C[2], C[4], C[20], { n: '소라', o: '空', h: 200, hair: [210, 30, 30], c: 17, long: false }];
+  return `<div class="picker__head"><div class="input ${tablet ? '' : 'is-typing'}">${ic('search')}<span class="ph">${tablet ? '이름 · 작품 검색' : ''}</span>${tablet ? '' : '<span style="margin-left:-8px">|</span>'}</div><button class="ibtn" aria-label="도움말">${ic('info')}</button></div>
+  <div class="picker__scope">${segmented([['전체'], ['게임'], ['만화'], ['오리지널'], ['기타']], 0, 'ui-segmented--full')}</div>
+  <div class="picker__list">
+    <div class="picker__label">${label('게임 · 별의 항해자', '12명')}</div>
+    ${prow(g1[0], 'in')}${prow(g1[1], 'in')}${prow(g1[2], 'on')}${prow(g1[3], tablet ? '' : 'hover')}
+    <div class="picker__label">${label('게임 · 철의 왕관', '5명')}</div>
+    ${prow(g2[0], 'in')}${prow(g2[1], 'in')}${prow(g2[2], 'on')}
+    <div class="picker__label">${label('만화 · 푸른 등대', '6명')}</div>
+    ${prow(g3[0], 'in')}${prow(g3[1], 'in')}${prow(g3[2], 'in')}${prow(g3[3], '')}
+  </div>
+  <div class="picker__foot"><span class="sel">2명 선택</span><span class="grow"></span>${tablet ? '' : '<button class="btn btn--ghost">취소</button>'}<button class="btn btn--primary">${tablet ? '2명 추가' : '추가'}</button></div>`;
+}
+
+/* ---------- frames ---------- */
+const $ = (id) => document.getElementById(id);
+const pcRight = (edit) => `<button class="qbtn">${ic('pencil')}편집</button><button class="ibtn" aria-label="캐릭터 더보기">${ic('dots')}</button>`;
+
+/* P1 A */
+$('f-p1a').innerHTML = pcShell(topbar('캐릭터'), `${sectionBar()}<div class="scroll">${grid(C.slice(0, 24), { hover: 2, slot: 9 })}
+  ${menu(CARD_MENU.map((m, i) => i === 3 ? [...m, true] : m), 'left:600px;top:236px')}
+  <div class="charcard carry-ghost" style="left:1180px;top:300px"><div class="charcard__img">${art(C[9])}</div></div>
+</div>`);
+
+/* P1 B */
+$('f-p1b').innerHTML = pcShell(topbar('캐릭터'), `${sectionBar()}<div class="scroll">${grid(C.slice(0, 24), { square: true, hover: 2 })}</div>`);
+
+/* P2 A */
+const sera = C[0];
+$('f-p2a').innerHTML = pcShell(topbar('세라', pcRight()), `<div class="scroll"><div class="detail">
+  <div class="prof"><div class="prof__img">${art(sera)}<button class="prof__swap">${ic('photo')}바꾸기</button></div>
+    <div class="prof__name"><h3>세라</h3><span>セラ・アルトリア · 별의 항해자</span></div>
+    ${facts(SERA_FACTS)}
+  </div>
+  <div class="dcol">
+    <div>${label('등장 작품', '3')}<div style="height:12px"></div>${works(WORKS)}</div>
+    <div>${label('에셋', '342장', `<button class="qbtn">${ic('open')}폴더 열기</button>`)}<div style="height:12px"></div>${masonry(sera, 25, 5, { cover: 0 })}</div>
+  </div>
+</div></div>`);
+
+/* P2 B */
+$('f-p2b').innerHTML = pcShell(topbar('세라', pcRight()), `<div class="scroll">
+  <div class="hero"><div class="hero__bg">${art(sera, { s: 1.1 })}</div>
+    <div class="hero__row"><div class="hero__card">${art(sera)}</div>
+      <div class="hero__text"><h3>세라<span>セラ・アルトリア · 별의 항해자</span></h3>
+        <dl class="hfacts"><div><dt>생일</dt><dd>3월 14일<span class="dday">D-6</span></dd></div><div><dt>키</dt><dd>158cm</dd></div><div><dt>성우</dt><dd>카토 미유</dd></div><div><dt>소속</dt><dd>성광 기사단</dd></div></dl>
+        <p class="hero__memo">2주년 예복 차림이 제일 좋다.</p></div></div></div>
+  <div class="bbody">
+    <div>${label('등장 작품', '3')}<div style="height:12px"></div>${works(WORKS)}</div>
+    <div>${label('에셋', '342장', `<button class="qbtn">${ic('open')}폴더 열기</button>`)}<div style="height:12px"></div>${masonry(sera, 28, 7, { cover: 0 })}</div>
+  </div>
+</div>`);
+
+/* P2+ edit (profile column only) */
+$('f-edit').innerHTML = `<div style="padding:24px 24px 32px;display:flex;flex-direction:column;gap:16px">
+  <div class="prof__img" style="width:180px">${art(sera)}</div>
+  <div class="edit">
+    <div class="two"><label class="field"><span>이름</span><div class="input">세라</div></label><label class="field"><span>원래 이름</span><div class="input is-typing">セラ・アルトリア|</div></label></div>
+    <div class="two"><label class="field"><span>생일</span><div class="two" style="gap:8px"><div class="input">3<span class="unit">월</span></div><div class="input">14<span class="unit">일</span></div></div></label><label class="field"><span>키</span><div class="input">158<span class="unit">cm</span></div></label></div>
+    <label class="field"><span>성우</span><div class="input">카토 미유</div></label>
+    <label class="field"><span>소속</span><div class="input"><span class="ph">소속</span></div></label>
+    <label class="field"><span>메모</span><textarea>2주년 예복 차림이 제일 좋다.</textarea></label>
+    <div class="field"><span>등장 작품</span><div class="chipset">
+      <span class="wchip"><i style="background:hsl(215 45% 40%)"></i>별의 항해자<span class="x">${ic('x')}</span></span>
+      <span class="wchip"><i style="background:hsl(30 45% 40%)"></i>별의 항해자 코믹스<span class="x">${ic('x')}</span></span>
+      <span class="wchip"><i style="background:var(--color-border)"></i>별의 항해자: 극장판<span class="x">${ic('x')}</span></span>
+      <button class="qbtn">${ic('link')}작품 연결</button></div></div>
+    <div class="edit__foot"><button class="btn btn--ghost">취소</button><button class="btn btn--primary">완료</button></div>
+  </div></div>`;
+
+/* P2+ sparse profile */
+const mio = C[4];
+$('f-empty').innerHTML = `<div style="padding:24px 24px 32px;display:flex;flex-direction:column;gap:16px">
+  <div class="prof__img" style="width:180px">${art(mio)}</div>
+  <div class="prof__name"><h3>미오</h3><span>푸른 등대</span></div>
+  <button class="qbtn add-info" style="margin-left:-8px">${ic('plus')}정보 추가</button>
+  <div style="margin-top:16px">${label('에셋', '54장', `<button class="qbtn">${ic('open')}폴더 열기</button>`)}<div style="height:12px"></div>${masonry(mio, 9, 3)}</div>
+</div>`;
+
+/* P2+ swap dialog over P2 A */
+$('f-swap').innerHTML = pcShell(topbar('세라', pcRight()), `<div class="scroll"><div class="detail">
+  <div class="prof"><div class="prof__img">${art(sera)}</div><div class="prof__name"><h3>세라</h3><span>セラ・アルトリア · 별의 항해자</span></div>${facts(SERA_FACTS.slice(0, 3))}</div>
+  <div class="dcol"><div>${label('등장 작품', '3')}<div style="height:12px"></div>${works(WORKS)}</div></div></div>
+  <div class="scrim"></div>
+  <div class="float dlg" style="left:50%;top:40px;width:820px;height:620px;transform:translateX(-50%);background-color:var(--color-sidebar)">
+    <div class="dlg__head"><h3>대표 이미지</h3><span style="color:var(--color-faint);font-size:12px">세라 · 342장</span><span class="grow"></span><button class="ibtn" aria-label="닫기">${ic('x')}</button></div>
+    <div class="dlg__body"><div class="dlg__grid">${masonry(sera, 22, 4, { sel: 5 })}</div>
+      <div class="dlg__side">${label('카드 미리보기')}<div class="prev">${art({ ...sera, h: (sera.h + 25) % 360 }, { s: 1.6, dx: 4, dy: 14 })}<span class="grab">${ic('move')}</span></div></div></div>
+    <div class="dlg__foot"><button class="btn btn--ghost">취소</button><button class="btn btn--primary">바꾸기</button></div>
+  </div>
+</div>`);
+
+/* P3 picker over P1 A */
+$('f-p3').innerHTML = pcShell(topbar('캐릭터'), `${sectionBar({ addOpen: true })}<div class="scroll">${grid(C.slice(0, 24))}
+  <div class="float picker" style="right:72px;top:4px">${pickerBody(false)}</div>
+  <div class="float help-pop" style="right:484px;top:16px">${label('캐릭터 추가')}<div style="height:8px"></div>에셋에 캐릭터 폴더가 있는 캐릭터만 보입니다. 에셋이 없는 캐릭터는 나중에 추가할 수 있게 됩니다.</div>
+</div>`);
+
+/* ---------- tablet ---------- */
+const tabTop = (title) => `<div class="tab-top"><span class="ttl">${title}</span><span class="grow" style="flex:1"></span><button class="ibtn">${ic('search')}</button><button class="ibtn">${ic('dots')}</button></div>`;
+const tabNav = `<nav class="tab-nav">${[['home', '홈'], ['photo', '에셋'], ['stack', '컬렉션'], ['book', '망가'], ['doc', '메모']].map(([n, t], i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}${t}</span>`).join('')}</nav>`;
+const tabUnder = `<div class="tab">${tabTop('컬렉션')}<div class="tab-body"></div>${tabNav}</div><div class="tab-dim"></div>`;
+function tabGridOverlay() {
+  return `<div class="ov"><div class="ov__head"><div class="ov__grab"></div><div class="ov__title"><h2>캐릭터</h2><span>24</span><span class="grow"></span><button class="ibtn" aria-label="캐릭터 추가">${ic('plus')}</button><button class="ibtn" aria-label="닫기">${ic('x')}</button></div></div>
+    <div class="ov__body"><div class="ov__filter">${segmented(BOX, 0, 'ui-segmented--full')}</div>${grid(C.slice(0, 20))}</div></div>`;
+}
+$('f-t1').innerHTML = tabUnder + tabGridOverlay();
+$('f-t1b').innerHTML = tabUnder + tabGridOverlay() + `<div class="press" style="left:510px;top:300px"></div><div class="tab-dim" style="z-index:10"></div>
+  <div class="sheet"><div class="sheet__grab"></div>
+    <div class="sheet__subject"><span class="prow__img">${art(C[2], { s: 1.5, dy: -16 })}</span><span class="prow__txt"><b>하루카</b><small>푸른 등대 · 96장</small></span></div>
+    ${CARD_MENU.map(m => m === '-' ? '<div class="sheet__sep"></div>' : `<div class="sheet__item">${ic(m[0])}${m[1]}</div>`).join('')}
+    <div style="height:16px"></div></div>`;
+
+function tabDetail(kind) {
+  const head = `<div class="ov__head"><div class="ov__grab"></div><div class="ov__title has-back"><button class="ibtn" aria-label="뒤로">${ic('chevL')}</button><h2>세라</h2><span class="grow"></span><button class="ibtn" aria-label="캐릭터 더보기">${ic('dots')}</button></div></div>`;
+  let body;
+  if (kind === 'a') {
+    body = `<div class="tdetail"><div class="ttop"><div class="prof__img">${art(sera)}</div>
+      <div class="prof"><div class="prof__name"><h3>세라</h3><span>セラ・アルトリア · 별의 항해자</span></div>${facts(SERA_FACTS)}</div></div>
+      <div>${label('등장 작품', '3')}<div style="height:12px"></div><div class="shelfrow">${works(WORKS)}</div></div>
+      <div>${label('에셋', '342장')}<div style="height:12px"></div>${masonry(sera, 12, 3)}</div></div>`;
+  } else {
+    body = `<div class="hero"><div class="hero__bg">${art(sera, { s: 1.1 })}</div>
+      <div class="hero__row"><div class="hero__card">${art(sera)}</div>
+        <div class="hero__text"><h3>세라</h3><span style="color:var(--color-muted);font-size:var(--type-meta);margin-top:-8px">セラ・アルトリア · 별의 항해자</span></div></div></div>
+      <div class="bbody"><dl class="hfacts"><div><dt>생일</dt><dd>3월 14일<span class="dday">D-6</span></dd></div><div><dt>키</dt><dd>158cm</dd></div><div><dt>성우</dt><dd>카토 미유</dd></div><div><dt>소속</dt><dd>성광 기사단</dd></div></dl>
+        <p class="hero__memo" style="margin-top:-8px">2주년 예복 차림이 제일 좋다.</p>
+        <div>${label('등장 작품', '3')}<div style="height:12px"></div><div class="shelfrow">${works(WORKS)}</div></div>
+        <div>${label('에셋', '342장')}<div style="height:12px"></div>${masonry(sera, 9, 3)}</div></div>`;
+  }
+  return tabUnder + tabGridOverlay() + `<div class="ov ov--stack">${head}<div class="ov__body">${body}</div></div>`;
+}
+$('f-t2a').innerHTML = tabDetail('a');
+$('f-t2b').innerHTML = tabDetail('b');
+$('f-t3').innerHTML = tabUnder + tabGridOverlay() + `<div class="tab-dim" style="z-index:10"></div>
+  <div class="sheet" style="top:140px"><div class="sheet__grab"></div><div class="sheet__title"><h3>캐릭터 추가</h3></div>${pickerBody(true).replace('<button class="ibtn" aria-label="도움말">', '<button class="ibtn" aria-label="도움말">')}</div>`;
+
+/* ---------- segmented thumbs, fit-to-width, theme ---------- */
+function placeThumbs() {
+  document.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-on]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!th) return;
+    if (!cell) { th.style.display = 'none'; return; }
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+function fit() {
+  document.querySelectorAll('.fit').forEach(f => {
+    const frame = f.firstElementChild, w = +f.dataset.w, pref = +(f.dataset.scale || 1);
+    const shots = f.closest('.shots'); const avail = shots ? shots.clientWidth : f.parentElement.clientWidth;
+    frame.style.zoom = Math.min(pref, avail / w);
+  });
+}
+placeThumbs(); fit();
+addEventListener('resize', fit);
+document.fonts && document.fonts.ready.then(() => { placeThumbs(); fit(); });
+document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('click', () => {
+  const v = b.dataset.themeSet;
+  if (v === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', v);
+  document.querySelectorAll('[data-theme-set]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+</script>
+</body>
+</html>
