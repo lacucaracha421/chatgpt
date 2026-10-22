@@ -3,7 +3,7 @@ import {characterNodeName,isExtrasNode,type CharacterIndex,type CharacterNode} f
 import {createKoreanMatcher} from '../src/shared/koreanSearch';
 export type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>;/** A 기타 bucket: listed last among its siblings. */characterExtras?:true};
 export const LIBRARY_ROOT:View={tab:'library',root:true,title:'에셋'};
-export const ALL_ASSETS:View={tab:'library',title:'모든 자산'};
+export const ALL_ASSETS:View={tab:'library',title:'모든 에셋'};
 export function mergeLibraryEntries(items:Classification[],characters?:CharacterIndex):Entry[]{
     const nodes=characters?.ready?characters.nodes:[];
     const series=new Map(nodes.filter(n=>n.kind==='series').map(n=>[n.sourceId,n]));

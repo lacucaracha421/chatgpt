@@ -20,21 +20,6 @@ textarea.ui-text-input.home-qmemo__text:focus { box-shadow:none; }
 /* A place kept for a tool or card that is not built yet: one quiet line on the surface face. */
 .home-slot__empty { flex:1; min-height:120px; display:grid; place-items:center; background:var(--color-surface); border-radius:var(--radius-control); }
 .home-slot__empty .ui-empty-state--inline { margin:0; padding:0; }
-.home-daily-card { flex:none; }
-/* Compact (user 2026-10-18): only the card, its next-pack line and the album link, in a column as wide as the card beside 전송. */
-.home-daily-card__body { flex:none; display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); }
-.home-daily-card .daily-card-result { align-items:flex-start; }
-.home-daily-card .daily-card-result small, .home-daily-card .daily-card-stage__copy small { white-space:nowrap; }
-.home-daily-card .daily-card-result__art { width:96px; }
-/* An unopened pack is taller than a card: a little narrower, its lines close under it and 뜯기 as wide as the pack. */
-.home-daily-card .daily-card-stage__art { width:80px; }
-.home-daily-card .daily-card-stage__copy { align-self:stretch; gap:var(--space-1); }
-.home-daily-card .daily-card-stage__copy > .ui-button:first-child { align-self:stretch; margin-bottom:var(--space-1); }
-.home-daily-card .daily-card-skeleton { width:96px; height:134px; }
-.home-daily-card__loading { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); color:var(--color-muted); font-size:var(--type-meta); }
-.home-daily-card .home-link.home-daily-card__album { margin-left:calc(var(--space-1) * -1); }
-.home-daily-card__meta { display:flex; flex-direction:column; align-items:flex-start; }
-.home-daily-card__meta > small { line-height:var(--line-meta); }
 
 /* 오늘의 카드 and 전송 share the column's first row; the drop tile takes the rest of the width and the card's height. */
 .home-day-column .home-day-pair { display:grid; grid-template-columns:auto minmax(0,1fr); gap:var(--space-6); align-items:stretch; }

@@ -9,12 +9,13 @@ import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from '
 import {swapSegment,type ViewSwap} from '../src/shared/motion/viewSwap';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
-import {BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {BookOpenIcon,MagnifyingGlassIcon,FunnelIcon,Squares2X2Icon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {TopBar,TopBarSearch} from './TopBar';
 import {ArrowPathIcon} from '@heroicons/react/24/outline';
 import {syncedLabel} from './CatalogRefresh';
-import {Badge,SectionLabel,Button,EmptyState,IconButton} from './ui';
+import {Badge,SectionLabel,SegmentedControl,Button,EmptyState,IconButton} from './ui';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 import {api,errorText,native} from './transport';
 import {batteryAllowsWarm,warmEnabled,type BatteryState} from './thumbnailWarm';
 import {meteredConnection,warmConnection} from './warmNetwork';
@@ -79,7 +80,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   // The list is the first page plus the pages appended while scrolling.
   const [more,setMore]=useState<{items:CatalogItem[];nextCursor:string|null}|null>(null);
   const [moreBusy,setMoreBusy]=useState(false),[moreError,setMoreError]=useState('');
-  const [sheet,setSheet]=useState<'language'|'sort'|null>(null);
+  const [sheet,setSheet]=useState<'view'|null>(null);
   const moreRequest=useRef<AbortController|null>(null);
   const restartedFor=useRef<string|null>(null);
   const [page,setPage]=useState<CatalogPage|null>(null),[refresh,setRefresh]=useState(0);
@@ -499,8 +500,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const SORTS:Record<CatalogQuery['sort'],string>={latest:'최신순',bookmarkAdded:BOOKMARK_SORT_OPTIONS[1].label,views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
   const bookmarkScope=query.scope==='bookmarked';
   const viewControls=<div className="ui-segmented ui-segmented--full-width catalog-view-controls" role="group" aria-label="카탈로그 보기">
-    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 언어 ${LANGUAGES[query.language]}`} onClick={()=>setSheet('language')}>{LANGUAGES[query.language]}<ChevronDownIcon aria-hidden="true"/></button>
-    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${SORTS[catalogQuery.sort]}`} disabled={!!indexFilter&&!bookmarkScope} onClick={()=>setSheet('sort')}>{SORTS[catalogQuery.sort]}<ChevronDownIcon aria-hidden="true"/></button>
+    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/>보기</button>
     <button type="button" className={`ui-segmented__cell${filterCount?' is-active':''}`} aria-haspopup="dialog" aria-label={filterCount?`필터 ${filterCount}개 적용`:defaultTags?`필터, 기본 회피 태그 ${defaultTags}개`:'필터'} disabled={!active} onClick={openSettings}><FunnelIcon aria-hidden="true"/>필터{filterCount>0?<span className="catalog-view-count numeric">{filterCount}</span>:defaultTags>0&&<span className="catalog-view-default">기본</span>}</button>
   </div>;
   // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down.
@@ -567,8 +567,10 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
       {detail&&detail.tagGroups.length>0&&<section className="catalog-tags" aria-label="태그"><SectionLabel as="h3" title="태그"/><dl>{detail.tagGroups.map(group=><div key={group.namespace}><dt>{group.namespace}</dt><dd>{group.values.map(value=><button key={value} className="catalog-tag" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);search(text);}}>{group.labels?.[value]??value}</button>)}</dd></div>)}</dl><p className="hint">태그를 누르면 같은 태그로 검색합니다.</p></section>}
     </div>}
     {!privacy&&reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
-    {sheet==='language'&&<BottomSheet title="언어" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 언어">{(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.language===value} onClick={()=>{setSheet(null);if(query.language!==value)change({language:value});}}>{LANGUAGES[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
-    {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(bookmarkScope?BOOKMARK_SORT_OPTIONS.map(option=>option.value):(Object.keys(SORTS) as CatalogQuery['sort'][]).filter(value=>value!=='bookmarkAdded')).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(bookmarkScope){setBookmarkSort(value as BookmarkSort);writeBookmarkSort(value as BookmarkSort);}if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
+    {sheet==='view'&&<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content">
+      <ViewOptionsSection title="언어"><SegmentedControl<CatalogQuery['language']> label="카탈로그 언어" fullWidth options={(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=>({value,label:LANGUAGES[value]}))} value={query.language} onChange={value=>{if(query.language!==value)change({language:value});}}/></ViewOptionsSection>
+      <ViewOptionsSection title="정렬"><div role="radiogroup" aria-label="카탈로그 정렬">{(bookmarkScope?BOOKMARK_SORT_OPTIONS.map(option=>option.value):(Object.keys(SORTS) as CatalogQuery['sort'][]).filter(value=>value!=='bookmarkAdded')).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={catalogQuery.sort===value} disabled={!!indexFilter&&!bookmarkScope} onClick={()=>{if(bookmarkScope){setBookmarkSort(value as BookmarkSort);writeBookmarkSort(value as BookmarkSort);}if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></ViewOptionsSection>
+    </div></BottomSheet>}
     <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} index={<CatalogIndex index={index} filter={indexFilter} onFilter={row=>{setIndexFilter(row);setSettings(false);}}/>} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
     {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={closeDuplicates}/>}
   </section>;

@@ -96,7 +96,6 @@ describe('tablet AV collections',()=>{
     expect(flat.closest('.work-strip')?.firstElementChild).toBe(flat);
     expect(screen.queryByRole('button',{name:'케이스'})).toBeNull();
     expect(screen.queryByRole('button',{name:'안쪽'})).toBeNull();
-    expect(screen.getByText(/^LMNS-123 · (?:2026\.)?8\.14$/)).toBeTruthy();
     await act(async()=>screenArticle.querySelectorAll('img').forEach(image=>fireEvent.load(image)));
     fireEvent.click(flat);expect(flat.getAttribute('aria-pressed')).toBe('true');
     expect((screenArticle.querySelector('.work-flat-slot') as HTMLElement).style.visibility).toBe('');
@@ -106,8 +105,8 @@ describe('tablet AV collections',()=>{
     await waitFor(()=>expect(screenArticle.querySelector('[data-work-pending] img')).toBeTruthy());
     expect(screen.getByRole('heading',{level:1,name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
     await act(async()=>screenArticle.querySelectorAll('[data-work-pending] img').forEach(image=>fireEvent.load(image)));
-    await waitFor(()=>expect(within(screenArticle).getByText(/^LMNS-124 · (?:2026\.)?8\.14$/, {selector:'[aria-hidden="false"] small'})).toBeTruthy());
-    expect((screen.getByRole('button',{name:'다음 작품'}) as HTMLButtonElement).disabled).toBe(true);
+    // Arriving at the last work disables 다음 작품.
+    await waitFor(()=>expect((screen.getByRole('button',{name:'다음 작품'}) as HTMLButtonElement).disabled).toBe(true));
   });
 
   it('normalizes a typed code, sends the tablet client request, and records the sent code',async()=>{

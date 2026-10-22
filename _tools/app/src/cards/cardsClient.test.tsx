@@ -43,7 +43,7 @@ it("shows the server pack, cover, bonus and album totals; restores focus on clos
   render(<HomeDailyCard api={api} onAlbum={album} root="library" />); await settle();
   expect(screen.getByText("남은 팩 1")).toBeInTheDocument();
   expect(screen.getByText("오늘 50장 저장 · 보너스 팩")).toBeInTheDocument();
-  expect(screen.getByText("05:00에 새 팩")).toBeInTheDocument();
+  expect(screen.getByText(/^\d\d:\d\d 새 팩 증정$/)).toBeInTheDocument();
   expect(api.art).toHaveBeenCalledWith("cover1", false);
   const opener = screen.getByRole("button", { name: "오늘의 카드 팩 열기" }); opener.focus(); fireEvent.click(opener);
   expect(screen.getByRole("dialog", { name: "오늘의 카드" })).toHaveClass("ui-dialog--fullscreen");
@@ -59,7 +59,6 @@ it("shows the stored result of the newest pack without any open request", async 
   expect(screen.getByText("07:35 새 팩 증정")).toBeInTheDocument();
   expect(screen.queryByText("LR · 서버 카드 4")).toBeNull();
   expect(screen.queryByText("오늘 50장 저장 · 보너스 팩")).toBeNull();
-  expect(screen.queryByText("05:00에 새 팩")).toBeNull();
   expect(screen.queryByRole("button", { name: "결과 보기" })).toBeNull();
   expect(screen.getAllByRole("button")).toHaveLength(1);
   expect(api.open).not.toHaveBeenCalled();

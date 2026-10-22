@@ -1,13 +1,6 @@
-import type {Classification} from './types';
 import {breadcrumbPath, type BreadcrumbNode} from '../src/shared/breadcrumb';
 
 export const RECENT_FOLDERS_KEY = 'lakomics.mobile.recentFolders';
-export function folderBreadcrumb(item: Classification, items: Classification[]) {
-  return breadcrumbPath(
-    {id:item.id,name:item.name,parentId:item.parent_id},
-    items.map(folder => ({id:folder.id,name:folder.name,parentId:folder.parent_id})),
-  );
-}
 /**
  * The same breadcrumb over any parent-linked tree.
  *

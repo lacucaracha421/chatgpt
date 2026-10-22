@@ -290,7 +290,7 @@ it("hides a note's content on the board from the 더보기 menu and shows it aga
   await settle(store);
   expect(last(fake.saves())).toMatchObject({ id: "API", concealed: true });
   await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
-  await waitFor(() => expect(document.querySelector('[data-note-id="API"]')).toHaveTextContent("숨긴 메모 · 열어서 보기"));
+  await waitFor(() => expect(document.querySelector('[data-note-id="API"]')).toHaveTextContent("숨긴 메모"));
   expect(document.querySelector('[data-note-id="API"]')).not.toHaveTextContent("sk-secret-value");
   await userEvent.click(screen.getByRole("button", { name: /API/ }));
   await userEvent.click(screen.getByRole("button", { name: "메모 더보기" }));

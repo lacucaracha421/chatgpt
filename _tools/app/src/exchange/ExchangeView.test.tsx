@@ -60,7 +60,7 @@ it("lists the other devices and sends to the chosen one", async () => {
   const devices = await screen.findByRole("group", { name: "주고받을 기기" });
   expect(within(devices).getByRole("button", { name: /Galaxy Tab S11/ })).toHaveAttribute("aria-current", "page");
   await userEvent.click(within(devices).getByRole("button", { name: /Phone/ }));
-  expect(screen.getByText("Phone(으)로 보내기")).toBeInTheDocument();
+  expect(screen.getByText("Phone로 보내기")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "파일 보내기" }));
   expect(view.calls).toContainEqual(["exchange_send", { paths: ["/home/me/a.jpg", "/home/me/b.mp4"], toDevice: "d2" }]);
 });
@@ -145,9 +145,9 @@ it("shows the empty timeline and where a drop goes", async () => {
   const view = setup({ devices: [tablet] });
   expect(await screen.findByRole("heading", { name: "Galaxy Tab S11과 주고받은 파일이 없습니다" })).toBeInTheDocument();
   view.drop({ type: "enter", paths: ["/a.jpg", "/b.jpg", "/c.pdf"], position: { x: 0, y: 0 } });
-  expect(screen.getByText("놓으면 Galaxy Tab S11(으)로 보냅니다")).toBeInTheDocument();
+  expect(screen.getByText("놓으면 Galaxy Tab S11로 보냅니다")).toBeInTheDocument();
   view.drop({ type: "leave" });
-  expect(screen.queryByText("놓으면 Galaxy Tab S11(으)로 보냅니다")).toBeNull();
+  expect(screen.queryByText("놓으면 Galaxy Tab S11로 보냅니다")).toBeNull();
 });
 
 it("keeps explanations behind separate help buttons and preserves the full save path", async () => {

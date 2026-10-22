@@ -102,7 +102,7 @@ export function LibraryRoot({active=true,onDrawer,onFolderActions,entries,charac
     <div className="library-root-scroll" ref={host} onScroll={event=>{const top=event.currentTarget.scrollTop;onScroll(top);if(top>8!==scrolled)setScrolled(top>8);}} aria-label="에셋 탐색">{pull}
     {sections.inline}
     <div style={{display:segment==='folders'?undefined:'none'}}>
-      <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment!=='folders'}/>)}</span><span className="result-name"><strong>모든 자산</strong><small>최근 저장한 순서</small></span>{total!==undefined&&<span className="numeric muted">{displayCount(total)}</span>}<ChevronRightIcon/></button>
+      <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment!=='folders'}/>)}</span><span className="result-name"><strong>모든 에셋</strong></span>{total!==undefined&&<span className="numeric muted">{displayCount(total)}</span>}<ChevronRightIcon/></button>
       <section className="library-root-folders" ref={folders}><SectionLabel as="h2" className="section-label" title="분류" count={topFolders.length ? topFolders.length : undefined}/><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||!active||segment!=='folders'||searchOpen} revision={revision} subtree={subtree} onSelect={onSelect} onActions={onFolderActions}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
       {fit&&fit.hidden>0&&!scrolled&&<p className="library-end-line"><ChevronDownIcon aria-hidden="true"/>아래에 분류 {fit.hidden}개 더</p>}</section>
     </div>

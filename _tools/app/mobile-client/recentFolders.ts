@@ -47,7 +47,7 @@ export function tabletRecentCatalog(entries:Entry[]):Map<string,TabletRecentFold
 }
 
 /**
- * The remembered folder a view is in, or null for places that never count: the root, 모든 자산,
+ * The remembered folder a view is in, or null for places that never count: the root, 모든 에셋,
  * 미분류, albums, searches by description and the revisit lists. Inside the character browser the
  * place is the browser's own location (`focusedNode`), not the view that opened it.
  */

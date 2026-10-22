@@ -47,7 +47,7 @@ it('asks for a device token instead of failing silently when the shared token is
 
 it('sends to the PC through the system picker', () => {
   show(snapshot());
-  fireEvent.click(screen.getByRole('button', {name: 'DESKTOP(으)로 파일 보내기'}));
+  fireEvent.click(screen.getByRole('button', {name: 'DESKTOP로 파일 보내기'}));
   expect(mocks.native).toHaveBeenCalledWith('exchangeSend', {toDevice: PC.deviceId});
 });
 
@@ -101,7 +101,7 @@ it('shows each row state with its action', async () => {
 
 it('explains that Android versions without Downloads access can only send', () => {
   show(snapshot({receiveSupported: false}));
-  expect(screen.queryByRole('group', {name: '보기'})).toBeNull();
+  expect(screen.queryByRole('radiogroup', {name: '보기'})).toBeNull();
   expect(screen.getByText(/받기를 지원하지 않습니다/)).toBeTruthy();
   expect(screen.getByRole('button', {name: /파일 보내기/})).toBeTruthy();
 });
@@ -189,10 +189,10 @@ it('keeps each device to its own timeline and filters to received files', () => 
   expect(screen.getByText('pc.txt')).toBeTruthy();
   expect(screen.getByText('sent.txt')).toBeTruthy();
   expect(screen.queryByText('other.txt')).toBeNull();
-  fireEvent.click(screen.getByRole('button', {name: '받은 파일'}));
+  fireEvent.click(screen.getByRole('radio', {name: '받은 파일'}));
   expect(screen.queryByText('sent.txt')).toBeNull();
   expect(screen.getByText('pc.txt')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', {name: /DESKTOP와 주고받은 파일/}));
+  fireEvent.click(screen.getByRole('button', {name: '주고받을 기기: DESKTOP'}));
   fireEvent.click(screen.getByRole('radio', {name: /노트북/}));
   expect(screen.getByText('other.txt')).toBeTruthy();
   expect(screen.queryByText('pc.txt')).toBeNull();
@@ -201,7 +201,7 @@ it('keeps each device to its own timeline and filters to received files', () => 
 it('explains an empty timeline once, above the send bar', () => {
   show(snapshot());
   expect(screen.getByRole('heading', {name: 'DESKTOP와 주고받은 파일이 없습니다'})).toBeTruthy();
-  expect(screen.getByText('DESKTOP(으)로 보내기')).toBeTruthy();
+  expect(screen.getByText('DESKTOP로 보내기')).toBeTruthy();
 });
 
 

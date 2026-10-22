@@ -149,7 +149,7 @@ export function FolderDrawer({entries,currentFolderId,quickCurrent,pinnedIds,rec
       <div className="folder-drawer__scroll" ref={scroller}>
         <SectionLabel title="빠른 보기"/>
         <nav className="folder-drawer__quick" aria-label="빠른 보기">
-          {quick('all','모든 자산',PhotoIcon)}
+          {quick('all','모든 에셋',PhotoIcon)}
           {quick('albums','앨범',RectangleStackIcon)}
           {quick('artists','작가',UserIcon)}
         </nav>

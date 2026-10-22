@@ -60,3 +60,12 @@ it('closes a tall inbox sheet from the header button or a downward header swipe'
   grab.dispatchEvent(new MouseEvent('pointerup', {bubbles:true, clientX:100, clientY:100}));
   expect(close).toHaveBeenCalledTimes(2);
 });
+
+it('opens without focusing a text field (no keyboard) unless the field asks for it', () => {
+  const {unmount} = render(<BottomSheet title="10월 30일" onClose={vi.fn()}><textarea aria-label="메모"/></BottomSheet>);
+  expect(document.activeElement).not.toBe(screen.getByRole('textbox', {name: '메모'}));
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+  unmount();
+  render(<BottomSheet title="폴더 만들기" onClose={vi.fn()}><input aria-label="폴더 이름" autoFocus/></BottomSheet>);
+  expect(document.activeElement).toBe(screen.getByRole('textbox', {name: '폴더 이름'}));
+});

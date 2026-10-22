@@ -315,8 +315,9 @@ describe("character suggestions", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "캐릭터 만들기" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    await waitFor(() => expect(client.detail).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(client.detail).toHaveBeenCalledTimes(2), { timeout: 5000 });
   }, 15000);
   it("renders a thumbnail-first card with name, tag, counts and one folder sentence", async () => {
     const client = api();

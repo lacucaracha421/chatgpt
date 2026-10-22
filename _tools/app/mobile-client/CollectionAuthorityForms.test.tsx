@@ -142,7 +142,7 @@ describe('activation-gated tablet forms', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await screen.findByRole('button', {name: '더보기'});
     expect(screen.getByRole('heading', {name: '새 영화'})).toBeTruthy();
-    expect(screen.getAllByText('컬렉션 › 영화 ›').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('컬렉션 › 영화').length).toBeGreaterThan(0);
     expect(readCommands()[0].state).toBe('pending');
     expect(mocks.api.mock.calls.some(([path]) => path === `/v1/collections/${readCommands()[0].command.workId}`)).toBe(false);
     act(() => { expect(backRef.current?.()).toBe(true); });

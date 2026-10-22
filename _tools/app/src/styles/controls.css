@@ -858,6 +858,10 @@ select.ui-text-input {
 .ui-view-options { width: min(19rem, calc(100vw - var(--space-6))); max-height: var(--radix-dropdown-menu-content-available-height, none); overflow-y: auto; }
 .ui-view-options__content { display: grid; gap: var(--space-6); padding: var(--space-4); }
 .ui-view-options__section { display: grid; gap: var(--space-2); }
+/* Slider (shared Slider): native range drawn in the accent (ivory thumb and filled track) on PC and
+   tablet; the control-height row keeps a 44px touch target on the tablet. */
+.ui-slider { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); }
+.ui-slider input { width: 112px; min-height: var(--control-height); margin: 0; accent-color: var(--color-accent); }
 .ui-per-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); }
 .ui-per-row .ui-slider { min-width: 0; }
 .ui-per-row .ui-slider > span { flex: none; white-space: nowrap; }

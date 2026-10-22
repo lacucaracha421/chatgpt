@@ -22,7 +22,7 @@ function surface(notes: Note[]) {
 it("shows only the title of a hidden note on its card", async () => {
   surface([base("api", { title: "API", body: "sk-secret-value", concealed: true })]);
   const card = await screen.findByRole("button", { name: /API/ });
-  expect(card).toHaveTextContent("숨긴 메모 · 열어서 보기");
+  expect(card).toHaveTextContent("숨긴 메모");
   expect(card).not.toHaveTextContent("sk-secret-value");
 });
 

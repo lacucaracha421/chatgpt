@@ -14,8 +14,8 @@
 .tablet-more .more-panel__activity { width:var(--space-1); height:var(--space-1); background:var(--color-accent); }
 /* Landscape: the sheet stays a readable column so counts sit near their names. */
 [role="dialog"]:has(>.library-sheet>.tablet-more) { width:min(560px,100%); }
-/* 닫기 lines its text up with the row labels (row padding + 16px icon + gap). */
-.library-sheet>.tablet-more+.ui-button { width:100%; justify-content:flex-start; padding-left:calc(var(--space-3) + 16px + var(--space-3)); }
+/* 닫기 lines its text up with the row labels (row padding + 20px icon + gap). */
+.library-sheet>.tablet-more+.ui-button { width:100%; justify-content:flex-start; padding-left:calc(var(--space-3) + var(--icon-md) + var(--space-3)); }
 /* The long-press action sheet's first row names the target (thumb, name, one meta line) in place of the text title. */
 .ui-dialog__title.action-sheet__target { display:flex; align-items:center; gap:var(--space-3); min-height:var(--row-height-2,64px); margin:0 0 var(--space-2); padding:0 var(--space-3) var(--space-3); border-bottom:1px solid var(--color-border); font-size:var(--type-body); font-weight:400; }
 .action-sheet__thumb { position:relative; flex:none; width:48px; height:48px; overflow:hidden; border-radius:var(--radius-mark,2px); background:var(--color-surface); }

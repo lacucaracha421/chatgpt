@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { batchProgress, buildTimeline, dayLabel, extensionLabel, withParticle } from "./timeline";
+import { batchProgress, buildTimeline, dayLabel, extensionLabel, withParticle, withTowardParticle } from "./timeline";
 
 it("groups a batch into one block and orders blocks oldest first", () => {
   const entry = (transferId: string, batchId: string, mine: boolean, at: string) => ({ row: transferId, transferId, batchId, mine, at });
@@ -22,6 +22,10 @@ it("labels days, particles, extensions and combined progress", () => {
   expect(withParticle("DESKTOP", "과", "와")).toBe("DESKTOP와");
   expect(withParticle("작업실 PC", "과", "와")).toBe("작업실 PC와");
   expect(withParticle("태블릿", "과", "와")).toBe("태블릿과");
+  expect(withTowardParticle("LAKUPC")).toBe("LAKUPC로");
+  expect(withTowardParticle("Galaxy Tab S11")).toBe("Galaxy Tab S11로");
+  expect(withTowardParticle("태블릿")).toBe("태블릿으로");
+  expect(withTowardParticle("작업실")).toBe("작업실로");
   expect(extensionLabel("표지.psd")).toBe("PSD");
   expect(batchProgress([{ size: 100, done: 100, finished: true }, { size: 100, done: 50, finished: false }]))
     .toEqual({ size: 200, done: 150, finished: 1, total: 2, percent: 75 });

@@ -14,8 +14,8 @@
 .home-attention-mobile .home-month__totals dd { font-size:var(--type-meta); }
 /* Reserve room for all three 22px chips and the spending footer, including on busy days. */
 .home-attention-mobile .home-cal--month { --cal-chip-height:22px; --cal-today-size:30px; --cal-cell-height:134px; }
-.home-attention-mobile .home-cal--month .home-cal__day { padding:var(--space-1) 3px; }
-.home-attention-mobile .home-cal__chip { padding:0 3px; }
+.home-attention-mobile .home-cal--month .home-cal__day { padding:var(--space-1); }
+.home-attention-mobile .home-cal__chip { padding:0 var(--space-1); }
 .home-attention-mobile .home-cal__chip--pay svg { display:none; }
 
 /* The day sheet: the PC day panel's sections in a column (it wears .home-day for the shared row rules), rows and inputs at 44-48 px. */

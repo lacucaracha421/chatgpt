@@ -35,7 +35,7 @@ beforeEach(()=>{
     return{items:[{id:'a1',kind:'image',width:100,height:100}],has_more:false,next_cursor:null,filterVersion:1};
   });
 });
-afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();});
 
 const place=(name:string)=>screen.findByRole('heading',{level:1,name:new RegExp(`^${name}`)});
 const press=(label:string)=>fireEvent.click(screen.getByRole('button',{name:label}));
@@ -80,4 +80,19 @@ it('shows the folder pinned from its long-press sheet in the drawer, and unpins 
   fireEvent.click(within(await screen.findByRole('dialog',{name:'혼자'})).getByRole('button',{name:'고정 해제'}));
   await waitFor(()=>expect(pins).toEqual([]));
   await waitFor(()=>expect(within(drawer).queryByRole('group',{name:'고정한 폴더'})).toBeNull());
+});
+
+it('closes only the open folder drawer on one Back, whichever listener sees the press first',async()=>{
+  // A WebView that runs listeners at `window` in registration order lets the shell see Back before the drawer's capturing listener.
+  const add=window.addEventListener.bind(window);
+  vi.spyOn(window,'addEventListener').mockImplementation(((type:string,listener:EventListenerOrEventListenerObject,options?:boolean|AddEventListenerOptions)=>add(type,listener,type==='lakomics-back'?false:options)) as typeof window.addEventListener);
+  render(<App/>);
+  fireEvent.click(await screen.findByRole('button',{name:/^혼자/}));
+  await place('혼자');
+  press('폴더 서랍');
+  await screen.findByRole('dialog',{name:'폴더 서랍'});
+  back();
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'폴더 서랍'})).toBeNull());
+  await place('혼자');
+  expect(mocks.native).not.toHaveBeenCalledWith('finish');
 });

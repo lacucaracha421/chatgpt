@@ -10,7 +10,8 @@ export function favoriteFolders(folders:Classification[]):ClassificationEntry[] 
   return folders.map(folder=>({id:folder.id,name:folder.name,parentId:folder.parent_id,
     kind:folder.kind??'tag',isContainer:folder.kind==='root',iconKey:folder.icon_key??null,colorKey:folder.color_key??null}));
 }
-export function favoriteTargets(index:CharacterIndex,entries?:FavoriteEntry[]):CharacterTarget[] {
+/** Character targets from the tablet index; `entries` narrows them to the favourites through the PC rule. */
+export function indexFavoriteTargets(index:CharacterIndex,entries?:FavoriteEntry[]):CharacterTarget[] {
   const targets=index.nodes.filter(node=>index.ready&&node.kind==='character'&&node.role!=='extras').map(node=>({
     id:node.sourceId,seriesClassificationId:node.seriesId,linkedClassificationId:null,
     displayName:node.name,description:node.description,thumbnailAssetId:node.thumbnailAssetId,

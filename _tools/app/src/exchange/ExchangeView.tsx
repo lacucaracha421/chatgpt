@@ -13,7 +13,7 @@ import { formatBytes } from "../assets/assetMetadata";
 import { commandErrorMessage } from "../library/errorMessage";
 import { subscribeToTauriDrops, type DropSubscriber } from "../ingestion/useFileDrop";
 import { exchangeStore, useExchangeSnapshot, type ExchangeDevice, type ExchangeIncoming, type ExchangeOutgoing, type ExchangeReceived, type ExchangeSnapshot, type ExchangeStore } from "./exchangeStore";
-import { batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type BatchPart, type TimelineBlock, type TimelineEntry } from "./timeline";
+import { batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, withTowardParticle, type BatchPart, type TimelineBlock, type TimelineEntry } from "./timeline";
 import { blockRoute } from "./route";
 import { RouteWord } from "./RouteWord";
 import { DirectReceiveBlock } from "./DirectReceive";
@@ -387,12 +387,12 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
           </EmptyState>}
     </div>
     {chosen && <footer className="exchange-composer">
-      <div className="exchange-composer-to"><b>{peer}(으)로 보내기</b><AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="보내기 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p></AnchoredPanel></div>
+      <div className="exchange-composer-to"><b>{withTowardParticle(peer)} 보내기</b><AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="보내기 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p></AnchoredPanel></div>
       <Button onClick={() => void choose(pickFolder)}><FolderIcon aria-hidden="true" />폴더 보내기</Button>
       <Button variant="primary" onClick={() => void choose(pickFiles)}><PaperClipIcon aria-hidden="true" />파일 보내기</Button>
     </footer>}
     {dragging !== null && <div className="exchange-drop-veil" aria-hidden="true">
-      <strong>{chosen ? `놓으면 ${peer}(으)로 보냅니다` : "받을 기기가 없어 보낼 수 없습니다"}</strong>
+      <strong>{chosen ? `놓으면 ${withTowardParticle(peer)} 보냅니다` : "받을 기기가 없어 보낼 수 없습니다"}</strong>
       {dragging > 0 && <span>항목 {displayCount(dragging, "개")} · 폴더는 zip 하나로</span>}
     </div>}
   </div>;

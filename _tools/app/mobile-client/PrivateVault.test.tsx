@@ -151,7 +151,7 @@ it('filters by kind in memory, swipes through the filtered list, and resets the 
   const writes=vi.spyOn(Storage.prototype,'setItem');
   await unlocked();
   fireEvent.click(screen.getByRole('button',{name:'종류'}));
-  expect(screen.getAllByRole('radio').map(option=>option.textContent)).toEqual(['전체','이미지','영상']);
+  expect(screen.getAllByRole('radio').map(option=>option.getAttribute('aria-label'))).toEqual(['전체','이미지','영상']);
   fireEvent.click(screen.getByRole('radio',{name:'영상'}));
   expect(screen.queryByRole('button',{name:'사용자 지정 제목 · 이미지'})).toBeNull();
   expect(screen.getByRole('button',{name:'영상 제목 · 영상'})).toBeTruthy();

@@ -433,7 +433,7 @@
   min-height: 28px;
   padding: 0 var(--space-1) 0 var(--space-2);
   color: var(--color-text);
-  font-size: var(--text-sm);
+  font-size: var(--type-meta);
   background: var(--color-surface-raised);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);

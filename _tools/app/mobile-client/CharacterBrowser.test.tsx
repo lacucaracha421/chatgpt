@@ -382,7 +382,8 @@ it('hosts character view filters and sorting in the shared view sheet without to
   fireEvent.click(within(screen.getByRole('radiogroup',{name:'정렬'})).getByRole('radio',{name:'오래된순'}));
   await waitFor(()=>{const path=String(mocks.api.mock.calls.at(-1)?.[0]);expect(new URL(path,'https://test').searchParams.getAll('sort')).toEqual(['oldest']);});
   fireEvent.click(screen.getByRole('radio',{name:'이미지'}));
-  expect(within(screen.getByRole('radiogroup',{name:'길이'})).getAllByRole('radio').every(button=>(button as HTMLButtonElement).disabled)).toBe(true);
+  // Length only narrows videos, so its row leaves while only images are shown.
+  await waitFor(()=>expect(screen.queryByRole('radiogroup',{name:'길이'})).toBeNull());
  }finally{host.remove();}
 });
 it('opens the image range explanation from the info button',async()=>{

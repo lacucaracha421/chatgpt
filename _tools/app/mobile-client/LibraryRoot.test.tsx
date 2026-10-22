@@ -42,7 +42,7 @@ it('shows root cards and All without recent folders, then searches every charact
  expect(document.querySelector('.library-recents')).toBeNull();expect(screen.queryByText('최근 연 폴더')).toBeNull();
  // Search is a magnifier in the shared bar until opened.
  expect(screen.queryByRole('searchbox')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:/모든 자산/}));expect(props.onSelect).toHaveBeenLastCalledWith({tab:'library',title:'모든 자산'});
+ fireEvent.click(screen.getByRole('button',{name:/모든 에셋/}));expect(props.onSelect).toHaveBeenLastCalledWith({tab:'library',title:'모든 에셋'});
  openScreenSearch();
  const search=screen.getByRole('searchbox',{name:'에셋 찾기'});
  fireEvent.change(search,{target:{value:'학생'}});

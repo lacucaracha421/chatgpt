@@ -270,7 +270,8 @@ it.each(['game', 'movie', 'av'] as const)('ignores horizontal stage swipes on %s
   expect(screen.getByRole('heading', {name: '작품'})).toBeTruthy();
   const identity = container.querySelector('.tablet-work__identity')!;
   expect(identity.textContent).not.toMatch(/37\s*\/\s*181/);
-  expect(identity.querySelector('small')?.textContent).toContain('9.1');
+  // Device and date live in the record and 작품 정보 rows below, not again under the title.
+  expect(identity.querySelector('small')).toBeNull();
   const stage = container.querySelector('.work-stage')!;
   const touch = {pointerType: 'touch', pointerId: 1, button: 0, clientX: 200, clientY: 200};
   for (const clientX of [100, 300]) {

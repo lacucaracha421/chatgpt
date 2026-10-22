@@ -18,7 +18,7 @@ export function previewLines(body: string): string {
 
 export function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
   if (note.concealed && !isSecret(note)) {
-    return <span className="notes-card__concealed"><EyeSlashIcon aria-hidden="true" />숨긴 메모 · 열어서 보기</span>;
+    return <span className="notes-card__concealed"><EyeSlashIcon aria-hidden="true" />숨긴 메모</span>;
   }
   if (isSecret(note)) {
     // Values are always masked on the board; field names only exist while a PIN session is open.

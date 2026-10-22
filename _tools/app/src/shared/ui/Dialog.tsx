@@ -14,6 +14,9 @@ type DialogProps = PropsWithChildren<{
   onKeyUp?: KeyboardEventHandler<HTMLDivElement>;
   /** A fullscreen dialog that is pushed in from the right and pops back, like a tablet layer. */
   layer?: boolean;
+  /** Where focus goes on open: the first control (default), or the surface itself so no text field raises a
+   *  touch keyboard (tablet sheets). A field that asks for `autoFocus` keeps it either way. */
+  openFocus?: "first" | "surface";
   onClose: () => void;
 }>;
 
@@ -23,7 +26,7 @@ const SWIPE_BACK_COOLDOWN_MS = 800;
 /** Where dialogs mount; null (the default) is the document body. A Home destination mounts its viewer inside its area. */
 export const DialogPortalContainer = createContext<HTMLElement | null>(null);
 
-export function Dialog({ children, open, title, heading, headingClassName, variant = "default", onKeyDown, onKeyUp, layer = false, onClose }: DialogProps) {
+export function Dialog({ children, open, title, heading, headingClassName, variant = "default", onKeyDown, onKeyUp, layer = false, openFocus = "first", onClose }: DialogProps) {
   const portalContainer = useContext(DialogPortalContainer);
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
@@ -87,6 +90,10 @@ export function Dialog({ children, open, title, heading, headingClassName, varia
         <RadixDialog.Content
           ref={surfaceRef}
           className={`ui-dialog${variant === "default" ? "" : ` ui-dialog--${variant}`}`}
+          onOpenAutoFocus={openFocus === "surface" ? (event) => {
+            event.preventDefault();
+            (event.target as HTMLElement | null)?.focus({ preventScroll: true });
+          } : undefined}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             openerRef.current?.focus();

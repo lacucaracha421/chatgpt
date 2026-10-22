@@ -1,0 +1,18 @@
+/* 오늘의 카드 on Home, PC and tablet (src/cards/DailyCard.tsx). The tablet only sizes it for touch (mobile-client/cards/tabletCards.css). */
+/* Compact (user 2026-10-18): only the card, its next-pack line and the album link, in a column as wide as the card beside 전송. */
+.home-daily-card { flex:none; }
+.home-daily-card__body { flex:none; display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); }
+.home-daily-card .daily-card-result { align-items:flex-start; }
+.home-daily-card .daily-card-result small, .daily-card-stage__copy small { color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); white-space:nowrap; }
+.home-daily-card .daily-card-result__art { width:96px; }
+/* An unopened pack is taller than a card: a little narrower, its lines close under it and 뜯기 as wide as the pack. */
+.daily-card-stage__art { width:80px; flex:none; }
+.daily-card-stage__art .card-demo-preview__button { padding:0; width:100%; }
+.daily-card-stage__art .card-demo-preview__button > span { display:block; width:100%; }
+.daily-card-stage__copy { display:flex; flex-direction:column; align-items:flex-start; align-self:stretch; gap:var(--space-1); min-width:0; }
+.daily-card-stage__copy > .ui-button:first-child { align-self:stretch; margin-bottom:var(--space-1); }
+.daily-card-skeleton { display:block; width:96px; height:134px; }
+.home-daily-card__loading { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); color:var(--color-muted); font-size:var(--type-meta); }
+.home-daily-card .home-link.home-daily-card__album { margin-left:calc(var(--space-1) * -1); }
+.home-daily-card__meta { display:flex; flex-direction:column; align-items:flex-start; }
+.daily-card-error { color:var(--color-danger); font-size:var(--type-meta); margin:var(--space-2) 0 0; }

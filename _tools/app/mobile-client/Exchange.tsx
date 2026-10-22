@@ -4,9 +4,10 @@ import {useTabletAssetMask} from './assetMask';
 import {Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {
   ArrowLeftIcon, ArrowsUpDownIcon, CheckIcon, ChevronDownIcon, ComputerDesktopIcon, DeviceTabletIcon, EllipsisHorizontalIcon,
-  ExclamationTriangleIcon, FolderIcon, PaperClipIcon,
+  ExclamationTriangleIcon, FolderIcon, InformationCircleIcon, PaperClipIcon,
 } from '@heroicons/react/24/outline';
-import {Button, EmptyState, IconButton} from './ui';
+import {Button, EmptyState, IconButton, SegmentedControl} from './ui';
+import {BottomSheet} from './BottomSheet';
 import {errorText, native} from './transport';
 import {formatBytes} from './libraryTrashModel';
 import {useExchangeThumbnail} from './useExchange';
@@ -17,11 +18,12 @@ import {
 } from './exchangeModel';
 import {blockRoute} from '../src/exchange/route';
 import {RouteWord} from '../src/exchange/RouteWord';
-import {batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type TimelineBlock} from '../src/exchange/timeline';
+import {batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, withTowardParticle, type TimelineBlock} from '../src/exchange/timeline';
 import {displayCount} from '../src/shared/displayDate';
 import './exchange.css';
 
 type Actions = {onOpen(id: string): void; onRetry(id: string): void; onCancel(id: string): void};
+const VIEW_OPTIONS = [{value: 'all' as const, label: '전체'}, {value: 'received' as const, label: '받은 파일'}];
 
 /**
  * 전송: everything sent to and received from one other device, stacked by time like a
@@ -39,18 +41,20 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
   const [editingToken, setEditingToken] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [receivedOnly, setReceivedOnly] = useState(false);
+  const [sendHelp, setSendHelp] = useState(false);
   const [token, setToken] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     backRef.current = () => {
+      if (sendHelp) { setSendHelp(false); return true; }
       if (choosing) { setChoosing(false); return true; }
       if (editingToken) { setEditingToken(false); return true; }
       onClose(); return true;
     };
     return () => { backRef.current = null; };
-  }, [backRef, onClose, editingToken, choosing]);
+  }, [backRef, onClose, editingToken, choosing, sendHelp]);
 
   useEffect(() => {
     let active = true;
@@ -117,14 +121,11 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
       <div className="exchange-title">
         <h1>전송</h1>
         {usable && target && (devices.length > 1
-          ? <button type="button" className="exchange-peer" aria-haspopup="dialog" onClick={() => setChoosing(true)}><DeviceIcon device={target}/>{withParticle(peerName, '과', '와')} 주고받은 파일<ChevronDownIcon aria-hidden="true"/></button>
-          : <p className="exchange-peer"><DeviceIcon device={target}/>{withParticle(peerName, '과', '와')} 주고받은 파일</p>)}
+          ? <button type="button" className="exchange-peer" aria-haspopup="dialog" aria-label={`주고받을 기기: ${peerName}`} onClick={() => setChoosing(true)}><DeviceIcon device={target}/>{peerName}<ChevronDownIcon aria-hidden="true"/></button>
+          : <p className="exchange-peer"><DeviceIcon device={target}/>{peerName}</p>)}
         {(!usable || !target) && snapshot?.deviceName && <p className="exchange-peer">{snapshot.deviceName}</p>}
       </div>
-      {usable && target && snapshot.receiveSupported && <div className="exchange-filter" role="group" aria-label="보기">
-        <button type="button" aria-pressed={!receivedOnly} onClick={() => setReceivedOnly(false)}>전체</button>
-        <button type="button" aria-pressed={receivedOnly} onClick={() => setReceivedOnly(true)}>받은 파일</button>
-      </div>}
+      {usable && target && snapshot.receiveSupported && <SegmentedControl className="exchange-filter" label="보기" options={VIEW_OPTIONS} value={receivedOnly ? 'received' : 'all'} onChange={value => setReceivedOnly(value === 'received')}/>}
       <BusyLabel busy={reconnecting} idle={!reconnecting&&statusLabel&&<span className="exchange-status" role="status"><span className="exchange-dot" data-live={code === ''} aria-hidden="true"/>{statusLabel}</span>}><span className="exchange-status" role="status"><span className="exchange-dot" data-live={false} aria-hidden="true"/>다시 연결하는 중</span></BusyLabel>
       {snapshot?.configured && snapshot.tokenConfigured && !needsToken && <IconButton label="기기 토큰 변경" icon={EllipsisHorizontalIcon} active={editingToken} onClick={() => setEditingToken(value => !value)}/>}
     </header>
@@ -161,10 +162,11 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
       <Scrubber scrollRef={scroller} total={blocks.length} sort={scrubberSort} hidden={!usable||!target||choosing}/>
     </div>
     {usable && target && <footer className="exchange-composer">
-      <p className="exchange-composer-to"><b>{peerName}(으)로 보내기</b>파일당 최대 2GB · 받지 않으면 24시간 뒤 삭제</p>
+      <div className="exchange-composer-to"><b>{withTowardParticle(peerName)} 보내기</b><IconButton label="보내기 도움말" icon={InformationCircleIcon} onClick={() => setSendHelp(true)}/></div>
       <Button className="exchange-composer-button" aria-label="폴더 보내기" onClick={() => send('exchangeSendFolder')}><FolderIcon aria-hidden="true"/>폴더</Button>
-      <Button variant="primary" className="exchange-composer-button" aria-label={`${peerName}(으)로 파일 보내기`} onClick={() => send('exchangeSend')}><PaperClipIcon aria-hidden="true"/>파일 보내기</Button>
+      <Button variant="primary" className="exchange-composer-button" aria-label={`${withTowardParticle(peerName)} 파일 보내기`} onClick={() => send('exchangeSend')}><PaperClipIcon aria-hidden="true"/>파일 보내기</Button>
     </footer>}
+    {sendHelp && <BottomSheet title="보내기" onClose={() => setSendHelp(false)}><ul className="exchange-help"><li>파일당 최대 2GB</li><li>폴더는 zip 하나로</li><li>받지 않으면 24시간 뒤 삭제</li><li>다른 앱의 공유 메뉴에서 Lakomics를 골라도 보낼 수 있습니다</li></ul></BottomSheet>}
     {choosing && snapshot && <>
       <div className="exchange-menu-scrim" aria-hidden="true" onClick={() => setChoosing(false)}/>
       <div className="exchange-devices" role="radiogroup" aria-label="주고받을 기기">

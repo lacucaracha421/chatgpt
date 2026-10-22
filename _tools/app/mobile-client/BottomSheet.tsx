@@ -19,7 +19,7 @@ export function BottomSheet({title,heading,onClose,children,headerActions,tall=f
     <header className="viewer-reading-sheet__header"><strong>{title}</strong><Button variant="ghost" size="icon" aria-label={`${title} 닫기`} onClick={onClose}><XMarkIcon aria-hidden="true"/></Button></header>
     {children}
   </section>;
-  return <Dialog open title={title} heading={heading} headingClassName={heading?'action-sheet__target':undefined} onClose={onClose}><DialogDescription className="sr-only">옵션을 선택하면 적용됩니다.</DialogDescription><div className={`library-sheet${tall?' library-sheet--tall':''}${stacked?' library-sheet--stacked':''}`}>
+  return <Dialog open title={title} heading={heading} headingClassName={heading?'action-sheet__target':undefined} openFocus="surface" onClose={onClose}><DialogDescription className="sr-only">옵션을 선택하면 적용됩니다.</DialogDescription><div className={`library-sheet${tall?' library-sheet--tall':''}${stacked?' library-sheet--stacked':''}`}>
     {tall&&<><div className="bottom-sheet-drag-area" onPointerDown={down} onPointerUp={end} onPointerCancel={end}><span aria-hidden="true"/></div><div className="bottom-sheet-header-actions">{headerActions}<Button variant="ghost" aria-label={`${title} 닫기`} onClick={onClose}><XMarkIcon aria-hidden="true"/></Button></div></>}
     {children}{!tall&&(actions?<div className="library-sheet__actions"><Button variant="ghost" onClick={onClose}>닫기</Button>{actions}</div>:<Button variant="ghost" onClick={onClose}>닫기</Button>)}
   </div></Dialog>;

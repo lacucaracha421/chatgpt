@@ -409,10 +409,10 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
         </div>}
       <SimilarityClues names={['A','B']} sides={[clueSide(current.a),clueSide(current.b)]} clues={current.clues} reason={current.reason} recommended={current.recommendedAssetId === current.a.assetId ? 'a' : current.recommendedAssetId === current.b.assetId ? 'b' : null}/>
     </div>}
-    {ready && <footer className="similarity-actions">
+    {ready && current && <footer className="similarity-actions">
       {current?.clues && <p className="similarity-reason" data-none={!current.reason || undefined}>{reasonSentence(current.reason ?? null, current.clues, ['A','B'], [clueSide(current.a),clueSide(current.b)])}</p>}
       <div className="similarity-buttons">
-        {CHOICES.map(choice => <Button key={choice.decision} variant={current?.recommendation === choice.decision ? 'primary' : 'secondary'} aria-description={current?.recommendation === choice.decision ? '권장' : undefined} disabled={!current} onClick={() => act(choice.decision)}>
+        {CHOICES.map(choice => <Button key={choice.decision} variant={current?.recommendation === choice.decision ? 'primary' : 'secondary'} aria-description={current?.recommendation === choice.decision ? '권장' : undefined} onClick={() => act(choice.decision)}>
           {choice.label}
         </Button>)}
       </div>

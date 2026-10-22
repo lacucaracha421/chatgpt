@@ -65,7 +65,9 @@ describe('tablet filter-sheet Manga index',()=>{
     fireEvent.click(screen.getByRole('button',{name:'john doe 필터 빼기'}));
     // Clearing can reuse the previously cached browse page without another read.
     await waitFor(()=>expect(screen.queryByRole('button',{name:'john doe 필터 빼기'})).toBeNull());
-    expect(screen.getByRole('button',{name:'카탈로그 정렬 오늘 인기'}).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));
+    const sort=within(screen.getByRole('dialog',{name:'보기'})).getByRole('radio',{name:'오늘 인기'}) as HTMLButtonElement;
+    expect(sort.getAttribute('aria-checked')).toBe('true');expect(sort.disabled).toBe(false);
   });
   it('adds one AND condition without changing a typed OR expression',async()=>{
     await openSheet();fireEvent.click(screen.getByRole('button',{name:'필터 닫기'}));

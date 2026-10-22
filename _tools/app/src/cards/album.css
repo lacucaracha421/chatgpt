@@ -30,16 +30,6 @@
 .card-album__detail dl { display:grid; grid-template-columns:1fr auto; gap:var(--space-2); margin:0; }
 .card-album__detail dd { margin:0; color:var(--color-text); }
 .card-album__ladder { display:flex; flex-wrap:wrap; gap:var(--space-1); }
-.daily-card-stage { display:flex; align-items:center; justify-content:center; gap:var(--space-6); background:radial-gradient(ellipse at 50% 20%,#252631,#101115 80%); }
-.daily-card-stage__art { width:112px; flex:none; }
-.daily-card-stage__art .trading-card,.daily-card-stage__art .card { width:100%; }
-.daily-card-stage__copy { display:flex; flex-direction:column; gap:var(--space-2); align-items:flex-start; }
-.daily-card-stage__copy p { margin:0; font-size:var(--type-body); }
-.daily-card-stage__copy small { color:var(--color-muted); font-size:var(--type-meta); }
-.daily-card-error { color:var(--color-danger); font-size:var(--type-meta); margin:var(--space-2) 0 0; }
-.daily-card-skeleton { display:block; width:112px; height:180px; }
-.daily-card-stage__art .card-demo-preview__button { padding:0; width:100%; }
-.daily-card-stage__art .card-demo-preview__button > span { display:block; width:100%; }
 @keyframes card-album-enter { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 @media (max-width:1100px) { .card-album__body { grid-template-columns:160px minmax(0,1fr) 260px; } }
 @media (prefers-reduced-motion:reduce) { .card-album,.card-album__detail-content { animation:none; } }

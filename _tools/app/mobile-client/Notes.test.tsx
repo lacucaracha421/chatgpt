@@ -179,7 +179,7 @@ it('hides text note cards, saves the concealment choice and searches hidden note
 
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  const noteCard=screen.getByText('숨은 제목').closest('button')!;
- expect(within(noteCard).getByText('숨긴 메모 · 열어서 보기')).toBeTruthy();
+ expect(within(noteCard).getByText('숨긴 메모')).toBeTruthy();
  expect(noteCard.textContent).not.toContain('숨겨진 본문 단어');
  await searchNotes('숨겨진 본문 단어');
  expect(screen.queryByText('숨은 제목')).toBeNull();

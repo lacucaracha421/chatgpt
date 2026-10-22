@@ -2,19 +2,31 @@ import {useEffect, useRef} from 'react';
 
 /**
  * Android Back for an overlay the app shell does not know about (the pack opening sits on top of
- * Home, opened from inside a Home section). While one is open it takes Back first and the shell's
- * own handler never sees the press, so Back closes the overlay instead of leaving Home or the app.
+ * Home, opened from inside a Home section; the folder drawer; action sheets). While one is open it
+ * takes Back first and the shell's own handler never acts on the press, so Back closes only the
+ * topmost overlay instead of also leaving Home, the folder or the app.
  *
- * The shell listens on `window` too; this listener is a capturing one, and at the target a
- * capturing listener runs before the shell's, so `stopImmediatePropagation` reaches it in time.
- * Overlays stack: the newest open one gets the press.
+ * Two listeners can see the press, and which one runs first depends on the WebView's ordering of
+ * capturing and bubbling listeners at `window`. So neither order matters: the capturing listener
+ * here and the shell's own handler both call `consumeOverlayBack`, the first caller closes the
+ * top overlay and marks the event, and every later caller on the same event gets `true` back and
+ * must do nothing. Overlays stack: the newest open one gets the press.
  */
 const stack: {current: () => void}[] = [];
-function onBack(event: Event) {
+const consumed = new WeakSet<Event>();
+
+/** True when this Back press belongs to an open overlay (closing the top one on first call). */
+export function consumeOverlayBack(event?: Event): boolean {
+  if (event && consumed.has(event)) return true;
   const top = stack[stack.length - 1];
-  if (!top) return;
-  event.stopImmediatePropagation();
+  if (!top) return false;
+  if (event) consumed.add(event);
   top.current();
+  return true;
+}
+
+function onBack(event: Event) {
+  if (consumeOverlayBack(event)) event.stopImmediatePropagation();
 }
 
 export function useAndroidBack(handler: () => void, enabled = true) {

@@ -559,7 +559,6 @@ describe('read-only collections',()=>{
     expect(document.querySelector('.collection-showcase-fold')).toBeNull();
     pressShowcase(screen.getByRole('button',{name:'쇼케이스'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
-    expect(within(overlay).getByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
     expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});
     expect(screen.queryByRole('dialog',{name:'쇼케이스'})).toBeNull();
@@ -746,7 +745,7 @@ describe('read-only collections',()=>{
     await screen.findByRole('heading',{level:1,name:'밤의 도서관'});
     expect(screen.queryByRole('radio',{name:'게임'})).toBeNull();
     expect(screen.getByRole('button',{name:'뒤로'})).toBeTruthy();
-    expect(within(screen.getByRole('button',{name:'뒤로'}).closest('header')!).getByText('컬렉션 › 게임 ›')).toBeTruthy();
+    expect(within(screen.getByRole('button',{name:'뒤로'}).closest('header')!).getByText('컬렉션 › 게임')).toBeTruthy();
     // The shared work screen: the case on its stage, the strip of views, the information below.
     expect(screen.getByRole('article',{name:'게임 작품 화면'})).toBeTruthy();
     expect(screen.getByRole('group',{name:'케이스'})).toBeTruthy();

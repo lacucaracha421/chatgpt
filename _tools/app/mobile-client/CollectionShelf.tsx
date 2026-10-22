@@ -109,8 +109,7 @@ export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; 
   const spineBookcase = view.layout === 'bookcase' && hasBookcase(type);
   return <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
-      {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} av={type === 'av'} onChange={spineSize => onChange({spineSize})}/> : <>
-        <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
-        <p className="hint">세로 화면 기준입니다. 가로 화면에서는 같은 크기로 더 많이 표시합니다.</p></>}
+      {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} av={type === 'av'} onChange={spineSize => onChange({spineSize})}/>
+        : <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>}
     </ViewOptionsSection>;
 }

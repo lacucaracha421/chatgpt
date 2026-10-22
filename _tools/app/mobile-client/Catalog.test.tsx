@@ -28,8 +28,15 @@ beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,val
   return page;
 });});
 const CHOICES:Record<string,string>={korean:'한국어',japanese:'일본어',all:'전체 언어',latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
-/** Open a chip's sheet and pick one option, as a user does. */
-function choose(group:'카탈로그 언어'|'카탈로그 정렬',value:string){fireEvent.click(screen.getByRole('button',{name:new RegExp(`^${group}`)}));fireEvent.click(screen.getByRole('radio',{name:CHOICES[value]}));}
+const viewSheet=()=>screen.getByRole('dialog',{name:'보기'});
+function openView(host?:HTMLElement){fireEvent.click((host?within(host):screen).getByRole('button',{name:'보기'}));return viewSheet();}
+function closeView(){fireEvent.click(within(viewSheet()).getByRole('button',{name:'닫기'}));}
+/** Open the 보기 sheet, pick one option and close it again, as a user does. */
+function choose(group:'카탈로그 언어'|'카탈로그 정렬',value:string){const sheet=openView();fireEvent.click(within(within(sheet).getByRole('radiogroup',{name:group})).getByRole('radio',{name:CHOICES[value]}));closeView();}
+/** The sort the 보기 sheet shows as chosen. */
+function shownSort(){const sheet=openView();const radio=within(within(sheet).getByRole('radiogroup',{name:'카탈로그 정렬'})).getAllByRole('radio').find(item=>item.getAttribute('aria-checked')==='true');closeView();return radio?.textContent;}
+/** Whether the 보기 sheet's sort rows can be chosen. */
+function sortEnabled(){const sheet=openView();const enabled=within(within(sheet).getByRole('radiogroup',{name:'카탈로그 정렬'})).getAllByRole('radio').every(item=>!(item as HTMLButtonElement).disabled);closeView();return enabled;}
 afterEach(()=>{cleanup();forgetCatalogCovers();vi.unstubAllGlobals();});
 describe('catalog cover retention',()=>{
   const preview='https://app.lakomics.local/media-cache/cover';
@@ -235,7 +242,7 @@ describe('mobile catalog reads',()=>{
     expect(visible).toHaveLength(2);expect(visible.map(e=>e.style.flexBasis)).toEqual(['50%','50%']);
   });
   it('starts with Today popular sorting',async()=>{
-    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['hotDay']);
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect(shownSort()).toBe(CHOICES['hotDay']);
   });
   it('observes the reader stage after the dialog portal mounts',async()=>{
     const observe=vi.fn(),disconnect=vi.fn();const previous=window.ResizeObserver;
@@ -310,16 +317,11 @@ describe('mobile catalog reads',()=>{
     };
     let row=controls();
     expect(row.classList.contains('ui-segmented')).toBe(true);
-    expect(within(row).getAllByRole('button')).toHaveLength(3);
+    expect(within(row).getAllByRole('button')).toHaveLength(2);
     expect(within(row).getByRole('button',{name:'필터, 기본 회피 태그 1개'}).textContent).toBe('필터기본');
-    fireEvent.click(within(row).getByRole('button',{name:'카탈로그 언어 한국어'}));
-    let panel=await screen.findByRole('dialog',{name:'언어'});
-    expect(within(panel).getByRole('radio',{name:'한국어'}).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(within(panel).getByRole('button',{name:'닫기'}));
-    row=controls();
-    fireEvent.click(within(row).getByRole('button',{name:'카탈로그 정렬 오늘 인기'}));
-    panel=await screen.findByRole('dialog',{name:'정렬'});
-    expect(within(panel).getByRole('radio',{name:'오늘 인기'}).getAttribute('aria-checked')).toBe('true');
+    let panel=openView(row);
+    expect(within(within(panel).getByRole('radiogroup',{name:'카탈로그 언어'})).getByRole('radio',{name:'한국어'}).getAttribute('aria-checked')).toBe('true');
+    expect(within(within(panel).getByRole('radiogroup',{name:'카탈로그 정렬'})).getByRole('radio',{name:'오늘 인기'}).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(within(panel).getByRole('button',{name:'닫기'}));
     row=controls();
     fireEvent.click(within(row).getByRole('button',{name:'필터, 기본 회피 태그 1개'}));
@@ -333,17 +335,15 @@ describe('mobile catalog reads',()=>{
   });
   it('defaults bookmarks to newest-added and offers both bookmark orders',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    choose('카탈로그 정렬','views');await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['views']));
-    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe('최근 추가순'));
+    choose('카탈로그 정렬','views');await waitFor(()=>expect(shownSort()).toBe(CHOICES['views']));
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(shownSort()).toBe('최근 추가순'));
     expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=bookmarkAdded'))).toBe(true);
-    expect((screen.getByRole('button',{name:'카탈로그 정렬 최근 추가순'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(sortEnabled()).toBe(true);
     const list=document.querySelector('.catalog-scroll') as HTMLElement;
     fireEvent.scroll(list,{target:{scrollTop:300}});
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 · 북마크'}));
     const shade=document.querySelector('.section-shade') as HTMLElement;
-    const sort=within(shade).getByRole('button',{name:'카탈로그 정렬 최근 추가순'}) as HTMLButtonElement;
-    expect(sort.disabled).toBe(false);
-    fireEvent.click(sort);
+    openView(shade);
     expect(screen.getByRole('radio',{name:'최신순'})).toBeTruthy();
     expect(screen.queryByRole('radio',{name:'조회순'})).toBeNull();
     fireEvent.click(screen.getByRole('radio',{name:'최신순'}));
@@ -352,7 +352,7 @@ describe('mobile catalog reads',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('latest'));
-    fireEvent.click(screen.getByRole('button',{name:/^카탈로그 정렬/}));
+    openView();
     fireEvent.click(screen.getByRole('radio',{name:'최근 추가순'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('bookmarkAdded'));
   });
@@ -529,20 +529,19 @@ describe('mobile catalog reads',()=>{
     // 오늘 인기 only covers works posted in the last day, so `artist:x` would find nothing.
     const user=userEvent.setup();
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    const sortChip=()=>screen.getByRole('button',{name:/^카탈로그 정렬/});
-    expect(sortChip().textContent).toBe(CHOICES['hotDay']);
+    expect(shownSort()).toBe(CHOICES['hotDay']);
     await user.type(catalogSearch('textbox'),'artist:peachbitch{Enter}');
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:peachbitch'));
     expect(searchParams(lastSearch()).get('sort')).toBe('latest');
-    expect(sortChip().textContent).toBe(CHOICES['latest']);
+    expect(shownSort()).toBe(CHOICES['latest']);
     expect(screen.getByText('검색 중에는 최신순으로 표시합니다')).toBeTruthy();
     // A sort picked during the search applies to it, and the note no longer claims otherwise.
     choose('카탈로그 정렬','views');
     await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('views'));
     expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'검색어 지우기'}));
-    // The unfiltered hotDay page is already cached, so the restored sort is read from the chip.
-    await waitFor(()=>expect(sortChip().textContent).toBe(CHOICES['hotDay']));
+    // The unfiltered hotDay page is already cached, so the restored sort is read from the sheet.
+    await waitFor(()=>expect(shownSort()).toBe(CHOICES['hotDay']));
     expect((catalogSearch('textbox') as HTMLInputElement).value).toBe('');
     expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
   });
@@ -669,7 +668,7 @@ describe('mobile catalog layout',()=>{
     expect(screen.queryByRole('button',{name:'이전'})).toBeNull();expect(screen.queryByRole('button',{name:'다음'})).toBeNull();
     // A page from another publication is never mixed into the list; the list starts over.
     mocks.api.mockClear();
-    fireEvent.click(screen.getByRole('button',{name:/^카탈로그 언어/}));fireEvent.click(screen.getByRole('radio',{name:'일본어'}));
+    choose('카탈로그 언어','japanese');
     await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>(path as string).includes('cursor=j2'))).toBe(true));
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')&&!(path as string).includes('cursor=')).length).toBeGreaterThanOrEqual(2));
     expect(screen.queryByText('다른 게시본')).toBeNull();

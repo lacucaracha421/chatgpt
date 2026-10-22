@@ -84,7 +84,7 @@ import {ImageActionSheet} from './ImageActions';
 import {tabletRecentFolderId,useTabletRecentFolders} from './recentFolders';
 import {FolderDrawer,type DrawerQuick} from './FolderDrawer';
 import {useTabletFolderPins} from './useTabletFolderPins';
-import {useAndroidBack} from './cards/useAndroidBack';
+import {consumeOverlayBack,useAndroidBack} from './cards/useAndroidBack';
 import type {FolderAuthority} from './folderCommands';
 import {useSelectionActions} from './useSelectionActions';
 import {FolderArrowDownIcon,InformationCircleIcon,MinusCircleIcon} from '@heroicons/react/24/outline';
@@ -783,7 +783,9 @@ export function App() {
         void load(HOME, null, [], 0, true, EMPTY_FILTERS);
       }
     };
-    const back = () => {
+    const back = (event?: Event) => {
+      // An overlay that took Back through useAndroidBack (folder drawer, action sheets, card sheets) owns this press alone.
+      if (consumeOverlayBack(event)) return;
       const state = latest.current;
       // Transient navigation sheets consume Back before their originating view.
       if (state.moreOpen) setMoreOpen(false);

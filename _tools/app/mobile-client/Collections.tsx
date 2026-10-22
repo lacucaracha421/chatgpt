@@ -655,9 +655,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<button onClick={closeWork} className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>} ›</button>} itemAction={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits} tracking={false}/></div>:undefined} onMenu={item&&edits.authority.identity?()=>setManage('menu'):undefined}/>
+    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<button onClick={closeWork} className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>}</button>} itemAction={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits} tracking={false}/></div>:undefined} onMenu={item&&edits.authority.identity?()=>setManage('menu'):undefined}/>
     :performer
-      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<button onClick={closePerformer} className="top-bar__crumbs is-alone">컬렉션 › AV › 배우 ›</button>} menu={edits.authority.identity?{title:'배우',entries:[{id:'performer-manage',group:'action',label:'배우 관리',icon:<EllipsisHorizontalIcon/>,run:()=>setPerformerManagementRequest(value=>value+1)}]}:undefined}/>
+      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<button onClick={closePerformer} className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</button>} menu={edits.authority.identity?{title:'배우',entries:[{id:'performer-manage',group:'action',label:'배우 관리',icon:<EllipsisHorizontalIcon/>,run:()=>setPerformerManagementRequest(value=>value+1)}]}:undefined}/>
     :searching&&tab!=='av'&&!overlayOpen
         ?<TopBarSearch title="컬렉션" menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:undefined} search={{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());}}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
@@ -788,7 +788,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {showcasePull}
       <SegmentedControl label="쇼케이스 컬렉션 유형" options={typeOptions} value={tab} onChange={chooseTab}/>
       <BusyLabel busy={!!(showcase.busy&&!showcaseItems.length)}><p className="hint" role="status">쇼케이스를 불러오는 중…</p></BusyLabel>
-      <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
       <BusyLabel busy={!ready} idle={ready ? unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals,true) : null}><p className="hint" role="status">쇼케이스를 준비하는 중…</p></BusyLabel>
@@ -797,7 +796,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>}
     </Overlay>
-    <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>{beginScreenTiming('collections','back');setCalendarOpen(false);}}>
+    <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" onClose={()=>{beginScreenTiming('collections','back');setCalendarOpen(false);}}>
       {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>{beginScreenTiming('collections','back');setCalendarOpen(false);}}/>}
     </Overlay>
     <KakaoReviewOverlay open={kakaoReviewOpen} active={live} onClose={()=>setKakaoReviewOpen(false)} queue={kakaoQueue} authority={edits.authority}

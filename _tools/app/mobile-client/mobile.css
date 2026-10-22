@@ -384,7 +384,11 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .top-bar__search:focus-within { border-color:var(--color-muted); }
 /* Home keeps its own header element; it takes the same brand and title size. */
 .app-header .home-brand .brand-mark { width:22px; height:26px; }
-.app-header:has(.home-brand > .brand-mark:only-child) { padding-left:16px; }
+.app-header:has(.home-brand > .brand-mark:only-child) { padding-left:var(--mobile-gutter); }
+/* The mark and the title sit where the other tabs' top bar puts them (brand margin 12 + bar gap 2). */
+.app-header:has(.home-brand > .brand-mark:only-child) #context-location { margin-inline-start:14px; }
+/* A sheet's own 닫기 starts where its option rows' text starts (4 px); sheets with icon rows indent it further (moreSheet.css). */
+.library-sheet > .ui-button--ghost:last-child { padding-inline:4px var(--space-4); }
 #context-location .gallery-heading h2 { font-size:var(--type-title); font-weight:600; letter-spacing:-.2px; }
 @media (orientation:portrait), (max-width:999px) { #context-location { margin-inline:12px 0; } #context-location .gallery-heading h2 { font-size:var(--type-title); } }
 /* Viewer actions name themselves; the destructive one sits apart. */

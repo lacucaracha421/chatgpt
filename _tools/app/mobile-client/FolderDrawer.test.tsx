@@ -48,8 +48,8 @@ it('lists 빠른 보기, 고정, 최근 and 폴더 in that order, with the curre
   drawer({quickCurrent:'all'});
   const labels=screen.getAllByText(/^(빠른 보기|고정|최근|폴더)$/).filter(node=>!node.closest('nav')).map(node=>node.textContent);
   expect(labels).toEqual(['빠른 보기','고정','최근','폴더']);
-  expect(within(screen.getByRole('navigation',{name:'빠른 보기'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['모든 자산','앨범','작가']);
-  expect(screen.getByRole('button',{name:'모든 자산'}).getAttribute('aria-current')).toBe('page');
+  expect(within(screen.getByRole('navigation',{name:'빠른 보기'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['모든 에셋','앨범','작가']);
+  expect(screen.getByRole('button',{name:'모든 에셋'}).getAttribute('aria-current')).toBe('page');
   expect(rowButton('손자').getAttribute('aria-current')).toBe('page');
   expect(within(screen.getByRole('group',{name:'고정한 폴더'})).getByRole('button',{name:'조카'})).toBeTruthy();
   expect(within(screen.getByRole('group',{name:'최근 폴더'})).getByRole('button',{name:/혼자/})).toBeTruthy();

@@ -88,9 +88,10 @@
 @container homecal (max-width:699px) {
   .home-cal--month .home-cal__holiday { display:none; }
   .home-cal__chip:not(.home-cal__chip--pay) .home-cal__chip-detail { display:none; }
-  /* A charge keeps its amount; the name (read in the day panel) gives way first. */
+  /* A charge keeps its amount; the name (read in the day panel) gives way first. A charge without an amount (the
+     tablet) keeps its name. */
   .home-cal__chip--pay { overflow:hidden; }
-  .home-cal__chip--pay .home-cal__chip-title { display:none; }
+  .home-cal__chip--pay:has(.home-cal__chip-detail) .home-cal__chip-title { display:none; }
   .home-cal__chip--pay .home-cal__chip-detail { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
   .home-cal__money-full { display:none; }
   .home-cal__money-short { display:inline; }

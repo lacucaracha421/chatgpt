@@ -73,6 +73,14 @@ export function withParticle(name: string, consonant: string, vowel: string): st
   return `${name}${hasFinalConsonant(name) ? consonant : vowel}`;
 }
 
+/** "LAKUPC로", "Galaxy Tab S11로", "태블릿으로": 으로 after a final consonant other than ㄹ. */
+export function withTowardParticle(name: string): string {
+  const last = name.trim().slice(-1);
+  const code = last.charCodeAt(0);
+  const finalL = code >= 0xac00 && code <= 0xd7a3 ? (code - 0xac00) % 28 === 8 : /[178lr]/i.test(last);
+  return withParticle(name, finalL ? "로" : "으로", "로");
+}
+
 const IMAGE = /\.(jpe?g|png|webp|gif|bmp|avif|heic|heif)$/i;
 export const isImageName = (name: string) => IMAGE.test(name);
 

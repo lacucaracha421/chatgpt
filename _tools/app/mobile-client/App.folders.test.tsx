@@ -46,10 +46,10 @@ beforeEach(()=>{
   mocks.api.mockImplementation(server(2));
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
-const openAll=async()=>{fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');};
+const openAll=async()=>{fireEvent.click(await screen.findByRole('button',{name:/모든 에셋/}));await screen.findByText('tile-a1');};
 const openFolder=async(name:RegExp)=>{fireEvent.click(await screen.findByRole('button',{name}));await screen.findByText('tile-p1');};
 const openSort=()=>{if(!screen.queryByRole('dialog',{name:'보기'}))fireEvent.click(screen.getByRole('button',{name:'보기'}));};
-const sortOptions=()=>within(screen.getByRole('radiogroup',{name:'정렬'})).getAllByRole('radio').map(option=>option.textContent);
+const sortOptions=()=>within(screen.getByRole('radiogroup',{name:'정렬'})).getAllByRole('radio').map(option=>option.getAttribute('aria-label'));
 
 it('opens 만화 › 밴드물 as a library folder with 봇치 and 걸밴크 series cards from today\'s publication',async()=>{
   const revision='a'.repeat(64);

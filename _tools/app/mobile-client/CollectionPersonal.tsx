@@ -132,9 +132,9 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
 
   return <>
     {(editable || memo.value || memo.pending) && <section className="collection-block collection-memo" aria-label="내 메모">
-      <div className="collection-memo-heading"><SectionLabel as="h2" title="내 메모" />{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</div>
+      <SectionLabel title="내 메모" actions={<>{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</>}/>
       {memo.conflict && <div className="collection-memo-conflict" role="alert"><span>PC에서 메모가 바뀌었습니다</span><Button variant="ghost" onClick={() => onSheet('conflict')}>확인</Button></div>}
-      {memo.value ? <p className={`collection-memo-text${memo.pending ? ' is-pending' : ''}`}>{memo.value}</p> : <p className="hint">메모가 없습니다.</p>}
+      {memo.value && <p className={`collection-memo-text${memo.pending ? ' is-pending' : ''}`}>{memo.value}</p>}
     </section>}
     {sheet === 'rating' && <BottomSheet title="내 별점" onClose={() => onSheet(null)}>
       <div role="radiogroup" aria-label="내 별점">

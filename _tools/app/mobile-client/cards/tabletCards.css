@@ -2,21 +2,11 @@
 
 /* ---- Home slot ---- */
 /* Compact (user 2026-10-18, as the PC): the card alone in a column as wide as it, beside 전송, with its next-pack line and the album link under it. */
-.tablet-daily-card { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); }
-.tablet-daily-card .daily-card-result { align-items:flex-start; }
-.tablet-daily-card .daily-card-result__art { width:112px; }
-.tablet-daily-card small { color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); white-space:nowrap; }
-.tablet-daily-card__meta { display:flex; flex-direction:column; align-items:flex-start; }
-.tablet-daily-card .home-link.tablet-daily-card__album { min-height:var(--touch-target); margin-left:calc(var(--space-1) * -1); }
-.tablet-daily-card__art { display:block; width:96px; flex:none; }
-.tablet-daily-card__art .trading-card, .tablet-daily-card__art .card { width:100%; }
-button.tablet-daily-card__pack { appearance:none; border:0; background:transparent; padding:0; color:inherit; font:inherit; cursor:pointer; min-height:var(--touch-target); }
-.tablet-daily-card__pack > span { display:block; width:100%; pointer-events:none; }
-.tablet-daily-card__copy { display:flex; flex-direction:column; align-items:flex-start; align-self:stretch; gap:var(--space-1); min-width:0; }
-.tablet-daily-card__copy > .ui-button:first-child { align-self:stretch; margin-bottom:var(--space-1); }
-.tablet-daily-card__loading { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-2); color:var(--color-muted); font-size:var(--type-meta); }
-.tablet-daily-card__skeleton { display:block; width:112px; height:156px; }
-.tablet-daily-card__error { color:var(--color-danger); font-size:var(--type-meta); margin:var(--space-2) 0 0; }
+.home-daily-card--touch .daily-card-result__art { width:112px; }
+.home-daily-card--touch .daily-card-stage__art { width:96px; }
+.home-daily-card--touch .daily-card-stage__art .card-demo-preview__button { min-height:var(--touch-target); }
+.home-daily-card--touch .daily-card-skeleton { width:112px; height:156px; }
+.home-daily-card--touch .home-link.home-daily-card__album { min-height:var(--touch-target); }
 
 /* ---- Full-screen pack opening and the album: a finger is the pointer ---- */
 .tablet-cards { display:flex; flex-direction:column; flex:1; min-height:0; height:100%; }

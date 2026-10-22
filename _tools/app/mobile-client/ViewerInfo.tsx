@@ -54,7 +54,7 @@ export function sourceOpenUrl(url: string): string {
 }
 
 function dateTimeLabel(value: string | undefined | null, now = new Date()): string {
-  return value ? displayDateTime(value, now, {withTime: true}) : '';
+  return value ? displayDateTime(value, now, {withDate: true}) : '';
 }
 
 export function creatorText(asset: Asset): string {

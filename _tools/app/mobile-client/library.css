@@ -2,6 +2,8 @@
 .library-root { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
 .library-root-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior-y:contain; padding:0 var(--mobile-gutter) 24px; }
 .library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
+/* The folder shelf under the 미분류/전체 switch starts a new section: the 24px section gap, not 8. */
+.folder-scope + .folder-intro { margin-top:var(--space-6); }
 .library-segments { width:100%; margin:var(--space-3) 0 var(--space-2); }
 .library-segments .ui-segmented__cell { min-height:var(--touch-target); }
 /* Asset galleries and their shade share the screen gutter. */

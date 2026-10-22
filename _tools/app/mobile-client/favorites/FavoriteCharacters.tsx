@@ -16,7 +16,7 @@ import {CharacterImage,CharacterPortrait} from './CharacterAssets';
 import {CharacterDetail} from './CharacterDetail';
 import {CoverSheet} from './CoverSheet';
 import {useFavorites} from './useFavorites';
-import {containerId,createFavoriteCommand,isManualFavorite,linkFavoriteCommand,favoriteFolders,favoriteNode,favoriteScopes,favoriteTargets,reorderCommand,visibleFavorites} from './model';
+import {containerId,createFavoriteCommand,isManualFavorite,linkFavoriteCommand,favoriteFolders,favoriteNode,favoriteScopes,indexFavoriteTargets,reorderCommand,visibleFavorites} from './model';
 import {useFavoriteHero} from './useFavoriteHero';
 import './favorites.css';
 
@@ -62,7 +62,7 @@ export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFo
   },[open,selected,sheet,close,hero.pending,hero.close]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   const folders=useMemo(()=>favoriteFolders(source?.folders??[]),[source?.folders]);
-  const targets=useMemo(()=>source?favoriteTargets(source.index,favorites.document?.entries??[]):[],[source?.index,favorites.document]);
+  const targets=useMemo(()=>source?indexFavoriteTargets(source.index,favorites.document?.entries??[]):[],[source?.index,favorites.document]);
   const entries=source?visibleFavorites(favorites.document?.entries??[],source.index):[];
   const scopes=favoriteScopes(targets,folders);
   const currentScope=scopes.some(option=>option.value===scope)?scope:'all';
@@ -131,7 +131,7 @@ export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFo
 
 function AddSheet({index,folders,entries,busy,error,backRef,onClose,onAdd,onCreate,onLink}:{index:CharacterIndex;folders:ReturnType<typeof favoriteFolders>;entries:FavoriteEntry[];busy:boolean;error:string;backRef:MutableRefObject<(()=>boolean)|null>;onClose():void;onAdd(ids:string[]):Promise<boolean>;onCreate(name:string):Promise<boolean>;onLink?(id:string):Promise<boolean>}) {
   const [query,setQuery]=useState(''),[scope,setScope]=useState('all'),[chosen,setChosen]=useState<Set<string>>(new Set()),[help,setHelp]=useState(false);
-  const targets=useMemo(()=>index.ready?favoriteTargets(index):[],[index]);
+  const targets=useMemo(()=>index.ready?indexFavoriteTargets(index):[],[index]);
   const scopes=favoriteScopes(targets,folders),added=new Set(entries.map(entry=>entry.characterId));
   const matches=createKoreanMatcher(query);
   const rows=index.ready?index.nodes.filter(node=>node.kind==='character'&&!isExtrasNode(node)&&targets.some(target=>target.id===node.sourceId&&(scope==='all'||containerId(target,folders)===scope))):[];

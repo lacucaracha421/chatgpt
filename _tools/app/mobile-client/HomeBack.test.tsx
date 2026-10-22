@@ -149,7 +149,7 @@ it('steps back inside Library before returning Home when the Library was opened 
 
 it('keeps Back unchanged for screens reached without Home',async() => {
   render(<App/>);
-  fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
+  fireEvent.click(await screen.findByRole('button',{name:/모든 에셋/})); await screen.findByText('tile-a1');
   fireEvent.click(nav('컬렉션'));
   expect((await screen.findByRole('region',{name:'collections-screen'})).getAttribute('data-from-home')).toBe('false');
   // The tab root falls back to the assets area it was opened over (the Library folder), not Home.

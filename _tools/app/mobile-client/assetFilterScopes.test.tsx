@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {cleanup, fireEvent, render, screen, waitFor, within as inGroup} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
@@ -64,7 +64,7 @@ describe('character scope filters',()=>{
     await screen.findByText('Series');
     await screen.findByText('a1');
     const within=screen.getByRole('radiogroup',{name:'길이'});
-    fireEvent.click([...within.querySelectorAll('button')].find(b=>b.textContent==='5분 이상')!);
+    fireEvent.click(inGroup(within).getByRole('radio',{name:'5분 이상'}));
     await waitFor(()=>expect(String(mocks.api.mock.calls.at(-1)?.[0])).toContain('duration_ms_min=300000'));
     // The frozen membership is still pinned by its revision and node.
     const path=String(mocks.api.mock.calls.at(-1)?.[0]);
