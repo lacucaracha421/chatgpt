@@ -1,7 +1,7 @@
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetViewer } from "../assets/AssetViewer";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -153,17 +153,31 @@ function useArtistStyleSuggestionPages() {
   return { page, status, loading, moreLoading, error, loadMore };
 }
 
+/**
+ * Opens the viewer on a clicked thumbnail with the assets of its strip that can still be read
+ * (one may have been trashed meanwhile). Only the latest click opens.
+ */
+function useViewerOpener(setViewer: (viewer: { items: AssetSummary[]; activeId: string }) => void) {
+  const { gateway } = useLibrary();
+  const latest = useRef(0);
+  return (assetIds: string[]) => (assetId: string) => {
+    const click = ++latest.current;
+    void Promise.allSettled([...new Set(assetIds)].map((id) => gateway.getAsset(id))).then((results) => {
+      if (click !== latest.current) return;
+      const items = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      if (items.some((item) => item.id === assetId)) setViewer({ items, activeId: assetId });
+    });
+  };
+}
+
 export function UnknownStyleSuggestions({ privacyMode, onNavigate }: { privacyMode: boolean; onNavigate: Navigate }) {
   const { gateway } = useLibrary();
   const { page, status, loading, moreLoading, error, loadMore } = useArtistStyleSuggestionPages();
   const [viewer, setViewer] = useState<{ items: AssetSummary[]; activeId: string } | null>(null);
+  const open = useViewerOpener(setViewer);
   const groups = page?.groups ?? [];
   const showBusy = useDelayedBusy((loading && !page) || (!!status?.computing && groups.length === 0));
   if (!showBusy && !loading && !status?.computing && groups.length === 0 && !error) return null;
-  const open = (assetIds: string[]) => (assetId: string) => {
-    const unique = [...new Set(assetIds)];
-    void Promise.all(unique.map((id) => gateway.getAsset(id))).then((items) => setViewer({ items, activeId: assetId }), () => undefined);
-  };
   const remaining = Math.max(0, (page?.totalArtists ?? 0) - groups.length);
   return <details className="artist-style-suggestions" open>
     <summary className="artist-style-suggestions__summary">
@@ -239,9 +253,7 @@ function ArtistIntro({ detail, privacyMode, actions }: { detail: ArtistDetail; p
   const { summary } = detail;
   const [viewer, setViewer] = useState<{ items: AssetSummary[]; activeId: string } | null>(null);
   const { gateway } = useLibrary();
-  const open = (assetIds: string[]) => (assetId: string) => {
-    void Promise.all(assetIds.map((id) => gateway.getAsset(id))).then((items) => setViewer({ items, activeId: assetId }), () => undefined);
-  };
+  const open = useViewerOpener(setViewer);
   const manual = detail.assignments.find((entry) => entry.source === "manual");
   const stat = (label: string, value: ReactNode) => <div className="artist-stat"><span>{label}</span><strong>{value}</strong></div>;
   return <div className="artist-intro">

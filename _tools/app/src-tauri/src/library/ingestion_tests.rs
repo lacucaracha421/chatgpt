@@ -445,6 +445,65 @@
     }
 
     #[test]
+    fn favorite_cover_exact_duplicate_preserves_classification_and_metadata() {
+        let fixture = IngestionFixture::new();
+        let classification = fixture
+            .library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "original".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let IngestOutcome::Added { asset } = fixture.ingest_with_classification(&classification.id)
+        else {
+            panic!("first ingest must add an asset");
+        };
+        let classifications = fixture
+            .library
+            .get_asset_classifications(&asset.id)
+            .unwrap();
+        let stored_metadata = || {
+            fixture.library.connection().unwrap().query_row(
+                    "SELECT import_source, source_url, collected_at, creator_name FROM assets WHERE id=?1",
+                    [&asset.id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?)),
+                ).unwrap()
+        };
+        let before = stored_metadata();
+        let request = serde_json::from_value(serde_json::json!({
+            "sourcePath": fixture.source,
+            "classificationId": null,
+            "importSource": "favorite_cover",
+            "importBatchId": "00000000-0000-4000-8000-000000000002",
+            "replaceDuplicateMetadata": true,
+            "sourceUrl": "https://example.test/cover",
+            "collectedAt": "2026-08-13T04:44:55Z",
+            "creatorName": "Cover creator"
+        }))
+        .unwrap();
+
+        assert_eq!(
+            fixture.library.ingest_media(request).unwrap(),
+            IngestOutcome::ExactDuplicate {
+                existing_asset_id: asset.id.clone(),
+                classification_changed: false,
+                metadata_changed: false,
+            }
+        );
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications(&asset.id)
+                .unwrap(),
+            classifications
+        );
+        assert_eq!(before.0, "direct");
+        assert_eq!(stored_metadata(), before);
+    }
+
+    #[test]
     fn favorite_cover_import_keeps_media_without_entering_asset_lists() {
         let fixture = IngestionFixture::new();
         let request = serde_json::from_value(serde_json::json!({

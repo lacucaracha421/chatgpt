@@ -69,6 +69,16 @@ describe("day memos", () => {
     expect([...dayMemos(store.snapshot().notes, ["2026-10"]).keys()]).toEqual(["2026-10-18"]);
   });
 
+  it("keeps a cleared day cleared when an older keep-both copy of the month still has it", async () => {
+    const id = await dayMemoId("2026-10");
+    const copy = monthNote("2026-10", [{ id: "2026-10-17", text: "예전 메모" }], { id: "copy", updatedAt: "2026-09-30T00:00:00Z", conflictCopy: true });
+    const store = new NotesStore(backend([monthNote("2026-10", [{ id: "2026-10-17", text: "새 메모" }], { id }), copy]).request);
+    await store.load();
+    await writeDayMemo(store, "2026-10-17", "");
+    await store.flush();
+    expect(dayMemos(store.snapshot().notes, ["2026-10"]).has("2026-10-17")).toBe(false);
+  });
+
   it("does not create a note for an empty memo", async () => {
     const fake = backend([]);
     const store = new NotesStore(fake.request);

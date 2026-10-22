@@ -532,20 +532,24 @@ export function ClassificationSidebar({
   }
 
   function handleSidebarKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (inlineEdit || dialog || selected?.characterId || selected?.characterGroupId) return;
+    // From a tree row the shortcuts act on that row (the arrow keys move focus, not the open folder).
+    const row = (event.target as HTMLElement).closest('[role="treeitem"]');
+    const rowId = row ? [...rowRefs.current].find(([, element]) => element === row)?.[0] : undefined;
+    const target = rowId ? allEntries.find((entry) => entry.id === rowId) ?? null : selected;
+    if (inlineEdit || dialog || target?.characterId || target?.characterGroupId) return;
     const key = event.key.toLowerCase();
     if (key === "n" && event.ctrlKey && event.shiftKey && !event.altKey) {
       event.preventDefault();
       openTopLevelCreate("classification");
-    } else if (key === "n" && event.altKey && !event.ctrlKey && selected) {
+    } else if (key === "n" && event.altKey && !event.ctrlKey && target) {
       event.preventDefault();
-      openChildCreate(selected);
-    } else if (event.key === "F2" && selected) {
+      openChildCreate(target);
+    } else if (event.key === "F2" && target) {
       event.preventDefault();
-      openRename(selected);
-    } else if (event.key === "Delete" && selected) {
+      openRename(target);
+    } else if (event.key === "Delete" && target) {
       event.preventDefault();
-      openDelete(selected);
+      openDelete(target);
     }
   }
 

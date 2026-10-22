@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { cloudCommandRefused } from "../library/errorMessage";
 import type { LibraryGateway } from "../library/types";
 import { subscribeWindowFocus, windowPollDelay } from "./windowFocus";
 
@@ -12,6 +13,8 @@ export type FolderPinsReply = { version: 1; revision: number; pinnedIds: string[
 
 export const FOLDER_PINS_PENDING_KEY = "lakomics.folderPins.pending.v1";
 const POLL_MS = 60_000;
+/** The server and the PC's transport take at most this many commands per request. */
+const MAX_COMMANDS = 20;
 
 /** The commands that turn `previous` into `next` on the server. */
 export function pinCommands(previous: string[], next: string[]): FolderPinCommand[] {
@@ -69,10 +72,22 @@ export function useFolderPins(gateway: LibraryGateway, libraryRoot: string, pinn
           if (pending.current === null) pending.current = readPending();
           let reply: FolderPinsReply;
           if (pending.current.length) {
-            const sent = pending.current.length;
-            reply = await gateway.changeFolderPins!(pending.current);
-            pending.current = pending.current.slice(sent);
+            const sent = pending.current.slice(0, MAX_COMMANDS);
+            try {
+              reply = await gateway.changeFolderPins!(sent);
+            } catch (error) {
+              if (!cloudCommandRefused(error)) throw error;
+              // Resending a refused batch can never succeed: drop it so later edits still sync, and
+              // let the next round take the server's list over once the queue is empty.
+              console.warn("Folder pin changes were refused by the server and dropped.", error);
+              pending.current = pending.current.slice(sent.length);
+              writePending(pending.current);
+              rerun.current = true;
+              continue;
+            }
+            pending.current = pending.current.slice(sent.length);
             writePending(pending.current);
+            if (pending.current.length) rerun.current = true;
           } else {
             reply = await gateway.folderPins!();
             // The list was never written on the server: this PC's own pins become the shared list once.

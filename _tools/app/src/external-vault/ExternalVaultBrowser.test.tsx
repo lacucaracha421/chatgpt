@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -14,7 +14,8 @@ vi.mock("../video/readVideoDuration", () => ({ readVideoDuration: vi.fn() }));
 import { readVideoDuration } from "../video/readVideoDuration";
 import { captureVideoFrame } from "../video/captureVideoFrame";
 vi.mock("../assets/AssetGallery", () => ({
-  AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource, onVideoDurationKnown }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
+  AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource, onVideoDurationKnown, onLoadNextPage }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
+    <button onClick={() => onLoadNextPage?.()}>scroll to end</button>
     <button onClick={() => items.forEach((item: any) => onVideoDurationKnown?.(item, 5_000))}>preview lengths</button>
     {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-duration={item.media?.durationMs} data-thumbnail-revision={item.thumbnailRevision ?? ""} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
       onClick={(event) => onSelectionGesture?.(item, { toggle: event.ctrlKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
@@ -461,4 +462,33 @@ it("offers no frame thumbnail in a read-only session", async () => {
   render(<ExternalVaultBrowser gateway={gateway} status={{ ...unlocked, backupIndex: true }} onStatusChange={vi.fn()} />);
   fireEvent.doubleClick(await screen.findByRole("button", { name: "내 영상" }));
   expect(within(screen.getByLabelText("vault viewer")).queryByRole("button", { name: "frame thumbnail" })).not.toBeInTheDocument();
+});
+
+it("loads the next page once however often the gallery asks, and drops a page from the scope it left", async () => {
+  const gateway = vaultGateway();
+  const item = (id: string) => ({ ...page.items[0], id, originalFileName: `${id}.png` });
+  let finishNext!: (value: EncryptedVaultItemPage) => void;
+  vi.mocked(gateway.listEncryptedVaultItems!).mockImplementation(({ kind, offset }: any) => {
+    if (kind === "video") return Promise.resolve({ items: [item("clip")], totalCount: 1, nextOffset: null });
+    if (offset === 0) return Promise.resolve({ items: [item("first")], totalCount: 2, nextOffset: 80 });
+    return new Promise((resolve) => { finishNext = resolve; });
+  });
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await screen.findByRole("button", { name: "first.png" });
+
+  fireEvent.click(screen.getByRole("button", { name: "scroll to end" }));
+  fireEvent.click(screen.getByRole("button", { name: "scroll to end" }));
+  expect(gateway.listEncryptedVaultItems).toHaveBeenCalledTimes(2);
+  finishNext({ items: [item("second")], totalCount: 2, nextOffset: null });
+  expect(await screen.findAllByRole("button", { name: "second.png" })).toHaveLength(1);
+
+  // A next page still on its way when the filter changes must not land in the new list.
+  await userEvent.click(screen.getByRole("button", { name: "이미지" }));
+  await screen.findByRole("button", { name: "first.png" });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "second.png" })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "scroll to end" }));
+  await userEvent.click(screen.getByRole("button", { name: "영상" }));
+  await screen.findByRole("button", { name: "clip.png" });
+  await act(async () => { finishNext({ items: [item("stale")], totalCount: 2, nextOffset: null }); });
+  expect(screen.queryByRole("button", { name: "stale.png" })).not.toBeInTheDocument();
 });

@@ -40,7 +40,7 @@ export function dayMemos(notes: Note[], months: string[]): Map<string, string> {
   return memos;
 }
 
-/** Saves one day's memo (an empty text removes it). Typing coalesces through the store's debounce. */
+/** Saves one day's memo (an empty text clears it). Typing coalesces through the store's debounce. */
 export async function writeDayMemo(store: NotesStore, date: string, text: string): Promise<void> {
   const month = date.slice(0, 7);
   const id = await dayMemoId(month);
@@ -48,7 +48,9 @@ export async function writeDayMemo(store: NotesStore, date: string, text: string
   const existing = notes.find(note => note.id === id && !note.deleted) ?? monthNotes(notes, month).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const value = text.slice(0, DAY_MEMO_MAX_CHARS);
   const items = (existing?.items ?? []).filter(item => item.id !== date);
+  // A cleared day keeps an empty item while it still shows: it overrides that day in an older keep-both copy of the month.
   if (value.trim()) items.push({ id: date, text: value, checked: false, order: ORDER });
+  else if (dayMemos(notes, [month]).has(date)) items.push({ id: date, text: "", checked: false, order: ORDER });
   if (!existing) {
     if (!items.length) return;
     const now = new Date().toISOString();

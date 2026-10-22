@@ -11,6 +11,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import character_exclusions
 import classification_authority
 import classification_snapshot
 import folder_pins
@@ -107,7 +108,8 @@ def register(app, api):
 
     def projection(db):
         key = cache.key(db, api.list_generation(db), heads(db, (
-            'mobile_character_state', 'classification_snapshots', 'picker_display', 'folder_pins')))
+            'mobile_character_state', 'mobile_character_hidden_members',
+            'classification_snapshots', 'picker_display', 'folder_pins')))
         cached = cache.get(key)
         if cached is not None:
             return cached
@@ -146,9 +148,9 @@ def register(app, api):
         index = json.loads(state[0]) if state else {'nodes': []}
         navigation = {id: i for i, id in enumerate(index.get('navigationOrder', []))}
         counts = {row[0]: row[1] for row in db.execute(
-            'SELECT member.node_id,COUNT(DISTINCT asset.id) FROM mobile_character_members AS member '
-            f'JOIN visible_assets AS asset ON asset.id=member.asset_id WHERE member.filter=\'all\' AND {ELIGIBLE} '
-            'GROUP BY member.node_id')}
+            'SELECT m.node_id,COUNT(DISTINCT asset.id) FROM mobile_character_members AS m '
+            f'JOIN visible_assets AS asset ON asset.id=m.asset_id WHERE m.filter=\'all\' AND {ELIGIBLE} '
+            f'AND {character_exclusions.VISIBLE_MEMBER} GROUP BY m.node_id')}
         nodes = sorted(enumerate(index['nodes']), key=lambda pair: (
             navigation.get(pair[1]['id'], navigation.get(pair[1]['sourceId'], 20000)), pair[0]))
         characters = [dict(kind=node['kind'], id=node['sourceId'], name=node['name'],
@@ -228,8 +230,9 @@ def register(app, api):
                     if not any(node['id'] == node_id and not node.get('excluded', False)
                                and node.get('role') != 'extras' for node in nodes):
                         fail(404, 'pickerScopeNotFound')
-                    predicate = ("EXISTS(SELECT 1 FROM mobile_character_members AS member "
-                                 "WHERE member.asset_id=asset.id AND member.node_id=? AND member.filter='all')")
+                    predicate = ("EXISTS(SELECT 1 FROM mobile_character_members AS m "
+                                 "WHERE m.asset_id=asset.id AND m.node_id=? AND m.filter='all' "
+                                 f"AND {character_exclusions.VISIBLE_MEMBER})")
                     params = [node_id]
                 if exclude and order == 'random':
                     predicate += ' AND asset.id NOT IN (' + ','.join('?' for _ in exclude) + ')'

@@ -141,22 +141,28 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   }, [gateway]);
   useEffect(() => { void loadFolders(); }, [loadFolders]);
 
+  // Each first load starts a generation; a reply from an older one (another folder or filter) is dropped.
+  const generation = useRef(0);
+  const requestedNext = useRef<{ token: number; offset: number } | null>(null);
   const loadFirst = useCallback(async () => {
+    const token = ++generation.current;
     setLoading(true);
     setError(null);
     try {
       const page = await listItems({ kind, offset: 0, limit: PAGE_SIZE, ...scopeFilter(scope, trashView) });
+      if (token !== generation.current) return;
       setItems(page.items.map(toAssetSummary));
       setItemFolders(new Map(page.items.map((item) => [item.id, item.folderId ?? null])));
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
     } catch (cause) {
+      if (token !== generation.current) return;
       setItems([]);
       setNextOffset(null);
       setTotalCount(0);
       setError(commandErrorMessage(cause, "비밀 보관함을 불러오지 못했습니다."));
     } finally {
-      setLoading(false);
+      if (token === generation.current) setLoading(false);
     }
   }, [kind, listItems, trashView, scope]);
 
@@ -165,15 +171,24 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   useEffect(() => { setSelection((current) => reconcileSelection(current, itemIds)); }, [itemIds]);
 
   const loadNext = useCallback(async () => {
+    // The gallery asks on every scroll event near the end, also from a render that has not seen the
+    // last page yet: each offset is requested once per generation (again only after a failure).
+    const token = generation.current;
     if (nextOffset === null) return;
+    const requested = requestedNext.current;
+    if (requested && requested.token === token && requested.offset === nextOffset) return;
+    const request = { token, offset: nextOffset };
+    requestedNext.current = request;
     try {
       const page = await listItems({ kind, offset: nextOffset, limit: PAGE_SIZE, ...scopeFilter(scope, trashView) });
+      if (token !== generation.current) return;
       setItems((current) => [...current, ...page.items.map(toAssetSummary)]);
       setItemFolders((current) => new Map([...current, ...page.items.map((item) => [item.id, item.folderId ?? null] as const)]));
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
     } catch (cause) {
-      setError(commandErrorMessage(cause, "다음 항목을 불러오지 못했습니다."));
+      if (requestedNext.current === request) requestedNext.current = null;
+      if (token === generation.current) setError(commandErrorMessage(cause, "다음 항목을 불러오지 못했습니다."));
     }
   }, [kind, listItems, nextOffset, trashView, scope]);
 

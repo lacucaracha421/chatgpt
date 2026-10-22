@@ -534,6 +534,14 @@ impl Library {
         }
         let expected: String = self.connection()?.query_row("SELECT content_hash FROM assets WHERE id=?1", [&existing_asset_id], |r| r.get(0))?;
         if actual != expected { return Err(LibraryError::DuplicateOriginalCorrupt); }
+        // Selecting existing artwork as a cover must not edit the library asset.
+        if request.import_source == ImportSource::FavoriteCover {
+            return Ok(IngestOutcome::ExactDuplicate {
+                existing_asset_id,
+                classification_changed: false,
+                metadata_changed: false,
+            });
+        }
         let current_ids = self
             .get_asset_classifications(&existing_asset_id)?
             .into_iter()

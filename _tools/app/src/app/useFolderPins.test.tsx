@@ -76,3 +76,25 @@ it("keeps an edit made while the server is unreachable and sends it on the next 
   expect(localStorage.getItem(FOLDER_PINS_PENDING_KEY)).toBeNull();
   expect(view.result.current.pins).toEqual(["a", "b"]);
 });
+
+it("sends a long offline queue in batches the server accepts, and drops a refused batch", async () => {
+  vi.useFakeTimers();
+  const queued = Array.from({ length: 25 }, (_, index) => ({ op: "add", ids: [`f${index}`] }));
+  localStorage.setItem(FOLDER_PINS_PENDING_KEY, JSON.stringify(queued));
+  const folderPins = vi.fn().mockResolvedValue(reply(9, ["server"]));
+  const changeFolderPins = vi.fn().mockImplementation((commands: unknown[]) => commands.length > 20
+    ? Promise.reject({ code: "invalid_cloud_response" }) : Promise.resolve(reply(5, ["a"])));
+  mount(["a"], folderPins, changeFolderPins);
+  await settle();
+  expect(changeFolderPins.mock.calls.map(([commands]) => commands.length)).toEqual([20, 5]);
+  expect(localStorage.getItem(FOLDER_PINS_PENDING_KEY)).toBeNull();
+
+  const refused = vi.fn().mockRejectedValue({ code: "cloud_asset_registration_rejected", message: "클라우드 자산 등록이 거부됐습니다: HTTP 422" });
+  localStorage.setItem(FOLDER_PINS_PENDING_KEY, JSON.stringify([{ op: "add", ids: ["b"] }]));
+  cleanup();
+  const view = mount(["a"], folderPins, refused);
+  await settle();
+  expect(refused).toHaveBeenCalledTimes(1);
+  expect(localStorage.getItem(FOLDER_PINS_PENDING_KEY)).toBeNull();
+  expect(view.result.current.pins).toEqual(["server"]);
+});

@@ -167,6 +167,24 @@ class PickerTests(unittest.TestCase):
         self.client.put('/v1/picker/display', headers=self.headers(self.publisher), json=data)
         self.assertFalse(any(row['pinned'] for row in self.folders()['entries']))
 
+    def test_hidden_character_members_are_not_counted_or_selected_but_remain_in_folders(self):
+        # Warm navigation first: a correction must also invalidate cached counts.
+        self.assertEqual([row['imageCount'] for row in self.folders()['characters']], [2, 1])
+        with api.get_db() as db:
+            db.executemany("INSERT INTO mobile_character_hidden_members VALUES(?,'all','a')",
+                           [('character:c',), ('group:g',)])
+            db.commit()
+        self.assertEqual([(row['id'], row['imageCount']) for row in self.folders()['characters']],
+                         [('g', 1), ('c', 0)])
+        for kind, id, expected in [('character', 'c', set()), ('group', 'g', {'extra'})]:
+            for order in ['random', 'newest']:
+                response = self.batch(scope={'kind': kind, 'id': id}, order=order)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual({row['assetId'] for row in response.json()['items']}, expected)
+        self.assertEqual(next(row['imageCount'] for row in self.folders()['entries']
+                              if row['id'] == 's'), 1)
+        self.assertEqual({row['assetId'] for row in self.batch(folderId='s').json()['items']}, {'a'})
+
     def test_pins_made_on_any_device_replace_the_published_pins(self):
         with api.get_db() as db:
             db.executescript(folder_pins.DDL)

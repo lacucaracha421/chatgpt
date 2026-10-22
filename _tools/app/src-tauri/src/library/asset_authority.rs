@@ -33,6 +33,32 @@ pub(crate) struct AssetProjection {
     pub updated_at: String,
 }
 impl AssetProjection {
+    fn materialization_media(&self) -> Result<(u64, &'static str), LibraryError> {
+        let size = self
+            .size_bytes
+            .filter(|size| *size > 0)
+            .ok_or(LibraryError::InvalidCloudResponse)?;
+        let content = self
+            .content_type
+            .as_deref()
+            .ok_or(LibraryError::InvalidCloudResponse)?;
+        let (extension, video) = match content {
+            "image/png" => ("png", false),
+            "image/jpeg" => ("jpg", false),
+            "image/webp" => ("webp", false),
+            "image/gif" => ("gif", false),
+            "video/mp4" => ("mp4", true),
+            "video/webm" => ("webm", true),
+            "video/quicktime" => ("mov", true),
+            _ => return invalid(),
+        };
+        // Ingestion bounds image bytes; supported videos have no size cap.
+        if !video && size > super::ingestion::MAX_IMAGE_BYTES {
+            return invalid();
+        }
+        Ok((size, extension))
+    }
+
     fn validate(&self) -> Result<(), LibraryError> {
         if self.asset_id.is_empty()
             || self.asset_id.len() > 128
@@ -1309,23 +1335,7 @@ impl Library {
             params![digest, p.asset_id], |r| r.get(0),
         )?;
         if conflict { return invalid(); }
-        let size = p
-            .size_bytes
-            .filter(|size| *size > 0 && *size <= 512 * 1024 * 1024)
-            .ok_or(LibraryError::InvalidCloudResponse)?;
-        let content = p
-            .content_type
-            .as_deref()
-            .ok_or(LibraryError::InvalidCloudResponse)?;
-        let extension = match content {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/webp" => "webp",
-            "image/gif" => "gif",
-            "video/mp4" => "mp4",
-            "video/webm" => "webm",
-            _ => return invalid(),
-        };
+        let (size, extension) = p.materialization_media()?;
         // UUID-named local TEMP; no server-provided path is ever joined to the library.
         let directory = self.root().join("assets/.staging");
         fs::create_dir_all(&directory).map_err(|_| LibraryError::CloudCaptureStagingFailed)?;

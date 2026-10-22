@@ -394,9 +394,11 @@ export function AssetViewer({
       if (event.key === "ArrowLeft") { event.preventDefault(); move(previous); }
       if (event.key === "ArrowRight") { event.preventDefault(); move(next); }
       if ((event.ctrlKey || event.metaKey) && event.key === "0") { event.preventDefault(); setZoom({ scale: 1, x: 0, y: 0 }); return; }
-      if (event.key.toLowerCase() === "f") { event.preventDefault(); if (onToggleFavorite) { if (favoriteButtonRef.current) popToggle(favoriteButtonRef.current, !asset.favorite); onToggleFavorite(asset); } }
-      if (event.key.toLowerCase() === "i" && renderInfo) { event.preventDefault(); setInfoOpen((open) => !open); }
-      if (event.key === "Delete") { event.preventDefault(); onTrash?.(asset); }
+      // Single-key shortcuts only: Ctrl+F (the old Find), Ctrl+I and the like must not toggle anything.
+      const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
+      if (plain && event.key.toLowerCase() === "f") { event.preventDefault(); if (onToggleFavorite) { if (favoriteButtonRef.current) popToggle(favoriteButtonRef.current, !asset.favorite); onToggleFavorite(asset); } }
+      if (plain && event.key.toLowerCase() === "i" && renderInfo) { event.preventDefault(); setInfoOpen((open) => !open); }
+      if (plain && event.key === "Delete") { event.preventDefault(); onTrash?.(asset); }
     }}
   >
     <div

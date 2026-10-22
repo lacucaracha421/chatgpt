@@ -13,8 +13,10 @@ export function useExchange(configured: boolean, endpoint: string, open: boolean
     setSnapshot(null);
     if (!configured) return;
     let active = true;
-    void native<ExchangeSnapshot>('exchangeState').then(value => { if (active) setSnapshot(value); }).catch(() => {});
-    const onState = (event: Event) => { const detail = (event as CustomEvent<ExchangeSnapshot>).detail; if (detail) setSnapshot(detail); };
+    // A snapshot pushed while the first read is on its way is newer than that read.
+    let pushed = false;
+    void native<ExchangeSnapshot>('exchangeState').then(value => { if (active && !pushed) setSnapshot(value); }).catch(() => {});
+    const onState = (event: Event) => { const detail = (event as CustomEvent<ExchangeSnapshot>).detail; if (detail) { pushed = true; setSnapshot(detail); } };
     const onArrived = (event: Event) => {
       const detail = (event as CustomEvent<ExchangeArrival>).detail;
       if (detail?.count) setToast({text: arrivalText(detail), key: Date.now()});

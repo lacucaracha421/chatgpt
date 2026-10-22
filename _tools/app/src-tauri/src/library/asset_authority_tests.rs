@@ -4,6 +4,46 @@
     const ID: &str = "80000000-0000-4000-8000-000000000001";
 
     #[test]
+    fn materialization_accepts_mov_and_large_videos_but_keeps_image_bound() {
+        let mut projection = asset(&media());
+        projection.kind = Some("video".into());
+        for (mime, extension, size) in [
+            ("video/quicktime", "mov", 1024),
+            (
+                "video/mp4",
+                "mp4",
+                super::super::ingestion::MAX_IMAGE_BYTES + 1,
+            ),
+            (
+                "video/webm",
+                "webm",
+                super::super::ingestion::MAX_IMAGE_BYTES + 1,
+            ),
+            (
+                "video/quicktime",
+                "mov",
+                super::super::ingestion::MAX_IMAGE_BYTES + 1,
+            ),
+        ] {
+            projection.content_type = Some(mime.into());
+            projection.size_bytes = Some(size);
+            projection.validate().unwrap();
+            assert_eq!(
+                projection.materialization_media().unwrap(),
+                (size, extension)
+            );
+        }
+        projection.kind = Some("image".into());
+        projection.content_type = Some("image/png".into());
+        assert!(projection.materialization_media().is_err());
+        projection.size_bytes = Some(super::super::ingestion::MAX_IMAGE_BYTES);
+        assert_eq!(
+            projection.materialization_media().unwrap(),
+            (super::super::ingestion::MAX_IMAGE_BYTES, "png")
+        );
+    }
+
+    #[test]
     fn image_text_projection_defaults_false_and_accepts_future_fields() {
         let mut raw = serde_json::to_value(asset(&media())).unwrap();
         raw.as_object_mut().unwrap().remove("hasImageText");

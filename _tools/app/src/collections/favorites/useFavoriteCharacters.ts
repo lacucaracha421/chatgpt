@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { subscribeWindowFocus, windowPollDelay } from "../../app/windowFocus";
-import { commandErrorMessage } from "../../library/errorMessage";
+import { cloudCommandRefused, commandErrorMessage } from "../../library/errorMessage";
 import type { FavoriteCharacters, FavoriteCommand, LibraryGateway } from "../../library/types";
 import { isManualFavorite } from "./model";
 
@@ -43,20 +43,22 @@ function createStore(gateway: LibraryGateway, root: string) {
           if (!gateway.favoriteCharacters) throw new Error("캐릭터 목록을 사용할 수 없습니다.");
           if (pending.length) {
             if (!gateway.changeFavoriteCharacters) throw new Error("캐릭터 목록을 사용할 수 없습니다.");
-            const sent = pending.slice(0, 20);
+            // A link travels alone: its collision refuses the whole batch and must not take other edits with it.
+            const link = pending.findIndex(command => command.op === "link");
+            const sent = pending.slice(0, link === 0 ? 1 : link > 0 ? Math.min(link, 20) : 20);
             try {
               const reply = await gateway.changeFavoriteCharacters(sent);
               pending = pending.slice(sent.length); writePending();
               document = reply;
               adopt(applyCommands(reply, pending));
             } catch (error) {
-              if (!error || typeof error !== "object" || !("code" in error) || error.code !== "favoriteCharacterExists") throw error;
-              // A link collision rejects the whole batch. It must not poison the offline queue or keep the optimistic id.
+              if (!cloudCommandRefused(error)) throw error;
+              // Resending a refused batch can never succeed. Drop it (and its optimistic change) so later edits still save.
               sent.forEach(command => rejected.add(command));
               pending = pending.slice(sent.length); writePending();
               try { document = await gateway.favoriteCharacters(); } catch { /* Keep the last confirmed document until the next read. */ }
               if (document) adopt(applyCommands(document, pending));
-              publish({ error: "이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요." });
+              publish({ error: refusalMessage(error) });
             }
             if (pending.length) again = true;
           } else {
@@ -81,6 +83,14 @@ function createStore(gateway: LibraryGateway, root: string) {
     return !commands.some(command => rejected.has(command));
   };
   return { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, refresh, change };
+}
+
+function refusalMessage(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+  if (code === "favoriteCharacterExists") return "이미 추가된 캐릭터입니다. 다른 캐릭터를 선택하세요.";
+  // The tablet may have filled the list since this PC last read it.
+  if (code === "cloud_object_key_conflict") return "캐릭터는 300명까지 추가할 수 있습니다. 목록을 다시 불러왔습니다.";
+  return "서버가 캐릭터 목록 변경을 거부해 되돌렸습니다.";
 }
 
 export function applyCommands(document: FavoriteCharacters, commands: FavoriteCommand[]): FavoriteCharacters {

@@ -45,26 +45,18 @@ class CoverVisibilityTests(unittest.TestCase):
 
 
 class FavoriteCharactersTests(unittest.TestCase):
-    def test_legacy_manual_cover_upgrade_keeps_normal_character_asset_visible(self):
+    def test_manual_cover_preserves_direct_asset_import_source(self):
         with self.get_db() as db:
             db.execute("CREATE TABLE assets(id TEXT PRIMARY KEY, import_source TEXT)")
-            db.executemany("INSERT INTO assets VALUES(?, 'direct')", [("manual-cover",), ("normal-cover",)])
+            db.execute("INSERT INTO assets VALUES('existing-image', 'direct')")
             db.commit()
-        self.send({"op": "create", "id": "manual-old", "name": "Manual"},
-                  {"op": "update", "id": "manual-old", "set": {"coverAssetId": "manual-cover"}},
-                  {"op": "add", "ids": ["normal"]},
-                  {"op": "update", "id": "normal", "set": {"coverAssetId": "normal-cover"}})
-        # Simulate the existing pre-marker document at process startup.
+        self.send({"op": "create", "id": "manual-new", "name": "Manual"},
+                  {"op": "update", "id": "manual-new", "set": {"coverAssetId": "existing-image"}})
+        # A replay also exercises the path with an already stored manual cover.
+        self.send({"op": "update", "id": "manual-new", "set": {"coverAssetId": "existing-image"}})
         with self.get_db() as db:
-            db.execute("UPDATE assets SET import_source='direct'")
-            favorite_characters.mark_manual_covers(db, favorite_characters._stored(db)[1])
-            favorite_characters.mark_manual_covers(db, favorite_characters._stored(db)[1])
-            db.commit()
-        self.send({"op": "link", "id": "manual-old", "characterId": "linked"})
-        with self.get_db() as db:
-            asset_visibility.install(db)
-            self.assertEqual([row[0] for row in db.execute("SELECT id FROM visible_assets")], ["normal-cover"])
-            self.assertEqual(db.execute("SELECT count(*) FROM media_assets").fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT import_source FROM assets WHERE id='existing-image'")
+                             .fetchone()[0], "direct")
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

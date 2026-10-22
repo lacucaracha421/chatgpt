@@ -49,16 +49,16 @@ export function DayMemo({ date, store, saved, conflict, unavailable, syncing, on
   const [draft, setDraft] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const save = () => {
+  const save = (): Promise<void> => {
     clearTimeout(timer.current);
     timer.current = undefined;
-    if (draftRef.current === null || !store) return;
-    void writeDayMemo(store, date, draftRef.current);
+    if (draftRef.current === null || !store) return Promise.resolve();
+    return writeDayMemo(store, date, draftRef.current);
   };
   const saveRef = useRef(save);
   useLayoutEffect(() => { saveRef.current = save; });
   // Changing the day (the panel is keyed by date) or leaving Home saves what is typed.
-  useEffect(() => () => saveRef.current(), []);
+  useEffect(() => () => { void saveRef.current(); }, []);
   useEffect(() => {
     if (draft !== null && timer.current === undefined && (draft.trim() ? draft : "") === saved) { draftRef.current = null; setDraft(null); }
   }, [draft, saved]);
@@ -72,7 +72,7 @@ export function DayMemo({ date, store, saved, conflict, unavailable, syncing, on
     <SectionLabel title="메모" />
     <div>
       <textarea className="ui-text-input home-day__memo" rows={3} spellCheck={false} maxLength={DAY_MEMO_MAX_CHARS} aria-label={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 메모`}
-        value={draft ?? saved} disabled={unavailable} onChange={event => change(event.target.value)} onBlur={() => { save(); void store?.finish(); }} />
+        value={draft ?? saved} disabled={unavailable} onChange={event => change(event.target.value)} onBlur={() => { void save().finally(() => store?.finish()); }} />
       {unavailable && <div className="home-qmemo__status" role="status">
         <span>메모를 열어야 쓸 수 있습니다</span>
         <Button variant="quiet" size="sm" onClick={onOpenNotes}>메모 열기</Button>
