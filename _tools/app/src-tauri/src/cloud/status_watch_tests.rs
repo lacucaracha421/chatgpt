@@ -25,6 +25,7 @@ pub(crate) fn logs(bindings_last: i64, captures_pending: i64) -> PublisherLogs {
         character_review_decisions: Some(4),
         similarity_decisions: Some(5),
         catalog_duplicate_decisions: Some(6),
+        catalog_representatives: None,
         release_reads: Some(ReleaseReadsHead {
             last: 7,
             pruned_through: 2,

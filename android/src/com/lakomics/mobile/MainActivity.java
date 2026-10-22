@@ -87,6 +87,13 @@ public final class MainActivity extends Activity {
   try{start.get(5,TimeUnit.SECONDS);}
   catch(java.util.concurrent.ExecutionException e){if(e.getCause() instanceof ActivityNotFoundException)throw new ExchangeService.UserError("이 파일을 열 수 있는 앱이 없습니다.");throw new IOException("Cannot open");}
  }
+ /** Opens the share sheet unless the viewer that asked has already gone (its request was cancelled). */
+ private void startChooser(Intent chooser,CancellationSignal signal)throws Exception{
+  FutureTask<Void> start=new FutureTask<>(()->{signal.throwIfCanceled();startActivity(chooser);return null;});
+  runOnUiThread(start);
+  try{start.get(5,TimeUnit.SECONDS);}
+  catch(java.util.concurrent.ExecutionException e){if(e.getCause() instanceof OperationCanceledException)throw (OperationCanceledException)e.getCause();if(e.getCause() instanceof ActivityNotFoundException)throw new ExchangeService.UserError("공유할 수 있는 앱이 없습니다.");throw new IOException("Cannot share");}
+ }
  // Metering follows the WebView warm-up policy; native also fences queued work on pause.
  private boolean ticketWarmAllowed(){return foreground&&batteryAllowsWarm();}
  private JSONObject batteryState()throws JSONException{
@@ -435,6 +442,8 @@ public final class MainActivity extends Activity {
      case "exchangeRetry":exchange().retry(p.getString("transferId"));data=exchange().snapshot();break;
      case "exchangeCancel":exchange().cancel(p.getString("transferId"));data=exchange().snapshot();break;
      case "exchangeOpen":openExchange(p.getString("transferId"));data=new JSONObject();break;
+     case "assetSave":data=AssetExport.save(MainActivity.this,media,p.getString("assetId"),p.optString("mime"),signal);break;
+     case "assetShare":startChooser(AssetExport.share(media,p.getString("assetId"),p.optString("mime"),signal),signal);data=new JSONObject();break;
      case "exchangeThumbnail":data=exchange().thumbnail(p.getString("transferId"));break;
      case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;

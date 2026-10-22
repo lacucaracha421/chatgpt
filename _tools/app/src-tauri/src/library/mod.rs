@@ -44,6 +44,7 @@ mod catalog_counts;
 pub(crate) mod catalog_duplicate_sync;
 mod catalog_group_api;
 mod catalog_group_identity;
+mod catalog_representative_sync;
 mod catalog_group_query;
 mod catalog_groups;
 mod catalog_lineage;

@@ -4,7 +4,7 @@ import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SyntheticEvent} from 'react';
 import {displayCount,displayDateTime} from '../src/shared/displayDate';
-import {LanguageIcon, ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {LanguageIcon, ArrowLeftIcon, ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, RectangleStackIcon, ShareIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
@@ -35,6 +35,8 @@ import {useDisplayedImage} from '../src/shared/viewer/useDisplayedImage';
 import {useImageText} from '../src/shared/viewer/useImageText';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {createImageTextGateway} from './imageText';
+import {useAssetExport} from './assetExport';
+import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
 import './Viewer.css';
 
 /**
@@ -67,8 +69,8 @@ function viewerDateLabel(value?: string): string {
  * A viewer bar action that names itself with an icon and keeps the existing accessible name.
  * `name` is used where the established name is longer than the short action label.
  */
-function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
-  return <Button type="button" size="icon" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
+function ViewerAction({label, name, icon: Icon, active, danger, disabled, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; disabled?: boolean; onClick(): void}) {
+  return <Button type="button" size="icon" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} disabled={disabled} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
 export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedOn' | 'textOpen' | 'setTextOpen' | 'textGateway'>) {
   const [textOpen, setTextOpen] = useState(false);
@@ -402,6 +404,12 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     });
   };
   const imageSrc = original || (!vault ? decoded?.url : undefined) || asset.preview;
+  // 저장/공유 of the original: ordinary Library Assets only (not vault media, pending captures or a privacy-masked view).
+  const exporter = useAssetExport();
+  const exportable = !vault && !privacy && !asset.pending;
+  const exportBusy = useDelayedBusy(exporter.running !== null, {delay: 400});
+  const exportToast = useMotionSurface('toast');
+  const exportText = exportBusy ? (exporter.running === 'save' ? '원본을 저장하는 중…' : '공유할 원본을 준비하는 중…') : exporter.notice?.text;
   const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
   const filmstripVisible = !halfSheet && !vault && items.length > 1 && !videoPlaying && (chrome || asset.kind === 'video');
   return <ImageTextContext value={imageText}><Dialog open title="미디어 감상" variant="fullscreen" onClose={() => {if (!notesRef.current?.dismissCard()) motion.close();}} onKeyDown={event => {
@@ -431,6 +439,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 빼기`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
             {likes.available&&<IconButton className="viewer-action viewer-action--like" tone="heart" pop label="좋아요" icon={HeartIcon} activeIcon={HeartSolidIcon} active={likes.liked.has(asset.id)} data-toggle-key={asset.id} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}/>}
             <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); if (info) setTextOpen?.(false); revealChrome();}}/>
+            {exportable&&<ViewerAction label="저장" name="원본 저장" icon={ArrowDownTrayIcon} disabled={exporter.running!==null} onClick={() => {revealChrome();exporter.run('save',asset);}}/>}
+            {exportable&&<ViewerAction label="공유" name="원본 공유" icon={ShareIcon} disabled={exporter.running!==null} onClick={() => {revealChrome();exporter.run('share',asset);}}/>}
             {onTrash&&!asset.pending&&<ViewerAction label="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false); setTextOpen?.(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}
         </div>
@@ -526,6 +536,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
       {trashNotice}
+      {exportText&&<div className="trash-snackbar viewer-export-notice" role={exporter.notice?.failed&&!exportBusy?'alert':'status'} ref={exportToast} data-state="open"><span>{exportText}</span></div>}
       {info&&!landscape&&<BottomSheet title="미디어 정보" reading={halfSheet} onClose={closeInfo}><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo} classifications={classifications} onArtist={onArtist} onOpenAsset={openFromInfo}/></BottomSheet>}
       </>}
     </div>

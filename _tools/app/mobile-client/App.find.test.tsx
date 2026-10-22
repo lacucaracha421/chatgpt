@@ -15,7 +15,7 @@ vi.mock('./Artists',()=>({
   Artists:({initialArtist}:{initialArtist?:LibraryArtist})=><section aria-label="artist-screen">{initialArtist?.id}</section>,
   HiddenArtists:()=>null,ArtistImage:()=>null,EmptyArtists:()=>null,
 }));
-vi.mock('./Settings',()=>({Settings:()=> <section aria-label="settings-screen"/>}));
+vi.mock('./Settings',()=>({Settings:({section}:{section?:{id:string}|null})=> <section aria-label="settings-screen">{section?.id}</section>}));
 vi.mock('./Catalog',()=>({Catalog:({active}:{active:boolean})=>active?<section aria-label="catalog-screen"/>:null}));
 import {App} from './App';
 const back=()=>act(()=>{window.dispatchEvent(new Event('lakomics-back'));});
@@ -51,6 +51,18 @@ it.each([
   fireEvent.click(options.find(option=>option.textContent?.startsWith(query))!);
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
   expect((await screen.findByLabelText(region)).textContent).toContain(text);
+});
+it.each([['설정 › 저장 공간','storage'],['설정 › 화면','display']])('a find pick %s opens Settings at that group',async(label,section)=>{
+  await start(label);
+  fireEvent.click((await screen.findAllByRole('option')).find(option=>option.textContent?.startsWith(label))!);
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
+  expect((await screen.findByLabelText('settings-screen')).textContent).toBe(section);
+});
+it('a find pick of a More tool runs the same action as 더보기',async()=>{
+  await start('미분류');
+  fireEvent.click((await screen.findAllByRole('option')).find(option=>option.textContent?.startsWith('미분류'))!);
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'찾기'})).toBeNull());
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>typeof path==='string'&&path.includes('unclassified'))).toBe(true));
 });
 it('a find pick 링크 보관 opens the link sheet over the current screen and closes the sheet',async()=>{
   await start('링크');const options=await screen.findAllByRole('option');

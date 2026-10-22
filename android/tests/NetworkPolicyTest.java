@@ -270,6 +270,11 @@ public final class NetworkPolicyTest {
  // Home release calendar reads, the wishlist intent command and the Home cover ticket.
  for(String path:new String[]{"/v1/home/upcoming"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  pass(()->NetworkPolicy.api("/v1/home/upcoming/wishlist","POST"));
+ for(String path:new String[]{"/v1/mobile-catalog/representatives","/v1/home/link-preview"}){
+  pass(()->NetworkPolicy.api(path,"POST"));
+  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ }
+ for(String path:new String[]{"/v1/mobile-catalog/representatives/pending","/v1/mobile-catalog/representatives/acknowledge","/v1/mobile-catalog/representatives/","/v1/home/link-preview/","/v1/home/link-previewx"})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(path,method));
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/home/upcoming/wishlist",method));
  String homeCover="/v1/home/covers/"+"a".repeat(64)+"/media-ticket";
  pass(()->NetworkPolicy.api(homeCover,"POST"));

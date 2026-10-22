@@ -17,6 +17,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
+import catalog_representatives
 import manga_index
 import catalog_duplicates
 import conditional
@@ -196,6 +197,8 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         catalog_bookmarks.startup(get_db)
         manga_index.startup(get_db)
         api_auth.startup(get_db)
+        with get_db() as db:
+            catalog_representatives.startup_db(db)
     lifecycle(app).on_startup(startup)
     def root():
         return Path(artifact_root()).resolve()
@@ -276,7 +279,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
             finally:
                 db.rollback()
-        return conditional.json_response({"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1, "suggestions": True}}, if_none_match)
+        return conditional.json_response({"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1, "suggestions": True, "representativeWrite": True}}, if_none_match)
 
     @app.post(PREFIX + "/bookmark-authority/activate")
     async def activate(request: Request, authorization: str | None = Header(default=None)):
@@ -723,9 +726,13 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 if result is None:
                     replica.fail(404)
                 result.update(publicationRevision=publication["revision"], nextCursor=token(payload, "editions", group=group_id, offset=offset+q["limit"]) if offset+q["limit"] < result["totalCount"] else None)
-                return result
         except sqlite3.Error as exc:
             unavailable(exc)
+        # A tablet representative choice the PC has not applied yet (PC 반영 대기).
+        with get_db() as control:
+            result["representativePending"] = catalog_representatives.pending_for(control, group_id, result["groupId"])
+        return result
+    catalog_representatives.register(app, get_db, root, require_client, require_publisher, on_published=pruner.trigger)
     if refresh_fetcher is not None:
         from mobile_catalog_refresh import register_refresh
         register_refresh(app, get_db, root, require_client, refresh_fetcher, on_published=pruner.trigger)

@@ -102,6 +102,7 @@ pub(crate) enum LogKind {
     CharacterReviewDecisions,
     SimilarityDecisions,
     CatalogDuplicateDecisions,
+    CatalogRepresentatives,
     ReleaseReads,
     UpcomingIntents,
     ArtistIntents,
@@ -142,6 +143,7 @@ impl Head {
             LogKind::CharacterReviewDecisions => Self::Sequence(logs.character_review_decisions?),
             LogKind::SimilarityDecisions => Self::Sequence(logs.similarity_decisions?),
             LogKind::CatalogDuplicateDecisions => Self::Sequence(logs.catalog_duplicate_decisions?),
+            LogKind::CatalogRepresentatives => Self::Sequence(logs.catalog_representatives?),
             LogKind::PersonalEdits => Self::Sequence(logs.personal_edits?),
             LogKind::UpcomingIntents => {
                 let head = logs.upcoming_intents?;

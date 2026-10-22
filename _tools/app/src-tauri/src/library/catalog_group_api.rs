@@ -583,6 +583,31 @@ mod tests {
         ));
     }
     #[test]
+    fn tablet_representative_choices_apply_in_order_and_skip_unknown_groups() {
+        use crate::cloud::client::CatalogRepresentativeChoice;
+        let (_root, library) = fixture();
+        library.prepare_online_catalog_counts().unwrap();
+        let id = group(&library, 1);
+        let choice = |sequence, group_id: &str, selected: Option<&str>| CatalogRepresentativeChoice {
+            sequence,
+            group_id: group_id.into(),
+            selected_provider_work_id: selected.map(str::to_owned),
+        };
+        let applied = library
+            .apply_catalog_representative_choices(&[
+                choice(1, &id, Some("2")),
+                choice(2, "missing-group", Some("1")),
+                choice(3, &id, Some("1")),
+            ])
+            .unwrap();
+        assert!(applied);
+        let editions = library.get_catalog_group_editions(editions_query(id.clone())).unwrap();
+        assert_eq!(editions.selected_provider_work_id.as_deref(), Some("1"));
+        library.apply_catalog_representative_choices(&[choice(4, &id, None)]).unwrap();
+        let editions = library.get_catalog_group_editions(editions_query(id)).unwrap();
+        assert_eq!(editions.selected_provider_work_id, None);
+    }
+    #[test]
     fn catalog_group_api_lazy_editions_manual_visibility_and_provider_validation() {
         let (_root, library) = fixture();
         library.prepare_online_catalog_counts().unwrap();

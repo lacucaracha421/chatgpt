@@ -38,3 +38,20 @@ it.each(['conflict','readOnly','concealed'])('rejects deletion when the latest n
   expect(f.edit).not.toHaveBeenCalled();
 });
 
+it('fills a newly kept link with the server preview without replacing other edits',async()=>{
+  const f=fixture();
+  let resolve:(value:{title:string;siteName:string;imageUrl:string})=>void=()=>{};
+  const previews={preview:vi.fn(()=>new Promise<{title:string;siteName:string;imageUrl:string}>(done=>{resolve=done;}))};
+  render(<TabletLinks store={f.store} root="test" privacy={false} onOpenNotes={vi.fn()} previews={previews}/>);
+  const input=screen.getByRole('textbox',{name:'URL 붙여넣기'});
+  fireEvent.change(input,{target:{value:'https://new.example/post'}});
+  fireEvent.submit(input.closest('form')!);
+  expect(parseLinks(f.snapshot().notes[0].body)[0]).toMatchObject({url:'https://new.example/post',title:'new.example'});
+  // Another device deletes a link while the preview is read.
+  f.replace({notes:[{...f.snapshot().notes[0],body:serializeLinks(parseLinks(f.snapshot().notes[0].body).filter(link=>link.url!=='https://b.example/'))}]});
+  await waitFor(()=>expect(previews.preview).toHaveBeenCalledWith('https://new.example/post'));
+  resolve({title:'새 글',siteName:'예제',imageUrl:'https://new.example/cover.jpg'});
+  await waitFor(()=>expect(parseLinks(f.snapshot().notes[0].body)[0]).toMatchObject({title:'새 글',siteName:'예제',imageUrl:'https://new.example/cover.jpg'}));
+  expect(parseLinks(f.snapshot().notes[0].body).map(link=>link.url)).toEqual(['https://new.example/post','https://a.example/']);
+  expect(previews.preview).toHaveBeenCalledTimes(1);
+});

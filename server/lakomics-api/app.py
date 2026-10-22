@@ -913,6 +913,9 @@ def _home_client(authorization):
 
 lifecycle(app).on_startup(home_upcoming.register(app, get_db, _home_client, require_publisher))
 lifecycle(app).on_startup(library_artists.register(app, get_db, _home_client, require_publisher))
+# Kept-link previews for the tablet (parity U02); bounded public HTTPS reads only.
+import link_preview
+link_preview.register(app, _home_client)
 
 # Tablet read projections (parity batch D): same-post strip, artist 다시보기, statistics.
 import library_artist_rediscovery
@@ -997,6 +1000,7 @@ if EXCHANGE_ENABLED:
     lifecycle(app).on_startup(_exchange_sweeper.start)
     lifecycle(app).on_shutdown(_exchange_sweeper.stop)
 
+import catalog_representatives
 import character_exclusions
 import character_review
 import collection_bindings
@@ -1018,6 +1022,7 @@ def publisher_log_heads(db):
             "characterReviewDecisions": character_review.status_head(db),
             "similarityDecisions": similarity_review.status_head(db),
             "catalogDuplicateDecisions": catalog_duplicates.status_head(db),
+            "catalogRepresentatives": catalog_representatives.status_head(db),
             "releaseReads": collection_releases.status_head(db),
             "bindings": collection_bindings.status_head(db),
             "personalEdits": collection_personal_edits.status_head(db),

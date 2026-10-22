@@ -391,11 +391,11 @@ class RealAppStatusTests(unittest.TestCase):
         logs = body["publisherLogs"]
         self.assertEqual(set(logs), {"characterExclusions", "characterReviewDecisions", "similarityDecisions",
                                      "catalogDuplicateDecisions", "releaseReads", "bindings", "personalEdits",
-                                     "captures", "upcomingIntents", "artistIntents"})
+                                     "captures", "upcomingIntents", "artistIntents", "catalogRepresentatives"})
         self.assertEqual(logs["upcomingIntents"], {"last": 0, "acknowledgedThrough": 0, "prunedThrough": 0})
         self.assertEqual(logs["artistIntents"], {"last": 0, "acknowledgedThrough": 0, "prunedThrough": 0})
         for name in ("characterExclusions", "characterReviewDecisions", "similarityDecisions",
-                     "catalogDuplicateDecisions", "personalEdits"):
+                     "catalogDuplicateDecisions", "personalEdits", "catalogRepresentatives"):
             self.assertEqual(logs[name], 0, name)
         self.assertEqual(logs["releaseReads"], {"last": 0, "prunedThrough": 0})
         self.assertEqual(set(logs["bindings"]), {"logEpoch", "last", "oldestPending"})

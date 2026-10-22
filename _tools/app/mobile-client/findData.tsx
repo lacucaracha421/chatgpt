@@ -2,7 +2,7 @@ import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {FolderIcon,LinkIcon,RectangleStackIcon} from '@heroicons/react/24/outline';
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {FIND_SCOPES} from '../src/shared/findModel';
-import {FIND_WORK_TYPE_LABEL,type NavigationEntry} from '../src/shared/findEntries';
+import {FIND_WORK_TYPE_LABEL,MORE_KEYWORDS,SETTINGS_SECTION_LABELS,type NavigationEntry} from '../src/shared/findEntries';
 import {isDayMemoNote} from '../src/notes/dayMemo';
 import type {Note,NotesStore} from '../src/notes/store';
 import {api} from './transport';
@@ -14,21 +14,29 @@ import {DESCRIPTION_TYPING_PAUSE_MS,cachedDescription,descriptionQueryReady,read
 import {artistName,searchValues,type LibraryArtist} from './artistsModel';
 
 export const TABLET_FIND_SCOPES=FIND_SCOPES;
-export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'shortcut';shortcut:'calendar'|'releases'|'links'}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
+/** The tablet Settings groups Find can open directly (PC-only sections such as 라이브러리 or 고급 are not registered). */
+export type TabletSettingsSection='connection'|'display'|'storage'|'vault';
+export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'shortcut';shortcut:'calendar'|'releases'|'links'}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'}|{kind:'tool';id:string}|{kind:'settings';section:TabletSettingsSection};
 export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{item:CollectionSummary;revision:string};assetId?:string;contentRating?:import("../src/shared/privacy/contentMask").ContentRating|null};
 
-/** Project titles only, including concealed and locked secret notes' public titles. */
-export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:{works:{item:CollectionSummary;revision:string}[];artists:LibraryArtist[];notes:Pick<Note,'id'|'title'|'type'|'deleted'>[];folders:Entry[];albums:AlbumTree|null;navigate(destination:FindDestination):void}):TabletFindEntry[] {
+/**
+ * Project titles only, including concealed and locked secret notes' public titles. `tools` are the More
+ * destinations (전송, 휴지통, …) and `settingsSections` the Settings groups this tablet shows, both opened
+ * like the PC palette's destinations and "설정 › …" entries; 링크 보관 and 설정 already have their own rows.
+ */
+export function tabletFindEntries({works,artists,notes,folders,albums,tools=[],settingsSections=[],navigate}:{works:{item:CollectionSummary;revision:string}[];artists:LibraryArtist[];notes:Pick<Note,'id'|'title'|'type'|'deleted'>[];folders:Entry[];albums:AlbumTree|null;tools?:NavigationEntry[];settingsSections?:readonly TabletSettingsSection[];navigate(destination:FindDestination):void}):TabletFindEntry[] {
   const entry=(id:string,group:NavigationEntry['group'],label:string,destination:FindDestination,extra:Partial<TabletFindEntry>={}):TabletFindEntry=>({id,group,label,icon:null,...extra,destination,run:()=>navigate(destination)});
   return [
     entry('release-calendar','go','발매 캘린더',{kind:'shortcut',shortcut:'calendar'},{icon:<AREA_ICONS.collections/>}),
     entry('new-releases','go','신간',{kind:'shortcut',shortcut:'releases'},{icon:<AREA_ICONS.collections/>}),
-    entry('links','go','링크 보관',{kind:'shortcut',shortcut:'links'},{icon:<LinkIcon/>,keywords:['링크','북마크','주소']}),
+    entry('links','go','링크 보관',{kind:'shortcut',shortcut:'links'},{icon:<LinkIcon/>,keywords:MORE_KEYWORDS.links}),
     ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{workType:work.item.type,keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<AREA_ICONS.collections/>,work})),
     ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{count:artist.assetCount,keywords:searchValues(artist),icon:<AREA_ICONS.artists/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
     ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month'&&!isDayMemoNote(note)).map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<AREA_ICONS.notes/>})),
     ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{placeKind:folder.characterKind==='character'?'character':'folder',count:folder.asset_count,context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
     ...(albums?.adopted?albums.albums.map(album=>entry(`place-album-${album.id}`,'place',album.name,{kind:'place',view:albumView(albums,album)},{context:'앨범',icon:<RectangleStackIcon/>})):[]),
+    ...tools.filter(tool=>tool.id!=='links'&&tool.id!=='settings').map(tool=>entry(tool.id,tool.group,tool.label,{kind:'tool',id:tool.id},{icon:tool.icon,count:tool.count,activity:tool.activity,keywords:MORE_KEYWORDS[tool.id]})),
+    ...settingsSections.map(section=>entry(`settings-${section}`,'settings',`설정 › ${SETTINGS_SECTION_LABELS[section]}`,{kind:'settings',section},{icon:<AREA_ICONS.settings/>})),
     ...([['home','홈',AREA_ICONS.home],['assets','에셋',AREA_ICONS.assets],['collections','컬렉션',AREA_ICONS.collections],['catalog','카탈로그',AREA_ICONS.manga],['notes','메모',AREA_ICONS.notes],['settings','설정',AREA_ICONS.settings]] as const).map(([screen,label,Icon])=>entry(`screen-${screen}`,'go',label,{kind:'screen',screen},{icon:<Icon/>})),
   ];
 }

@@ -5,6 +5,18 @@ export const MORE_LABELS = {
   artists: "작가", links: "링크 보관", trash: "휴지통", settings: "설정",
 } as const;
 
+/** Extra names Find matches for the More destinations, shared by the PC palette and the tablet sheet. */
+export const MORE_KEYWORDS: Partial<Record<string, string[]>> = {
+  review: ["유사 검토", "중복"], exchange: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일"],
+  private_vault: ["비밀 보관함"], artists: ["다시보기", "작가 미상", "artist"], links: ["링크", "북마크", "주소"],
+};
+
+/** Settings section names for Find's "설정 › …" entries; each client registers only the sections it has. */
+export const SETTINGS_SECTION_LABELS = {
+  frequent: "자주 쓰는 것", display: "화면", library: "라이브러리", connection: "연결",
+  catalog: "카탈로그", vault: "보관함", advanced: "고급", storage: "저장 공간",
+} as const;
+
 /** content: 내용 검색, images that match the typed description (PC palette only, while typing); search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
 export type NavigationEntryGroup = "best" | "menu" | "content" | "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
 

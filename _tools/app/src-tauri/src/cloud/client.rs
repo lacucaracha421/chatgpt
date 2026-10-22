@@ -225,12 +225,31 @@ pub(crate) struct PublisherLogs {
     pub character_review_decisions: Option<i64>,
     pub similarity_decisions: Option<i64>,
     pub catalog_duplicate_decisions: Option<i64>,
+    pub catalog_representatives: Option<i64>,
     pub release_reads: Option<ReleaseReadsHead>,
     pub upcoming_intents: Option<ReleaseReadsHead>,
     pub artist_intents: Option<ArtistIntentsHead>,
     pub bindings: Option<BindingsHead>,
     pub personal_edits: Option<i64>,
     pub captures: Option<CapturesHead>,
+}
+
+/// `GET /v1/mobile-catalog/representatives/pending`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogRepresentativePage {
+    pub last_sequence: i64,
+    pub acknowledged_through: i64,
+    pub has_more: bool,
+    pub items: Vec<CatalogRepresentativeChoice>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogRepresentativeChoice {
+    pub sequence: i64,
+    pub group_id: String,
+    pub selected_provider_work_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,6 +304,7 @@ impl PublisherLogs {
             character_review_decisions: head("characterReviewDecisions"),
             similarity_decisions: head("similarityDecisions"),
             catalog_duplicate_decisions: head("catalogDuplicateDecisions"),
+            catalog_representatives: head("catalogRepresentatives"),
             upcoming_intents: block.get("upcomingIntents").and_then(|value| {
                 Some(ReleaseReadsHead {
                     last: sequence(value.get("last"))?,
@@ -2608,6 +2628,50 @@ impl CloudClient {
                 }
                 (_, error) => Err(error),
             },
+        }
+    }
+
+    /// Tablet representative-edition choices the PC has not acknowledged yet, in log order
+    /// (publisher token). `None` when the route is absent (an older server).
+    pub(crate) fn catalog_representatives_pending(
+        &self,
+        token: &str,
+        limit: i64,
+    ) -> Result<Option<CatalogRepresentativePage>, LibraryError> {
+        if !(1..=200).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/mobile-catalog/representatives/pending?limit={limit}");
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            401 | 403 => return Err(LibraryError::CloudUnauthorized),
+            _ => return Err(LibraryError::InvalidCloudResponse),
+        }
+        let page = read_json_bounded::<CatalogRepresentativePage>(&mut response, 1024 * 1024)?;
+        let ordered = page.items.windows(2).all(|pair| pair[0].sequence < pair[1].sequence);
+        if !ordered
+            || page.items.len() as i64 > limit
+            || page.items.iter().any(|item| item.sequence <= page.acknowledged_through || item.sequence > page.last_sequence)
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(Some(page))
+    }
+
+    /// Acknowledge the representative choices this PC applied, through `through`.
+    pub(crate) fn acknowledge_catalog_representatives(&self, token: &str, through: i64) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
+        let body = serde_json::to_vec(&serde_json::json!({"version": 1, "through": through}))
+            .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let request = self.coded_agent()?.post(self.endpoint("/v1/mobile-catalog/representatives/acknowledge")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(&body);
+        let response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => Ok(()),
+            401 | 403 => Err(LibraryError::CloudUnauthorized),
+            _ => Err(LibraryError::InvalidCloudResponse),
         }
     }
 

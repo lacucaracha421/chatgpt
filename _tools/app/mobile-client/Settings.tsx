@@ -1,6 +1,6 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
-import {useEffect, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {Button, Field, SegmentedControl, SettingsGroup, SettingsRow, Switch, TextInput} from './ui';
 import {TopBar} from './TopBar';
 import {errorText, native} from './transport';
@@ -8,13 +8,17 @@ import type {Status} from './types';
 import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} from './thumbnailWarm';
 import {useNsfwFilter,usePrivacyMode} from './privacyMode';
 import {useCaseSounds} from '../src/preferences/caseSoundPreference';
+import {SETTINGS_SECTION_LABELS} from '../src/shared/findEntries';
+import {prefersReducedMotion} from '../src/shared/motion/curves';
+import type {TabletSettingsSection} from './findData';
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
 declare const __APP_VERSION__: string | undefined;
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
 
-export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void; /** Only until a vault USB has been chosen; afterwards Home shows the vault icon. */ onOpenVault?():void}) {
+export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault, section}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void; /** Only until a vault USB has been chosen; afterwards Home shows the vault icon. */ onOpenVault?():void;
+  /** A 찾기 "설정 › …" pick: that group is scrolled into view (at once when Settings opens with it). */ section?:{id:TabletSettingsSection;request:number}|null}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);
   const [token, setToken] = useState('');
   const [privateHttp, setPrivateHttp] = useState(status.allowPrivateHttp ?? false);
@@ -44,14 +48,22 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
     }).catch(reason => setError(errorText(reason))).finally(() => setBusy(false));
   };
 
+  const scroller = useRef<HTMLElement>(null), opened = useRef(false);
+  useLayoutEffect(() => {
+    if (!section) return;
+    const group = scroller.current?.querySelector(`[aria-labelledby="settings-group-${SETTINGS_SECTION_LABELS[section.id]}"]`);
+    group?.scrollIntoView?.({block:'start', behavior:opened.current && !prefersReducedMotion() ? 'smooth' : 'auto'});
+    opened.current = true;
+  }, [section?.id, section?.request]);
+
   const showCacheCheck = useDelayedBusy(!cache);
   const cacheValue = showCacheCheck ? '사용량 확인 중…' : cache ? `${(cache.bytes/1024/1024).toFixed(1)} MB / ${(cache.limit/1024/1024/1024).toFixed(0)} GB · ${(cache.count ?? 0).toLocaleString('ko-KR')}개` : '';
 
   return <div className="settings-screen">
     <TopBar back={{label:'홈으로', onClick:onClose}} title="설정" />
-    <main className="settings-screen__scroll" aria-label="설정 항목">
+    <main ref={scroller} className="settings-screen__scroll" aria-label="설정 항목">
       <div className="settings-screen__content">
-        <SettingsGroup title="연결">
+        <SettingsGroup title={SETTINGS_SECTION_LABELS.connection}>
           <SettingsRow
             name="서버"
             value={status.endpoint || '주소 없음'}
@@ -82,14 +94,14 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
           {!editing && error && <p className="settings-screen__error" role="alert">{error}</p>}
         </SettingsGroup>
 
-        <SettingsGroup title="화면">
+        <SettingsGroup title={SETTINGS_SECTION_LABELS.display}>
           <TextZoomSetting/>
           <SettingsRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />} />
           <SettingsRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
           <SettingsRow name="케이스 소리" status="컬렉션에서 케이스와 책을 열고 닫을 때" control={<Switch aria-label="케이스 소리" checked={caseSounds} onChange={event => setCaseSounds(event.target.checked)} />} />
         </SettingsGroup>
 
-        <SettingsGroup title="저장 공간">
+        <SettingsGroup title={SETTINGS_SECTION_LABELS.storage}>
           <SettingsRow
             name="미디어 캐시"
             value={cacheValue}
@@ -103,7 +115,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
           <ThumbnailWarmSetting/>
         </SettingsGroup>
 
-        {onOpenVault && <SettingsGroup title="보관함">
+        {onOpenVault && <SettingsGroup title={SETTINGS_SECTION_LABELS.vault}>
           <SettingsRow name="비밀 보관함" control={<Button variant="quiet" type="button" onClick={onOpenVault}>연결</Button>} />
         </SettingsGroup>}
 

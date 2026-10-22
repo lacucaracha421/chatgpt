@@ -127,6 +127,10 @@
 .catalog-edition-mark{width:12px;height:12px;flex:none;color:var(--color-accent);visibility:hidden}
 .catalog-edition-mark.is-on{visibility:visible}
 .catalog-edition-mark.is-pending{opacity:.5}
+/* The representative edition is named in the same meta line (text, no mark or stripe). */
+.catalog-edition .catalog-edition-representative{display:inline;margin:0;font-size:inherit;font-weight:600;color:var(--color-text)}
+/* PC 반영 대기 or a failed choice: one quiet line under the 판본 label. */
+.catalog-representative-state{display:flex;align-items:center;gap:var(--space-2);margin:0 0 var(--space-2);font-size:var(--type-meta);color:var(--color-muted)}
 
 /* The accepted PC index becomes touch chips at the top of the filter sheet. */
 .catalog-index { border-bottom:1px solid var(--color-border); padding-bottom:var(--space-3); }

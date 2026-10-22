@@ -1,10 +1,10 @@
 import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {LinkIcon} from '@heroicons/react/24/outline';
 import type {NotesStore} from '../../src/notes/store';
-import {domain, findLinksNote, keepLink, linkTime, linkUrl, newLinksNote, parseLinks, readLinksId, serializeLinks, writeLinksId, type KeptLink} from '../../src/home/links';
+import {domain, findLinksNote, keepLink, linkTime, linkUrl, newLinksNote, parseLinks, readLinksId, serializeLinks, sessionLinkPreview, withLinkPreview, writeLinksId, type KeptLink, type LinkPreview} from '../../src/home/links';
 import {StableImage} from '../../src/shared/ui/StableImage';
 import {Button, EmptyState, SectionLabel, TextInput} from '../ui';
-import {errorText, native} from '../transport';
+import {api, errorText, native} from '../transport';
 import {writeClipboard} from '../ViewerInfo';
 import {SegmentedControl} from '../../src/shared/ui/SegmentedControl';
 
@@ -13,11 +13,14 @@ const noSubscribe = () => () => undefined;
 const emptySnapshot = () => EMPTY;
 const SHOWN = 4;
 
-type Props = {store: NotesStore | null; root: string; privacy: boolean; /** Lists every kept link instead of the newest few (the full 링크 보관 sheet). */ all?: boolean; onOpenNotes(): void; open?(url: string): Promise<unknown>};
+type Props = {store: NotesStore | null; root: string; privacy: boolean; /** Lists every kept link instead of the newest few (the full 링크 보관 sheet). */ all?: boolean; onOpenNotes(): void; open?(url: string): Promise<unknown>; previews?: LinkPreviewSource};
+type LinkPreviewSource = {preview(url: string): Promise<LinkPreview>};
 
 const openInBrowser = (url: string) => native('openExternal', {url});
+/** The server reads the title/thumbnail of the one link just kept (parity U02); one app-lifetime object keys the shared preview queue. */
+const serverPreviews: LinkPreviewSource = {preview: url => api<LinkPreview>('/v1/home/link-preview', undefined, {url}, 'POST')};
 
-/** Only a stored https thumbnail is loaded; the tablet has no preview fetcher, so the PC fills previews in. */
+/** Only a stored https thumbnail is loaded. */
 // No empty thumbnail box (user 2026-10-16): a link without a usable https image shows text only.
 function Thumb({url, privacy}: {url?: string | null; privacy: boolean}) {
   if (!url || !/^https:\/\//.test(url)) return null;
@@ -27,9 +30,10 @@ function Thumb({url, privacy}: {url?: string | null; privacy: boolean}) {
 
 /**
  * 링크 보관 on the tablet: the same dedicated note and JSON format as the PC (shared `links.ts`), added by
- * pasting a URL. A link is stored without a preview; the PC enriches it later.
+ * pasting a URL. A new link is stored at once and its preview (title, site, thumbnail) is filled in when the
+ * server has read it; if that fails, the PC still enriches it later.
  */
-export function TabletLinks({store, root, privacy, all = false, onOpenNotes, open = openInBrowser}: Props) {
+export function TabletLinks({store, root, privacy, all = false, onOpenNotes, open = openInBrowser, previews = serverPreviews}: Props) {
   const state = useSyncExternalStore(store?.subscribe ?? noSubscribe, store?.snapshot ?? emptySnapshot);
   const id = useRef({root, value: readLinksId(root)});
   if (id.current.root !== root) id.current = {root, value: readLinksId(root)};
@@ -56,6 +60,7 @@ export function TabletLinks({store, root, privacy, all = false, onOpenNotes, ope
     try { next = change(parseLinks(current?.body ?? '')); }
     catch { setError('링크 보관 메모의 형식을 확인해 주세요.'); return; }
     const updated = current ? {...current, body: serializeLinks(next)} : newLinksNote(next);
+    if (current && current.body === updated.body) return true;
     id.current.value = updated.id; writeLinksId(root, updated.id);
     store.edit(updated);
     void store.finish();
@@ -65,8 +70,12 @@ export function TabletLinks({store, root, privacy, all = false, onOpenNotes, ope
   function add(value: string) {
     const url = linkUrl(value);
     if (!url) { setError('http 또는 https URL을 붙여넣어 주세요.'); return; }
-    if (!mutate(current => keepLink(current, url))) return;
+    let exists = false;
+    if (!mutate(current => { exists = current.some(link => link.url === url); return keepLink(current, url); })) return;
     setInput(''); setError(null);
+    if (exists) return;
+    // The saved URL stays usable when the preview fails; the PC can still fill it in.
+    void sessionLinkPreview(previews, url).then(preview => { mutate(current => current.map(link => link.url === url ? withLinkPreview(link, preview) : link)); }, () => undefined);
   }
   const filtered = filter === 'images' ? links.filter(link => link.imageUrl) : links;
   const shown = all ? filtered : filtered.slice(0, SHOWN);

@@ -17,7 +17,8 @@ export type CatalogWork = {provider:'kHentai';providerWorkId:string;title:string
 export type CatalogItem = CatalogWork & {groupId:string;versionCount:number;hasBookmarkedVersion:boolean};
 export type CatalogPage = {ready:boolean;publicationRevision:string|null;publishedAt:string|null;items:CatalogItem[];nextCursor:string|null;context:string|null;countToken:string|null;totalCount:number|null;countStatus:'pending'|'ready'|'unavailable'};
 export type CatalogDetail = {provider:'kHentai';providerWorkId:string;title:string;titleJpn:string|null;thumbnailUrl:string|null;uploader:string|null;category:number|null;posted:number|null;updated:number|null;fileCount:number;fileSize:number|null;rating:number|null;views:number;bookmarked:boolean;bookmarkRevision?:number;tagGroups:{namespace:string;values:string[];labels?:Record<string,string>}[]};
-export type CatalogEditions = {publicationRevision:string;groupId:string;selectedProviderWorkId:string|null;items:CatalogWork[];nextCursor:string|null;totalCount:number};
+/** `representativePending`: a tablet representative choice the PC has not applied yet (PC 반영 대기). */
+export type CatalogEditions = {publicationRevision:string;groupId:string;selectedProviderWorkId:string|null;items:CatalogWork[];nextCursor:string|null;totalCount:number;representativePending?:boolean};
 export type CatalogReaderPage = {index:number;url:string;name:string|null;width:number|null;height:number|null;expiresAt:number|null};
 export type CatalogReaderManifest = {publicationRevision:string;provider:'kHentai';providerWorkId:string;pages:CatalogReaderPage[];manifestExpiresAt:number|null};
 
@@ -33,6 +34,16 @@ export function supportsDisplayPreferences(status:unknown):boolean{
   return typeof capabilities?.displayPreferencesVersion==='number'&&capabilities.displayPreferencesVersion>=DISPLAY_PREFERENCES_VERSION;
 }
 
+/** Whether a `/status` reply accepts a representative-edition choice (parity U23). */
+export function supportsRepresentativeWrite(status:unknown):boolean{
+  return (status as {capabilities?:{representativeWrite?:unknown}}|null)?.capabilities?.representativeWrite===true;
+}
+export const CATALOG_REPRESENTATIVE_PATH='/v1/mobile-catalog/representatives';
+export type CatalogRepresentativeReply={publicationRevision:string;selectedProviderWorkId:string|null;pending:boolean};
+/** Pick `selected` as the group's representative edition, or `null` for automatic selection. */
+export function catalogRepresentativeBody(groupId:string,selected:string|null,operationId:string=crypto.randomUUID()){
+  return {version:1,operationId,groupId,selectedProviderWorkId:selected};
+}
 /** Whether a `/status` reply advertises tag autocomplete (`/v1/mobile-catalog/suggestions`). */
 export function supportsSuggestions(status:unknown):boolean{
   return (status as {capabilities?:{suggestions?:unknown}}|null)?.capabilities?.suggestions===true;

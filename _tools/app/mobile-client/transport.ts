@@ -47,7 +47,8 @@ window.addEventListener('lakomics-native', event => {
 export function setDevelopmentTransport(transport: typeof developmentTransport) {
   if (import.meta.env.DEV) developmentTransport = transport;
 }
-export function native<T>(operation: string, payload: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+/** `timeoutMs` stays at 45 s except for an explicit transfer the user waits on (saving or sharing a large original). */
+export function native<T>(operation: string, payload: Record<string, unknown> = {}, signal?: AbortSignal, timeoutMs = 45_000): Promise<T> {
   if (signal?.aborted) return Promise.reject(new DOMException('Cancelled', 'AbortError'));
   if (import.meta.env.DEV && developmentTransport) return developmentTransport(operation, payload) as Promise<T>;
   if (!window.LakomicsNative) {
@@ -58,7 +59,7 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
     const timing=startupRequest(operation,payload);
     const id = String(++sequence);
     const abort = () => { timing?.('canceled'); window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
-    const timer = window.setTimeout(() => { timing?.('error'); window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.')); }, 45_000);
+    const timer = window.setTimeout(() => { timing?.('error'); window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.')); }, timeoutMs);
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); };
     const resume=()=>{
       timing?.('canceled');
@@ -68,7 +69,7 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
       let removeVisible=()=>{};
       const stopWaiting=()=>{removeVisible();signal?.removeEventListener('abort',cancelWaiting);};
       const cancelWaiting=()=>{stopWaiting();reject(new DOMException('Cancelled','AbortError'));};
-      const retry=()=>{if(!foreground||document.visibilityState==='hidden')return;stopWaiting();void native<T>(operation,payload,signal).then(resolve,reject);};
+      const retry=()=>{if(!foreground||document.visibilityState==='hidden')return;stopWaiting();void native<T>(operation,payload,signal,timeoutMs).then(resolve,reject);};
       removeVisible=onVisible(retry);
       signal?.addEventListener('abort',cancelWaiting,{once:true});
       retry();

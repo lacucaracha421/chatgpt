@@ -1,4 +1,4 @@
-import {MORE_LABELS} from '../shared/findEntries';
+import {MORE_KEYWORDS, MORE_LABELS, SETTINGS_SECTION_LABELS} from '../shared/findEntries';
 import { matchesKoreanSearch } from "../shared/koreanSearch";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
@@ -15,10 +15,7 @@ import { type NavigationEntry } from "../shared/findEntries";
 export { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "../shared/findEntries";
 
 type SettingsSection = NonNullable<Extract<AssetView, { kind: "settings" }>["section"]>;
-const SETTINGS_SECTIONS = [
-  ["frequent", "자주 쓰는 것"], ["display", "화면"], ["library", "라이브러리"], ["connection", "연결"],
-  ["catalog", "카탈로그"], ["vault", "보관함"], ["advanced", "고급"],
-] as const satisfies readonly (readonly [SettingsSection, string])[];
+const SETTINGS_SECTIONS = ["frequent", "display", "library", "connection", "catalog", "vault", "advanced"] as const satisfies readonly SettingsSection[];
 
 const ARTIST_KINDS: AssetView["kind"][] = ["artists", "creator"];
 const noSubscription = () => () => {};
@@ -51,15 +48,15 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
   const go = (next: AssetView) => () => onNavigate(next);
   const queued = (count: number | null) => (count ?? 0) > 0;
   const entries: NavigationEntry[] = [
-    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: MORE_LABELS.review, keywords: ["유사 검토", "중복"], icon: <Square2StackIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
+    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: MORE_LABELS.review, keywords: MORE_KEYWORDS.review, icon: <Square2StackIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: MORE_LABELS.unsorted, icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
     { id: "notes", group: "go", label: "메모", icon: <AREA_ICONS.notes />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
     // Utility outside the Library: listed as a queue only while received files are unseen.
     // 링크 보관 left Home (HOME-CAL-001); this and 찾기 open its full screen.
-    { id: "links", group: "go", label: "링크 보관", keywords: ["링크", "북마크", "주소"], icon: <LinkIcon />, selected: view.kind === "home" && Boolean(view.links), run: go({ kind: "home", links: true }) },
-    { id: "exchange", group: queued(received) ? "queue" : "go", label: MORE_LABELS.exchange, keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <AREA_ICONS.exchange />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
-    ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: MORE_LABELS.private_vault, keywords: ["비밀 보관함"], icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
-    { id: "artists", group: "go", label: MORE_LABELS.artists, keywords: ["다시보기", "작가 미상", "artist"], icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
+    { id: "links", group: "go", label: "링크 보관", keywords: MORE_KEYWORDS.links, icon: <LinkIcon />, selected: view.kind === "home" && Boolean(view.links), run: go({ kind: "home", links: true }) },
+    { id: "exchange", group: queued(received) ? "queue" : "go", label: MORE_LABELS.exchange, keywords: [...MORE_KEYWORDS.exchange ?? [], "태블릿"], icon: <AREA_ICONS.exchange />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
+    ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: MORE_LABELS.private_vault, keywords: MORE_KEYWORDS.private_vault, icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
+    { id: "artists", group: "go", label: MORE_LABELS.artists, keywords: MORE_KEYWORDS.artists, icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
     { id: "statistics", group: "go", label: "통계", icon: <ChartBarIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
     { id: "trash", group: "go", label: MORE_LABELS.trash, icon: <TrashIcon />, count: totalTrashCount > 0 ? totalTrashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
     { id: "settings", group: "go", label: MORE_LABELS.settings, icon: <AREA_ICONS.settings />, selected: view.kind === "settings", run: go({ kind: "settings" }) },
@@ -73,8 +70,8 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
       run: () => { void updateWorkloadSettings({ lightweight: !workload.lightweight }); },
     }] : []),
   ];
-  const settings: NavigationEntry[] = SETTINGS_SECTIONS.map(([section, label]) => ({
-    id: `settings-${section}`, group: "settings", label: `설정 › ${label}`, icon: <AREA_ICONS.settings />, run: go({ kind: "settings", section }),
+  const settings: NavigationEntry[] = SETTINGS_SECTIONS.map((section) => ({
+    id: `settings-${section}`, group: "settings", label: `설정 › ${SETTINGS_SECTION_LABELS[section]}`, icon: <AREA_ICONS.settings />, run: go({ kind: "settings", section }),
   }));
   return [...queues, ...destinations, ...actions, ...settings];
 }

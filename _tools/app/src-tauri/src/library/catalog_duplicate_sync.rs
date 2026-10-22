@@ -1043,6 +1043,10 @@ impl Library {
             }
             return received;
         }
+        // Tablet representative-edition choices ride this pass (same catalog, same token).
+        if let Err(error) = self.receive_catalog_representatives(client, publisher_token, endpoint, false) {
+            eprintln!("catalog representatives: {error}");
+        }
         let uploaded = self.upload_due_catalog_duplicates(client, publisher_token, endpoint);
         match &uploaded {
             Ok(merged) => changed |= *merged,

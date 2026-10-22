@@ -15,7 +15,7 @@ import {FindContext,type ScreenFind} from './FindContext';
 import {FindSheet} from './FindSheet';
 import {DescriptionIntro} from './DescriptionIntro';
 import {descriptionMeta} from './descriptionSearch';
-import {tabletFindEntries,useFindWorks,useFindNoteTitles,type FindDestination} from './findData';
+import {tabletFindEntries,useFindWorks,useFindNoteTitles,type FindDestination,type TabletSettingsSection} from './findData';
 import {NotesStore} from '../src/notes/store';
 import {mobileNotesRequest} from './notesTransport';
 import {PrivateVault} from './PrivateVault';
@@ -31,7 +31,7 @@ import {CharacterReviewOverview} from './CharacterReviewOverview';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {TrashLayer} from './TrashLayer';
-import {MoreContext,MoreSheet,type ScreenMenu} from './MoreSheet';
+import {MoreContext,MoreSheet,tabletMoreEntries,type ScreenMenu} from './MoreSheet';
 import {readTabletTrashCount} from './trashCounts';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useLibraryTrash} from './useLibraryTrash';
@@ -216,6 +216,9 @@ export function App() {
   const [reviewOverview,setReviewOverview]=useState(false);
   const overviewBack=useRef<(()=>boolean)|null>(null);
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false);
+  // A 찾기 "설정 › …" pick: the Settings group to bring into view; dropped when Settings closes.
+  const [settingsSection,setSettingsSection]=useState<{id:TabletSettingsSection;request:number}|null>(null);
+  useEffect(()=>{if(!settings)setSettingsSection(null);},[settings]);
   // Without a connection, the connection screen is the first screen: end the launch splash.
   useLaunchReady(!status.configured && !checking);
   // The bottom navigation steps aside while the soft keyboard is open, so a note keeps the room.
@@ -1188,13 +1191,15 @@ export function App() {
   const findNavigate=(destination:FindDestination)=>{
     closeArtists();setHomeOrigin(null);
     // Settings is an overlay; picks beneath it must become visible immediately.
-    if(destination.kind!=='screen'||destination.screen!=='settings')setSettings(false);
+    if(destination.kind!=='settings'&&(destination.kind!=='screen'||destination.screen!=='settings'))setSettings(false);
     if(destination.kind==='work')openCollections({kind:'work',id:destination.id});
     else if(destination.kind==='artist'){setArea('assets');openArtist(destination.artist);}
     else if(destination.kind==='note'){
       setNotesVisited(true);setArea('notes');setNoteRequest(current=>({id:destination.id,key:(current?.key??0)+1}));
     }else if(destination.kind==='place'){setArea('assets');select(destination.view);}
     else if(destination.kind==='shortcut'){if(destination.shortcut==='calendar')openCalendar();else if(destination.shortcut==='links')setLinksOpen(true);else openCollections({kind:'releases'});}
+    else if(destination.kind==='tool')findTools.find(tool=>tool.id===destination.id)?.run();
+    else if(destination.kind==='settings'){setSettings(true);setSettingsSection(current=>({id:destination.section,request:(current?.request??0)+1}));}
     else if(destination.screen==='home')openHome();
     else if(destination.screen==='assets')openLibrary();
     else if(destination.screen==='settings')setSettings(true);
@@ -1205,7 +1210,6 @@ export function App() {
       if(destination.screen==='notes')setNotesVisited(true);
     }
   };
-  const findEntries=tabletFindEntries({works:findWorks.works,artists:searchArtists.artists,notes:findNotes.notes,folders:entries,albums:albumTree,navigate:findNavigate});
   const homeWorkOpen=area==='collections'&&homeOrigin?.area==='collections'&&!!homeWork;
   const motionTab=homeWorkOpen?'home-work':area==='assets'?page.view.tab:area;
   // Full-screen layers are pushed in from the right over the page and pop back the same way; the
@@ -1248,6 +1252,8 @@ export function App() {
     onReview:()=>setSimilarity(true),onUnsorted:()=>{const view:View={tab:'library',unclassified:true,title:'미분류'};fromHome(view);select(view);},
     onExchange:()=>setExchangeOpen(true),onVault:()=>setVaultOpen(true),onArtists:()=>{closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();},
     onTrash:()=>trash.setOpen(true),onSettings:()=>setSettings(true),onLinks:()=>setLinksOpen(true),onStatistics:()=>setStatisticsOpen(true)};
+  const findTools=tabletMoreEntries(moreOptions);
+  const findEntries=tabletFindEntries({works:findWorks.works,artists:searchArtists.artists,notes:findNotes.notes,folders:entries,albums:albumTree,tools:findTools,settingsSections:['connection','display','storage',...(vaultSelected?[]:['vault' as const])],navigate:findNavigate});
   const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&nsfwFilter&&<span className="privacy-pill" aria-label="NSFW 필터 켜짐">NSFW 필터</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<TopBarActions/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
   const homeAreaNode=<>{!artistsCovered&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
@@ -1329,7 +1335,7 @@ export function App() {
     {albumManagementOpen&&albumTree&&currentAlbum&&<AlbumManagement tree={albumTree} album={currentAlbum} onClose={()=>setAlbumManagementOpen(false)} onDeleted={albumRoot}/>}
     {selectionActions.notice&&!selectedIds.size&&<div className="trash-snackbar" role="alert">{selectionActions.notice}</div>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}
-    {settings && <div className="settings-layer" ref={settingsLayer}><Settings onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/></div>}
+    {settings && <div className="settings-layer" ref={settingsLayer}><Settings section={settingsSection} onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/></div>}
     {fault && !privacyMode && !nsfwFilter && <div className="tablet-layer is-fault" ref={faultLayer}><FaultGame items={fault} onClose={() => setFault(null)}/></div>}
     {similarity && <div className="tablet-layer" ref={similarityLayer}><SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/></div>}
     {reviewOverview && reviewLibrary && <div className="tablet-layer" ref={reviewOverviewLayer}><CharacterReviewOverview libraryId={reviewLibrary} characters={characterIndex} refreshKey={`${characterIndex?.revision}:${reviewClosed}`} paused={!!review} backRef={overviewBack} onOpen={setReview} onClose={() => setReviewOverview(false)}/></div>}

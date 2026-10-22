@@ -142,6 +142,11 @@ final class NetworkPolicy {
   // nothing else. The candidate PUT and the decision log GET are publisher-only.
   get=get || p.equals("/v1/mobile-catalog/duplicates");
   post=post || p.equals("/v1/mobile-catalog/duplicates/decisions");
+  // Catalog representative edition (parity U23): only the client choice. The pending feed
+  // and its acknowledgement are publisher-only and stay unreachable.
+  post=post || p.equals("/v1/mobile-catalog/representatives");
+  // Kept-link preview (parity U02): one URL in the JSON body, read by the server.
+  post=post || p.equals("/v1/home/link-preview");
   // The catalog bookmark command: one desired-state write per work identity, and
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.

@@ -20,6 +20,9 @@ impl Library {
         let token = token.expose();
         let library_id=self.library_id()?;
         let base=client.mobile_catalog_revision(&token)?;
+        // Adopt tablet representative choices before exporting, so this publication carries
+        // them; one made after `base` was read fails the publication's compare-and-set.
+        self.receive_catalog_representatives(&client,&token,config.api_base_url.as_deref().unwrap_or_default(),true)?;
         let snapshot=self.export_mobile_catalog_snapshot_with_progress(progress)?;
         report(progress, "uploading", 0, Some(snapshot.bytes), "bytes");
         client.upload_mobile_catalog(&snapshot.content_digest,snapshot.file.try_clone().map_err(|_|LibraryError::InvalidOnlineCatalog)?,&token,progress)?;

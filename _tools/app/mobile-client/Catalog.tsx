@@ -37,7 +37,7 @@ import type {MangaIndexIdentity} from '../src/library/types';
 import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './CatalogDuplicates';
 import {useBookmarks,usePendingRetry} from './useBookmarks';
 import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
-import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,supportsDisplayPreferences,supportsSuggestions,catalogSuggestionPath,suggestionQuery,utf8Bytes,SUGGESTION_LIMIT,SUGGESTION_TEXT_MAX_BYTES,type CatalogSuggestion,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
+import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,supportsDisplayPreferences,supportsSuggestions,supportsRepresentativeWrite,catalogRepresentativeBody,CATALOG_REPRESENTATIVE_PATH,type CatalogRepresentativeReply,catalogSuggestionPath,suggestionQuery,utf8Bytes,SUGGESTION_LIMIT,SUGGESTION_TEXT_MAX_BYTES,type CatalogSuggestion,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
 import {DEFAULT_CATALOG_PREFERENCES,clearCatalogPreferences,readCatalogPreferences,writeCatalogPreferences,type CatalogPreferences} from './catalogPreferences';
 import {BOOKMARK_SORT_OPTIONS,readBookmarkSort,writeBookmarkSort,type BookmarkSort} from '../src/manga/bookmarkSort';
 import './Catalog.css';
@@ -107,6 +107,10 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   // Tag autocomplete, offered only by a server that advertises it.
   const [suggestable,setSuggestable]=useState(false);
   const [refreshSupported,setRefreshSupported]=useState(false);
+  // Representative-edition choice (parity U23): the server republishes at once; the PC applies it later.
+  const [representativeWritable,setRepresentativeWritable]=useState(false);
+  const [representativeSaving,setRepresentativeSaving]=useState(false),[representativeError,setRepresentativeError]=useState<{message:string;selected:string|null}|null>(null);
+  const ownPublication=useRef<string|null>(null);
   const [suggestOpen,setSuggestOpen]=useState(false),[options,setOptions]=useState<CatalogSuggestion[]>([]),[activeOption,setActiveOption]=useState(-1);
   const [searchOpen,setSearchOpen]=useState(false);
   const suggestRequest=useRef(0),searchInput=useRef<HTMLInputElement>(null),suggestionList=useRef<HTMLUListElement>(null);
@@ -119,6 +123,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     setCapability(supportsDisplayPreferences(status)?'supported':'unsupported');
     setSuggestable(supportsSuggestions(status));
     setRefreshSupported(status.capabilities?.refreshRequest===true);
+    setRepresentativeWritable(supportsRepresentativeWrite(status));
     const epoch=status.authorityEpoch;
     const nextCursor=typeof status.authorityCursor==='number'?status.authorityCursor:null;
     const bookmarkChanged=authorityCursor.current!==undefined&&authorityCursor.current!==nextCursor;
@@ -126,7 +131,11 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     setAuthority(status.authorityLibraryId!=null&&status.capabilities?.bookmarkWrite===true&&typeof epoch==='number'&&epoch>=1
       ?{libraryId:status.authorityLibraryId,epoch,contractVersion:status.authorityContractVersion??BOOKMARK_CONTRACT_VERSION}
       :null);
-    if(changed)reload();
+    const next=(reply as {publicationRevision?:string|null}).publicationRevision;
+    // This device's own representative choice republished the catalog: refresh in place
+    // instead of closing the open work.
+    if(changed&&next&&next===ownPublication.current){ownPublication.current=null;refreshBookmarks();}
+    else if(changed)reload();
     else if(bookmarkChanged)refreshBookmarks();
   },[selected]);
   const searchMode=capability==='supported';
@@ -464,7 +473,20 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     change({categories:null,excludedTags:[]});
   }
   function openSettings(){setSettings(true);}
-  function open(item:CatalogItem){scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setReader(null);setReaderError('');}
+  async function chooseRepresentative(selectedId:string|null){
+    // The handle the editions were read with; the server resolves it like the PC does.
+    const groupId=selected?.groupId;
+    if(!editions||!groupId||representativeSaving)return;
+    setRepresentativeSaving(true);setRepresentativeError(null);
+    try{
+      const reply=await api<CatalogRepresentativeReply>(CATALOG_REPRESENTATIVE_PATH,undefined,catalogRepresentativeBody(groupId,selectedId),'POST');
+      if(reply.publicationRevision!==page?.publicationRevision)ownPublication.current=reply.publicationRevision;
+      editionCache.current.clear();
+      setEditions(current=>current&&{...current,selectedProviderWorkId:reply.selectedProviderWorkId,representativePending:reply.pending});
+    }catch(reason){setRepresentativeError({message:catalogError(reason)||errorText(reason)||'대표 판본을 바꾸지 못했습니다.',selected:selectedId});}
+    finally{setRepresentativeSaving(false);}
+  }
+  function open(item:CatalogItem){scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setRepresentativeError(null);setReader(null);setReaderError('');}
   function refreshBookmarks(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();committed.current='';setRefresh(n=>n+1);if(selected)setDetailRefresh(n=>n+1);}
   function reload(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();readerCache.current.clear();committed.current='';resetMore();setSelected(null);setReader(null);setRefresh(n=>n+1);}
   // The endpoint identifies the server whose filters these are, so a different
@@ -563,7 +585,10 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
           <div className="catalog-detail-identity"><h2>{catalogDisplayTitle(detail.title)}</h2>{catalogDisplayTitle(detail.title)!==detail.title&&<p className="catalog-detail-alt"><span className="sr-only">원제 </span>{detail.title}</p>}{detail.titleJpn&&detail.titleJpn!==detail.title&&<p className="catalog-detail-alt">{detail.titleJpn}</p>}{selected.artists.length>0&&<p className="catalog-detail-credit">{selected.artists.join(' · ')}</p>}<p className="catalog-detail-facts">{detail.fileCount}페이지 · 조회 {detail.views.toLocaleString()}</p></div></div>
         {(()=>{const state=bookmarks.stateFor(detail.provider,detail.providerWorkId,detail.bookmarked,detail.bookmarkRevision);return <><div className="catalog-primary-actions"><Button variant="primary" className="catalog-read-action" disabled={privacy||readerBusy} onClick={()=>loadReader(false)}><BookOpenIcon/><BusyLabel busy={!!(readerBusy)} idle={'읽기'}>페이지 확인 중…</BusyLabel></Button><BookmarkToggle className={`catalog-bookmark-action${state.pending?' catalog-bookmark-pending':''}`} label={showBookmark?state.desired?'북마크 저장 중':'북마크 해제 중':state.desired?'북마크 해제':'북마크'} bookmarked={state.desired} data-toggle-key={`${detail.provider}:${detail.providerWorkId}`} disabled={!authority&&!state.pending} onClick={()=>{const desired=!state.desired;bookmarks.toggle(detail.provider,detail.providerWorkId,desired);applyBookmarkPresentation(detail.provider,detail.providerWorkId,desired);}}/></div>{/* One status line that always keeps its height, so 저장 대기 and a failure never push the page. */}<span className={`catalog-bookmark-state${bookmarks.failure?' catalog-bookmark-error':''}`} role={bookmarks.failure?'alert':'status'}>{bookmarks.failure||(state.pending?'저장 대기':'')}</span></>;})()}{readerError&&<p className="catalog-reader-error">{readerError}</p>}
       </>}
-      <section className="catalog-editions" aria-label="카탈로그 판본"><SectionLabel as="h3" title="판본" count={editions?.totalCount}/>{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:<div ref={editionWheel} className="catalog-edition-row">{editions?.items.map(item=>{const state=visibleEditionBookmark(item);return <button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><div className="catalog-cover"><CatalogCover item={{...selected,...item}} revision={revision} active={active&&!paused&&!reader}/></div><span>{catalogDisplayTitle(item.title)}</span><small className="catalog-edition-meta" aria-label={`${item.fileCount}p${state.desired?' · 북마크':''}${state.pending?' · 저장 대기':''}`}><span className="numeric" aria-hidden="true">{item.fileCount}p</span><BookmarkSolidIcon aria-hidden="true" className={`catalog-edition-mark${state.desired?' is-on':''}${state.pending?' is-pending':''}`}/></small></button>;})}</div>}{(editionCursor||editions?.nextCursor)&&<div className="catalog-edition-paging">{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</div>}</section>
+      <section className="catalog-editions" aria-label="카탈로그 판본"><SectionLabel as="h3" title="판본" count={editions?.totalCount} actions={representativeWritable&&detail&&editions&&editions.totalCount>1?<>
+        <Button variant="quiet" aria-pressed={editions.selectedProviderWorkId===detail.providerWorkId} disabled={representativeSaving||editions.selectedProviderWorkId===detail.providerWorkId} onClick={()=>void chooseRepresentative(detail.providerWorkId)}><BusyLabel busy={representativeSaving} idle="대표로 지정">저장 중…</BusyLabel></Button>
+        <Button variant="quiet" aria-pressed={editions.selectedProviderWorkId===null} disabled={representativeSaving||editions.selectedProviderWorkId===null} onClick={()=>void chooseRepresentative(null)}>자동 선택</Button>
+      </>:undefined}/>{(representativeError||editions?.representativePending)&&<p className="catalog-representative-state" role={representativeError?'alert':'status'}>{representativeError?<>{representativeError.message}<Button variant="quiet" onClick={()=>void chooseRepresentative(representativeError.selected)}>다시 시도</Button></>:'PC 반영 대기'}</p>}{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:<div ref={editionWheel} className="catalog-edition-row">{editions?.items.map(item=>{const state=visibleEditionBookmark(item);return <button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><div className="catalog-cover"><CatalogCover item={{...selected,...item}} revision={revision} active={active&&!paused&&!reader}/></div><span>{catalogDisplayTitle(item.title)}</span><small className="catalog-edition-meta" aria-label={`${item.fileCount}p${editions.selectedProviderWorkId===item.providerWorkId?' · 대표':''}${state.desired?' · 북마크':''}${state.pending?' · 저장 대기':''}`}><span className="numeric" aria-hidden="true">{item.fileCount}p</span>{editions.selectedProviderWorkId===item.providerWorkId&&<span className="catalog-edition-representative" aria-hidden="true">대표</span>}<BookmarkSolidIcon aria-hidden="true" className={`catalog-edition-mark${state.desired?' is-on':''}${state.pending?' is-pending':''}`}/></small></button>;})}</div>}{(editionCursor||editions?.nextCursor)&&<div className="catalog-edition-paging">{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</div>}</section>
       {detail&&detail.tagGroups.length>0&&<section className="catalog-tags" aria-label="태그"><SectionLabel as="h3" title="태그"/><dl>{detail.tagGroups.map(group=><div key={group.namespace}><dt>{group.namespace}</dt><dd>{group.values.map(value=><button key={value} className="catalog-tag" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);search(text);}}>{group.labels?.[value]??value}</button>)}</dd></div>)}</dl><p className="hint">태그를 누르면 같은 태그로 검색합니다.</p></section>}
     </div>}
     {!privacy&&reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy} bookmark={(()=>{const item=detail??selected;const state=bookmarks.stateFor(item.provider,item.providerWorkId,item.bookmarked,'bookmarkRevision' in item?item.bookmarkRevision:undefined);return {desired:state.desired,pending:state.pending,disabled:!authority&&!state.pending,failure:bookmarks.failure,toggle:()=>{const desired=!state.desired;bookmarks.toggle(item.provider,item.providerWorkId,desired);applyBookmarkPresentation(item.provider,item.providerWorkId,desired);}};})()}/>}

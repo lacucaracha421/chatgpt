@@ -72,3 +72,16 @@ it('keeps the previous names during a retry and retains a kind when its refresh 
   expect(hook.result.current.works).toEqual(previous);
   await waitFor(()=>expect(hook.result.current.loading).toBe(false));expect(hook.result.current.works).toEqual(previous);expect(hook.result.current.error).toBeTruthy();
 });
+it('registers the More tools and the tablet Settings groups as menu destinations with the shared labels',()=>{
+  const navigate=vi.fn();
+  const tools=[{id:'trash',group:'go' as const,label:'휴지통',icon:null,run:vi.fn()},{id:'exchange',group:'queue' as const,label:'전송',count:2,icon:null,run:vi.fn()},{id:'links',group:'go' as const,label:'링크 보관',icon:null,run:vi.fn()},{id:'settings',group:'go' as const,label:'설정',icon:null,run:vi.fn()}];
+  const entries=tabletFindEntries({works:[],artists:[],notes:[],folders:[],albums:null,tools,settingsSections:['display','storage'],navigate});
+  const rows=(query:string)=>findGroups(entries,query,'메뉴',[]).flatMap(group=>group.items);
+  rows('파일 받기')[0].run();expect(navigate).toHaveBeenLastCalledWith({kind:'tool',id:'exchange'});
+  expect(rows('휴지통').map(entry=>entry.id)).toEqual(['trash']);
+  rows('저장 공간')[0].run();expect(navigate).toHaveBeenLastCalledWith({kind:'settings',section:'storage'});
+  expect(rows('설정').map(entry=>entry.label)).toEqual(expect.arrayContaining(['설정','설정 › 화면','설정 › 저장 공간']));
+  // Rows that already exist (링크 보관, 설정) are not doubled, and unregistered sections never appear.
+  expect(entries.filter(entry=>entry.label==='링크 보관'||entry.label==='설정')).toHaveLength(2);
+  expect(rows('설정').some(entry=>entry.label.includes('연결')||entry.label.includes('고급'))).toBe(false);
+});

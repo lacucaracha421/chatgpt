@@ -355,3 +355,6 @@
 .viewer-surface:has(.image-text-notes[data-animate-pan="true"]) > img { transition: transform 200ms var(--ease-standard); }
 @keyframes viewer-reading-enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .viewer-reading-sheet { animation: none; } .viewer-surface:has(.image-text-notes[data-animate-pan="true"]) > img { transition: none; } }
+
+/* 저장/공유 notice: the Trash snackbar surface without an action button, still one touch row tall. */
+.viewer-export-notice { min-height: var(--touch-target); box-sizing: border-box; }

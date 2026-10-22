@@ -962,3 +962,28 @@ it('masks active catalog covers and blocks reader prefetch under only the NSFW f
   expect(mocks.native.mock.calls.some(([op])=>op==='catalogImage')).toBe(false);
   expect(mocks.api.mock.calls.some(([path])=>path.includes('/reader?'))).toBe(false);
 });
+describe('representative edition (parity U23)',()=>{
+  it('picks the open edition as representative and shows PC 반영 대기 until the PC applies it',async()=>{
+    const other={...item,providerWorkId:'43',title:'밤의 도서관 2판',fileCount:44};
+    mocks.api.mockImplementation(async(path:string,_signal?:AbortSignal,body?:unknown)=>{
+      if(path==='/v1/mobile-catalog/representatives')return {publicationRevision:'p2',selectedProviderWorkId:(body as {selectedProviderWorkId:string|null}).selectedProviderWorkId,pending:true};
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:1};
+      if(path.includes('/status'))return {...capableStatus,capabilities:{...capableStatus.capabilities,representativeWrite:true}};
+      if(path.includes('/works/'))return {publicationRevision:'p1',item:{...item,tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null}};
+      if(path.includes('/editions?'))return {publicationRevision:'p1',groupId:'group',selectedProviderWorkId:'43',representativePending:false,items:[item,other],nextCursor:null,totalCount:2};
+      return page;
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));
+    const editions=await screen.findByRole('region',{name:'카탈로그 판본'});
+    const pick=await within(editions).findByRole('button',{name:'대표로 지정'});
+    expect(within(editions).getByLabelText('44p · 대표 · 북마크')).toBeTruthy();
+    fireEvent.click(pick);
+    await within(editions).findByText('PC 반영 대기');
+    const post=mocks.api.mock.calls.find(([path])=>path==='/v1/mobile-catalog/representatives')!;
+    expect(post[2]).toMatchObject({version:1,groupId:'group',selectedProviderWorkId:'42'});
+    expect(post[3]).toBe('POST');
+    expect(within(editions).getByLabelText('40p · 대표 · 북마크')).toBeTruthy();
+    expect(within(editions).getByRole('button',{name:'대표로 지정'}).getAttribute('aria-pressed')).toBe('true');
+  });
+});
