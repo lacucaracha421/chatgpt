@@ -126,7 +126,7 @@ globalThis.LakomicsPickerCss = String.raw`
 .trow .n{font-size:12px;color:var(--p-faint);font-variant-numeric:tabular-nums}
 .trow .cur{width:5px;height:5px;flex:none;margin-left:8px;background:var(--p-accent)}
 .trow.me .nm{font-weight:600}
-.trow.kf{outline:2px solid var(--p-focus);outline-offset:-2px}
+.trow.kf{background:var(--p-hover)}
 .trow.anc .nm{color:var(--p-faint)}
 .trow mark{background:none;color:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px}
 .pop .none{padding:12px;color:var(--p-muted)}

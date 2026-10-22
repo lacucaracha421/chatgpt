@@ -121,7 +121,7 @@ test('first open shows the folder picker, the choice loads a batch, and the view
   assert.ok(f.q('.pop'), 'first use opens the folder popover');
   assert.equal(f.sent.filter(m => m.type === 'picker:batch').length, 0);
   f.q('.pop input').value = '아로'; f.q('.pop input').dispatchEvent(new f.w.Event('input'));
-  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f1', 'f2'], 'search keeps ancestors');
+  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f2'], 'search shows only matches');
   assert.equal(f.q('.trow mark').textContent, '아로');
   f.q('.trow[data-id="f2"]').click(); await settle();
   assert.equal(f.q('.pop'), null);
@@ -413,17 +413,72 @@ test('search matches characters and groups by name and shows the series path as 
   await f.panel.open(); await settle();
   const input = f.q('.pop input');
   input.value = '라플라스'; input.dispatchEvent(new f.w.Event('input'));
-  assert.deepEqual(f.qa('.trow').map(r => `${r.dataset.kind}:${r.dataset.id}`), ['folder:f1', 'folder:f2', 'group:g1', 'character:c1']);
+  assert.deepEqual(f.qa('.trow').map(r => `${r.dataset.kind}:${r.dataset.id}`), ['group:g1', 'character:c1']);
   assert.deepEqual(f.qa('.trow mark').map(m => m.textContent), ['라플라스', '라플라스']);
   assert.equal(f.q('.trow[data-id="g1"] .sec').textContent, '캐릭터 › 아로나');
   assert.equal(f.q('.trow[data-id="c1"] .sec').textContent, '캐릭터 › 아로나');
-  assert.equal(f.q('.trow[data-id="f2"] .sec'), null);
-  assert.ok(f.q('.trow[data-id="f2"]').classList.contains('anc'));
+  assert.ok(f.qa('.trow').every(row => row.getAttribute('aria-level') === '1' && !row.hasAttribute('aria-expanded')));
+  assert.equal(f.q('.trow .tw'), null);
   input.value = '호시노'; input.dispatchEvent(new f.w.Event('input'));
-  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['f1', 'f2', 'c2']);
+  assert.deepEqual(f.qa('.trow').map(r => r.dataset.id), ['c2']);
   input.value = '없는'; input.dispatchEvent(new f.w.Event('input'));
   assert.equal(f.q('.pop .none').textContent, '찾는 폴더·캐릭터가 없음');
   f.panel.destroy(); f.w.close();
+});
+
+for (const width of [1440, 800]) test(`search keyboard selection and reset at width ${width}`, async () => {
+  const f = setup({ characters: PEOPLE, width, height: width === 800 ? 1200 : 768 });
+  try {
+    await f.panel.open(); await settle();
+    const input = f.q('.pop input'), revealed = [];
+    f.w.HTMLElement.prototype.scrollIntoView = function () { revealed.push(this.dataset.id); };
+    const search = value => { input.value = value; input.dispatchEvent(new f.w.Event('input')); };
+    const cursor = () => f.q('.trow.kf')?.dataset.id;
+    f.q('.trow[data-id="f1"] .tw').click();
+    const treeBefore = f.qa('.trow').map(row => row.dataset.id);
+    search('라플라스');
+    assert.equal(cursor(), 'g1', 'first match starts highlighted');
+    assert.equal(revealed.at(-1), 'g1', 'typing reveals the first result');
+    f.key(input, 'ArrowUp'); assert.equal(cursor(), 'g1');
+    assert.equal(f.key(input, 'ArrowDown').defaultPrevented, true);
+    assert.equal(cursor(), 'c1'); assert.equal(revealed.at(-1), 'c1');
+    f.key(input, 'ArrowDown'); assert.equal(cursor(), 'c1');
+    f.key(input, 'ArrowUp'); assert.equal(cursor(), 'g1');
+    assert.equal(f.panel.root.activeElement, input, 'typing focus stays in the search box');
+    search('');
+    assert.deepEqual(f.qa('.trow').map(row => row.dataset.id), treeBefore, 'clearing restores the expanded tree');
+    search('없는');
+    f.key(input, 'ArrowDown'); f.key(input, 'Enter');
+    assert.ok(f.q('.pop')); assert.equal(batchesOf(f).length, 0);
+    search('라플라스');
+    f.key(input, 'Enter', { isComposing: true });
+    assert.ok(f.q('.pop'), 'IME confirmation does not choose a result');
+    f.key(input, 'Escape');
+    assert.equal(f.q('.pop'), null); assert.equal(f.panel.isOpen, true);
+    f.q('.folder').click();
+    const nextInput = f.q('.pop input');
+    nextInput.value = '라플라스'; nextInput.dispatchEvent(new f.w.Event('input'));
+    f.key(nextInput, 'Enter'); await settle();
+    assert.equal(f.q('.pop'), null);
+    assert.deepEqual(batchesOf(f)[0].scope, { kind: 'group', id: 'g1' }, 'Enter chooses the first match');
+    f.q('.folder').click();
+    const lastInput = f.q('.pop input');
+    lastInput.value = '라플라스'; lastInput.dispatchEvent(new f.w.Event('input'));
+    f.key(lastInput, 'Process', { code: 'ArrowDown', keyCode: 229, isComposing: true });
+    assert.ok(f.q('.trow.kf[data-id="c1"]'), 'an arrow pressed while Korean input is composing still moves the cursor');
+    f.key(lastInput, 'ArrowUp'); f.key(lastInput, 'ArrowDown'); f.key(lastInput, 'Enter'); await settle();
+    const keyboardRequest = batchesOf(f).at(-1);
+    assert.deepEqual(keyboardRequest.scope, { kind: 'character', id: 'c1' });
+    f.q('.folder').click();
+    const clickInput = f.q('.pop input');
+    clickInput.value = '라플라스'; clickInput.dispatchEvent(new f.w.Event('input'));
+    f.q('.trow[data-id="c1"]').click(); await settle();
+    const clickRequest = batchesOf(f).at(-1);
+    assert.deepEqual(clickRequest.scope, keyboardRequest.scope, 'click and Enter choose the same scope');
+    assert.equal(clickRequest.limit, keyboardRequest.limit);
+    assert.equal(f.panel.state.scopeKind, 'character');
+    assert.equal(f.q('.folder .leaf').textContent, '라플라스 A');
+  } finally { f.panel.destroy(); f.w.close(); }
 });
 
 test('choosing a character loads its pictures by scope, names it in the header and hides the sub-folder switch', async () => {
@@ -538,10 +593,11 @@ test('고정 section precedes the full tree in pin order and search keeps PC ord
   assert.deepEqual(f.qa('.trow').map(e => [e.dataset.section, e.dataset.id]),
     [['pinned', 'a'], ['pinned', 'z'], ['tree', 'z'], ['tree', 'a']]);
   const input = f.q('.pop input'); input.value = 'match'; input.dispatchEvent(new f.w.Event('input'));
-  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['a', 'z', 'z', 'a']);
+  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['z', 'a']);
   input.value = 'Zulu'; input.dispatchEvent(new f.w.Event('input'));
-  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['z', 'z']);
-  f.q('.trow[data-section="pinned"]').click(); await settle();
+  assert.deepEqual(f.qa('.trow').map(e => e.dataset.id), ['z']);
+  assert.equal(f.q('.tree-section'), null);
+  f.q('.trow').click(); await settle();
   assert.equal(f.sent.find(m => m.type === 'picker:batch').folderId, 'z');
   f.panel.destroy(); f.w.close();
 });

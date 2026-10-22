@@ -247,12 +247,11 @@
 
   // Rows of the popover tree. Folders as in `folderRows`; under a series folder its groups,
   // then its characters without a group, then its sub-folders. A group's own characters hang
-  // under the group. While searching, folders, groups and characters match by name and the
-  // path above a match stays; character and group rows then carry their series path as `secondary`.
+  // under the group. Search returns only name matches, once each, with their path as `secondary`.
   function treeRows(folders, characters = [], { expanded = new Set(), query = "" } = {}) {
     folders = [...folders].sort(pcOrder);
     characters = [...characters].sort(pcOrder);
-    const folderIds = new Set(folders.map(entry => entry.id)), byId = new Map(folders.map(entry => [entry.id, entry]));
+    const folderIds = new Set(folders.map(entry => entry.id));
     const byParent = new Map(), groupsOf = new Map(), looseOf = new Map(), membersOf = new Map(), groupById = new Map();
     const push = (map, key, value) => { if (!map.has(key)) map.set(key, []); map.get(key).push(value); };
     for (const entry of folders) push(byParent, entry.parentId && folderIds.has(entry.parentId) ? entry.parentId : null, entry);
@@ -264,40 +263,29 @@
       else push(looseOf, entry.seriesId, entry);
     }
     const needle = normalize(query.trim());
-    const keep = new Set(), direct = new Set();
-    const keepFolderChain = id => { for (let node = byId.get(id), guard = 0; node && guard < 40; node = byId.get(node.parentId), guard += 1) keep.add("folder:" + node.id); };
-    if (needle) {
-      for (const entry of folders) if (normalize(entry.name).includes(needle)) { direct.add("folder:" + entry.id); keepFolderChain(entry.id); }
-      for (const entry of usable) {
-        if (!normalize(entry.name).includes(needle)) continue;
-        direct.add(entry.kind + ":" + entry.id); keep.add(entry.kind + ":" + entry.id); keepFolderChain(entry.seriesId);
-        if (entry.kind === "character" && entry.groupId && groupById.has(entry.groupId)) keep.add("group:" + entry.groupId);
-      }
-    }
     const rows = [];
     const row = (entry, kind, depth, children, open, secondary) => {
-      const key = kind + ":" + entry.id, hit = Boolean(needle) && direct.has(key), at = hit ? normalize(entry.name).indexOf(needle) : -1;
-      rows.push({ entry, kind, depth, hasChildren: children, open, match: at >= 0 ? [at, at + needle.length] : null, ancestorOnly: Boolean(needle) && !hit, secondary: needle && kind !== "folder" ? secondary : "" });
+      const at = needle ? normalize(entry.name).indexOf(needle) : -1;
+      if (needle && at < 0) return;
+      rows.push({ entry, kind, depth: needle ? 0 : depth, hasChildren: !needle && children, open: !needle && open, match: at >= 0 ? [at, at + needle.length] : null, ancestorOnly: false,
+        secondary: needle ? (kind === "folder" ? entry.path.slice(0, -1).join(" › ") : secondary) : "" });
     };
-    for (const entry of folders.filter(entry => entry.pinned === true && (!needle || direct.has("folder:" + entry.id)))
+    for (const entry of folders.filter(entry => entry.pinned === true && !needle)
       .sort((a, b) => (cleanOrder(a.pinOrder) ?? Number.MAX_SAFE_INTEGER) - (cleanOrder(b.pinOrder) ?? Number.MAX_SAFE_INTEGER))) {
       row(entry, "folder", 0, false, false, "");
       rows[rows.length - 1].section = "pinned";
     }
-    const shown = (kind, entry) => !needle || keep.has(kind + ":" + entry.id);
     (function walk(parent, depth) {
       for (const entry of byParent.get(parent) || []) {
-        if (!shown("folder", entry)) continue;
-        const groups = (groupsOf.get(entry.id) || []).filter(group => shown("group", group));
-        const loose = (looseOf.get(entry.id) || []).filter(member => shown("character", member));
-        const subs = (byParent.get(entry.id) || []).filter(child => shown("folder", child));
+        const groups = groupsOf.get(entry.id) || [];
+        const loose = looseOf.get(entry.id) || [];
         const hasChildren = (groupsOf.get(entry.id) || []).length + (looseOf.get(entry.id) || []).length + (byParent.get(entry.id) || []).length > 0;
-        const open = hasChildren && (needle ? groups.length + loose.length + subs.length > 0 : expanded.has(entry.id));
+        const open = hasChildren && (Boolean(needle) || expanded.has(entry.id));
         row(entry, "folder", depth, hasChildren, open, "");
         if (!open) continue;
         for (const group of groups) {
-          const members = (membersOf.get(group.id) || []).filter(member => shown("character", member));
-          const hasMembers = (membersOf.get(group.id) || []).length > 0, groupOpen = hasMembers && (needle ? members.length > 0 : expanded.has(group.id));
+          const members = membersOf.get(group.id) || [];
+          const hasMembers = members.length > 0, groupOpen = hasMembers && (Boolean(needle) || expanded.has(group.id));
           row(group, "group", depth + 1, hasMembers, groupOpen, group.seriesPath.join(" › "));
           if (groupOpen) for (const member of members) row(member, "character", depth + 2, false, false, member.seriesPath.join(" › "));
         }

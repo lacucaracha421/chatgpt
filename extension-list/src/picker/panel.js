@@ -354,13 +354,14 @@
       if (s.popover) return; s.popover = true; s.query = ""; s.cursor = 0;
       s.expanded = new Set([...s.expanded, ...scopeAncestors()]);
       ui.folderBtn.setAttribute("aria-expanded", "true");
-      ui.searchInput = h(doc, "input", { type: "text", placeholder: "폴더·캐릭터 찾기", "aria-label": "폴더·캐릭터 찾기", autocomplete: "off", spellcheck: "false", oninput: () => { s.query = ui.searchInput.value; s.cursor = 0; renderTree(); }, onkeydown: popoverKey });
+      ui.searchInput = h(doc, "input", { type: "text", placeholder: "폴더·캐릭터 찾기", "aria-label": "폴더·캐릭터 찾기", autocomplete: "off", spellcheck: "false", oninput: () => { s.query = ui.searchInput.value; s.cursor = 0; renderTree({ reveal: true }); } });
       ui.tree = h(doc, "div", { class: "tree", role: "tree", "aria-label": "폴더와 캐릭터" });
       ui.pop = h(doc, "div", { class: "pop", role: "dialog", "aria-label": "폴더·캐릭터 고르기" }, h(doc, "label", { class: "search" }, icon(doc, "search"), ui.searchInput), ui.tree);
+      win.addEventListener("keydown", popoverKey, true);
       ui.lk.append(ui.pop); renderTree({ reveal: true }); ui.searchInput.focus();
     }
     function closePopover({ refocus = true } = {}) {
-      if (!s.popover) return; s.popover = false; ui.pop?.remove(); ui.pop = null;
+      if (!s.popover) return; s.popover = false; win.removeEventListener("keydown", popoverKey, true); ui.pop?.remove(); ui.pop = null;
       ui.folderBtn.setAttribute("aria-expanded", "false"); if (refocus) ui.folderBtn.focus();
     }
     // `reveal`: keyboard moves bring the cursor row into view; a mouse expand/collapse keeps the
@@ -381,7 +382,7 @@
         const mine = row.kind === s.scopeKind && entry.id === s.scopeId;
         const count = row.kind === "folder" ? entry.imageCountWithDescendants : entry.imageCount;
         const line = h(doc, "div", { class: "trow " + row.kind + (mine ? " me" : "") + (index === s.cursor ? " kf" : "") + (row.ancestorOnly ? " anc" : ""), role: "treeitem", "aria-level": String(row.depth + 1), "aria-selected": String(mine), "aria-expanded": row.hasChildren ? String(row.open) : null, "data-id": entry.id, "data-kind": row.kind, "data-section": row.section || "tree", style: `padding-left:${8 + row.depth * 16}px`, onclick: event => { if (event.target.closest(".tw")) return; chooseScope(row.kind, entry.id); } },
-          row.hasChildren ? h(doc, "button", { type: "button", class: "tw", tabindex: "-1", "aria-label": row.open ? "접기" : "펼치기", onclick: () => toggleBranch(entry.id) }, icon(doc, row.open ? "chevron" : "right")) : h(doc, "span", { class: "tw" }),
+          row.hasChildren ? h(doc, "button", { type: "button", class: "tw", tabindex: "-1", "aria-label": row.open ? "접기" : "펼치기", onclick: () => toggleBranch(entry.id) }, icon(doc, row.open ? "chevron" : "right")) : s.query.trim() ? null : h(doc, "span", { class: "tw" }),
           icon(doc, row.kind, "ic ki"),
           h(doc, "span", { class: "nm" + (row.secondary ? " two" : "") }, label, row.secondary ? h(doc, "small", { class: "sec" }, row.secondary) : null),
           h(doc, "span", { class: "n" }, Model.formatCount(count)), mine ? h(doc, "span", { class: "cur", "aria-hidden": "true" }) : null);
@@ -396,21 +397,28 @@
       if (index >= 0) s.cursor = index;
       renderTree();
     }
+    // Listens on the window in the capture phase so page shortcuts cannot swallow the keys first.
+    // During Korean composition the key reads "Process"; arrows still move the result cursor
+    // (the IME commits the text itself), other keys are left to the IME.
     function popoverKey(event) {
+      if (root.activeElement !== ui.searchInput) return;
+      const composing = event.isComposing || event.keyCode === 229;
+      const key = composing ? (event.code === "ArrowDown" || event.code === "ArrowUp" ? event.code : null) : event.key;
+      if (!key) { event.stopPropagation(); return; }
       const rows = s.rows || [], row = rows[s.cursor];
-      const stop = () => { event.preventDefault(); event.stopPropagation(); };
-      if (event.key === "ArrowDown") { stop(); s.cursor = Math.min(rows.length - 1, s.cursor + 1); renderTree({ reveal: true }); }
-      else if (event.key === "ArrowUp") { stop(); s.cursor = Math.max(0, s.cursor - 1); renderTree({ reveal: true }); }
-      else if (event.key === "ArrowRight" && row?.hasChildren && !row.open && !s.query) { stop(); s.expanded.add(row.entry.id); renderTree({ reveal: true }); }
-      else if (event.key === "ArrowLeft" && row && !s.query) {
+      const stop = () => { if (!composing) event.preventDefault(); event.stopPropagation(); };
+      if (key === "ArrowDown") { stop(); s.cursor = Math.min(rows.length - 1, s.cursor + 1); renderTree({ reveal: true }); }
+      else if (key === "ArrowUp") { stop(); s.cursor = Math.max(0, s.cursor - 1); renderTree({ reveal: true }); }
+      else if (key === "ArrowRight" && row?.hasChildren && !row.open && !s.query) { stop(); s.expanded.add(row.entry.id); renderTree({ reveal: true }); }
+      else if (key === "ArrowLeft" && row && !s.query) {
         stop();
         if (row.open) { s.expanded.delete(row.entry.id); renderTree({ reveal: true }); return; }
         const parent = row.kind === "folder" ? (row.entry.parentId ? ["folder", row.entry.parentId] : null)
           : row.kind === "group" || !rows.some(r => r.kind === "group" && r.entry.id === row.entry.groupId) ? ["folder", row.entry.seriesId] : ["group", row.entry.groupId];
         if (parent) { s.cursor = Math.max(0, rows.findIndex(r => r.section !== "pinned" && r.kind === parent[0] && r.entry.id === parent[1])); renderTree({ reveal: true }); }
       }
-      else if (event.key === "Enter" && row) { stop(); chooseScope(row.kind, row.entry.id); }
-      else if (event.key !== "Escape") event.stopPropagation();
+      else if (key === "Enter" && row) { stop(); chooseScope(row.kind, row.entry.id); }
+      else if (key !== "Escape") event.stopPropagation();
     }
     async function chooseScope(kind, id) {
       closePopover({ refocus: false });
@@ -1025,7 +1033,7 @@
     }
     function toggleOpen() { return isOpen ? setFolded(!s.folded, { focus: Boolean(root.activeElement) }) : open({ focus: false }); }
     function destroy() {
-      isOpen = false; win.removeEventListener("resize", onResize); win.cancelAnimationFrame(resizeFrame); win.cancelAnimationFrame(fillFrame); clearTimer(trayTimer); discardPrefetch(); clearTimer(retryTimer); clearTimer(leaveTimer); themeObserver?.disconnect();
+      isOpen = false; win.removeEventListener("resize", onResize); win.removeEventListener("keydown", popoverKey, true); win.cancelAnimationFrame(resizeFrame); win.cancelAnimationFrame(fillFrame); clearTimer(trayTimer); discardPrefetch(); clearTimer(retryTimer); clearTimer(leaveTimer); themeObserver?.disconnect();
       detachSheet(); ui.spacer?.remove();
       doc.removeEventListener("selectionchange", onSelectionChange); unplace(); host?.remove(); host = null;
       for (const url of thumbs.values()) { try { win.URL.revokeObjectURL(url); } catch {} }

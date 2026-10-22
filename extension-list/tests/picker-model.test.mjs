@@ -173,25 +173,21 @@ test('popover tree: groups first, loose characters next, then sub-folders; group
   assert.equal(all.some(r => r.entry.id === 'c3'), false);
 });
 
-test('popover search finds characters and groups by name, keeps the path above them and shows the series path', () => {
+test('popover search is flat, matches names only and keeps path hints and counts', () => {
   const found = M.treeRows(SERIES_FOLDERS, PEOPLE, { query: '라플라스' });
-  assert.deepEqual(found.map(r => `${r.kind}:${r.entry.id}@${r.depth}`), ['folder:root@0', 'folder:ser@1', 'group:g1@2', 'character:c1@3']);
-  assert.deepEqual(found.map(r => r.ancestorOnly), [true, true, false, false]);
-  assert.deepEqual(found[2].match, [0, 4]);
-  assert.equal(found[2].secondary, '캐릭터 › 리버스'); assert.equal(found[3].secondary, '캐릭터 › 리버스');
-  assert.equal(found[0].secondary, '', 'folders have no secondary text');
-  // a character inside a group keeps its group visible, the group does not open its other members
-  const one = M.treeRows(SERIES_FOLDERS, PEOPLE, { query: 'a' });
-  assert.ok(one.some(r => r.entry.id === 'g1'));
+  assert.deepEqual(found.map(r => `${r.kind}:${r.entry.id}@${r.depth}`), ['group:g1@0', 'character:c1@0']);
+  assert.ok(found.every(r => !r.hasChildren && !r.open && !r.ancestorOnly));
+  assert.deepEqual(found[0].match, [0, 4]);
+  assert.deepEqual(found.map(r => r.secondary), ['캐릭터 › 리버스', '캐릭터 › 리버스']);
+  assert.deepEqual(found.map(r => r.entry.imageCount), [30, 20]);
+  assert.deepEqual(M.treeRows(SERIES_FOLDERS, PEOPLE, { query: 'a' }).map(r => r.entry.id), ['c1']);
   const loose = M.treeRows(SERIES_FOLDERS, PEOPLE, { query: '아로나' });
-  assert.deepEqual(loose.map(r => r.entry.id), ['root', 'ser', 'c2']);
-  assert.equal(loose[2].secondary, '캐릭터 › 리버스');
-  // folders still match as before and do not pull in their characters
+  assert.deepEqual(loose.map(r => r.entry.id), ['c2']);
+  assert.equal(loose[0].secondary, '캐릭터 › 리버스');
   const folder = M.treeRows(SERIES_FOLDERS, PEOPLE, { query: '기계' });
-  assert.deepEqual(folder.map(r => r.entry.id), ['root', 'ser', 'sub']);
+  assert.deepEqual(folder.map(r => r.entry.id), ['sub']);
+  assert.equal(folder[0].secondary, '캐릭터 › 리버스');
   assert.deepEqual(M.treeRows(SERIES_FOLDERS, PEOPLE, { query: '없는 이름' }), []);
-  // without characters the tree equals the old folder rows
-  assert.deepEqual(M.treeRows(SERIES_FOLDERS, [], { expanded: new Set(['root']) }).map(r => r.entry.id), M.folderRows(SERIES_FOLDERS, { expanded: new Set(['root']) }).map(r => r.entry.id));
 });
 
 test('scope helpers: lookup, breadcrumb, request shape and counts per scope kind', () => {
@@ -214,6 +210,20 @@ test('scope helpers: lookup, breadcrumb, request shape and counts per scope kind
   assert.equal(M.scopeCount(PEOPLE[0], 'group', true), 30); assert.equal(M.scopeCount(PEOPLE[1], 'character', false), 20);
 });
 
+test('same-named search results keep their distinct paths and counts', () => {
+  const folders = M.cleanFolders([
+    { id: 'a', name: 'First', path: ['First'] },
+    { id: 'b', name: 'Second', path: ['Second'] },
+  ]);
+  const characters = M.cleanCharacters([
+    { kind: 'character', id: 'one', name: '린네', seriesId: 'a', seriesPath: ['First'], imageCount: 51 },
+    { kind: 'character', id: 'two', name: '린네', seriesId: 'b', seriesPath: ['Second'], imageCount: 12 },
+  ]);
+  assert.deepEqual(M.treeRows(folders, characters, { query: '린네' }).map(row =>
+    [row.entry.id, row.depth, row.secondary, row.entry.imageCount]),
+    [['one', 0, 'First', 51], ['two', 0, 'Second', 12]]);
+});
+
 
 test('PC ranks order every sibling list and search; pins are ordered duplicate shortcuts', () => {
   const folders = M.cleanFolders([
@@ -234,8 +244,8 @@ test('PC ranks order every sibling list and search; pins are ordered duplicate s
   const all = M.treeRows(folders, people, { expanded: new Set(['z', 'ga']) });
   assert.deepEqual(all.map(r => r.entry.id), expected);
   assert.deepEqual(all.slice(0, 2).map(r => [r.section, r.hasChildren]), [['pinned', false], ['pinned', false]]);
-  assert.deepEqual(M.treeRows(folders, people, { query: 'match' }).map(r => r.entry.id), expected);
-  assert.deepEqual(M.treeRows(folders, people, { query: 'member' }).map(r => r.entry.id), ['z', 'ga', 'cz', 'ca']);
+  assert.deepEqual(M.treeRows(folders, people, { query: 'match' }).map(r => r.entry.id), expected.slice(2));
+  assert.deepEqual(M.treeRows(folders, people, { query: 'member' }).map(r => r.entry.id), ['cz', 'ca']);
   assert.deepEqual(folders.map(e => e.id), ['a', 'z', 'sa', 'sz'], 'does not mutate inputs');
   assert.equal(M.cleanFolders([{ id: 'old', name: 'Old' }])[0].pinned, false);
   assert.equal(M.cleanFolders([{ id: 'bad', name: 'Bad', order: -1, pinOrder: '1', pinned: 'true' }])[0].order, null);

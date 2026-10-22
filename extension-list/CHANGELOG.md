@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.64 — 2026-10-22
+
+- Show only matching folders and characters in Arca Live picker search, with path hints
+  and counts. The first result is highlighted; use Up/Down and Enter to choose it.
+
 ## 3.5.63 — 2026-10-21
 
 - Browse and insert pictures from a draggable bottom sheet on portrait tablets,
