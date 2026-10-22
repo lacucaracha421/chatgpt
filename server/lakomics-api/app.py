@@ -1125,7 +1125,7 @@ def shutdown_image_thumbnails():
 
 
 # Medium (768 px) copies of the art of upcoming cards, for the tablet album grid. Existing cards
-# are covered by the operator backfill (card_art_medium_backfill.py), never by this worker.
+# were backfilled once by a since-removed one-off script; this worker handles upcoming cards.
 import card_art_medium
 
 _card_art_medium_worker = None
@@ -1158,8 +1158,8 @@ def shutdown_card_art_medium():
         released()
 
 
-# Medium (768 px) copies of the spine artwork shown on the tablet 책장 (collection_artwork_medium). The operator backfill
-# (collection_artwork_medium_backfill.py) covers the spines that exist; this worker only keeps up with spines published later,
+# Medium (768 px) copies of the spine artwork shown on the tablet 책장 (collection_artwork_medium). Existing spines
+# were backfilled once by a since-removed one-off script; this worker keeps up with spines published later,
 # so it stays off until the operator switches it on (LAKOMICS_COLLECTION_MEDIUM_WORKER=1).
 import collection_artwork_medium
 import collection_authority

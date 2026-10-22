@@ -8,7 +8,6 @@ from tests.test_library_thumbnail_uploads import Fixture, ASSET, AUTH, RED, BLUE
 import app as api
 import head_cache
 import library_thumbnails as thumbs
-import migrate_library_thumbnails as migration
 
 
 class ThumbnailHTTPTests(Fixture):
@@ -41,15 +40,24 @@ class ThumbnailHTTPTests(Fixture):
         self.assertNotIn('thumbnail_revision', response.json()['items'][0])
         self.assertNotIn('thumbnail_revision',self.client.get('/v1/assets',headers=self.headers).json()['items'][0])
 
-    def test_single_21_50_ticket_routes_zero_heads_after_new_publish_and_migration(self):
+    def test_single_21_50_ticket_routes_zero_heads_after_new_publish_and_backfilled_receipts(self):
         ids = [f'00000000-0000-4000-8000-{index:012d}' for index in range(1,51)]
         for asset in ids:
             self.seed(asset)
         self.commit(self.upload())
+        # Seed the verified, revision-preserving state of previously backfilled rows.
+        digest = hashlib.sha256(RED).hexdigest()
+        key = thumbs.immutable_key(digest)
+        self.storage.seed(key)
+        rows = [self.row(asset) for asset in ids[1:]]
         with api.get_db() as db:
-            migration.install(db)
-            migration.manifest(db,'http')
-            migration.Migrator(db,self.storage,api.R2_BUCKET,'http',emit=lambda event:None).apply()
+            for row in rows:
+                db.execute('''UPDATE assets SET thumbnail_key=?,thumbnail_metadata_key=?,
+                              thumbnail_size_bytes=?,thumbnail_content_type='image/webp',
+                              thumbnail_sha256=?,thumbnail_revision=?,thumbnail_verified=1,
+                              thumbnail_write_epoch=thumbnail_write_epoch+1 WHERE id=?''',
+                           (key, key, len(RED), digest, thumbs.revision(row), row['id']))
+            db.commit()
         head_cache.ticket_heads = head_cache.HeadMetadataCache()
         single = self.client.post(f'/v1/library/assets/{ASSET}/media-ticket',headers=self.headers,json={'variant':'thumbnail'})
         self.assertEqual(single.status_code,200,single.text)

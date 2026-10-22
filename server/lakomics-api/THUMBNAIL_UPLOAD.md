@@ -111,7 +111,7 @@ installed PC's string-map response decoder.
 ## Revision and receipt rules
 
 The effective revision is null without a key, otherwise the stored revision or
-`sha256(key.encode('utf-8')).hexdigest()[:16]`. Migration freezes that value before
+`sha256(key.encode('utf-8')).hexdigest()[:16]`. The completed migration froze that value before
 moving the key. Equal thumbnail bytes preserve it; new/different bytes use
 `t1.<thumbnail sha256>`. If the previous digest is unknown, publish reads and
 hashes the old object once. An unreadable old object fails closed.
@@ -124,42 +124,21 @@ and moves preserving the effective revision do not change list generation.
 Existing projections with revisions keep them; projections previously without
 revisions remain unchanged until the tablet cache adoption rollout.
 
-Temporary objects are deleted after commit, best effort. The migration tool's
-separate `--reclaim-temp --limit N` mode reclaims session keys after their upload
+Temporary objects are deleted after commit, best effort. The live
+`library_thumbnails.reclaim_temp` helper reclaims session keys after their upload
 URL and session expiry plus a one-hour grace. Repeated bounded sweeps also catch
 late PUTs; no final or legacy object is ever deleted.
 
-## Rollout and migration
+## Completed migration
+
+Existing thumbnails were backfilled once on 2026-10-03 by a since-removed one-off
+script. It preserved effective revisions and legacy objects while recording
+verified immutable receipts. Its migration and rollback commands are no longer
+available.
 
 `LAKOMICS_BLOCK_LEGACY_THUMBNAIL_UPLOADS=1` refuses legacy thumbnail presigns with
-HTTP 409 `thumbnailUpgradeRequired`. Default is off. Before migration enable it
-in the running server and the operator environment, update/stop every legacy
-writer, wait out all old PUT URLs and confirm in-flight transfers ended. The
-tool also requires `--legacy-writes-drained` as an operator attestation. The
-switch alone cannot establish that an already started PUT has finished.
-
-Take and verify an online DB backup before applying. From `server/lakomics-api`,
-with R2 environment already loaded and DATABASE set to the exact control DB:
-
-```sh
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE"
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE" --verify-read 25
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE" --apply --legacy-writes-drained --batch-size 25 --max-r2-ops-per-second 5 --limit 25 --run-id thumb-pilot
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE" --report --run-id thumb-pilot
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE" --apply --legacy-writes-drained --batch-size 25 --max-r2-ops-per-second 5 --run-id thumb-full
-.venv/bin/python migrate_library_thumbnails.py --database "$DATABASE" --rollback --run-id thumb-pilot --max-r2-ops-per-second 5
-```
-
-Dry-run/report open SQLite read-only and never write objects. Verify-read performs
-only the requested bounded GETs. Apply freezes a keyset manifest per run (limit
-caps that manifest), journals each stage and resumes with the same run ID. One
-worker, at most 25 rows per DB batch, bounded retries/timeouts and a per-run lease
-protect the single-vCPU service. SIGTERM finishes the current safe stage.
-Rollback verifies the old object's journaled bytes and reverses only rows still
-at that run's exact result/epoch and unchanged lifecycle/metadata identity.
-No old-object deletion is implemented. Foreground ticket latency must be
-observed by the operator; this offline tool does not send network probes to the
-API. See JSONL summary for local storage, stage and SQLite timings.
+HTTP 409 `thumbnailUpgradeRequired`. Default is off. This switch does not cancel
+already-issued PUT URLs or in-flight transfers.
 
 ## Schema and projection scope
 
@@ -172,8 +151,8 @@ context and the original result. `thumbnail_revision_fallbacks` is an immutable
 key-to-legacy-token dictionary used only by SQLite generation triggers: SQLite
 has no portable SHA-256 function, and triggers must work on every writer's
 connection without installing a connection-local function. The shared Python
-revision helper remains the projection contract. Apply creates
-`thumbnail_migration_runs` and `thumbnail_migration_journal`; dry-run/report do not.
+revision helper remains the projection contract. The completed migration created
+`thumbnail_migration_runs` and `thumbnail_migration_journal` for its operational history.
 
 Changed revision readers: the shared mobile asset mapper (via the existing
 `app.thumbnail_revision` export), and both Character list sorts' live overlay
@@ -193,27 +172,6 @@ already-deployed Pillow dependency in the isolated encoder, including memory,
 pixel and wall-clock bounds; a missing verifier fails closed.
 
 ## Operational bounds and verification
-
-One worker is supported (`--workers 1`). Apply limits each storage artifact to
-2 MiB, each asset operation to 60 seconds plus bounded in-flight socket/decode
-completion, and a run to four hours by default (`--max-seconds`). The storage
-client uses the existing worker's connection/read timeouts with SDK retries
-disabled, so every storage attempt is counted and paced by this tool. Each call
-has at most three tool-level attempts. Journal CAS transactions contain one asset (no more than the
-requested batch size), with all storage work outside the transaction. The
-initial manifest is frozen atomically with no storage I/O; later walks use IDs,
-never OFFSET. A run resumes only its frozen targets; a new run discovers later
-assets and earlier conflicts.
-
-Transactions exceeding 250 ms halve the storage rate, down to 0.25 operations
-per second; three slow transactions or three SQLite busy errors stop further
-assets. If SQLite stays busy even for error journaling, the process exits and
-the previous durable state remains resumable. JSONL reports stage p50/p95,
-operation counts, declared download/upload bytes, retries, progress and DB
-integrity. The GET counters include destination-existence probes; COPY/HEAD
-remain zero. Foreground API latency needs external operator observation because
-the migration tool neither imports the app nor probes API sockets. Stop with
-SIGTERM if foreground latency exceeds the pilot's accepted baseline.
 
 Local socket-free coverage lives in `tests/test_library_thumbnail_uploads.py`;
 HTTP wire/projection/cold batch checks live in

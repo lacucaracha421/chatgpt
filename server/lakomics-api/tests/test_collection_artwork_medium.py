@@ -6,15 +6,12 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import closing, redirect_stdout
+from contextlib import closing
 from pathlib import Path
-from types import ModuleType
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import authority
 import collection_artwork_medium as medium
-import collection_artwork_medium_backfill as backfill
 import collection_authority
 from tests.test_card_art_medium import MemoryStore, picture, requires_pillow
 
@@ -60,15 +57,6 @@ class MediumSpines(unittest.TestCase):
         db.row_factory = sqlite3.Row
         return closing(db)
 
-    def run_backfill(self, *args):
-        fake = ModuleType("r2")
-        fake.thumbnail_storage_client = mock.Mock(return_value=self.store)
-        fake.R2_BUCKET = "bucket"
-        out = io.StringIO()
-        with mock.patch.dict(sys.modules, {"r2": fake}), redirect_stdout(out):
-            backfill.main(["--database", str(self.path), "--delay", "0", *args])
-        return json.loads(out.getvalue()), fake
-
     def test_only_game_and_av_spines_are_wanted_once_each_and_unreadable_ones_are_set_aside(self):
         shared = self.add_original(seed=1)
         self.add_work("game", "game", shared, {**shared, "id": "cover", "kind": "cover"})
@@ -100,32 +88,6 @@ class MediumSpines(unittest.TestCase):
             self.assertEqual(medium.classify(db, medium.wanted(db, "mobile_collections"))["ready"], [sha])
             self.assertEqual(medium.digests(db, [{"type": "game", "artworks": [original]}]), {sha: digest})
             self.assertEqual(medium.lookup(db, sha)["object_key"], key)
-
-    def test_the_backfill_dry_run_changes_nothing_and_apply_is_resumable_and_idempotent(self):
-        for index in range(3):
-            self.add_work("game%d" % index, "game", self.add_original(seed=index + 10))
-        before = dict(self.store.objects)
-
-        report, fake = self.run_backfill()
-        self.assertEqual((report["dryRun"], report["spines"], report["todo"], report["unsupported"]), (True, 3, 3, 0))
-        self.assertEqual(report["downloadBytes"], sum(len(data) for data, _ in before.values()))
-        self.assertEqual(report["estimatedStoredBytes"], 3 * medium.ESTIMATED_BYTES)
-        fake.thumbnail_storage_client.assert_not_called()
-        self.assertEqual(self.store.objects, before)
-        with self.db() as db:
-            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='collection_artwork_medium'").fetchone())
-
-        report, _ = self.run_backfill("--apply", "--limit", "2")
-        self.assertEqual(report["outcome"], {"made": 2})
-        report, _ = self.run_backfill("--apply")
-        self.assertEqual((report["todo"], report["ready"], report["outcome"]), (1, 2, {"made": 1}))
-        objects = dict(self.store.objects)
-        report, _ = self.run_backfill("--apply")
-        self.assertEqual((report["todo"], report["ready"], report["outcome"]), (0, 3, {}))
-        self.assertEqual(self.store.objects, objects)
-        self.assertEqual(len([key for key in objects if key.startswith(medium.PREFIX)]), 3)
-        # Originals are untouched.
-        self.assertTrue(all(objects[key] == before[key] for key in before))
 
     def test_the_worker_covers_what_is_left_and_gives_up_on_a_hopeless_original_until_restart(self):
         self.add_work("good", "game", self.add_original(seed=20))

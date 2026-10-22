@@ -13,9 +13,8 @@ module makes the in-between copy with the recipe the server already trusts for t
   made from. A row exists only for a finished, verified object, so a rerun skips it.
 
 Nothing here decodes an image in the API process, and nothing writes the Library ``assets`` row.
-:class:`CardArtMediumWorker` covers the art of new packs; the operator backfill
-(``card_art_medium_backfill.py``) covers cards that already exist. Both go through
-:func:`classify` and :func:`make`.
+:class:`CardArtMediumWorker` covers the art of new packs through :func:`classify` and
+:func:`make`. Existing cards were backfilled once by a since-removed one-off script.
 """
 import contextlib
 import hashlib

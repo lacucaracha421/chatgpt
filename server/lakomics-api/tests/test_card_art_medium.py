@@ -1,20 +1,15 @@
 """Medium card art: the real encoder child on a temporary database and an in-memory object store."""
 import hashlib
 import io
-import json
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
-from types import ModuleType
-from unittest import mock
 
 import asset_visibility
 import card_art_medium
-import card_art_medium_backfill
 import cards
 import image_thumbnail_encode as encoder
 
@@ -171,45 +166,6 @@ class MediumArt(unittest.TestCase):
         self.assertEqual(worker.run_once(), 0)
         self.assertEqual(worker.run_once(), 0)
         self.assertEqual(reads.count("original/broken"), 1)
-        with self.db() as db:
-            self.assertEqual(db.execute("SELECT revision FROM card_state").fetchone()[0], 2)
-
-    def run_backfill(self, *args):
-        fake = ModuleType("r2")
-        fake.thumbnail_storage_client = mock.Mock(return_value=self.store)
-        fake.R2_BUCKET = "bucket"
-        out = io.StringIO()
-        with mock.patch.dict(sys.modules, {"r2": fake}), redirect_stdout(out):
-            card_art_medium_backfill.main(["--database", str(self.path), "--delay", "0", *args])
-        return json.loads(out.getvalue()), fake
-
-    def test_the_backfill_dry_run_changes_nothing_and_apply_is_resumable_and_idempotent(self):
-        for index in range(3):
-            self.add_art("art%d" % index)
-        self.add_art("animated", kind="animated_gif", content_type="image/gif")
-        before = dict(self.store.objects)
-
-        report, fake = self.run_backfill()
-        self.assertEqual((report["dryRun"], report["artAssets"], report["todo"], report["unsupported"]), (True, 4, 3, 1))
-        self.assertEqual(report["downloadBytes"], sum(len(before["original/art%d" % i][0]) for i in range(3)))
-        self.assertEqual(report["estimatedStoredBytes"], 3 * card_art_medium.ESTIMATED_BYTES)
-        fake.thumbnail_storage_client.assert_not_called()
-        self.assertEqual(self.store.objects, before)
-        with self.db() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM card_art_medium").fetchone()[0], 0)
-            self.assertEqual(db.execute("SELECT revision FROM card_state").fetchone()[0], 0)
-
-        report, _ = self.run_backfill("--apply", "--limit", "2")
-        self.assertEqual(report["outcome"], {"made": 2})
-        report, _ = self.run_backfill("--apply")
-        self.assertEqual((report["todo"], report["ready"], report["outcome"]), (1, 2, {"made": 1}))
-        objects = dict(self.store.objects)
-        report, _ = self.run_backfill("--apply")
-        self.assertEqual((report["todo"], report["ready"], report["outcome"]), (0, 3, {}))
-        self.assertEqual(self.store.objects, objects)
-        self.assertEqual(len([key for key in objects if key.startswith(card_art_medium.PREFIX)]), 3)
-        # Originals are untouched and the signal moved once per applying run that made copies.
-        self.assertTrue(all(objects[key] == before[key] for key in before))
         with self.db() as db:
             self.assertEqual(db.execute("SELECT revision FROM card_state").fetchone()[0], 2)
 

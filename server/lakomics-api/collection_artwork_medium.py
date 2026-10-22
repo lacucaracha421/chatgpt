@@ -16,8 +16,8 @@ Which spines: the ``spine`` artwork of game and AV works in what ``/v1/collectio
 that is active, else the PC replica). The list publishes a copy's digest as ``artworkVersions[<spine>].medium`` and the
 artwork ticket serves it as ``variant: "medium"``; a client without it (or after a failure) keeps the thumbnail.
 
-Nothing here decodes an image in the API process. The operator backfill (``collection_artwork_medium_backfill.py``) covers
-the spines that exist; :class:`CollectionArtworkMediumWorker` (off unless ``LAKOMICS_COLLECTION_MEDIUM_WORKER=1``) keeps up
+Nothing here decodes an image in the API process. Existing spines were backfilled once by a since-removed one-off script.
+:class:`CollectionArtworkMediumWorker` (off unless ``LAKOMICS_COLLECTION_MEDIUM_WORKER=1``) keeps up
 with spines published later.
 """
 import contextlib
