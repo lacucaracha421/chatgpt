@@ -26,6 +26,7 @@ import { resetReleaseDataForTests } from "./releaseData";
 import type { AvLinkApi } from "./AvLinkInbox";
 import { resetMangaShelvesForTests } from "./MangaShelfList";
 import { avGateway } from "./avClient";
+import type { AvGateway } from "./avTypes";
 import { resetSpineShelfDataForTests } from "./spineShelfData";
 import { resetShelfCasesForTests } from "./case/shelfCaseInfo";
 import { forgetMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
@@ -81,6 +82,7 @@ function renderBrowser(props: {
   fetchLaunchBoxSpines?: LibraryGateway["fetchLaunchBoxSpines"];
   patch?: (gateway: LibraryGateway) => void;
   navigationMemory?: CollectionNavigationMemory;
+  avApi?: AvGateway;
 }) {
   const gateway = createGateway();
   props.patch?.(gateway);
@@ -89,7 +91,7 @@ function renderBrowser(props: {
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} kakaoReview={props.kakaoReview} avLinkApi={props.avLinkApi} navigationMemory={props.navigationMemory}
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} kakaoReview={props.kakaoReview} avLinkApi={props.avLinkApi} avApi={props.avApi} navigationMemory={props.navigationMemory}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onOpenWork={props.onOpenWork} onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -250,6 +252,70 @@ describe("CollectionBrowser", () => {
 
     renderBrowser({ collections: [], typeFilter: "av", showcase: false, avLinkApi });
     expect(await screen.findByRole("region", { name: "받은 품번" })).toBeInTheDocument();
+  });
+
+  it("groups AV works by performer: a shared work under each performer, 배우 없음 last, the heading opens the performer page", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("lakomics.collections.view.av.v1", JSON.stringify({ layout: "shelf", perRow: 8, grouping: "sort" }));
+    const av = (id: string, name: string): CollectionSummary => ({ ...sample, id, name, type: "av" });
+    const avApi = {
+      listPerformerCredits: vi.fn().mockResolvedValue({
+        people: [{ id: "mio", displayName: "하야세 미오", nameJa: "早瀬みお", portrait: null }, { id: "rin", displayName: "아마노 린", nameJa: null, portrait: null }],
+        credits: [{ collectionId: "duo", personId: "mio", order: 0 }, { collectionId: "duo", personId: "rin", order: 1 }, { collectionId: "solo", personId: "rin", order: 0 }],
+      }),
+      getPerformer: vi.fn(() => new Promise(() => undefined)),
+    } as unknown as AvGateway;
+    renderBrowser({ collections: [av("duo", "둘이서"), av("solo", "혼자서"), av("bare", "배우 미상")], typeFilter: "av", showcase: false, avApi });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    const grouping = within(screen.getByRole("radiogroup", { name: "묶기" }));
+    expect(grouping.getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["안 묶음", "배우"]);
+    await user.click(grouping.getByRole("radio", { name: "배우" }));
+    expect(JSON.parse(localStorage.getItem("lakomics.collections.view.av.v1")!)).toMatchObject({ grouping: "performer" });
+    await user.keyboard("{Escape}");
+    const list = await screen.findByRole("group", { name: "AV 작품 목록" });
+    await waitFor(() => expect(list.querySelectorAll(".collection-list__group")).toHaveLength(3));
+    // Both are first credited somewhere, so the shown name orders them; the Japanese name sits under the name.
+    expect([...list.querySelectorAll(".collection-list__group")].map(group => group.querySelector("button")?.getAttribute("aria-label") ?? group.textContent)).toEqual(["아마노 린 2편", "하야세 미오 1편", "배우 없음 1편"]);
+    expect(within(list).getByText("早瀬みお")).toHaveAttribute("lang", "ja");
+    // Four cells for three works: 둘이서 stands under both performers; the toolbar still counts works.
+    expect(list.querySelectorAll(".collection-list__cell")).toHaveLength(4);
+    expect(screen.getByLabelText("작품 3개")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "아마노 린 2편" }));
+    expect(avApi.getPerformer).toHaveBeenCalledWith("rin");
+    expect(await screen.findByRole("article", { name: "AV 배우 상세" })).toBeInTheDocument();
+  });
+
+  it("returns to the performer page after a work opened from it, and not on a later visit", async () => {
+    localStorage.setItem("lakomics.collections.view.av.v1", JSON.stringify({ layout: "shelf", perRow: 8, grouping: "performer" }));
+    const av = (id: string, name: string): CollectionSummary => ({ ...sample, id, name, type: "av" });
+    const avApi = {
+      listPerformerCredits: vi.fn().mockResolvedValue({ people: [{ id: "rin", displayName: "아마노 린", nameJa: null, portrait: null }], credits: [{ collectionId: "solo", personId: "rin", order: 0 }] }),
+      getPerformer: vi.fn().mockResolvedValue({
+        person: { id: "rin", displayName: "아마노 린", nameJa: null, portrait: null, memo: null, fanzaActressId: null, wikidataId: null },
+        stats: { workCount: 1, firstRelease: null, lastRelease: null, averageScore: null },
+        works: [{ collectionId: "solo", name: "혼자서", productCode: "SOLO-1", releaseDate: null, frontArtworkId: null, spineArtworkId: null, backArtworkId: null, coverRevision: "r1", role: "performer", solo: true }],
+        coPerformers: [], labels: [],
+      }),
+      getPerformerProfile: vi.fn().mockResolvedValue(null), getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    } as unknown as AvGateway;
+    const memory: CollectionNavigationMemory = new Map();
+    const onOpenWork = vi.fn();
+    const show = () => renderBrowser({ collections: [av("solo", "혼자서")], typeFilter: "av", showcase: false, avApi, onOpenWork, navigationMemory: memory });
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "아마노 린 1편" }));
+    const page = await screen.findByRole("article", { name: "AV 배우 상세" });
+    await waitFor(() => expect(page.querySelector("[data-collection-id='solo']")).not.toBeNull());
+    fireEvent.keyDown(page.querySelector("[data-collection-id='solo']")!, { key: "Enter" });
+    expect(onOpenWork).toHaveBeenCalledWith("solo", expect.any(Array));
+    cleanup();
+    // Back from the work screen: the performer page it was opened from.
+    show();
+    expect(await screen.findByRole("article", { name: "AV 배우 상세" })).toBeInTheDocument();
+    cleanup();
+    // Another visit: the list.
+    show();
+    expect(await screen.findByRole("group", { name: "AV 작품 목록" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "AV 배우 상세" })).toBeNull();
   });
 
   it("shows a saved rating outside the presets as the selected option", async () => {

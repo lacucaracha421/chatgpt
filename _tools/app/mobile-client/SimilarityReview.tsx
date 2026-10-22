@@ -3,10 +3,10 @@ import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
 import {SimilarityClues} from '../src/similarity/SimilarityClues';
 import {sourceHost, reasonSentence, SIMILARITY_CHOICES as CHOICES, type ClueSideData} from '../src/similarity/clues';
-import {Badge} from '../src/shared/ui/Badge';
-import {visibleInterval} from './useVisibleInterval';
-import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
-import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PauseIcon, PhotoIcon, PlayIcon, Square2StackIcon} from '@heroicons/react/24/outline';
+import {CompareTools, ImageCompare, useImageCompare, type CompareImage} from '../src/similarity/compare/ImageCompare';
+import {FIT} from '../src/similarity/compare/compareView';
+import {useCallback, useEffect, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
+import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PhotoIcon, Square2StackIcon} from '@heroicons/react/24/outline';
 import {Button, EmptyState, IconButton} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {decodeImage, loadThumbnail, mediaTicket, warmThumbnail} from './media';
@@ -21,12 +21,6 @@ import '../src/similarity/similarity-clues.css';
 
 const UNDO_DEPTH = 5;
 const PAGE = 20;
-const MAX_SCALE = 16;
-const FLICKER_MS = 500;
-
-/** Zoom and pan shared by both images, in normalized image coordinates (0..1). */
-export type CompareView = {scale: number; x: number; y: number};
-export const FIT: CompareView = {scale: 1, x: 0.5, y: 0.5};
 
 type Undo = {item: SimilarityItem; intent: SimilarityIntent; hidden: SimilarityItem[]};
 type State =
@@ -34,43 +28,8 @@ type State =
   | {phase: 'error'; message: string; offline: boolean}
   | {phase: 'ready'; ready: boolean};
 
-const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
-
-/** The displayed (contain-fitted, unzoomed) size of an image inside a box. */
-export function fitted(box: {width: number; height: number}, image: {width: number; height: number}) {
-  if (!box.width || !box.height || !image.width || !image.height) return {width: box.width, height: box.height};
-  const f = Math.min(box.width / image.width, box.height / image.height);
-  return {width: image.width * f, height: image.height * f};
-}
-
-/**
- * The CSS transform that puts the normalized point (x, y) of an image at the box centre at
- * the given scale. Both images use the same view, so the same spot lines up even when their
- * resolutions differ.
- */
-export function transformFor(view: CompareView, box: {width: number; height: number}, image: {width: number; height: number}) {
-  const shown = fitted(box, image);
-  const tx = -(view.x - 0.5) * shown.width * view.scale, ty = -(view.y - 0.5) * shown.height * view.scale;
-  return `translate(${tx}px, ${ty}px) scale(${view.scale})`;
-}
-
-function useBox(ref: MutableRefObject<HTMLElement | null>) {
-  const [box, setBox] = useState({width: 0, height: 0});
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const read = () => setBox({width: node.clientWidth, height: node.clientHeight});
-    read();
-    if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', read); return () => window.removeEventListener('resize', read); }
-    const observer = new ResizeObserver(read);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [ref]);
-  return box;
-}
-
 /** The thumbnail at once; the original once `original` is set (on zoom) and it decodes. */
-function PairImage({side, original, style, label}: {side: SimilaritySide; original: boolean; style?: React.CSSProperties; label: string}) {
+function PairImage({side, original, style, label, className}: {side: SimilaritySide; original: boolean; style: CSSProperties; label: string; className: string}) {
   const privacy = useTabletAssetMask(side.asset);
   const asset = side.asset;
   const [src, setSrc] = useState<{id: string; url?: string; full?: boolean}>({id: asset.id, url: asset.preview});
@@ -94,110 +53,16 @@ function PairImage({side, original, style, label}: {side: SimilaritySide; origin
     }).catch(() => {});
     return () => controller.abort();
   }, [asset, original, full, privacy]);
-  if (privacy) return <span className="similarity-image privacy-mask" style={style} aria-label="비공개 모드"/>;
+  if (privacy) return <span className={`${className} privacy-mask`} style={style} aria-label="비공개 모드"/>;
   return shown
-    ? <img className="similarity-image" src={shown} alt={label} draggable={false} style={style} data-original={full ? 'true' : undefined}/>
-    : <span className="similarity-image similarity-missing" style={style}><PhotoIcon aria-hidden="true"/></span>;
+    ? <img className={className} src={shown} alt={label} draggable={false} style={style} data-original={full ? 'true' : undefined}/>
+    : <span className={`${className} image-compare__missing`} style={style}><PhotoIcon aria-hidden="true"/></span>;
 }
 
 const dims = (side: SimilaritySide) => ({width: side.width ?? side.asset.width ?? 0, height: side.height ?? side.asset.height ?? 0});
-
-/**
- * One gesture surface: drag pans (when zoomed), two fingers pinch, double-tap toggles 1:1
- * around the tapped point. It reports a new shared view; it never owns one.
- */
-function useCompareGestures(view: CompareView, onView: (view: CompareView) => void, box: {width: number; height: number}, image: {width: number; height: number}) {
-  const pointers = useRef(new Map<number, {x: number; y: number}>());
-  const start = useRef<{view: CompareView; distance: number; mid: {x: number; y: number}} | null>(null);
-  const tap = useRef<{x: number; y: number; t: number; moved: boolean} | null>(null);
-  const lastTap = useRef<{x: number; y: number; t: number} | null>(null);
-  const latest = useRef({view, box, image});
-  latest.current = {view, box, image};
-  const local = (event: ReactPointerEvent<HTMLElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return {x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2};
-  };
-  const shown = () => fitted(latest.current.box, latest.current.image);
-  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if (event.button > 0) return;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    pointers.current.set(event.pointerId, local(event));
-    tap.current = pointers.current.size === 1 ? {...local(event), t: performance.now(), moved: false} : null;
-    if (pointers.current.size === 2) {
-      const [p, q] = [...pointers.current.values()];
-      start.current = {view: latest.current.view, distance: Math.hypot(p.x - q.x, p.y - q.y) || 1, mid: {x: (p.x + q.x) / 2, y: (p.y + q.y) / 2}};
-    }
-  };
-  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const previous = pointers.current.get(event.pointerId);
-    if (!previous) return;
-    const point = local(event);
-    pointers.current.set(event.pointerId, point);
-    const size = shown();
-    if (tap.current && Math.hypot(point.x - tap.current.x, point.y - tap.current.y) > 10) tap.current.moved = true;
-    if (pointers.current.size === 2 && start.current && size.width && size.height) {
-      const [p, q] = [...pointers.current.values()];
-      const from = start.current;
-      const scale = clamp(from.view.scale * Math.hypot(p.x - q.x, p.y - q.y) / from.distance, 1, MAX_SCALE);
-      // Keep the image point under the pinch midpoint where it was.
-      const u = from.view.x + from.mid.x / (size.width * from.view.scale), v = from.view.y + from.mid.y / (size.height * from.view.scale);
-      onView(scale === 1 ? FIT : {scale, x: clamp(u - from.mid.x / (size.width * scale), 0, 1), y: clamp(v - from.mid.y / (size.height * scale), 0, 1)});
-    } else if (pointers.current.size === 1 && latest.current.view.scale > 1 && size.width && size.height) {
-      const current = latest.current.view;
-      onView({...current, x: clamp(current.x - (point.x - previous.x) / (size.width * current.scale), 0, 1),
-        y: clamp(current.y - (point.y - previous.y) / (size.height * current.scale), 0, 1)});
-    }
-  };
-  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
-    const point = pointers.current.get(event.pointerId);
-    pointers.current.delete(event.pointerId);
-    if (pointers.current.size < 2) start.current = null;
-    const pressed = tap.current;
-    tap.current = null;
-    if (!point || !pressed || pressed.moved || performance.now() - pressed.t > 300) return;
-    const now = performance.now(), last = lastTap.current;
-    if (last && now - last.t < 350 && Math.hypot(point.x - last.x, point.y - last.y) < 40) {
-      lastTap.current = null;
-      const current = latest.current.view, size = shown();
-      if (current.scale > 1) { onView(FIT); return; }
-      // 1:1 — one image pixel per CSS pixel, at least a visible step, centred on the tap.
-      const natural = latest.current.image.width;
-      const scale = clamp(natural && size.width ? natural / size.width : 2, 2, MAX_SCALE);
-      onView({scale, x: clamp(current.x + (size.width ? point.x / size.width : 0), 0, 1), y: clamp(current.y + (size.height ? point.y / size.height : 0), 0, 1)});
-    } else lastTap.current = {...point, t: now};
-  };
-  const onPointerCancel = (event: ReactPointerEvent<HTMLElement>) => { pointers.current.delete(event.pointerId); start.current = null; tap.current = null; };
-  return {onPointerDown, onPointerMove, onPointerUp, onPointerCancel};
-}
-
-/** One image of the pair with its own gesture surface (side-by-side / stacked layout). */
-function Pane({side, name, view, onView}: {side: SimilaritySide; name: 'A' | 'B'; view: CompareView; onView(view: CompareView): void}) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const box = useBox(host);
-  const image = dims(side);
-  const gestures = useCompareGestures(view, onView, box, image);
-  return <div ref={host} className="similarity-pane" aria-label={`${name} 이미지`} {...gestures}>
-    <PairImage side={side} original={view.scale > 1} label={`${name} 이미지`} style={{transform: transformFor(view, box, image)}}/>
-    <Badge variant="scrim" aria-hidden="true">{name}</Badge>
-  </div>;
-}
-
-/** Single-pane compare: B over A, either held/flickered or cut by a wipe divider. */
-function CompareStage({item, view, onView, mode, showB, wipe}: {item: SimilarityItem; view: CompareView; onView(view: CompareView): void; mode: 'flicker' | 'wipe'; showB: boolean; wipe: number}) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const box = useBox(host);
-  const a = dims(item.a), b = dims(item.b);
-  const gestures = useCompareGestures(view, onView, box, a);
-  const top = mode === 'wipe' ? {clipPath: `inset(0 0 0 ${wipe}%)`} : {opacity: showB ? 1 : 0};
-  return <div ref={host} className="similarity-pane similarity-stage" aria-label="비교 화면" data-showing={mode === 'flicker' ? (showB ? 'B' : 'A') : 'wipe'} {...gestures}>
-    <PairImage side={item.a} original={view.scale > 1} label="A 이미지" style={{transform: transformFor(view, box, a)}}/>
-    <div className="similarity-layer" style={top}>
-      <PairImage side={item.b} original={view.scale > 1} label="B 이미지" style={{transform: transformFor(view, box, b)}}/>
-    </div>
-    {mode === 'wipe' && <span className="similarity-divider" style={{left: `${wipe}%`}} aria-hidden="true"/>}
-    <Badge variant="scrim" aria-hidden="true">{mode === 'wipe' ? 'A | B' : showB ? 'B' : 'A'}</Badge>
-  </div>;
-}
+const NAMES = ['A', 'B'] as const;
+const compareImage = (side: SimilaritySide, name: 'A' | 'B'): CompareImage => ({name, label: `${name} 이미지`, size: dims(side),
+  render: ({className, style, original}) => <PairImage side={side} original={original} label={`${name} 이미지`} className={className} style={style}/>});
 
 function clueSide(side: SimilaritySide): ClueSideData {
   return {handle: side.accountHandle ?? null, host: side.sourceHost ?? sourceHost(side.sourceLabel ? `https://${side.sourceLabel}` : null), role: side.accountRole ?? 'unknown', postedAt: side.sourcePublishedAt ?? null, width: side.width, height: side.height, byteSize: side.byteSize, format: side.format};
@@ -223,23 +88,19 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
   const [undo, setUndo] = useState<Undo[]>([]);
   const [notice, setNotice] = useState('');
   const [queued, setQueued] = useState(() => queuedSimilarity().reviews.size);
-  const [view, setView] = useState<CompareView>(FIT);
-  const [compare, setCompare] = useState<null | 'flicker' | 'wipe'>(null);
-  const [held, setHeld] = useState(false);
-  const [auto, setAuto] = useState(false);
-  const [phase, setPhase] = useState(false);
-  const [wipe, setWipe] = useState(50);
+  const current = queue[0];
+  const compare = useImageCompare(current?.reviewId);
   const cursor = useRef<string | null>(null);
   const more = useRef(false);
   const done = useRef(new Set<string>());
   const alive = useRef(true);
-  const latest = useRef({view, onClose});
-  latest.current = {view, onClose};
+  const latest = useRef({compare, onClose});
+  latest.current = {compare, onClose};
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     backRef.current = () => {
-      if (latest.current.view.scale > 1) { setView(FIT); return true; }
+      if (latest.current.compare.view.scale > 1) { latest.current.compare.setView(FIT); return true; }
       latest.current.onClose();
       return true;
     };
@@ -250,12 +111,6 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     window.addEventListener(SIMILARITY_REVIEW_EVENT, read);
     return () => window.removeEventListener(SIMILARITY_REVIEW_EVENT, read);
   }, []);
-  useEffect(() => {
-    if (!auto || compare !== 'flicker') return;
-    const timer = visibleInterval(() => setPhase(value => !value), FLICKER_MS);
-    return () => timer();
-  }, [auto, compare]);
-
   /** Pairs this device already decided, or that hold an image a queued decision will trash. */
   const fresh = useCallback((items: SimilarityItem[]) => {
     const {reviews, trashed} = queuedSimilarity();
@@ -304,9 +159,6 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     if (!privacy) for (const item of queue.slice(1, 3)) for (const side of [item.a, item.b]) void warmThumbnail(side.asset, controller.signal);
     return () => controller.abort();
   }, [queue, state.phase, load, privacy]);
-
-  const current = queue[0];
-  useEffect(() => { setView(FIT); setHeld(false); }, [current?.reviewId]);
 
   const act = useCallback((decision: SimilarityChoice) => {
     const item = queue[0];
@@ -370,7 +222,6 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     ? `${queued > 0 ? ` · 전송 대기 ${queued}` : ''}${(counts?.pendingPc ?? 0) > 0 ? ` · PC 반영 대기 ${counts!.pendingPc}` : ''}`
     : pending > 0 ? ` · PC 반영 대기 ${pending}` : '';
   const lastUndo = undo[undo.length - 1];
-  const showB = compare === 'flicker' && (held || (auto && phase));
   const ready = state.phase === 'ready' && state.ready;
   return <div className="similarity-overlay" role="dialog" aria-modal="true" aria-label="유사 이미지 검토">
     <header className="review-bar">
@@ -378,7 +229,6 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
       <div className="review-title"><h1>유사 이미지 검토</h1>
         {ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{waitingText}{(counts?.skipped ?? 0) > 0 && ` · 반영 안 된 결정 ${counts!.skipped}`}</p>}
       </div>
-      {ready && current && <IconButton label={compare ? '나란히 보기' : '한 화면에서 비교'} icon={Square2StackIcon} active={!!compare} onClick={() => { setCompare(value => value ? null : 'flicker'); setAuto(false); setHeld(false); }}/>}
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
     <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
@@ -387,26 +237,11 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     </EmptyState>}
     {state.phase === 'ready' && !state.ready && <EmptyState className="review-empty" title="PC 업데이트가 필요합니다" hint="PC 앱이 아직 유사 이미지 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다."/>}
     {ready && !current && <EmptyState className="review-empty" title="모두 검토했습니다" hint={pending > 0 ? (serverApply ? `전송 대기 ${pending}개 · 전송되면 바로 반영되고 버린 이미지는 휴지통으로 갑니다.` : `PC 반영 대기 ${pending}개 · PC가 반영하면 버린 이미지가 휴지통으로 갑니다.`) : 'PC가 새 유사 이미지를 찾으면 여기에 나타납니다.'}/>}
-    {ready && current && <div className="similarity-body" data-mode={compare ? 'compare' : 'side'}>
-      {compare
-        ? <div className="similarity-compare">
-          <CompareStage item={current} view={view} onView={setView} mode={compare} showB={showB} wipe={wipe}/>
-          <div className="similarity-compare-tools">
-            <div className="library-segments" role="tablist" aria-label="비교 방식">
-              {(['flicker', 'wipe'] as const).map(mode => <button key={mode} role="tab" aria-selected={compare === mode} onClick={() => { setCompare(mode); setAuto(false); }}>{mode === 'flicker' ? '깜빡임' : '와이프'}</button>)}
-            </div>
-            {compare === 'flicker'
-              ? <div className="similarity-flicker">
-                <Button variant="secondary" aria-label="누르는 동안 B 보기" onPointerDown={() => setHeld(true)} onPointerUp={() => setHeld(false)} onPointerLeave={() => setHeld(false)} onPointerCancel={() => setHeld(false)}>누르는 동안 B</Button>
-                <IconButton label={auto ? '자동 깜빡임 멈춤' : '자동 깜빡임'} icon={auto ? PauseIcon : PlayIcon} active={auto} onClick={() => setAuto(value => !value)}/>
-              </div>
-              : <label className="similarity-wipe">와이프 위치<input type="range" min={0} max={100} value={wipe} onChange={event => setWipe(Number(event.target.value))}/></label>}
-          </div>
-        </div>
-        : <div className="similarity-panes">
-          <Pane side={current.a} name="A" view={view} onView={setView}/>
-          <Pane side={current.b} name="B" view={view} onView={setView}/>
-        </div>}
+    {ready && current && <div className="similarity-body">
+      <CompareTools className="similarity-compare-tools" state={compare} names={NAMES}/>
+      <div className="similarity-panes" data-mode={compare.mode}>
+        <ImageCompare state={compare} images={[compareImage(current.a, 'A'), compareImage(current.b, 'B')]}/>
+      </div>
       <SimilarityClues names={['A','B']} sides={[clueSide(current.a),clueSide(current.b)]} clues={current.clues} reason={current.reason} recommended={current.recommendedAssetId === current.a.assetId ? 'a' : current.recommendedAssetId === current.b.assetId ? 'b' : null}/>
     </div>}
     {ready && current && <footer className="similarity-actions">

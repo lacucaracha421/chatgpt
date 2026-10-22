@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Button } from "../../shared/ui/Button";
@@ -14,24 +14,12 @@ import { safeProfileUrl } from "./AvPerformerProfile";
 import { AvPortrait as Portrait } from "./AvPortrait";
 import "./avPortraitPicker.css";
 import { defaultPortraitSource } from "./portraitSource";
+import { initialPortraitRect, zoomPortraitRect } from "./portraitCrop";
+import { PortraitCropSurface } from "./PortraitCropSurface";
 
 type PortraitSourceKind = "crop" | "commons" | "stashdb" | "none";
 
-function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
-
-function initialRect(source: AvPortraitSource | null): PortraitRect {
-  if (!source || source.width <= 0 || source.height <= 0) return { x: .25, y: .15, w: .5, h: .7 };
-  const imageRatio = source.width / source.height;
-  let w = .5;
-  let h = w * imageRatio / .75;
-  if (h > .8) { h = .8; w = h * .75 / imageRatio; }
-  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
-}
-
-function zoomRect(base: PortraitRect, zoom: number): PortraitRect {
-  const w = base.w / zoom, h = base.h / zoom;
-  return { x: clamp(base.x + (base.w - w) / 2, 0, 1 - w), y: clamp(base.y + (base.h - h) / 2, 0, 1 - h), w, h };
-}
+const initialRect = (source: AvPortraitSource | null): PortraitRect => initialPortraitRect(source?.width, source?.height);
 
 function artworkUrl(id: string, revision: string, large = false) {
   const base = large ? workArtworkUrl(id) : workArtworkThumbnailUrl(id);
@@ -62,8 +50,6 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
   const [commonsLoading, setCommonsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const drag = useRef<{ x: number; y: number; rect: PortraitRect } | null>(null);
-  const cropSurfaceRef = useRef<HTMLDivElement>(null);
   const selected = useMemo(() => sources.find(source => source.artworkId === selectedId) ?? sources[0] ?? null, [selectedId, sources]);
 
   useEffect(() => {
@@ -111,21 +97,9 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
     setRect(next); setBaseRect(next); setZoom(1);
   }
 
-  function onCropPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    drag.current = { x: event.clientX, y: event.clientY, rect };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  function onCropPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const active = drag.current;
-    const bounds = cropSurfaceRef.current?.getBoundingClientRect();
-    if (!active || !bounds || bounds.width <= 0 || bounds.height <= 0) return;
-    setRect(current => ({ ...current, x: clamp(active.rect.x + (event.clientX - active.x) / bounds.width, 0, 1 - current.w), y: clamp(active.rect.y + (event.clientY - active.y) / bounds.height, 0, 1 - current.h) }));
-  }
-  function endCrop() { drag.current = null; }
   function changeZoom(value: number) {
     setZoom(value);
-    // Zoom around the frame's current centre so a dragged frame stays on the face.
-    setRect(current => { const next = zoomRect(baseRect, value); return { ...next, x: clamp(current.x + current.w / 2 - next.w / 2, 0, 1 - next.w), y: clamp(current.y + current.h / 2 - next.h / 2, 0, 1 - next.h) }; });
+    setRect(current => zoomPortraitRect(baseRect, value, current));
   }
   function resetCrop() { setZoom(1); setRect(baseRect); }
 
@@ -166,10 +140,9 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, curr
             </button>)}
           </div>
           {selected ? <div className="av-portrait-picker__crop-surface">
-            <div className="av-portrait-picker__crop-image" ref={cropSurfaceRef} style={{ aspectRatio: `${selected.width} / ${selected.height}` }}>
+            <PortraitCropSurface rect={rect} onRect={setRect} aspectRatio={`${selected.width} / ${selected.height}`}>
               {!privacyMode ? <img src={artworkUrl(selected.artworkId, selected.revision, true)} alt="선택한 앞표지" /> : <span>비공개 모드</span>}
-              <div className="av-portrait-picker__crop-frame" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} onPointerDown={onCropPointerDown} onPointerMove={onCropPointerMove} onPointerUp={endCrop} onPointerCancel={endCrop} role="slider" aria-label="초상화 자르기 영역" aria-valuetext="3 대 4 자르기 영역"><i /><i /><i /><i /></div>
-            </div>
+            </PortraitCropSurface>
           </div> : <p className="av-portrait-picker__empty">자를 수 있는 앞표지가 없습니다.</p>}
           <div className="av-portrait-picker__crop-controls"><label htmlFor="av-portrait-zoom">확대</label><input id="av-portrait-zoom" type="range" min="1" max="3" step=".1" value={zoom} onChange={event => changeZoom(Number(event.target.value))} /><Button size="sm" onClick={resetCrop}>처음 위치</Button><span>틀을 끌어 얼굴에 맞추세요 · 3:4 고정</span></div>
         </>}

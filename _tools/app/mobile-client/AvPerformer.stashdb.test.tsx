@@ -131,3 +131,23 @@ it('refuses management actions when the connection changes or the person is not 
  rerender(<StashdbProfileActions person={{...person,entityRevision:undefined}} name="미오" authority={authority} onClose={()=>{}}/>);
  expect(screen.getByRole('button',{name:'StashDB 새로고침',hidden:true})).toBeDisabled();expect(screen.getByRole('button',{name:'연결 해제',exact:true})).toBeDisabled();
 });
+it('shows a cover crop on the portrait as soon as it is queued and keeps it once the server holds it', async () => {
+  // Its own connection: earlier tests leave a delivery pass waiting on the default one.
+  setOutboxConnection('https://crop.example');
+  vi.stubGlobal('Image', class {naturalWidth = 800; naturalHeight = 600; onload?: () => void; decode() {return Promise.resolve();} set src(_value: string) {queueMicrotask(() => this.onload?.());}});
+  const api = mocks.api.getMockImplementation()!, native = mocks.native.getMockImplementation()!;
+  mocks.api.mockImplementation(async (path: string, signal: unknown, body: AuthorityCommand) => path.startsWith('/v1/collections?') ? {ready: true, filterVersion: 1, revision: 'r1', items: [{id: 'w1', name: '작품', type: 'av', showcase: false,
+    selectedWorkArtworkId: 'front-1', artworkVersions: {'front-1': {thumbnail: 't1', original: 'o1'}}, av: {productCode: 'ABC-001', genres: [], people: [{id: 'p1', name: '미오', role: 'performer', order: 0, portraitImage: person.portraitImage}]}}]} : api(path, signal, body));
+  mocks.native.mockImplementation(async (op: string, body: {variant?: string}) => op === 'collectionArtwork' ? {url: `data:image/jpeg;base64,${body.variant === 'original' ? 'b3Jp' : 'dGh1'}`} : native(op, body));
+  render(<Harness/>); const entry = await screen.findByRole('button', {name: '사진 바꾸기'}); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  fireEvent.click(await screen.findByRole('radio', {name: '표지에서 자르기'}));
+  const save = await screen.findByRole('button', {name: '대표 이미지로 쓰기'}); await waitFor(() => expect(save).toBeEnabled()); fireEvent.click(save);
+  const crop = () => document.querySelector<HTMLElement>('.tablet-performer__portrait .av-portrait__crop')?.style;
+  expect(crop()?.backgroundImage).toContain('b3Jp');
+  expect(crop()?.backgroundSize).toBe(`${100 / .45}% ${100 / .8}%`);
+  await waitFor(() => expect(finishCommand).toBeTypeOf('function'));
+  person = {...person, entityRevision: 5, portraitImage: null, portraitSelection: (readCommands()[0].command as {portrait?: unknown}).portrait};
+  await act(async () => finishCommand({changed: true, person}));
+  expect(crop()?.backgroundImage).toContain('b3Jp');
+  expect(document.querySelector('.tablet-performer__portrait img')).toBeNull();
+});

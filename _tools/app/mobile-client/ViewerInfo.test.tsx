@@ -2,10 +2,10 @@ import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/reac
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import {displayDateTime} from '../src/shared/displayDate';
-const mocks = vi.hoisted(() => ({native: vi.fn(), artistIndex: {allArtists: [] as import('./artistsModel').LibraryArtist[], assignments: [] as import('./artistsModel').ArtistAssignment[]}}));
+const mocks = vi.hoisted(() => ({native: vi.fn(), classification: vi.fn(), artistIndex: {allArtists: [] as import('./artistsModel').LibraryArtist[], assignments: [] as import('./artistsModel').ArtistAssignment[]}}));
 vi.mock('./useLibraryArtists', () => ({useLibraryArtists: () => mocks.artistIndex}));
 vi.mock('./transport', () => ({
-  native: mocks.native,
+  native: (command: string, ...rest: unknown[]) => command === 'classificationAssignmentState' ? mocks.classification(command, ...rest) : mocks.native(command, ...rest),
   errorText: (reason: unknown) => reason instanceof Error ? reason.message.slice(0, 180) : '연결을 확인한 뒤 다시 시도해 주세요.',
 }));
 import {ViewerInfo, creatorText, infoFields, openableSource, sectionHasVisibleTitle, sizeLabel, sourceLabel, sourceOpenUrl, summaryText} from './ViewerInfo';
@@ -23,6 +23,7 @@ const NOW = new Date('2026-09-29T12:00:00+09:00');
 beforeEach(() => {
   mocks.artistIndex = {allArtists: [], assignments: []};
   mocks.native.mockReset();
+  mocks.classification.mockReset().mockResolvedValue({adopted: false});
   clipboard.writeText.mockReset();
   mocks.native.mockResolvedValue({});
   clipboard.writeText.mockResolvedValue(undefined);
@@ -30,6 +31,33 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', {configurable: true, value: clipboard});
 });
 afterEach(cleanup);
+
+it('opens the assigned artist internally, including a hidden artist',()=>{
+  const artist={id:'artist:a',label:'Assigned artist',keys:['HoundShou'],hidden:true,pinned:false,main:false,assetCount:1,recentCount:1,coverAssetIds:[]};
+  mocks.artistIndex={allArtists:[artist],assignments:[{assetId:'a',artistId:artist.id}]};
+  const open=vi.fn();render(<ViewerInfo asset={asset()} onArtist={open}/>);
+  fireEvent.click(screen.getByRole('button',{name:'작가 페이지'}));
+  expect(open).toHaveBeenCalledWith(artist);
+});
+
+it('shows each direct classification path without inventing descendant assignments',async()=>{
+  mocks.classification.mockResolvedValue({adopted:false});
+  render(<ViewerInfo asset={asset({classification_ids:['child','other']})} classifications={[
+    {id:'root',name:'작품',parent_id:null,asset_count:0},
+    {id:'child',name:'캐릭터',parent_id:'root',asset_count:1},
+    {id:'grandchild',name:'참고',parent_id:'child',asset_count:0},
+    {id:'other',name:'사진',parent_id:null,asset_count:1},
+  ]}/>);
+  expect(screen.getByText('작품 › 캐릭터')).toBeTruthy();expect(screen.getByText('사진')).toBeTruthy();
+  expect(screen.queryByText('작품 › 캐릭터 › 참고')).toBeNull();
+  await waitFor(()=>expect(mocks.classification).toHaveBeenCalledWith('classificationAssignmentState',{assetId:'a'},expect.any(AbortSignal)));
+});
+
+it('uses the live assignment and replica tree instead of a stale published path',async()=>{
+  mocks.classification.mockResolvedValue({adopted:true,classificationId:'new',classifications:[{id:'new',name:'새 분류',parentId:null}]});
+  render(<ViewerInfo asset={asset({classification_ids:['old']})} classifications={[{id:'old',name:'이전 분류',parent_id:null,asset_count:1}]}/>);
+  await screen.findByText('새 분류');expect(screen.queryByText('이전 분류')).toBeNull();
+});
 
 it('shows a published assignment before missing or conflicting creator metadata and copies it', async () => {
   mocks.artistIndex = {allArtists: [{id: 'artist:a', label: 'Assigned artist', keys: ['HoundShou'], hidden: true, pinned: false, main: false, assetCount: 1, recentCount: 1, coverAssetIds: []}], assignments: [{assetId: 'a', artistId: 'artist:a'}]};

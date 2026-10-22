@@ -1,23 +1,23 @@
 import {PerformerName, usePerformerNames} from "./PerformerName";
+import {personWithNameSource} from './personNameCache';
+import {NO_PERFORMER, performerGroups} from '../src/collections/av/performerGroups';
+import {NoPerformerHeading, PerformerGroupHeading} from '../src/collections/av/PerformerGroupHeading';
+import {portraitCropStyle} from '../src/collections/av/portraitCrop';
+import type {CollectionListGroup} from '../src/collections/CollectionList';
 import {distinctCreditName, performerName, performerWorkCount} from "../src/collections/av/performerName";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
-import {useMemo, useRef, useState, type CSSProperties} from 'react';
-import {ChevronDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
-import {CollectionList} from '../src/collections/CollectionList';
+import {useMemo, useRef, useState} from 'react';
+import {ChevronDownIcon} from '@heroicons/react/24/outline';
 import {displayDate, displayDateTime} from '../src/shared/displayDate';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {useArtworkSet, usePortraitUrl} from './collectionArtwork';
 import {usePrivacyMode} from './privacyMode';
-import {ShelfTile} from './CollectionShelf';
 import type {AvPerson, CollectionDetail, CollectionSummary} from './collectionModel';
 import {api} from './transport';
 import {normalizeProductCode, readAvLookupRecent, writeAvLookupRecent, type AvLookupRecent} from './avLookup';
-import {Button, SectionLabel, Tabs} from './ui';
+import {Button, SectionLabel} from './ui';
 import {Fold} from './Fold';
 import './avCollections.css';
-
-export type AvListView = 'works' | 'performers';
-export const AV_LIST_VIEW_KEY = 'lakomics.mobile.avListView';
 
 function initials(value:string) {
   const parts=value.trim().split(/\s+/).filter(Boolean);
@@ -44,13 +44,9 @@ export function PersonPortrait({person,current,items,revision,size='small',priva
   if(!privacy&&image&&portrait.url)return <span className={`av-portrait av-portrait-${size} has-image`} aria-label={label}>
     <StableImage src={portrait.url} alt="" width={image.width||undefined} height={image.height||undefined} draggable={false}/>
   </span>;
-  const style:CSSProperties={};
-  if(url&&crop&&crop.w>0&&crop.h>0){
-    style.backgroundImage=`url("${url}")`;
-    style.backgroundSize=`${100/crop.w}% ${100/crop.h}%`;
-    style.backgroundPosition=`${crop.w<1?crop.x/(1-crop.w)*100:0}% ${crop.h<1?crop.y/(1-crop.h)*100:0}%`;
-  }
-  return <span className={`av-portrait av-portrait-${size}${url&&crop?' has-image':''}`} style={style} aria-label={label}>{(!url||!crop)&&<span aria-hidden="true">{initials(performerName(person).primary)}</span>}</span>;
+  // The PC's crop rule: the 3:4 crop from the top of the box, never stretched to a square or round one.
+  const shown=url&&crop&&crop.w>0&&crop.h>0;
+  return <span className={`av-portrait av-portrait-${size}${shown?' has-image':''}`} aria-label={label}>{shown?<span className="av-portrait__crop" style={portraitCropStyle(url,crop)}/>:<span aria-hidden="true">{initials(performerName(person).primary)}</span>}</span>;
 }
 
 type LookupFeedback = {kind: 'sent'; code: string} | {kind: 'offline' | 'rate' | 'invalid'};
@@ -133,39 +129,21 @@ export function AvLookupSender({disabled=false,onSent}:{disabled?:boolean;onSent
   </section>;
 }
 
-/** 작품 · 배우별: the AV list as works (the shared shelf or grid) or as one shelf per performer. */
-export function AvViewTabs({view,onView}:{view:AvListView;onView(view:AvListView):void}) {
-  return <Tabs className="av-view-tabs" label="AV 목록 보기" value={view} onChange={onView} tabs={[{value:'works',label:'작품'},{value:'performers',label:'배우별'}]}/>;
-}
-
 /** Each work's performers (not directors), first credited first. */
 export function performersOf(item:CollectionSummary) {
   return (item.av?.people??[]).filter(person=>person.role==='performer');
 }
 
 /**
- * 배우별: one shelf row per performer of the loaded works; a tap on the name opens the
- * performer page, the cases behave as on the works shelf (tap picks, a second tap opens).
+ * 배우 묶기 on the tablet: the PC's grouping (one group per performer of the loaded works, 배우 없음 last) with the
+ * published portrait in the shared heading; a tap on the heading opens the performer page.
  */
-export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,onTap,onPerformer,onActions}:{items:CollectionSummary[];revision:string;active:boolean;privacy:boolean;perRow:number;picked:string|null;onTap(id:string):void;onPerformer(id:string):void;/** Long press on a case opens the work's action sheet. */onActions?(work:CollectionSummary):void}) {
-  const rows=useMemo(()=>{
-    const people=new Map<string,{person:AvPerson;works:CollectionSummary[]}>();
-    for(const item of items)for(const person of performersOf(item)){
-      const row=people.get(person.id)??{person,works:[]};
-      if(!row.works.includes(item))row.works.push(item);
-      people.set(person.id,row);
-    }
-    return [...people.values()].sort((a,b)=>a.person.order-b.person.order||a.person.name.localeCompare(b.person.name,'ko'));
-  },[items]);
-  return <div className="av-performer-list">{rows.map(({person,works})=><section key={person.id} className="av-performer-shelf" aria-label={`${performerName(person).primary} 작품`}>
-    <button type="button" className="av-performer-heading" onClick={()=>onPerformer(person.id)}>
-      <PersonPortrait person={person} current={works[0]!} items={items} revision={revision}/>
-      <span><PerformerName person={person}/></span>
-      <span className="muted numeric">{works.length.toLocaleString()}편</span><ChevronRightIcon aria-hidden="true"/>
-    </button>
-    <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase windowRows pickedId={picked} label={`${performerName(person).primary} 작품 선반`} onPick={onTap}
-      render={work=><ShelfTile item={work} revision={revision} active={active} privacy={privacy} picked={picked===work.id} onTap={onTap} onActions={onActions&&(()=>onActions(work))}/>}/>
-  </section>)}</div>;
+export function useTabletPerformerGroups(items:CollectionSummary[],revision:string,enabled:boolean,onPerformer:(id:string)=>void):CollectionListGroup<CollectionSummary>[]|undefined {
+  return useMemo(()=>enabled?performerGroups(items,performersOf).map(({person,items:works}):CollectionListGroup<CollectionSummary>=>{
+    if(!person)return {key:'',label:NO_PERFORMER,items:works,heading:<NoPerformerHeading count={works.length}/>};
+    const name=performerName(personWithNameSource(person));
+    return {key:person.id,label:name.primary,items:works,heading:<PerformerGroupHeading portrait={<PersonPortrait person={person} current={works[0]!} items={items} revision={revision}/>} name={name} count={works.length} onOpen={()=>onPerformer(person.id)}/>};
+  }):undefined,[items,revision,enabled,onPerformer]);
 }
 
 /**

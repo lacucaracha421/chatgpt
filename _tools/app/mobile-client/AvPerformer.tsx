@@ -19,7 +19,8 @@ import {AvPerformerLibraryStats} from '../src/collections/av/AvPerformerLibraryS
 import {allWorks} from './collectionReleasesModel';
 import {api, ApiError, errorText, native} from './transport';
 import {AuthorityQueue} from './CollectionAuthorityForms';
-import {clearPersonNotice, confirmedPersonEntity, isPersonCommand, personRevision, reconcilePersonRevision, confirmedPerson, optimisticPerson, personCommand, personNotice, reconcilePerson} from './collectionCommandOutbox';
+import {clearPersonNotice, confirmedPersonEntity, isPersonCommand, personRevision, reconcilePersonRevision, confirmedPerson, optimisticPerson, personCommand, personNotice, reconcilePerson, selectionCrop} from './collectionCommandOutbox';
+import {portraitCropStyle} from '../src/collections/av/portraitCrop';
 import {normalizePersonMemo, personMemoLength, PERSON_MEMO_LIMIT, PERSON_MEMO_TOO_LONG, type PersonFields, type PersonValues} from './avEditModel';
 import {outboxConnection} from './outboxConnection';
 import {AvStashdbSheet, StashdbProfileActions} from './AvStashdbSheet';
@@ -27,7 +28,7 @@ import {usePortraitUrl} from './collectionArtwork';
 import {usePrivacyMode} from './privacyMode';
 import type {PersonRevisionCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
-import {personPath, personReply, type AvPerson, type CollectionPerson, type CollectionPersonProfile, type CollectionSummary} from './collectionModel';
+import {personPath, personReply, type AvPerson, type AvPortraitCrop, type CollectionPerson, type CollectionPersonProfile, type CollectionSummary} from './collectionModel';
 
 function TabletProfileSurface(props: ProfileSurfaceProps) { return <BottomSheet {...props} tall/>; }
 
@@ -105,7 +106,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const [person, setPerson] = useState<PersonRead | null>(null);
   const [stashSheet, setStashSheet] = useState<'profile' | 'portrait' | null>(null);
   const [authorityPerson, setAuthorityPerson] = useState<PersonRead | null>(null);
-  const [portraitWish, setPortraitWish] = useState<{personId: string; operationId: string; url: string | null; digest: string | null} | null>(null);
+  const [portraitWish, setPortraitWish] = useState<{personId: string; operationId: string; url: string | null; digest: string | null; crop?: AvPortraitCrop} | null>(null);
   const [privateMode] = usePrivacyMode();
   const hidePhotos = privacy || privateMode;
   const [profileOpen, setProfileOpen] = useState(false);
@@ -150,9 +151,14 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const confirmedPortrait = usePortraitUrl(received?.portraitImage?.sha256 ?? null, !hidePhotos);
   // Keep the chosen preview until the confirmed replacement has decoded; feed lag never restores the old photo.
   const wishRow = portraitWish && [...(authority?.rows ?? []), ...(authority?.acknowledgements ?? [])].find(row => row.command.operationId === portraitWish.operationId);
-  const wishAccepted = portraitWish?.digest === null ? received?.portraitSelection === null : received?.portraitImage?.sha256 === portraitWish?.digest;
-  const wishVisible = portraitWish?.personId === personId && (!!wishRow || wishAccepted) &&
-    !(wishAccepted && portraitWish?.digest && confirmedPortrait.ready && !confirmedPortrait.failed && received?.portraitImage?.sha256 === portraitWish.digest);
+  const receivedCrop = selectionCrop(received?.portraitSelection);
+  const wishCrop = portraitWish?.crop;
+  const wishAccepted = wishCrop ? !!receivedCrop && JSON.stringify(receivedCrop) === JSON.stringify(wishCrop)
+    : portraitWish?.digest === null ? received?.portraitSelection === null : received?.portraitImage?.sha256 === portraitWish?.digest;
+  // A cover crop shows the chosen frame while it is queued and while the server's selection is that crop;
+  // a refused crop, or a later change from another device, shows what the server has.
+  const wishVisible = portraitWish?.personId === personId && (wishCrop ? wishAccepted || wishRow?.state === 'pending' : (!!wishRow || wishAccepted) &&
+    !(wishAccepted && portraitWish?.digest && confirmedPortrait.ready && !confirmedPortrait.failed && received?.portraitImage?.sha256 === portraitWish.digest));
   const read = person?.id === personId ? person.person : null;
   useEffect(() => {
     if (identity && read && person) reconcilePerson(identity, personId, {memo: normalizePersonMemo(read.memo), favorite: read.favorite === true}, person.readAt);
@@ -193,7 +199,10 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const basePerson = received ?? person.person;
   const published = basePerson && authority ? optimisticPersonProfile(basePerson, shownId, authority.rows) : basePerson, waiting = shownId !== personId;
   const shownName = performerName({...page.person, ...published});
-  const source = published && portraitSourceText(published, page.person.portraitCrop, shelf!.works);
+  // The person's own selection when the server publishes it (a crop from either client), else the credits' crop.
+  const selected = published && 'portraitImage' in published;
+  const shownCrop = selected ? selectionCrop(published.portraitSelection) ?? (published.portraitSelection === null ? null : page.person.portraitCrop) : page.person.portraitCrop;
+  const source = published && portraitSourceText(published, shownCrop, shelf!.works);
   const profile = published?.profile ? sharedProfile(published.id, published.profile) : null;
   // 즐겨찾기 and 내 메모 are edited only against a confirmed server person with the authority active;
   // the shown values are that person with this device's acknowledged and queued changes over it.
@@ -223,8 +232,9 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     <header className="tablet-performer__band">
       {editable && managementRequest === undefined && <IconButton className="tablet-performer__manage" label="배우 관리" icon={EllipsisHorizontalIcon} onClick={() => setManageOpen(true)}/>}
       <div className="tablet-performer__portrait" title={source ? `사진 출처: ${source}` : undefined}>
-        {!hidePhotos && wishVisible && portraitWish ? portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><img src={portraitWish.url} alt=""/></span> : <span className="av-portrait av-portrait-large" aria-label={`${page.person.name} 사진`}>{page.person.name.slice(0, 1)}</span>
-          : <PersonPortrait person={{...page.person, ...(published && 'portraitImage' in published ? {portraitImage: published.portraitImage, portraitCrop: published.portraitSelection === null ? null : page.person.portraitCrop} : {})}} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large" privacy={hidePhotos}/>}
+        {!hidePhotos && wishVisible && portraitWish ? portraitWish.crop && portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><span className="av-portrait__crop" style={portraitCropStyle(portraitWish.url, portraitWish.crop)}/></span>
+          : portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><img src={portraitWish.url} alt=""/></span> : <span className="av-portrait av-portrait-large" aria-label={`${page.person.name} 사진`}>{page.person.name.slice(0, 1)}</span>
+          : <PersonPortrait person={{...page.person, ...(selected ? {portraitImage: published.portraitImage, portraitCrop: shownCrop} : {})}} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large" privacy={hidePhotos}/>}
         {editable && <Button size="sm" variant="quiet" className="tablet-performer__portrait-change" disabled={revision === null || refused} onClick={() => setStashSheet('portrait')}><CameraIcon aria-hidden="true"/>사진 바꾸기</Button>}
       </div>
       <div className="tablet-performer__identity">
@@ -263,8 +273,11 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     </div></BottomSheet>}
     {profileOpen && profileEditable && published && <PersonProfileEditor surface={TabletProfileSurface} person={{...page.person, ...published, displayName: published.displayName ?? page.person.name}} disabled={refused} onSave={saveProfile} onClose={() => setProfileOpen(false)}/>}
     {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
-    {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={shownName.primary} nameJa={shownName.secondary} privacy={hidePhotos} authority={authority!} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
-      if (command.commandType === 'setPersonPortrait') setPortraitWish({personId: shownId, operationId, url, digest: command.portrait?.original.sha256 ?? null});
+    {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={shownName.primary} nameJa={shownName.secondary} privacy={hidePhotos} authority={authority!} covers={{works: page.works, revision: shelf!.revision}} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
+      if (command.commandType !== 'setPersonPortrait') return;
+      const portrait = command.portrait;
+      setPortraitWish(portrait?.kind === 'crop' ? {personId: shownId, operationId, url, digest: null, crop: {artworkId: portrait.artworkId, ...portrait.rect}}
+        : {personId: shownId, operationId, url, digest: portrait?.original.sha256 ?? null});
     }}/>}
     <section className="tablet-performer__works" aria-labelledby="tablet-performer-works">
       <div className="tablet-performer__tools">

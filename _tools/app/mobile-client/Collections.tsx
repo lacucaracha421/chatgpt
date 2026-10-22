@@ -12,7 +12,7 @@ import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionPersonal,PersonalActions,PersonalRecord,workRecordFacts,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
-import {CollectionList} from '../src/collections/CollectionList';
+import {CollectionList, type CollectionListGroup} from '../src/collections/CollectionList';
 import {CaseFacts} from '../src/collections/case/CollectionCase';
 import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
 import {withProductCodeCopy} from '../src/collections/work/ProductCodeCopy';
@@ -71,7 +71,7 @@ import {api, errorText} from './transport';
 import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkMissing, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
-import {AvCast, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
+import {AvCast, AvRelatedWorks, useTabletPerformerGroups} from './AvCollections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import './library.css';
 import './Collections.css';
@@ -424,7 +424,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null);
   const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(directWork??null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail;entityRevision?:number;readAt?:number}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
-  const [avView,setAvView]=useState<AvListView>(()=>{try{return localStorage.getItem(AV_LIST_VIEW_KEY)==='performers'?'performers':'works';}catch{return 'works';}});
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
   const [coverMode,setCoverMode]=useState<'3d'|'flat'>('3d');
@@ -590,7 +589,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   useEffect(()=>{if(!active){setSheet(null);}},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
-  const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
   const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{beginScreenTiming('collection.work','open');if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
@@ -599,6 +597,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const workActions=(work:CollectionSummary,revision:string)=>setWorkSheet({work,revision});
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
   const openPerformer=(id:string)=>{setSheet(null);setPerformer(current=>({id,from:selected??current?.from??null}));setSelected(null);};
+  // The 배우 group headings keep one handler, so the grouped list is not rebuilt on every render.
+  const latestOpenPerformer=useRef(openPerformer);latestOpenPerformer.current=openPerformer;
+  const openGroupPerformer=useCallback((id:string)=>latestOpenPerformer.current(id),[]);
   const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
   // Home opens the 신간 screen or one work's detail here.
   useEffect(()=>{
@@ -680,25 +681,30 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // remembered list, a refresh) shows at once.
   const mainArrivals=useAppendArrivals(main.page,main.items.map(work=>work.id));
   const showcaseArrivals=useAppendArrivals(showcase.page,showcase.items.map(work=>work.id));
-  const mainScrubberSort=useMemo<ScrubberSort>(()=>tab==='av'&&avView==='performers'
+  // 배우 묶기 (선반 and 격자; the 책장 packs each work once): one group per performer of the loaded works.
+  const groupable=(kind:CollectionKind)=>kind==='game'||kind==='movie'||(kind==='av'&&viewOf('av').layout!=='bookcase');
+  const avGrouped=listTab==='av'&&viewOf('av').grouping==='performer'&&groupable('av');
+  const mainScrubberSort=useMemo<ScrubberSort>(()=>avGrouped
     ?{kind:'fallback'}
     :filters.sort==='name'
     ?{kind:'name',values:main.items.map(work=>work.name)}
     :filters.sort==='recent'||filters.sort==='media_date'
       ?{kind:'date',values:main.items.map(work=>work.releaseDate??work.av?.releaseDate??work.createdAt??work.year)}
-      :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
+      :{kind:'fallback'},[avGrouped,filters.sort,main.items]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
-  const view=viewOf(shownType);
   const listActive=live&&!selected&&!overlayOpen&&!performer;
   const showcaseActive=live&&!selected&&!performer&&showcaseAll;
   // Both surfaces use the type's same layout, per-row setting and shared shelf geometry.
-  const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals,inShowcase=false)=>{
+  const workList=(listed:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals,inShowcase=false,groups?:CollectionListGroup<CollectionSummary>[])=>{
     const items=deletedWorks.size?listed.filter(work=>!deletedWorks.has(work.id)):listed;
     // 쇼케이스 stays on the turned-case shelf; the spine 책장 is the library's view of games and AV.
     const own=viewOf(kind),order=items.map(work=>work.id);
     const settings=inShowcase&&own.layout==='bookcase'&&(kind==='game'||kind==='av'||kind==='movie')?{...own,layout:'shelf' as const}:own;
-    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
+    if(settings.layout==='shelf')return <CollectionList items={items} groups={groups} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)} onActions={()=>workActions(work,workRevision)}/>}/>;
+    // A grouped 격자 stands the same flat covers in the shared list, under the group headings.
+    if(settings.layout==='grid'&&groups)return <CollectionList items={items} groups={groups} view={{layout:'grid',perRow:columns(settings.perRow),grouping:'sort'}} label={label} onPick={setPicked}
+      render={work=><WorkCard work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} onActions={published=>workActions(published,workRevision)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>}/>;
     if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'||kind==='movie'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)} onActions={id=>{const work=items.find(entry=>entry.id===id);if(work)workActions(work,workRevision);}}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} size={settings.spineSize??'normal'} revision={workRevision} active={visible} privacy={privacyMode}
@@ -709,7 +715,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
   const mainOrder=main.items.map(work=>work.id);
   const localWorks=edits.authority.creations.filter(work=>work.type===shownType&&!main.items.some(published=>published.id===work.id)&&(!search||work.name.includes(search))&&filters.rating==='all');
-  const worksView=workList([...localWorks,...main.items],shownType,`${labels[listTab]} 작품 목록`,revision,listActive,mainArrivals);
+  // The published page itself when nothing is added or removed locally, so the grouped list keeps its memo.
+  const listedWorks=!localWorks.length&&!deletedWorks.size?main.items:[...localWorks,...main.items].filter(work=>!deletedWorks.has(work.id));
+  const performerGroups=useTabletPerformerGroups(listedWorks,revision,avGrouped&&shownType==='av',openGroupPerformer);
+  const worksView=workList(listedWorks,shownType,`${labels[listTab]} 작품 목록`,revision,listActive,mainArrivals,false,performerGroups);
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
@@ -765,8 +774,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <AvInbox active={active&&!paused&&listTab==='av'} authority={edits.authority} items={main.items} open={avInboxOpen} onOpen={()=>setAvInboxOpen(true)} onClose={()=>setAvInboxOpen(false)}/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
-        <AvViewTabs view={avView} onView={chooseAvView}/>
-        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={columns(view.perRow,16)} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer} onActions={work=>workActions(work,revision)}/>}
+        {typeHeader}{worksView}
       </>}
       <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
@@ -815,7 +823,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <CollectionRatingSection rating={filters.rating} onChange={rating=>changeFilters({...filters,rating})} settleMs={250}/>
       <ShelfViewSection type={type} view={viewOf(type)} onChange={patch=>patchView(type,patch)}/>
       <CollectionSortSection sort={filters.sort} direction={filters.direction} onSortChange={next=>changeFilters({...filters,...next})}
-        movie={type==='movie'} grouping={type==='game'||type==='movie'?viewOf(type).grouping??'sort':undefined} onGroupingChange={type==='game'||type==='movie'?grouping=>patchView(type,{grouping}):undefined}/>
+        movie={type==='movie'} av={type==='av'} grouping={groupable(type)?viewOf(type).grouping??'sort':undefined} onGroupingChange={groupable(type)?grouping=>patchView(type,{grouping}):undefined}/>
     </div></BottomSheet>)}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>

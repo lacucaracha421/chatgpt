@@ -1,4 +1,5 @@
 import type { AssetSort, CollectionType } from "../library/types";
+import { isAssetDurationFilter, type AssetDurationFilter } from "../shared/assetDurationFilter";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
@@ -27,6 +28,7 @@ export type UiPreferences = {
   classificationCountOrderApplied?: boolean;
   expandedAlbumIds: string[];
   assetSort: AssetSort;
+  assetDurationFilter: AssetDurationFilter;
   thumbnailRowHeight: number;
   creatorCardSize: number;
   collectionType: CollectionType;
@@ -49,6 +51,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   classificationOrderIds: [],
   expandedAlbumIds: [],
   assetSort: "newest",
+  assetDurationFilter: "all",
   thumbnailRowHeight: 180,
   creatorCardSize: 200,
   collectionType: "manga",
@@ -116,6 +119,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     assetSort: isAssetSort(value.assetSort)
       ? value.assetSort
       : DEFAULT_UI_PREFERENCES.assetSort,
+    assetDurationFilter: isAssetDurationFilter(value.assetDurationFilter) ? value.assetDurationFilter : "all",
     thumbnailRowHeight:
       typeof value.thumbnailRowHeight === "number" && Number.isFinite(value.thumbnailRowHeight)
         ? Math.max(96, Math.min(320, value.thumbnailRowHeight))

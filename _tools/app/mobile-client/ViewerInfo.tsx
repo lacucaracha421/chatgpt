@@ -3,8 +3,11 @@ import {useViewerImageText} from '../src/shared/viewer/ImageTextContext';
 import {useTabletAssetMask} from './assetMask';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon} from '@heroicons/react/24/outline';
-import {Badge, IconButton, SectionLabel} from './ui';
-import type {Asset} from './types';
+import {Badge, Button, IconButton, SectionLabel} from './ui';
+import type {Asset, Classification} from './types';
+import type {LibraryArtist} from './artistsModel';
+import type {ClassificationAssignmentState} from './ClassificationAssignmentEditor';
+import {breadcrumbPath} from '../src/shared/breadcrumb';
 import {durationLabel} from './model';
 import {displayDateTime} from '../src/shared/displayDate';
 import {formatBytes} from '../src/shared/formatBytes';
@@ -128,7 +131,7 @@ export async function writeClipboard(text: string): Promise<void> {
  * `Viewer`, so those three overlays keep one owner.
  */
 /** `image`: lead with the large image (the gallery sheet); the viewer already shows the asset itself. */
-export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asset; mediaError?: string; image?: boolean; onClose?(): void}) {
+export function ViewerInfo({asset, mediaError = '', image = false, classifications = [], onArtist}: {asset: Asset; mediaError?: string; image?: boolean; classifications?:readonly Classification[]; onArtist?(artist:LibraryArtist):void; onClose?(): void}) {
   const privacy = useTabletAssetMask(asset);
   const imageText = useViewerImageText();
   const artistIndex = useLibraryArtists(true, 0);
@@ -136,6 +139,17 @@ export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asse
   const artist = assignment
     ? artistIndex.allArtists.find(row => row.id === assignment.artistId)
     : artistIndex.allArtists.find(row => row.keys.includes(asset.creator_handle?.replace(/^@+/, '') ?? ''));
+  const [classificationState,setClassificationState]=useState<{assetId:string;value:ClassificationAssignmentState}|null>(null);
+  useEffect(()=>{
+    const controller=new AbortController();
+    const read=()=>void native<ClassificationAssignmentState>('classificationAssignmentState',{assetId:asset.id},controller.signal).then(value=>{if(!controller.signal.aborted)setClassificationState({assetId:asset.id,value});},()=>{});
+    read();window.addEventListener('lakomics-list-generation',read);
+    return()=>{controller.abort();window.removeEventListener('lakomics-list-generation',read);};
+  },[asset.id]);
+  const liveClassification=classificationState?.assetId===asset.id?classificationState.value:null;
+  const tree=liveClassification?.adopted?liveClassification.classifications:classifications.map(row=>({...row,parentId:row.parent_id}));
+  const assignedIds=liveClassification?.adopted?(liveClassification.classificationId?[liveClassification.classificationId]:[]):asset.classification_ids??[];
+  const paths=assignedIds.flatMap(id=>{const row=tree.find(item=>item.id===id);return row?[breadcrumbPath(row,tree)]:[];});
   const creatorAsset = artist ? {...asset, creator_name: artistName(artist), creator_handle: assignedHandle(artist) ?? undefined} : asset;
   const [status, setStatus] = useState<{kind: 'copied' | 'failed'; label: string} | null>(null);
   const [copied, setCopied] = useState('');
@@ -204,12 +218,14 @@ export function ViewerInfo({asset, mediaError = '', image = false}: {asset: Asse
       <header className="viewer-info-heading" data-info-section="artist">
         <div className="viewer-info-artist-line">
           <h2>{heading}</h2>
+          {artist&&onArtist&&<Button variant="quiet" onClick={()=>onArtist(artist)}>작가 페이지</Button>}
           {creator && (
             <IconButton label="작가 복사" icon={copiedLabel('작가') ? CheckIcon : ClipboardDocumentIcon} onClick={() => void copy(creator, '작가')} disabled={busy}/>
           )}
         </div>
         {artistHandle && <span className="viewer-info-artist-handle">{artistHandle}</span>}
       </header>
+      {paths.length>0&&<section className="viewer-info-section" data-info-section="classification"><SectionLabel as="h3" title="분류"/><ul className="viewer-info-paths">{paths.map(path=><li key={path}>{path}</li>)}</ul></section>}
       {SECTIONS.map(section => {
         const sectionRows = rows.filter(row => row.section === section.key);
         if (!sectionRows.length) return null;

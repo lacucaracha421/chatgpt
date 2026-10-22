@@ -11,7 +11,6 @@ vi.mock('./transport',async()=>{
 import {ApiError} from './transport';
 import {SIMILARITY_DECISIONS_PATH,flushSimilarityReview} from './similarityReviewDelivery';
 import {SIMILARITY_OUTBOX_FULL,SIMILARITY_OUTBOX_LIMIT,SIMILARITY_SEND_DELAY_MS,commitSimilarityDecision,nextSimilarityDue,queuedSimilarity,readSimilarityIntents,undoSimilarityDecision,type SimilarityChoice} from './similarityReviewOutbox';
-import {FIT,fitted,transformFor} from './SimilarityReview';
 
 const LIBRARY='e'.repeat(32),SHA='a'.repeat(64),REV='f'.repeat(64);
 const ready={version:1,ready:true,libraryId:LIBRARY,revision:REV,counts:{open:0,pendingPc:0,skipped:0},items:[],nextCursor:null,hasMore:false};
@@ -160,17 +159,5 @@ describe('similarity review connection identity',()=>{
     install(body=>({operationId:body.operationId}));
     expect((await flushSimilarityReview(undefined,later)).outcomes).toEqual([{key:'r1',outcome:'confirmed'}]);
     expect(mocks.api.mock.calls.every(call=>call[5]===CONNECTION)).toBe(true);
-  });
-});
-
-describe('synced compare view',()=>{
-  it('puts the same normalized point at the centre of differently sized images',()=>{
-    const box={width:400,height:400};
-    expect(fitted(box,{width:2000,height:1000})).toEqual({width:400,height:200});
-    expect(transformFor(FIT,box,{width:2000,height:1000})).toBe('translate(0px, 0px) scale(1)');
-    const view={scale:4,x:0.75,y:0.25};
-    // A 2000×1000 image and its 1000×500 downscale are displayed the same size, so they line up.
-    expect(transformFor(view,box,{width:2000,height:1000})).toBe(transformFor(view,box,{width:1000,height:500}));
-    expect(transformFor(view,box,{width:2000,height:1000})).toBe('translate(-400px, 200px) scale(4)');
   });
 });

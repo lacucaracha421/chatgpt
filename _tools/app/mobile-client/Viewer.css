@@ -349,6 +349,9 @@
 .viewer-reading-sheet .bottom-sheet-drag-area { position: static; flex: none; height: var(--touch-target); touch-action: none; display: flex; align-items: center; justify-content: center; }
 .viewer-reading-sheet .bottom-sheet-drag-area > span { width: var(--control-height-compact); height: var(--space-1); background: var(--color-border); border-radius: var(--radius-mark); }
 .viewer-info-body > .image-text-section { margin-bottom: var(--space-4); }
+.viewer-info-artist-line > .ui-button { min-height:44px; }
+.viewer-info-paths { margin:var(--space-2) 0 0; padding:0; list-style:none; color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+.viewer-info-paths li + li { margin-top:var(--space-2); }
 .viewer-surface:has(.image-text-notes[data-animate-pan="true"]) > img { transition: transform 200ms var(--ease-standard); }
 @keyframes viewer-reading-enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .viewer-reading-sheet { animation: none; } .viewer-surface:has(.image-text-notes[data-animate-pan="true"]) > img { transition: none; } }

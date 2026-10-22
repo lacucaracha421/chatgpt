@@ -5,6 +5,8 @@ import {domain, findLinksNote, keepLink, linkTime, linkUrl, newLinksNote, parseL
 import {StableImage} from '../../src/shared/ui/StableImage';
 import {Button, EmptyState, SectionLabel, TextInput} from '../ui';
 import {errorText, native} from '../transport';
+import {writeClipboard} from '../ViewerInfo';
+import {SegmentedControl} from '../../src/shared/ui/SegmentedControl';
 
 const EMPTY = {ready: false, unlocked: false, notes: []} as unknown as ReturnType<NotesStore['snapshot']>;
 const noSubscribe = () => () => undefined;
@@ -38,33 +40,41 @@ export function TabletLinks({store, root, privacy, all = false, onOpenNotes, ope
   }, [state.moved, store, root]);
   useEffect(() => () => { void store?.finish(); }, [store]);
   const [input, setInput] = useState('');
+  const [filter, setFilter] = useState<'all'|'images'>('all');
   const [error, setError] = useState<string | null>(null);
   let links: KeptLink[] = [], parseError: string | null = null;
   try { links = parseLinks(note?.body ?? ''); } catch { parseError = '링크 보관 메모의 형식을 확인해 주세요. 원문은 메모에 보관되어 있습니다.'; }
   const locked = !store || !state.ready || !state.unlocked || !!state.keyringLocked || !!note?.concealed || !!note?.readOnly;
   const disabled = locked || !!note?.conflict || !!parseError;
 
-  function add(value: string) {
+  function mutate(change: (links: KeptLink[]) => KeptLink[]) {
     if (disabled || !store) return;
-    const url = linkUrl(value);
-    if (!url) { setError('http 또는 https URL을 붙여넣어 주세요.'); return; }
     const snapshot = store.snapshot();
     const current = findLinksNote(snapshot.notes, id.current.value);
-    if (!snapshot.unlocked || snapshot.keyringLocked || current?.conflict || current?.concealed || current?.readOnly) return;
+    if (!snapshot.ready || !snapshot.unlocked || snapshot.keyringLocked || current?.conflict || current?.concealed || current?.readOnly) return;
     let next: KeptLink[];
-    try { next = keepLink(parseLinks(current?.body ?? ''), url); }
+    try { next = change(parseLinks(current?.body ?? '')); }
     catch { setError('링크 보관 메모의 형식을 확인해 주세요.'); return; }
     const updated = current ? {...current, body: serializeLinks(next)} : newLinksNote(next);
     id.current.value = updated.id; writeLinksId(root, updated.id);
     store.edit(updated);
     void store.finish();
+    setError(null);
+    return true;
+  }
+  function add(value: string) {
+    const url = linkUrl(value);
+    if (!url) { setError('http 또는 https URL을 붙여넣어 주세요.'); return; }
+    if (!mutate(current => keepLink(current, url))) return;
     setInput(''); setError(null);
   }
-  const shown = all ? links : links.slice(0, SHOWN);
+  const filtered = filter === 'images' ? links.filter(link => link.imageUrl) : links;
+  const shown = all ? filtered : filtered.slice(0, SHOWN);
   const status = parseError ?? (state.ready && locked ? (note?.concealed ? '숨긴 메모입니다' : '메모를 열어야 쓸 수 있습니다') : null);
   return <section className="home-attention-section home-tool home-tab-links" aria-label="링크 보관">
     <SectionLabel title="링크 보관" />
     <div className="home-tool__body">
+      {all && <SegmentedControl label="링크 필터" value={filter} onChange={setFilter} options={[{value:'all',label:'전체',count:links.length},{value:'images',label:'이미지 있음',count:links.filter(link=>link.imageUrl).length}]}/>}
       <form className="home-tab-links__input" onSubmit={event => { event.preventDefault(); add(input); }}>
         <LinkIcon className="home-tab-links__icon" aria-hidden="true" />
         <TextInput aria-label="URL 붙여넣기" placeholder="URL 붙여넣기" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} disabled={disabled}
@@ -75,12 +85,12 @@ export function TabletLinks({store, root, privacy, all = false, onOpenNotes, ope
       {status && <p className="home-tab-links__status" role="status"><span>{status}</span><Button variant="quiet" onClick={onOpenNotes}>메모 열기</Button></p>}
       {note?.conflict && <p className="home-tab-links__status" role="status"><span>다른 기기 수정과 충돌했습니다.</span><Button variant="quiet" disabled={state.syncing || state.saving} onClick={() => void store?.resolve(note, true)}>내 내용 보관 후 서버 버전 불러오기</Button></p>}
       <div className="home-tab-links__rows">
-        {!locked && shown.map(link => <button type="button" className="home-tab-link" key={link.url} onClick={() => { void open(link.url).catch(reason => setError(errorText(reason) || '링크를 열지 못했습니다.')); }}>
+        {!locked && shown.map(link => <article className="home-tab-links__row" key={link.url}><button type="button" className="home-tab-link" onClick={() => { void open(link.url).catch(reason => setError(errorText(reason) || '링크를 열지 못했습니다.')); }}>
           <Thumb url={link.imageUrl} privacy={privacy} />
           <span className="home-tab-link__copy"><span>{link.title || domain(link.url)}</span><small>{[link.siteName || domain(link.url), Date.parse(link.savedAt) > 0 ? linkTime(link.savedAt) : ''].filter(Boolean).join(' · ')}</small></span>
-        </button>)}
+        </button>{all && <div className="home-tab-links__actions"><Button variant="quiet" aria-label={`${link.title || domain(link.url)} 복사`} onClick={()=>void writeClipboard(link.url).catch(reason=>setError(errorText(reason)))}>복사</Button><Button variant="quiet" aria-label={`${link.title || domain(link.url)} 삭제`} disabled={disabled} onClick={()=>mutate(current=>current.filter(row=>row.url!==link.url))}>삭제</Button></div>}</article>)}
       </div>
-      {!disabled && !shown.length && <EmptyState inline title="보관할 URL을 붙여넣어 주세요" />}
+      {!disabled && !shown.length && <EmptyState inline title={filter==='images'?'이미지가 있는 링크가 없습니다':'보관할 URL을 붙여넣어 주세요'} />}
       {(error ?? state.error) && <p className="home-tab-links__status" role="status">{error ?? state.error}</p>}
     </div>
   </section>;

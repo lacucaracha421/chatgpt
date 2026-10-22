@@ -16,12 +16,6 @@
 .av-portrait-picker__cover-list img { width: 100%; height: 100%; object-fit: cover; }
 .av-portrait-picker__cover-list small { position: absolute; right: 0; bottom: 0; left: 0; overflow: hidden; padding: 1px 2px; color: var(--color-text); background: rgb(0 0 0 / 68%); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .av-portrait-picker__crop-surface { position: relative; display: grid; flex: 1; min-height: 400px; place-items: center; overflow: hidden; background: #18191a; border: 1px solid var(--color-border); }
-.av-portrait-picker__crop-image { position: relative; width: min(100%, 360px); max-height: 100%; overflow: hidden; }
-.av-portrait-picker__crop-image > img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.av-portrait-picker__crop-frame { position: absolute; border: 1px solid #fff; box-shadow: 0 0 0 9999px rgb(10 11 12 / 62%); cursor: move; }
-.av-portrait-picker__crop-frame::before { position: absolute; inset: 0; content: ""; background: linear-gradient(90deg, transparent 33%, rgb(255 255 255 / 35%) 33%, rgb(255 255 255 / 35%) calc(33% + 1px), transparent calc(33% + 1px), transparent 66%, rgb(255 255 255 / 35%) 66%, rgb(255 255 255 / 35%) calc(66% + 1px), transparent calc(66% + 1px)), linear-gradient(0deg, transparent 33%, rgb(255 255 255 / 35%) 33%, rgb(255 255 255 / 35%) calc(33% + 1px), transparent calc(33% + 1px), transparent 66%, rgb(255 255 255 / 35%) 66%, rgb(255 255 255 / 35%) calc(66% + 1px), transparent calc(66% + 1px)); }
-.av-portrait-picker__crop-frame i { position: absolute; width: 10px; height: 10px; background: #fff; }
-.av-portrait-picker__crop-frame i:nth-child(1) { top: -5px; left: -5px; }.av-portrait-picker__crop-frame i:nth-child(2) { top: -5px; right: -5px; }.av-portrait-picker__crop-frame i:nth-child(3) { bottom: -5px; left: -5px; }.av-portrait-picker__crop-frame i:nth-child(4) { right: -5px; bottom: -5px; }
 .av-portrait-picker__crop-controls { display: flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--text-sm); }
 .av-portrait-picker__crop-controls input { width: 180px; accent-color: var(--color-accent); }
 .av-portrait-picker__crop-controls span { margin-left: auto; color: var(--color-faint); font-size: var(--text-xs); }

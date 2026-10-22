@@ -1,3 +1,4 @@
+import type { AssetDurationFilter } from "../shared/assetDurationFilter";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
@@ -22,6 +23,8 @@ type AssetToolbarProps = {
   sort: AssetSort;
   mediaFilter: AssetMediaFilter;
   aspectFilter: AssetAspectFilter;
+  durationFilter?: AssetDurationFilter;
+  onDurationFilterChange?: (filter: AssetDurationFilter) => void;
   metadataVisible: boolean;
   privacyMode: boolean;
   thumbnailRowHeight: number;
@@ -56,7 +59,7 @@ type AssetToolbarProps = {
 // 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
-  scopeControl, scopeHelp, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
+  scopeControl, scopeHelp, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, durationFilter = "all", onDurationFilterChange, metadataVisible, privacyMode, thumbnailRowHeight,
   onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, trailingAccessory, titleLeading, titleContent, status, actions, ariaLabel = "자산 도구",
 }: AssetToolbarProps) {
   const {nsfwFilter} = usePrivacy();
@@ -69,10 +72,11 @@ export function AssetToolbar({
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const filterable = (rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator") && Boolean(onMediaFilterChange || onAspectFilterChange);
-  const filterLabel = filterable && onMediaFilterChange ? viewFilterLabel(mediaFilter, aspectFilter) : null;
+  const filterLabel = filterable && onMediaFilterChange ? viewFilterLabel(mediaFilter, aspectFilter, mediaFilter === "images" ? "all" : durationFilter) : null;
   const clearViewFilters = (event: MouseEvent<HTMLButtonElement>) => {
     onMediaFilterChange?.("all");
     onAspectFilterChange?.("all");
+    onDurationFilterChange?.("all");
     event.currentTarget.closest('[role="toolbar"]')?.querySelector<HTMLElement>('.asset-toolbar__quiet-menu')?.focus();
   };
   // 내용 검색 results keep their relevance order: no sort choice.
@@ -84,6 +88,7 @@ export function AssetToolbar({
       mediaFilter={filterable ? mediaFilter : undefined} onMediaFilterChange={filterable ? onMediaFilterChange : undefined}
       thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
       aspectFilter={filterable ? aspectFilter : undefined} onAspectFilterChange={filterable ? onAspectFilterChange : undefined}
+      durationFilter={durationFilter} onDurationFilterChange={filterable ? onDurationFilterChange : undefined}
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />;
 
   return <>

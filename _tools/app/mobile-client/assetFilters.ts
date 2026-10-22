@@ -1,3 +1,5 @@
+import { DURATION_BOUNDS } from "../src/shared/assetDurationFilter";
+export { DURATION_LABELS } from "../src/shared/assetDurationFilter";
 /**
  * One Asset filter vocabulary shared by every mobile gallery scope.
  *
@@ -6,10 +8,9 @@
  * PC's exactly, so the ordinary library, Album and Character scopes cannot drift from each
  * other or from the desktop.
  *
- * Duration is new: PC has no duration filter, so these labels name their own buckets
- * rather than mirroring a desktop control that does not exist.
+ * Duration labels and bounds are shared with the PC.
  */
-import type {AssetFiltersValue, AssetMediaFilter, AssetAspectFilter, AssetDurationFilter} from './types';
+import type {AssetFiltersValue, AssetMediaFilter, AssetAspectFilter} from './types';
 
 /**
  * Sort values of the ordinary tablet library endpoint. `newest` and `oldest` are the
@@ -52,10 +53,6 @@ export const MEDIA_LABELS: Record<AssetMediaFilter, string> = {all:'전체', ima
 /** 종류 as the section bar's options (전체 · 이미지 · 영상). */
 export const MEDIA_SECTIONS = (Object.keys(MEDIA_LABELS) as AssetMediaFilter[]).map(value => ({value, label:MEDIA_LABELS[value]}));
 export const ASPECT_LABELS: Record<AssetAspectFilter, string> = {all:'전체', square:'정사각형', landscape:'가로형', portrait:'세로형'};
-/** Duration buckets, in ascending order. `over_5m` is left open above its minimum. */
-export const DURATION_LABELS: Record<AssetDurationFilter, string> = {
-  all:'전체', under_30s:'30초 미만', '30s_1m':'30초–1분', '1m_5m':'1–5분', over_5m:'5분 이상',
-};
 export const SORT_LABELS: Record<AssetSort, string> = {newest:'최신순',oldest:'오래된순',favorites:'좋아요순',random:'랜덤'};
 export const ASSET_SORTS: readonly AssetSort[] = ['newest','oldest'];
 /** Every sort, for a server that declares `LIST_VERSION_RANKED`. */
@@ -102,11 +99,6 @@ export function queryExtras(filters: AssetFiltersValue): Partial<AssetQueryFilte
   const {sort, seed, subtree} = filters as AssetQueryFilters;
   return {...(sort ? {sort} : {}), ...(seed ? {seed} : {}), ...(subtree ? {subtree} : {})};
 }
-
-/** Inclusive/exclusive millisecond bounds. Absent means unbounded, never `0`. */
-const DURATION_BOUNDS: Record<AssetDurationFilter, {min?:number; max?:number}> = {
-  all:{}, under_30s:{max:30_000}, '30s_1m':{min:30_000, max:60_000}, '1m_5m':{min:60_000, max:300_000}, over_5m:{min:300_000},
-};
 
 export function sameFilters(left: AssetFiltersValue, right: AssetFiltersValue) {
   return left.media === right.media && left.aspect === right.aspect && left.duration === right.duration;

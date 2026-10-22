@@ -227,6 +227,30 @@ pub struct AvRelated {
     pub series: Option<AvSeriesShelf>,
     pub label: Option<AvLabelShelf>,
 }
+/// Every AV work's performer credits in one read, for the list grouped by performer. Each person is sent once.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvPerformerCredits {
+    pub people: Vec<AvCreditPerson>,
+    pub credits: Vec<AvWorkCredit>,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvCreditPerson {
+    #[serde(flatten)]
+    pub profile_metadata: serde_json::Value,
+    pub id: String,
+    pub display_name: String,
+    pub name_ja: Option<String>,
+    pub portrait: Option<AvPortrait>,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvWorkCredit {
+    pub collection_id: String,
+    pub person_id: String,
+    pub order: i64,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvPerformerShelf {

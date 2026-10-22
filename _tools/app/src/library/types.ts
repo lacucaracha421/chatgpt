@@ -1125,6 +1125,8 @@ export type AssetQuery = {
   unclassifiedOnly: boolean;
   mediaKind: Exclude<AssetMediaFilter, "all"> | null;
   aspectRatio: Exclude<AssetAspectFilter, "all"> | null;
+  durationMsMin?: number;
+  durationMsMax?: number;
   sort: AssetSort;
   randomPivot: string | null;
   after: AssetCursor | null;

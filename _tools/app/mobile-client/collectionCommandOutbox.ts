@@ -36,9 +36,12 @@ export type WorkCommand =
 /** A person command has no work: its queue order and label belong to the person. */
 export type SetPersonCommand = {commandType: 'setPerson'; personId: string; workId?: never; changes: PersonFields; expected: PersonFields};
 export type PortraitManifest = {original: BlobReceipt; width: number; height: number; attribution: {source: 'stashdb' | 'commons' | 'local'; sourceUrl: string | null; license: string | null; author: string | null}};
+/** A portrait cut from one of the performer's AV covers (PC 표지에서 자르기): `rect` is a fraction of the cover. */
+export type PortraitCropSelection = {kind: 'crop'; artworkId: string; rect: {x: number; y: number; w: number; h: number}};
+export type PortraitSelection = ({kind: 'image'} & PortraitManifest) | PortraitCropSelection;
 export type PersonRevisionCommand = {personId: string; workId?: never; expectedRevision: number} & (
   {commandType: 'setPersonProfile'; stashdbId: string | null} |
-  {commandType: 'setPersonPortrait'; portrait: ({kind: 'image'} & PortraitManifest) | null});
+  {commandType: 'setPersonPortrait'; portrait: PortraitSelection | null});
 export type SetPersonProfileFieldsCommand = {commandType: 'setPersonProfileFields'; personId: string; workId?: never; changes: ProfileChanges; expected: ProfileExpected};
 export type PersonCommand = SetPersonCommand | PersonRevisionCommand | SetPersonProfileFieldsCommand;
 export type AuthorityCommand = WorkCommand | PersonCommand;
@@ -177,7 +180,11 @@ function validateAvCommand(command: AuthorityCommand) {
   } else if (command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait') {
     if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId) || !Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 1) throw new Error(AV_INPUT_ERROR);
     if (command.commandType === 'setPersonProfile' && command.stashdbId !== null && (typeof command.stashdbId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.stashdbId))) throw new Error(AV_INPUT_ERROR);
-    if (command.commandType === 'setPersonPortrait' && command.portrait !== null) { if (command.portrait?.kind !== 'image') throw new Error(AV_INPUT_ERROR); validatePortraitManifest(command.portrait); }
+    if (command.commandType === 'setPersonPortrait' && command.portrait !== null) {
+      if (command.portrait?.kind === 'crop') validatePortraitCrop(command.portrait);
+      else if (command.portrait?.kind === 'image') validatePortraitManifest(command.portrait);
+      else throw new Error(AV_INPUT_ERROR);
+    }
   } else if (command.commandType === 'setAvDetails') {
     validateAvDetails(command.changes); validateAvDetails(command.expected);
     if (!Object.keys(command.changes).length || !sameAvValue(Object.keys(command.changes).sort(), Object.keys(command.expected).sort())) throw new Error('AV 입력을 확인해 주세요.');
@@ -443,6 +450,29 @@ export function validatePortraitManifest(value: PortraitManifest) {
     || !Number.isSafeInteger(value.original.sizeBytes) || value.original.sizeBytes < 1 || value.original.sizeBytes > 5 * 1024 * 1024
     || !Number.isSafeInteger(value.width) || value.width < 1 || value.width > 1600 || !Number.isSafeInteger(value.height) || value.height < 1 || value.height > 1600
     || !value.attribution || !['stashdb', 'commons', 'local'].includes(value.attribution.source)) throw new Error(AV_INPUT_ERROR);
+}
+/** The server's crop rule (`collection_authority._portrait_input`): exactly these keys, inside the cover, larger than 2%. */
+export function validatePortraitCrop(value: PortraitCropSelection) {
+  const rect = value?.rect, keys = rect && typeof rect === 'object' ? Object.keys(rect).sort().join() : '';
+  if (!value || Object.keys(value).sort().join() !== 'artworkId,kind,rect' || typeof value.artworkId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.artworkId)
+    || keys !== 'h,w,x,y' || [rect.x, rect.y, rect.w, rect.h].some(part => typeof part !== 'number' || !Number.isFinite(part) || part < 0 || part > 1)
+    || rect.w <= .02 || rect.h <= .02 || rect.x + rect.w > 1 || rect.y + rect.h > 1) throw new Error(AV_INPUT_ERROR);
+}
+/**
+ * The crop the tablet sends for a frame on screen: six decimals (the frame moves in whole pixels), pulled back
+ * inside the cover where rounding would push it past an edge.
+ */
+export function portraitCropSelection(artworkId: string, rect: {x: number; y: number; w: number; h: number}): PortraitCropSelection {
+  const round = (value: number) => Math.round(value * 1e6) / 1e6;
+  const w = round(rect.w), h = round(rect.h);
+  const inside = (start: number, size: number) => { let value = Math.max(0, round(start)); while (value > 0 && value + size > 1) value = round(value - 1e-6); return value; };
+  return {kind: 'crop', artworkId, rect: {x: inside(rect.x, w), y: inside(rect.y, h), w, h}};
+}
+/** A published `portraitSelection` that is a cover crop, as the credit-shaped crop the portraits read. */
+export function selectionCrop(value: unknown): {artworkId: string; x: number; y: number; w: number; h: number} | null {
+  try { validatePortraitCrop(value as PortraitCropSelection); } catch { return null; }
+  const {artworkId, rect} = value as PortraitCropSelection;
+  return {artworkId, ...rect};
 }
 /** Full person receipts update identity/profile immediately; older receipts leave the plain read intact. */
 export function confirmedPersonEntity(person: CollectionPerson, personId: string, rows: CommandIntent[]): CollectionPerson {

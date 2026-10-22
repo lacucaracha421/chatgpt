@@ -1,5 +1,5 @@
 import type { CharacterTarget } from "../../characters/api";
-import type { ClassificationEntry, FavoriteCommand, FavoriteEntry } from "../../library/types";
+import type { ClassificationEntry, FavoriteCommand, FavoriteEntry, FavoriteProfile } from "../../library/types";
 import { daysUntil } from "../../shared/displayDate";
 
 export const isManualFavorite = (id: string) => id.startsWith("manual-");
@@ -64,3 +64,18 @@ export function reorderCommand(entries: FavoriteEntry[], visibleIds: readonly st
   const ids = entries.map(entry => visible.has(entry.characterId) ? reorderedIds[index++] : entry.characterId);
   return ids.every((id, i) => id === entries[i].characterId) ? null : { op: "order", ids };
 }
+
+/** The profile facts a character detail shows, in this order, on the PC and the tablet. */
+export function favoriteFacts(profile: FavoriteProfile): { label: string; value: string; birthday?: boolean }[] {
+  const rows: { label: string; value: string | null | undefined; birthday?: boolean }[] = [
+    { label: "생일", value: profile.birthMonth && profile.birthDay ? `${profile.birthMonth}월 ${profile.birthDay}일` : null, birthday: true },
+    { label: "키", value: profile.heightCm != null ? `${profile.heightCm}cm` : null },
+    { label: "성우", value: profile.voiceActor },
+    { label: "소속", value: profile.affiliation },
+    { label: "메모", value: profile.memo },
+  ];
+  return rows.flatMap(row => row.value ? [{ ...row, value: row.value }] : []);
+}
+
+/** Whether a profile has any fact at all (else the detail offers 정보 추가). */
+export const hasFavoriteProfile = (profile: FavoriteProfile) => Object.values(profile).some(value => value != null && value !== "");

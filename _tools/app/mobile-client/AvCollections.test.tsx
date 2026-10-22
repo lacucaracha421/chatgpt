@@ -26,6 +26,14 @@ const detail:CollectionDetail={...avA,type:'av',volumes:[],artworks:[coverArtwor
 const page=(items:CollectionSummary[]):CollectionPage=>({ready:true,filterVersion:1,revision:'r1',publishedAt:null,totalCount:items.length,items,nextCursor:null});
 const props={active:true,paused:false,backRef:{current:null}};
 const openAv=async()=>fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
+/** 보기 → 묶기 → 배우, as on the PC; the sheet closes again. */
+const groupByPerformer=async()=>{
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const sheet=await screen.findByRole('dialog',{name:'보기'});
+  fireEvent.click(within(within(sheet).getByRole('radiogroup',{name:'묶기'})).getByRole('radio',{name:'배우'}));
+  fireEvent.click(within(sheet).getByRole('button',{name:'닫기'}));
+};
+const savePerformerGrouping=(layout='grid')=>localStorage.setItem('lakomics.mobile.collectionView.av.v1',JSON.stringify({layout,perRow:4,grouping:'performer'}));
 
 beforeEach(()=>{
   vi.stubGlobal('innerWidth',674);
@@ -43,15 +51,18 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe('tablet AV collections',()=>{
-  it('renders the 작품 list and the 배우별 shelves from the same fixture, and opens the performer page',async()=>{
+  it('groups the 작품 list by performer from 보기 and opens the performer page from a heading',async()=>{
     render(<Collections {...props}/>);
     await openAv();
     expect(await screen.findByText('오후의 창가')).toBeTruthy();
     expect(document.querySelector('.collection-grid')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
-    expect(document.querySelector('.av-performer-list')).toBeTruthy();
-    const mio=await screen.findByRole('button',{name:/하야세 미오/});
-    expect(screen.getByRole('group',{name:'하야세 미오 작품 선반'}).querySelectorAll('.collection-light-case')).toHaveLength(2);
+    await groupByPerformer();
+    // The shared grouping: 오후의 창가 has both performers, so it stands under each; the grid keeps its flat covers.
+    const list=await screen.findByRole('group',{name:'AV 작품 목록'});
+    expect([...list.querySelectorAll('.performer-group-heading')].map(heading=>heading.getAttribute('aria-label'))).toEqual(['하야세 미오 2편','아마노 린 1편']);
+    expect(list.querySelectorAll('.collection-list__cell')).toHaveLength(3);
+    expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.av.v1')!)).toMatchObject({grouping:'performer'});
+    const mio=screen.getByRole('button',{name:'하야세 미오 2편'});
     // The performer page: header band, 프로필 counts from the published works, the shelf, co-performers and labels.
     fireEvent.click(mio);
     const profile=await screen.findByRole('region',{name:'프로필 정보'});
@@ -73,7 +84,7 @@ describe('tablet AV collections',()=>{
     fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
     expect(await screen.findByRole('region',{name:'프로필 정보'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-    expect(await screen.findByRole('tab',{name:'배우별'})).toBeTruthy();
+    expect(await screen.findByRole('button',{name:'하야세 미오 2편'})).toBeTruthy();
   });
 
   it('stands AV works on the shelf as cases: a tap picks, a second tap opens the work screen with its flat jacket',async()=>{
@@ -192,11 +203,10 @@ describe('tablet AV collections',()=>{
   });
 
   it.each([null, 4])('keeps the performer shelf and view sheet in sync (saved rows: %s)', async saved => {
-    if (saved === null) localStorage.removeItem('lakomics.mobile.collectionView.av.v1');
+    // Grouped by performer, with or without a saved 한 줄에 choice.
+    localStorage.setItem('lakomics.mobile.collectionView.av.v1', JSON.stringify(saved === null ? {grouping: 'performer'} : {layout: 'grid', perRow: saved, grouping: 'performer'}));
     render(<Collections {...props}/>);
     await openAv();
-    await screen.findByText('오후의 창가');
-    fireEvent.click(screen.getByRole('tab', {name: '배우별'}));
     fireEvent.click(await screen.findByRole('button', {name: /하야세 미오/}));
     const shelf = await screen.findByRole('group', {name: '배우 작품 선반'});
     expect(shelf).toHaveAttribute('data-per-row', String(saved ?? 6));
@@ -219,7 +229,7 @@ describe('tablet AV collections',()=>{
       render(<Collections {...props}/>);
       await openAv();
       await screen.findByText('오후의 창가');
-      fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
+      await groupByPerformer();
       fireEvent.click(await screen.findByRole('button',{name:/하야세 미오/}));
     };
     const withPerson=(reply:(path:string)=>Promise<unknown>)=>{
@@ -331,7 +341,7 @@ describe('tablet AV collections',()=>{
     it('falls back to the cover crop when the image fails, and to initials without a crop',async()=>{
       mocks.native.mockImplementation(async(op:string,payload:{artworkId?:string})=>{if(op==='homeCover')throw new Error('없음');return {url:`https://example.invalid/${payload.artworkId}`};});
       const view=render(<PersonPortrait person={mio('a')} current={avA} items={[avA]} revision="r1"/>);
-      await waitFor(()=>expect(portrait().getAttribute('style')).toContain('https://example.invalid/cover-a'));
+      await waitFor(()=>expect(portrait().querySelector('.av-portrait__crop')?.getAttribute('style')).toContain('https://example.invalid/cover-a'));
       expect(homeCalls()).toHaveLength(1);expect(portrait().querySelector('img')).toBeNull();
       view.unmount();resetPortraitMemory();
       render(<PersonPortrait person={mio('c',null)} current={avA} items={[avA]} revision="r1"/>);
@@ -341,7 +351,7 @@ describe('tablet AV collections',()=>{
       // An older publication without the field keeps the crop.
       cleanup();
       render(<PersonPortrait person={mio(null)} current={avA} items={[avA]} revision="r1"/>);
-      await waitFor(()=>expect(portrait().getAttribute('style')).toContain('https://example.invalid/cover-a'));
+      await waitFor(()=>expect(portrait().querySelector('.av-portrait__crop')?.getAttribute('style')).toContain('https://example.invalid/cover-a'));
       expect(homeCalls()).toHaveLength(2);
     });
 
@@ -373,17 +383,26 @@ describe('tablet AV collections',()=>{
     });
   });
 
-  it('persists the last-used 작품 · 배우별 view',async()=>{
-    const first=render(<Collections {...props}/>);
-    await openAv();
-    await screen.findByText('오후의 창가');
-    fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
-    expect(localStorage.getItem('lakomics.mobile.avListView')).toBe('performers');
-    first.unmount();
+  it('opens grouped by performer on a device left on the old 배우별 tab, on the shelf too',async()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.av.v1',JSON.stringify({layout:'shelf',perRow:4}));
+    localStorage.setItem('lakomics.mobile.avListView','performers');
     render(<Collections {...props}/>);
     await openAv();
-    await waitFor(()=>expect(screen.getByRole('tab',{name:'배우별'})).toBeTruthy());
-    expect(screen.getByRole('tab',{name:'배우별'}).getAttribute('aria-selected')).toBe('true');
+    const list=await screen.findByRole('group',{name:'AV 작품 목록'});
+    await waitFor(()=>expect(list.querySelectorAll('.performer-group-heading')).toHaveLength(2));
+    expect(list.querySelectorAll('.collection-list__cell')).toHaveLength(3);
+    expect(screen.queryByRole('tab',{name:'배우별'})).toBeNull();
+  });
+
+  it('offers no 묶기 on the AV 책장, which keeps every work once',async()=>{
+    savePerformerGrouping('bookcase');
+    render(<Collections {...props}/>);
+    await openAv();
+    await screen.findByRole('group',{name:'AV 작품 목록'});
+    expect(document.querySelector('.performer-group-heading')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));
+    const sheet=await screen.findByRole('dialog',{name:'보기'});
+    expect(within(sheet).queryByRole('radiogroup',{name:'묶기'})).toBeNull();
   });
 
   it('shows the calm pre-publication empty state',async()=>{
@@ -416,7 +435,7 @@ describe('tablet AV collections',()=>{
     expect([...printedPortraits].every(node=>node.getAttribute('aria-hidden')==='true')).toBe(true);
     const cropped=await cast.findByLabelText('하야세 미오 사진');
     expect(cropped.className).toContain('has-image');
-    expect(cropped.getAttribute('style')).toContain('background-image');
+    expect(cropped.querySelector('.av-portrait__crop')?.getAttribute('style')).toContain('background-image');
     const initials=cast.getByLabelText('아마노 린 사진');
     expect(initials.className).not.toContain('has-image');
     expect(initials.textContent).toContain('아');

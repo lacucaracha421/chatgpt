@@ -3,22 +3,11 @@
 .similarity-overlay .review-bar > .review-title { flex:1; }
 .similarity-body { display:flex; flex-direction:column; gap:8px; min-height:0; padding:0 var(--mobile-gutter, 16px); }
 .similarity-panes { flex:1; min-height:0; display:grid; grid-template-rows:1fr 1fr; gap:var(--space-2); }
-.similarity-compare { flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; }
-.similarity-pane { position:relative; min-height:0; overflow:hidden; border:0; border-radius:0; background:var(--color-sidebar); touch-action:none; user-select:none; }
-.similarity-pane > .ui-badge--scrim { position:absolute; top:var(--space-2); left:var(--space-2); pointer-events:none; }
+/* 깜빡임 / 와이프: the shared compare surfaces stack in one cell (B on top). */
+.similarity-panes:not([data-mode="side"]) { grid-template-rows:minmax(0, 1fr); grid-template-columns:minmax(0, 1fr); }
+.similarity-panes:not([data-mode="side"]) > .image-compare__surface { grid-area:1 / 1; }
+.similarity-body > .similarity-compare-tools { flex:none; }
 .similarity-body > .similarity-clues { flex:none; }
-.similarity-stage { flex:1; }
-.similarity-image { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform-origin:center; will-change:transform; }
-.similarity-missing { display:flex; align-items:center; justify-content:center; color:var(--color-muted); }
-.similarity-missing svg { width:40px; height:40px; }
-.similarity-layer { position:absolute; inset:0; }
-.similarity-divider { position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--color-accent); pointer-events:none; }
-.similarity-compare-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.similarity-compare-tools .library-segments { margin:0; }
-.similarity-flicker { display:flex; align-items:center; gap:6px; }
-.similarity-flicker .ui-button { min-height:var(--touch, 44px); touch-action:none; user-select:none; }
-.similarity-wipe { display:flex; align-items:center; gap:8px; flex:1; min-width:160px; font-size:13px; color:var(--color-muted); }
-.similarity-wipe input { flex:1; min-height:var(--touch, 44px); }
 .similarity-actions { display:grid; gap:var(--space-2); padding:var(--space-3) var(--mobile-gutter, 16px); border-top:1px solid var(--color-border); }
 .similarity-reason { margin:0; text-align:center; font-size:var(--type-body); line-height:var(--line-ui); color:var(--color-text); }
 .similarity-reason[data-none] { color:var(--color-muted); }

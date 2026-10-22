@@ -108,6 +108,17 @@ pub async fn get_av_related(
 }
 
 #[tauri::command]
+pub async fn list_av_performer_credits(
+    state: State<'_, AppState>,
+) -> Result<AvPerformerCredits, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_av_performer_credits())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn get_av_performer(
     person_id: String,
     state: State<'_, AppState>,

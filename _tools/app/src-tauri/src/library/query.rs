@@ -40,6 +40,16 @@ enum CursorPayload {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+struct BoundCursor {
+    #[serde(flatten)]
+    payload: CursorPayload,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duration_ms_min: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duration_ms_max: Option<u64>,
+}
+
 struct AssetRow {
     summary: AssetSummary,
     content_hash: Option<String>,
@@ -197,12 +207,24 @@ fn count_filtered_assets(
 /// The listing and count statements all start their filters with this clause.
 const NORMAL_ASSET_CLAUSE: &str = "WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'";
 
-/// Adds the 자동 태그 filter (`auto_tags.rs`) after the normal-asset clause.
-fn with_auto_tag_filter<'a>(
+/// Applies shared query predicates to every list, count, anchor and refresh path.
+fn with_asset_filters<'a>(
     sql: std::borrow::Cow<'a, str>,
     query: &AssetQuery,
 ) -> Result<std::borrow::Cow<'a, str>, LibraryError> {
-    let conditions = super::auto_tags::filter_conditions(query.auto_tags.as_ref())?;
+    let mut conditions = super::auto_tags::filter_conditions(query.auto_tags.as_ref())?;
+    if query.duration_ms_min.is_some() || query.duration_ms_max.is_some() {
+        // EXISTS also works for the count query, which does not join video_assets.
+        // Typed integer bounds can be embedded without changing each sort's bind slots.
+        conditions.push_str(" AND asset.media_kind = 'video' AND EXISTS (SELECT 1 FROM video_assets AS duration WHERE duration.asset_id = asset.id AND typeof(duration.duration_ms) = 'integer' AND duration.duration_ms >= 0");
+        if let Some(min) = query.duration_ms_min {
+            conditions.push_str(&format!(" AND duration.duration_ms >= {min}"));
+        }
+        if let Some(max) = query.duration_ms_max {
+            conditions.push_str(&format!(" AND duration.duration_ms < {max}"));
+        }
+        conditions.push(')');
+    }
     if conditions.is_empty() {
         return Ok(sql);
     }
@@ -224,7 +246,7 @@ fn scoped_asset_sql<'a>(
     classification_parameter: usize,
     collection_parameter: usize,
 ) -> Result<std::borrow::Cow<'a, str>, LibraryError> {
-    with_auto_tag_filter(
+    with_asset_filters(
         membership_scoped_sql(
             connection,
             sql,
@@ -302,7 +324,7 @@ impl Library {
         let (start, end) = collected_range_bounds(&query)?;
         let connection = self.connection()?;
         let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
-        let sql = with_auto_tag_filter(ASSET_COUNT_SQL.into(), &query)?
+        let sql = with_asset_filters(ASSET_COUNT_SQL.into(), &query)?
             .replace("SELECT COUNT(*) FROM assets AS asset", &select.replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL))
             + " AND asset.id IN (SELECT value FROM json_each(?12))";
         let mut statement = connection.prepare(&sql)?;
@@ -491,7 +513,7 @@ impl Library {
             let asset = items
                 .last()
                 .expect("a page with another item has a returned item");
-            encode_cursor(query.sort, asset, random_pivot)
+            encode_cursor(&query, asset)
         });
         Ok(AssetPage {
             items: items.into_iter().map(|asset| asset.summary).collect(),
@@ -533,13 +555,12 @@ impl Library {
         items.extend(tail.iter().map(|row| row.summary.clone()));
         let previous_cursor = has_more_up.then(|| {
             encode_cursor(
-                query.sort,
+                query,
                 &chrono_row(items.first().expect("more-up implies a first item")),
-                "",
             )
         });
         let next_cursor = (has_more_down && !tail.is_empty())
-            .then(|| encode_cursor(query.sort, &tail.last().expect("tail keeps its last item"), ""));
+            .then(|| encode_cursor(query, &tail.last().expect("tail keeps its last item")));
         Ok(AssetPage {
             items,
             next_cursor,
@@ -582,9 +603,8 @@ impl Library {
         let items: Vec<AssetSummary> = rows.into_iter().map(|row| row.summary).collect();
         let previous_cursor = has_more_up.then(|| {
             encode_cursor(
-                query.sort,
+                query,
                 &chrono_row(items.first().expect("more-up implies a first item")),
-                "",
             )
         });
         Ok(AssetPage {
@@ -718,12 +738,20 @@ impl Library {
     }
 }
 
+fn decode_bound_cursor(query: &AssetQuery, cursor: &AssetCursor) -> Result<CursorPayload, LibraryError> {
+    let bound = serde_json::from_str::<BoundCursor>(&cursor.token)
+        .map_err(|_| LibraryError::InvalidAssetCursor)?;
+    if bound.duration_ms_min != query.duration_ms_min || bound.duration_ms_max != query.duration_ms_max {
+        return Err(LibraryError::InvalidAssetCursor);
+    }
+    Ok(bound.payload)
+}
+
 fn decode_cursor(query: &AssetQuery) -> Result<Option<CursorPayload>, LibraryError> {
     let Some(cursor) = query.after.as_ref() else {
         return Ok(None);
     };
-    let payload = serde_json::from_str::<CursorPayload>(&cursor.token)
-        .map_err(|_| LibraryError::InvalidAssetCursor)?;
+    let payload = decode_bound_cursor(query, cursor)?;
     let expected = match (&query.sort, &payload) {
         (AssetSort::Newest, CursorPayload::Newest { .. })
         | (AssetSort::Oldest, CursorPayload::Oldest { .. })
@@ -744,8 +772,7 @@ fn decode_side_cursor(
     query: &AssetQuery,
     cursor: &AssetCursor,
 ) -> Result<CursorPayload, LibraryError> {
-    let payload = serde_json::from_str::<CursorPayload>(&cursor.token)
-        .map_err(|_| LibraryError::InvalidAssetCursor)?;
+    let payload = decode_bound_cursor(query, cursor)?;
     let expected = matches!(
         (&query.sort, &payload),
         (AssetSort::Newest, CursorPayload::Newest { .. })
@@ -947,8 +974,8 @@ fn preparation_state(value: &str) -> rusqlite::Result<VideoPreparationState> {
     }
 }
 
-fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> AssetCursor {
-    let payload = match sort {
+fn encode_cursor(query: &AssetQuery, asset: &AssetRow) -> AssetCursor {
+    let payload = match query.sort {
         AssetSort::Newest => CursorPayload::Newest {
             collected_at: asset.summary.collected_at.clone(),
             id: asset.summary.id.clone(),
@@ -963,7 +990,7 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
             id: asset.summary.id.clone(),
         },
         AssetSort::Random => CursorPayload::Random {
-            pivot: random_pivot.into(),
+            pivot: query.random_pivot.as_deref().unwrap_or("").into(),
             bucket: asset.random_bucket.expect("random rows include a bucket"),
             content_hash: asset
                 .content_hash
@@ -973,7 +1000,12 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
         },
     };
     AssetCursor {
-        token: serde_json::to_string(&payload).expect("cursor payload serializes"),
+        token: serde_json::to_string(&BoundCursor {
+            payload,
+            duration_ms_min: query.duration_ms_min,
+            duration_ms_max: query.duration_ms_max,
+        })
+        .expect("cursor payload serializes"),
     }
 }
 

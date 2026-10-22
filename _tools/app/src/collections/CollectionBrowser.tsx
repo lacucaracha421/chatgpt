@@ -55,7 +55,13 @@ import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { FavoriteCharactersView, favoritePlaces } from "./favorites/FavoriteCharactersView";
 import { useFavoriteCharacters } from "./favorites/useFavoriteCharacters";
 import { useFavoriteCatalog } from "./favorites/useFavoriteCatalog";
+import { avGateway } from "./avClient";
+import type { AvGateway } from "./avTypes";
+import { AvPerformerPage } from "./av/AvPerformerPage";
+import { useAvPerformerGroups } from "./av/useAvPerformerGroups";
+import { useBackHandler } from "../shared/navigation/BackNavigation";
 import "./CollectionBrowser.css";
+import "./work/collectionWork.css";
 import "../styles/collectionSpines.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = KIND_LABEL;
@@ -69,7 +75,8 @@ const enteredSpineShelves = new Set<string>();
  * coming back from it puts that case back out on the 책장 once; leaving Collections otherwise clears it
  * (App clears every mark when another area opens).
  */
-export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number; pick?: boolean }>;
+/** `performer`: the AV performer page a work was opened from, shown again on the way back (with `pick`). */
+export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number; pick?: boolean; performer?: string }>;
 
 type CollectionBrowserProps = {
   /** The 신간 view: kakao = 한국 정발, mangadex = 일본. */
@@ -87,6 +94,8 @@ type CollectionBrowserProps = {
   libraryState: CollectionLibraryState;
   onLibraryStateChange: (next: CollectionLibraryState) => void;
   avLinkApi?: AvLinkApi;
+  /** AV details: the 배우 grouping's credits and the performer page it opens. */
+  avApi?: AvGateway;
 };
 
 /** The card cover: the chosen work artwork, else the media-vault cover asset, else the source preview. */
@@ -119,6 +128,7 @@ export function CollectionBrowser({
   libraryState,
   onLibraryStateChange,
   avLinkApi,
+  avApi = avGateway,
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
   const favorites = useFavoriteCharacters(gateway, library?.root ?? "");
@@ -212,7 +222,21 @@ export function CollectionBrowser({
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
   // 책장 for games and AV: the spine-only shelf. Showcase keeps the turned-case shelf.
   const spineBookcase = !showcase && (typeFilter === "game" || typeFilter === "av" || typeFilter === "movie") && viewSettings.layout === "bookcase";
-  const visible = useMemo(() => showcase ? showcaseItems : (viewSettings.layout === "shelf" || spineBookcase) && (typeFilter === "game" || typeFilter === "movie") ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
+  // 배우 묶기 (AV, 선반 and 격자): one group per performer; a work with several performers stands under each.
+  // Back from a work opened on a performer page shows that page again, as on the tablet.
+  const [performer, setPerformer] = useState<string | null>(() => returnPick.current?.pick ? navigationMemory?.get(scope)?.performer ?? null : null);
+  useBackHandler(() => setPerformer(null), 20, Boolean(performer));
+  const performerGrouping = typeFilter === "av" && !showcase && viewSettings.grouping === "performer" && viewSettings.layout !== "bookcase";
+  const performerList = useAvPerformerGroups({ api: avApi, root: library?.root ?? "", enabled: performerGrouping, items: libraryItems, refreshKey: collections, onOpenPerformer: setPerformer });
+  const listGroups = performerGrouping ? performerList.groups : undefined;
+  // A list already on screen for this type stays (ungrouped) until the first credits read lands; a type opened
+  // straight into the grouping waits for it instead of showing the ungrouped list for a moment.
+  const listPainted = useRef<CollectionType | null>(null);
+  const holdList = performerGrouping && performerList.waiting && listPainted.current !== typeFilter;
+  useEffect(() => { if (!holdList) listPainted.current = typeFilter; });
+  // Every cell in list order (a work under two performers twice), for the scrubber.
+  const listCells = useMemo(() => listGroups?.flatMap(group => group.items), [listGroups]);
+  const visible = useMemo(() => showcase ? showcaseItems : listCells ? [...new Set(listCells)] : (viewSettings.layout === "shelf" || spineBookcase) && (typeFilter === "game" || typeFilter === "movie") ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, listCells, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
@@ -394,13 +418,15 @@ export function CollectionBrowser({
         <ArrowDownTrayIcon aria-hidden="true" /><span>책등 받기</span>
       </button>}
   </ViewOptionsSection> : null;
+  // AV groups by performer on 선반 and 격자; its 책장 packs each work once, so it offers no grouping.
+  const groupable = typeFilter === "game" || typeFilter === "movie" || (typeFilter === "av" && viewSettings.layout !== "bookcase");
   // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
   const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
     onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
     sizeControl={spineBookcase || mangaBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} av={typeFilter === "av" || typeFilter === "movie"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
     leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
     <CollectionSortSection sort={libraryState.sort} direction={libraryState.direction} onSortChange={next => patchLibraryState(next)}
-      movie={typeFilter === "movie"} grouping={typeFilter === "game" || typeFilter === "movie" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" || typeFilter === "movie" ? grouping => patchViewSettings({ grouping }) : undefined} />
+      movie={typeFilter === "movie"} av={typeFilter === "av"} grouping={groupable ? viewSettings.grouping : undefined} onGroupingChange={groupable ? grouping => patchViewSettings({ grouping }) : undefined} />
     {manageSection}
   </ViewOptionsMenu> : undefined;
   const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
@@ -426,10 +452,10 @@ export function CollectionBrowser({
     search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
   };
 
-  const scrubberSort = useMemo<ScrubberSort>(() => libraryState.sort === "name"
+  const scrubberSort = useMemo<ScrubberSort>(() => listCells ? { kind: "fallback" } : libraryState.sort === "name"
     ? {kind: "name", values: visible.map(work => work.name)}
     : {kind: "date", values: visible.map(work => libraryState.sort === "recent" ? work.createdAt : work.releaseDate ?? work.createdAt)},
-  [visible, libraryState.sort]);
+  [visible, listCells, libraryState.sort]);
   const listScrubber = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
   // The spine shelf mounts only a window of rows, so it seeks by its own packing.
   const spineSeek = useCallback((index: number) => spineControl.current?.seek(index), []);
@@ -486,13 +512,23 @@ export function CollectionBrowser({
               : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={shelfScale} label={`${sectionLabel} 작품 목록`}
                 pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} prepare={spineData.prepare} controlRef={spineControl}
                 restoredFocusId={navigationMemory?.get(scope)?.focusId} restorePick={returnPick.current.pick} entrance={spineEntrance} />
-              : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
+              : holdList ? null
+              : <CollectionList items={libraryItems} groups={listGroups} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}
-          {!inbox && !showcase && <Scrubber key={`${typeFilter}:${viewSettings.layout}`} input="pointer" scrollRef={stageRef} total={visible.length} sort={scrubberSort} {...scrubberList} />}
+          {!inbox && !showcase && <Scrubber key={`${typeFilter}:${viewSettings.layout}`} input="pointer" scrollRef={stageRef} total={listCells?.length ?? visible.length} sort={scrubberSort} {...scrubberList} />}
 
         </div>
       </div>
+      {performer && <div className="work-person-page"><AvPerformerPage personId={performer} api={avApi} onBack={() => setPerformer(null)}
+        onOpenCollection={id => {
+          const work = collections.find(item => item.id === id);
+          if (!work) return;
+          openCollection(work);
+          const entry = navigationMemory?.get(scope);
+          if (entry) navigationMemory!.set(scope, { ...entry, performer });
+        }}
+        onOpenPerformer={setPerformer} onOpenSettings={() => { setPerformer(null); onViewChange({ kind: "settings", section: "connection" }); }} /></div>}
       {editMode && (
         <CollectionEditDialog
           open

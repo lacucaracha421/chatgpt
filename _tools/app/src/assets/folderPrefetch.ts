@@ -1,4 +1,5 @@
 import { createContext, useContext, type PointerEvent as ReactPointerEvent } from "react";
+import type { AssetDurationFilter } from "../shared/assetDurationFilter";
 import type { AssetAspectFilter, AssetMediaFilter, AssetView } from "../library/types";
 
 /**
@@ -131,7 +132,7 @@ export function resetFolderPrefetch() {
 
 // ---- Plain-folder filters of the mounted AssetBrowser, so a prefetch builds the switch's exact query.
 
-export type AssetFolderFilters = { mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; randomPivot: string | null };
+export type AssetFolderFilters = { durationFilter?: AssetDurationFilter; mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; randomPivot: string | null };
 let folderFilters: (() => AssetFolderFilters) | null = null;
 export function publishAssetFolderFilters(read: () => AssetFolderFilters) {
   folderFilters = read;

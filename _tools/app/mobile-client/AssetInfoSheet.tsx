@@ -1,13 +1,14 @@
 import {useRef} from 'react';
 import {XMarkIcon} from '@heroicons/react/24/outline';
 import {Dialog, DialogDescription, IconButton} from './ui';
-import type {Asset} from './types';
+import type {Asset, Classification} from './types';
+import type {LibraryArtist} from './artistsModel';
 import {ViewerInfo} from './ViewerInfo';
 import './Viewer.css';
 import './AssetInfoSheet.css';
 
 /** Gallery overlay: portrait bottom sheet, landscape side sheet; the gallery keeps its position. */
-export function AssetInfoSheet({asset,onClose}:{asset:Asset;onClose():void}) {
+export function AssetInfoSheet({asset,onClose,classifications,onArtist}:{asset:Asset;onClose():void;classifications?:readonly Classification[];onArtist?(artist:LibraryArtist):void}) {
   const start = useRef<{x:number;y:number}|null>(null);
   return <Dialog open title="미디어 정보" onClose={onClose}>
     <DialogDescription className="sr-only">선택한 에셋의 출처와 파일 정보</DialogDescription>
@@ -21,7 +22,7 @@ export function AssetInfoSheet({asset,onClose}:{asset:Asset;onClose():void}) {
       }} onPointerCancel={()=>{start.current=null;}}>
         <strong>정보</strong><IconButton label="정보 닫기" icon={XMarkIcon} onClick={onClose}/>
       </header>
-      <ViewerInfo asset={asset} image/>
+      <ViewerInfo asset={asset} image classifications={classifications} onArtist={onArtist}/>
     </div>
   </Dialog>;
 }

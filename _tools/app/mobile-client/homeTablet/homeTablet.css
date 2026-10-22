@@ -45,6 +45,10 @@
 .home-tab-link__copy > span, .home-tab-link__copy small { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .home-tab-link__copy > span { font-size:var(--type-body); line-height:var(--line-ui); }
 .home-tab-link__copy small { color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-meta); }
+.home-tab-links__row { display:flex; align-items:center; gap:var(--space-2); }
+.home-tab-links__row .home-tab-link { flex:1; min-width:0; }
+.home-tab-links__actions { display:flex; }
+.home-tab-links__actions .ui-button { min-height:44px; min-width:44px; }
 
 /* 전송: one tile with the shared TransferMark; 상세 keeps the list. */
 .home-tab-transfer__send { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; width:100%; min-height:88px; padding:var(--space-3); border:0; border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; }

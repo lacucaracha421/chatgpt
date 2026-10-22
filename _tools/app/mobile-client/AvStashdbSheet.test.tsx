@@ -117,3 +117,22 @@ it('loads photo previews in parallel and cancels preparation when the sheet clos
   const signal = mocks.api.mock.calls.find(([path]) => path === '/v1/providers/stashdb/portrait')![1] as AbortSignal;
   mounted.unmount(); expect(signal.aborted).toBe(true); expect(readCommands()).toEqual([]);
 });
+it('cuts the portrait from a cover when there is no StashDB profile and queues the frame as a crop', async () => {
+  vi.stubGlobal('Image', class {naturalWidth = 800; naturalHeight = 600; onload?: () => void; set src(_value: string) {queueMicrotask(() => this.onload?.());}});
+  const work = {id: 'w1', name: '작품', type: 'av' as const, showcase: false, selectedWorkArtworkId: 'front-1', artworkVersions: {'front-1': {thumbnail: 't1', original: 'o1'}},
+    av: {productCode: 'ABC-001', genres: [], people: [{id: 'p1', name: '미오', role: 'performer' as const, order: 0}]}};
+  const authority = {identity, rows: [], acknowledgements: [], enqueue: (command: Parameters<typeof enqueueCommand>[1], label: string) => enqueueCommand(identity, command, label)} as unknown as ReturnType<typeof useCollectionAuthority>;
+  render(<AvStashdbSheet mode="portrait" person={{id: 'p1', entityRevision: 4, stashdbId: null, memo: null, favorite: false, profile: null, portrait: null}} name="하야세 미오" privacy={false} authority={authority}
+    covers={{works: [work], revision: 'r1'}} onClose={close} onPortrait={portrait}/>);
+  expect(screen.getByRole('button', {name: 'ABC-001 표지 단독 작품'})).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('slider', {name: '초상화 자르기 영역'})).toBeInTheDocument();
+  const save = screen.getByRole('button', {name: '대표 이미지로 쓰기'});
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+  // 800×600 starts at the PC's frame: 3:4 on screen, 80% of the cover's height, centred.
+  expect(readCommands()[0].command).toMatchObject({commandType: 'setPersonPortrait', personId: 'p1', expectedRevision: 4, portrait: {kind: 'crop', artworkId: 'front-1', rect: {x: .275, y: .1, w: .45, h: .8}}});
+  expect(portrait).toHaveBeenCalledWith(expect.objectContaining({portrait: expect.objectContaining({kind: 'crop'})}), 'data:image/jpeg;base64,YQ==', expect.any(String));
+  expect(close).toHaveBeenCalled();
+  // StashDB's missing-profile note belongs to the StashDB source.
+  expect(screen.queryByText('StashDB 프로필을 먼저 선택해 주세요.')).toBeNull();
+});

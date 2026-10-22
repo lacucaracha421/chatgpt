@@ -1,3 +1,4 @@
+import { DURATION_BOUNDS, type AssetDurationFilter } from "../shared/assetDurationFilter";
 import { useAssetContextTarget } from "./useAssetContextTarget";
 import { pcPerfEnabled, pcFolderReady, pcFolderScope } from "../shared/pcPerfLog";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
@@ -57,15 +58,16 @@ import { prefetchedRead, publishAssetFolderFilters } from "./folderPrefetch";
 import type { AutoTagFilter } from "../autotags/types";
 
 /** The first-page query of a view; a hover prefetch builds the switch's exact request through it. */
-export function assetQueryBase(view: AssetView, { directOnly, mediaFilter, aspectFilter, sort, randomPivot, autoTags }: {
-  directOnly: boolean; mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; sort: AssetSort; randomPivot: string | null; autoTags: AutoTagFilter | null;
+export function assetQueryBase(view: AssetView, { directOnly, mediaFilter, aspectFilter, durationFilter = "all", sort, randomPivot, autoTags }: {
+  durationFilter?: AssetDurationFilter; directOnly: boolean; mediaFilter: AssetMediaFilter; aspectFilter: AssetAspectFilter; sort: AssetSort; randomPivot: string | null; autoTags: AutoTagFilter | null;
 }): Omit<AssetQuery, "after"> {
   const filterable = view.kind === "classification" || view.kind === "unsorted" || view.kind === "album" || view.kind === "creator";
-  return { classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey: view.kind === "creator" ? view.creatorKey : null, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivot : null, collectedRange: null, ...(autoTags ? { autoTags } : {}), limit: ASSET_PAGE_SIZE };
+  const bounds = filterable && mediaFilter !== "images" ? DURATION_BOUNDS[durationFilter] : {};
+  return { ...(bounds.min !== undefined ? { durationMsMin: bounds.min } : {}), ...(bounds.max !== undefined ? { durationMsMax: bounds.max } : {}), classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey: view.kind === "creator" ? view.creatorKey : null, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivot : null, collectedRange: null, ...(autoTags ? { autoTags } : {}), limit: ASSET_PAGE_SIZE };
 }
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { classificationOrderIds?: string[]; onReorderFolders?: (parentId: string, ids: string[]) => Promise<void>; navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; characterSeries?: CharacterSeries[]; characterExtras?: CharacterTarget[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
+type Props = { durationFilter?: AssetDurationFilter; onDurationFilterChange?: (value: AssetDurationFilter) => void; classificationOrderIds?: string[]; onReorderFolders?: (parentId: string, ids: string[]) => Promise<void>; navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; characterSeries?: CharacterSeries[]; characterExtras?: CharacterTarget[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
 /** `noMatchQuery`: a 내용 검색 page whose query the "no match" gate turned away (not forced). */
 type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null; noMatchQuery?: string };
 export type AssetNavigationMemory = Map<string, PageState>;
@@ -115,7 +117,7 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
 
 
 
-export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], characterSeries = [], characterExtras = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
+export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, classificationOrderIds = [], onReorderFolders, navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], characterSeries = [], characterExtras = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
   const { gateway, library } = useLibrary();
   const recentFolders = useRecentFolders();
   const previewCache = folderPreviewCache(gateway, library?.root);
@@ -226,9 +228,9 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   const descriptionForce = view.kind === "description_search" && view.force === true;
   const autoTagFiltered = hasAutoTagFilter(autoTagFilter) && descriptionQuery === null;
   const querySort: AssetSort = descriptionQuery === null ? sort : "newest";
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => assetQueryBase(view, { directOnly, mediaFilter, aspectFilter, sort: querySort, randomPivot: randomPivotRef.current, autoTags: autoTagFiltered ? autoTagFilter : null }), [aspectFilter, autoTagFilter, autoTagFiltered, directOnly, querySort, mediaFilter, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => assetQueryBase(view, { directOnly, mediaFilter, aspectFilter, durationFilter, sort: querySort, randomPivot: randomPivotRef.current, autoTags: autoTagFiltered ? autoTagFilter : null }), [durationFilter, aspectFilter, autoTagFilter, autoTagFiltered, directOnly, querySort, mediaFilter, randomVersion, view]);
   // A hover prefetch of another plain folder builds the query this browser would read for it.
-  useEffect(() => publishAssetFolderFilters(() => ({ mediaFilter, aspectFilter, randomPivot: randomPivotRef.current })), [mediaFilter, aspectFilter]);
+  useEffect(() => publishAssetFolderFilters(() => ({ mediaFilter, aspectFilter, durationFilter, randomPivot: randomPivotRef.current })), [mediaFilter, aspectFilter, durationFilter]);
   // The summary read uses the all-assets query; the description only keys the page.
   const queryKey = descriptionQuery === null ? JSON.stringify(queryBase) : JSON.stringify({ ...queryBase, descriptionQuery, ...(descriptionForce ? { descriptionForce } : {}) });
   useEffect(() => setNewAssetsAvailable(false), [queryKey]);
@@ -409,6 +411,11 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
   const changeMediaFilter = (next: AssetMediaFilter) => {
     resetFilterNavigation();
     setMediaFilter(next);
+    if (next === "images") onDurationFilterChange?.("all");
+  };
+  const changeDurationFilter = (next: AssetDurationFilter) => {
+    resetFilterNavigation();
+    onDurationFilterChange?.(next);
   };
   const changeAspectFilter = (next: AssetAspectFilter) => {
     resetFilterNavigation();
@@ -575,8 +582,8 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
     }
   })();
-  const hasActiveFilters = filterable && (mediaFilter !== "all" || aspectFilter !== "all");
-  const resetFilters = () => { changeMediaFilter("all"); changeAspectFilter("all"); };
+  const hasActiveFilters = filterable && (mediaFilter !== "all" || aspectFilter !== "all" || durationFilter !== "all");
+  const resetFilters = () => { changeMediaFilter("all"); changeAspectFilter("all"); changeDurationFilter("all"); };
   const resetStyleSuggestionFilter = () => {
     if (view.kind === "creator") onViewChange?.({ kind: "creator", creatorKey: view.creatorKey });
   };
@@ -682,7 +689,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
         ? <EmptyState title="검색 결과 없음">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
       : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
         ? hasActiveFilters && !autoTagFiltered && !styleSuggestionsOnly
-          ? <>{folderHead}<EmptyState icon={FunnelIcon} title={viewFilterEmptyTitle(mediaFilter, aspectFilter)} hint={`${viewFilterLabel(mediaFilter, aspectFilter)} 보는 중`} action={<Button onClick={resetFilters}>필터 초기화</Button>} /></>
+          ? <>{folderHead}<EmptyState icon={FunnelIcon} title={viewFilterEmptyTitle(mediaFilter, aspectFilter, durationFilter)} hint={`${viewFilterLabel(mediaFilter, aspectFilter, durationFilter)} 보는 중`} action={<Button onClick={resetFilters}>필터 초기화</Button>} /></>
           : <>{folderHead}<EmptyState title={styleSuggestionsOnly && !hasActiveFilters && !autoTagFiltered ? "추천 있는 자산 없음" : "조건에 맞는 자산 없음"}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
       : visibleItems.length === 0
         ? directOnlyEmpty
@@ -701,7 +708,7 @@ export function AssetBrowser({ classificationOrderIds = [], onReorderFolders, na
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>
     {newCharacter && creationFolder && <NewManualCharacter {...newCharacter} series={classifications.find(entry => entry.id === scopeSeriesId) ?? creationFolder} entries={classifications} onClose={() => setNewCharacter(null)} onSaved={target => { setNewCharacter(null); setCharacterOpen(false); clearSelection(); onCharactersChanged(); onMembershipChanged(); refresh(); onViewChange?.({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}
-    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{folderEntry?.isContainer && <Badge>분류함</Badge>}{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
+    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{folderEntry?.isContainer && <Badge>분류함</Badge>}{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} durationFilter={durationFilter} onDurationFilterChange={onDurationFilterChange ? changeDurationFilter : undefined} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "되돌리기" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <CharacterAssignToast notice={characterNotice} privacyMode={privacyMode} busy={batchPending} onDismiss={() => setCharacterNotice(null)} onOpen={() => {

@@ -34,6 +34,7 @@ export const avGateway: AvGateway = {
   setPersonProfileFields: (personId, changes, expected) => invoke("set_av_person_profile_fields", {personId, changes, expected}),
   resolvePersonProfileConflict: (personId, operationId, overwrite) => invoke("resolve_av_person_profile_conflict", {personId, operationId, overwrite}),
   getPerformer: personId => invoke("get_av_performer", { personId }),
+  listPerformerCredits: () => invoke("list_av_performer_credits"),
   savePersonMemo: (personId, memo) => invoke("save_av_person_memo", { personId, memo }),
   listPortraitSources: personId => invoke("list_av_portrait_sources", { personId }),
   setPortraitCrop: (personId, artworkId, rect: PortraitRect) => invoke("set_av_portrait_crop", { personId, artworkId, rect }),

@@ -746,7 +746,7 @@ describe('tablet Home tools and the 링크 보관 sheet', () => {
     const first = await screen.findByRole('button', {name: /첫 글.*A 사이트/});
     await waitFor(() => expect(first.querySelector('img')?.getAttribute('src')).toBe('https://img.example/1.png'));
     expect(screen.getByRole('button', {name: /b\.example.*b\.example/})).toBeTruthy();
-    expect(screen.getByRole('button', {name: /평문 이미지/}).querySelector('img')).toBeNull();
+    expect(screen.getByRole('button', {name: /평문 이미지(?! (복사|삭제))/}).querySelector('img')).toBeNull();
     view.rerender(<TabletLinksSheet store={tabletHomeNotes(props().scope)} root={props().scope} privacy onOpenNotes={vi.fn()} onClose={vi.fn()}/>);
     const section = screen.getByRole('region', {name: '링크 보관'});
     expect(section.querySelectorAll('img')).toHaveLength(0);
@@ -763,12 +763,12 @@ describe('tablet Home tools and the 링크 보관 sheet', () => {
     expect(screen.queryByRole('region', {name: '링크 보관'})).toBeNull();
     view.unmount();
     render(<TabletLinksSheet store={tabletHomeNotes(props().scope)} root={props().scope} privacy={false} onOpenNotes={vi.fn()} onClose={vi.fn()}/>);
-    expect(await screen.findAllByRole('button', {name: /^글 \d/})).toHaveLength(6);
+    expect(await screen.findAllByRole('button', {name: /^글 \d(?!.*(복사|삭제)$)/})).toHaveLength(6);
   });
   it('opens a kept link outside the app', async () => {
     notes = [{...note('links', {title: '링크 보관', pinned: false}), body: serializeLinks([{url: 'https://a.example/1', title: '첫 글', savedAt: '2026-09-25T09:00:00Z'}])}];
     render(<TabletLinksSheet store={tabletHomeNotes(props().scope)} root={props().scope} privacy={false} onOpenNotes={vi.fn()} onClose={vi.fn()}/>);
-    fireEvent.click(await screen.findByRole('button', {name: /첫 글/}));
+    fireEvent.click(await screen.findByRole('button', {name: /첫 글(?!.*(복사|삭제)$)/}));
     await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('openExternal', {url: 'https://a.example/1'}));
   });
   it('sends files to the PC through the exchange picker and shows the newest send on the icon alone', async () => {

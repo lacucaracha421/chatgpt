@@ -3,7 +3,7 @@ import type {ClassificationEntry,FavoriteEntry} from '../../src/library/types';
 import type {CharacterIndex,CharacterNode} from '../characterModel';
 import type {Classification} from '../types';
 import {favoriteTargets as projectTargets,isManualFavorite} from '../../src/collections/favorites/model';
-export {representativeAsset,birthdayDays,containerId,favoriteScopes,reorderCommand,isManualFavorite,createFavoriteCommand,linkFavoriteCommand} from '../../src/collections/favorites/model';
+export {representativeAsset,birthdayDays,containerId,favoriteScopes,reorderCommand,isManualFavorite,createFavoriteCommand,linkFavoriteCommand,favoriteFacts,hasFavoriteProfile} from '../../src/collections/favorites/model';
 
 /** Translate wire names once; the PC model remains the owner of the display rules. */
 export function favoriteFolders(folders:Classification[]):ClassificationEntry[] {

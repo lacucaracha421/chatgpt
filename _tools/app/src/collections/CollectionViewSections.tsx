@@ -83,6 +83,8 @@ const CRITERIA: { value: CollectionLibrarySort; label: string }[] = [
 const GROUPINGS: { value: CollectionGrouping; label: string }[] = [
   { value: "sort", label: "안 묶음" }, { value: "device", label: "기기" }, { value: "year", label: "발매 연도" },
 ];
+const MOVIE_GROUPINGS: { value: CollectionGrouping; label: string }[] = [{ value: "sort", label: "안 묶음" }, { value: "decade", label: "연대" }, { value: "director", label: "감독" }];
+const AV_GROUPINGS: { value: CollectionGrouping; label: string }[] = [{ value: "sort", label: "안 묶음" }, { value: "performer", label: "배우" }];
 
 /** 순서 words follow the 기준: dates read newest/oldest, titles read alphabetical/reverse. */
 export function directionOptions(sort: CollectionLibrarySort): { value: CollectionLibraryDirection; label: string }[] {
@@ -97,13 +99,13 @@ export function sortAfterCriterion(current: { sort: CollectionLibrarySort; direc
 
 /**
  * Grouping sits above the sort controls. Only the game's release-year grouping requires release-date
- * sorting; movie decade/director groups partition whichever order the user chose.
+ * sorting; movie decade/director and AV performer groups partition whichever order the user chose.
  */
-export function CollectionSortSection({ sort, direction, onSortChange, grouping, onGroupingChange, movie = false }: {
+export function CollectionSortSection({ sort, direction, onSortChange, grouping, onGroupingChange, movie = false, av = false }: {
   sort: CollectionLibrarySort; direction: CollectionLibraryDirection;
   onSortChange(next: { sort: CollectionLibrarySort; direction: CollectionLibraryDirection }): void;
-  /** Games and movies only: omit for types without grouping. */
-  grouping?: CollectionGrouping; onGroupingChange?: (grouping: CollectionGrouping) => void; movie?: boolean;
+  /** Games, movies and AV only: omit for types (or layouts) without grouping. */
+  grouping?: CollectionGrouping; onGroupingChange?: (grouping: CollectionGrouping) => void; movie?: boolean; av?: boolean;
 }) {
   const changeSort = (next: { sort: CollectionLibrarySort; direction: CollectionLibraryDirection }) => {
     onSortChange(next);
@@ -111,7 +113,7 @@ export function CollectionSortSection({ sort, direction, onSortChange, grouping,
   };
   return <ViewOptionsSection title="정렬">
     {onGroupingChange && <div className="collection-view-sort__row"><span className="collection-view-sort__label">묶기</span>
-      <SegmentedControl label="묶기" options={movie ? [{ value: "sort", label: "안 묶음" }, { value: "decade", label: "연대" }, { value: "director", label: "감독" }] : GROUPINGS} value={grouping ?? "sort"} fullWidth
+      <SegmentedControl label="묶기" options={movie ? MOVIE_GROUPINGS : av ? AV_GROUPINGS : GROUPINGS} value={grouping ?? "sort"} fullWidth
         onChange={next => { onGroupingChange(next); if (next === "year") onSortChange({ sort: "media_date", direction: "desc" }); }} /></div>}
     <div className="collection-view-sort__row"><span className="collection-view-sort__label">기준</span>
       <SegmentedControl label="정렬 기준" options={movie ? CRITERIA.map(option => option.value === "media_date" ? { ...option, label: "개봉일" } : option) : CRITERIA} value={sort} fullWidth onChange={next => changeSort(sortAfterCriterion({ sort, direction }, next))} /></div>

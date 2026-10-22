@@ -100,13 +100,9 @@
 .mobile-collections .collection-releases__other { min-height: var(--row-height-2); }
 .mobile-collections .collection-releases__other > button { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: var(--touch-target); padding: 0; color: var(--color-text); text-align: left; background: none; border: 0; font: inherit; }
 
-/* AV: 작품 · 배우별 tabs, and each performer's shelf row under a tappable name. */
-.av-view-tabs { margin-top: var(--space-2); }
-.av-performer-shelf .av-performer-heading { width: 100%; min-height: var(--row-height-2); padding: 0; color: inherit; text-align: left; background: none; border: 0; font: inherit; cursor: pointer; }
-.av-performer-shelf .av-performer-heading > .muted { margin-left: auto; }
-.av-performer-shelf .av-performer-heading > svg { width: 20px; height: 20px; flex: none; color: var(--color-muted); }
-/* A performer's shelf holds a single plank: no extra list padding above the cases or under the titles, so a row with one case is only as tall as that case, its plank and its title. */
-.mobile-collections .av-performer-shelf .collection-list { padding-top: var(--space-2); padding-bottom: 0; }
+/* AV 배우 묶기: the shared performer heading (performerGroupHeading.css) at the tablet's two-line row height. */
+.mobile-collections .performer-group-heading { min-height: var(--row-height-2); }
+.mobile-collections .performer-group-heading__chevron { width: 20px; height: 20px; color: var(--color-muted); }
 .mobile-collections .collection-card__extra { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); color: var(--color-muted); font-size: var(--type-meta); }
 
 /* Performer profile: the PC pieces fold into a portrait identity row on the tablet. */

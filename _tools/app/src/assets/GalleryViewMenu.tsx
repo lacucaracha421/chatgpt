@@ -8,6 +8,8 @@ import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Button } from "../shared/ui/Button";
 import type { AssetSort, AssetMediaFilter, AssetAspectFilter } from "../library/types";
 
+import { DURATION_OPTIONS, type AssetDurationFilter } from "../shared/assetDurationFilter";
+
 const SORT_OPTIONS = [
   { value: "newest", label: "최신순" }, { value: "oldest", label: "오래된순" },
   { value: "favorites", label: "좋아요순" }, { value: "random", label: "랜덤" },
@@ -34,6 +36,8 @@ type GalleryViewMenuProps = {
   onThumbnailRowHeightChange: (value: number) => void;
   aspectFilter?: AssetAspectFilter;
   onAspectFilterChange?: (value: AssetAspectFilter) => void;
+  durationFilter?: AssetDurationFilter;
+  onDurationFilterChange?: (value: AssetDurationFilter) => void;
   inspectorOpen?: boolean;
   inspectorAvailable?: boolean;
   onInspectorOpenChange?: (value: boolean) => void;
@@ -51,6 +55,8 @@ export function GalleryViewMenu({
   onThumbnailRowHeightChange: _onThumbnailRowHeightChange,
   aspectFilter = "all",
   onAspectFilterChange,
+  durationFilter = "all",
+  onDurationFilterChange,
   inspectorOpen,
   inspectorAvailable = true,
   onInspectorOpenChange,
@@ -72,6 +78,9 @@ export function GalleryViewMenu({
       </ViewOptionsSection>}
       {onAspectFilterChange && <ViewOptionsSection title="비율">
         <SegmentedControl label="비율" options={ASPECT_OPTIONS} value={aspectFilter} onChange={onAspectFilterChange} fullWidth />
+      </ViewOptionsSection>}
+      {onDurationFilterChange && mediaFilter !== "images" && <ViewOptionsSection title="길이">
+        <SegmentedControl label="길이" options={DURATION_OPTIONS} value={durationFilter} onChange={onDurationFilterChange} fullWidth />
       </ViewOptionsSection>}
       <ViewOptionsSection title="표시">
         <Switch label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />

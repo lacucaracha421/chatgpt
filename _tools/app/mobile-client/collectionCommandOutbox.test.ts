@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({api: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api}));
 import {ApiError} from './transport';
 import {AUTHORITY_STATUS_PATH, COMMAND_PATH, authorityIdentity, confirmedWork, createdWork, discardLifecycle, enqueueCommand, enqueueCommands, flushCommands, lifecycleInFlight, retryCommandNow,
-  optimisticWork, readCommands, reconcileCommands, replaceCommand, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
+  optimisticWork, portraitCropSelection, readCommands, reconcileCommands, replaceCommand, selectionCrop, type AuthorityIdentity, type WorkCommand} from './collectionCommandOutbox';
 import {avCredits, AV_INPUT_ERROR} from './avEditModel';
 import type {CollectionDetail} from './collectionModel';
 
@@ -182,5 +182,23 @@ describe('durable Collection commands', () => {
     expect(authorityIdentity({...identity, active: true})).toEqual(identity);
     expect(authorityIdentity({...identity, active: true, contractVersion: 2})).toBeNull();
     expect(authorityIdentity({...identity, active: true, epoch: 0})).toBeNull();
+  });
+});
+
+describe('cover-crop portraits (U20)', () => {
+  const crop = (rect: {x: number; y: number; w: number; h: number}, artworkId = 'front-1') => ({commandType: 'setPersonPortrait' as const, personId: 'p1', expectedRevision: 3, portrait: {kind: 'crop' as const, artworkId, rect}});
+  it('queues a crop the server accepts, and refuses one the server would refuse before it is stored', () => {
+    enqueueCommand(identity, crop({x: .275, y: .1, w: .45, h: .8}), '미오');
+    expect(readCommands()[0].command).toMatchObject({commandType: 'setPersonPortrait', portrait: {kind: 'crop', artworkId: 'front-1', rect: {x: .275, y: .1, w: .45, h: .8}}});
+    for (const bad of [crop({x: .6, y: .1, w: .45, h: .8}), crop({x: .1, y: .1, w: .01, h: .8}), crop({x: .1, y: .1, w: .45, h: .8}, 'bad id')])
+      expect(() => enqueueCommand(identity, bad)).toThrow(AV_INPUT_ERROR);
+    expect(readCommands()).toHaveLength(1);
+  });
+  it('rounds the on-screen frame and keeps it inside the cover', () => {
+    expect(portraitCropSelection('front-1', {x: (1 - 0.45000000000000007) / 2, y: .1, w: .8 * .75 / (4 / 3), h: .8}).rect).toEqual({x: .275, y: .1, w: .45, h: .8});
+    const edge = portraitCropSelection('front-1', {x: 1 - 0.3333333, y: 0, w: 0.33333336, h: .5}).rect;
+    expect(edge.x + edge.w).toBeLessThanOrEqual(1);
+    expect(selectionCrop({kind: 'crop', artworkId: 'front-1', rect: edge})).toEqual({artworkId: 'front-1', ...edge});
+    expect(selectionCrop({kind: 'image'})).toBeNull();
   });
 });

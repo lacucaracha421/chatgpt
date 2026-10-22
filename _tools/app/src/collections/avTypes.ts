@@ -42,6 +42,9 @@ export type AvRelated = {
   series: { name: string; total: number; items: (AvWorkCard & { current: boolean })[] } | null;
   label: { name: string; total: number; items: AvWorkCard[] } | null;
 };
+/** Every AV work's performer credits in one read (directors left out); each person is listed once. */
+export type AvCreditPerson = ProfilePerson & { id: string; displayName: string; nameJa: string | null; portrait: AvPortrait | null };
+export type AvPerformerCredits = { people: AvCreditPerson[]; credits: { collectionId: string; personId: string; order: number }[] };
 export type AvPerformerPage = {
   person: ProfilePerson & { id: string; displayName: string; nameJa: string | null; wikidataId: string | null; fanzaActressId: string | null; memo: string | null; portrait: AvPortrait | null };
   stats: { workCount: number; firstRelease: string | null; lastRelease: string | null; averageScore: number | null };
@@ -94,6 +97,8 @@ export interface AvGateway {
   listCoverSets?(collectionIds: string[]): Promise<AvCoverSetEntry[]>;
   getRelated(collectionId: string): Promise<AvRelated>;
   getPerformer(personId: string): Promise<AvPerformerPage>;
+  /** The list grouped by performer reads every work's credits at once. */
+  listPerformerCredits?(): Promise<AvPerformerCredits>;
   savePersonMemo(personId: string, memo: string | null): Promise<AvPerformerPage>;
   listPortraitSources(personId: string): Promise<AvPortraitSource[]>;
   setPortraitCrop(personId: string, artworkId: string, rect: PortraitRect): Promise<AvPortrait>;

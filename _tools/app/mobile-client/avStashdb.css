@@ -14,3 +14,20 @@
   .tablet-stashdb__candidates, .tablet-stashdb__photos:not(:empty) { animation: notice-enter 200ms var(--ease-standard); }
   .tablet-stashdb img { animation: collection-art-arrive 180ms var(--ease-standard); }
 }
+/* 표지에서 자르기 (AvPortraitCrop): the cover strip, the cover with the shared 3:4 frame, 확대, and the previews. */
+.tablet-portrait-crop { display: grid; gap: var(--space-3); }
+.tablet-portrait-crop__covers { display: flex; gap: var(--space-2); overflow-x: auto; padding: 2px; }
+.tablet-portrait-crop__covers button { position: relative; flex: none; width: 64px; height: 92px; padding: 0; overflow: hidden; color: var(--color-muted); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-mark); }
+.tablet-portrait-crop__covers button[aria-pressed="true"] { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.tablet-portrait-crop__covers img, .tablet-portrait-crop__covers .ui-skeleton { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tablet-portrait-crop__covers small { position: absolute; right: 0; bottom: 0; left: 0; overflow: hidden; padding: 0 var(--space-1); color: var(--color-text); background: var(--color-cover-scrim); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; }
+.tablet-portrait-crop__stage { display: grid; place-items: center; overflow: hidden; background: var(--color-bg); }
+.tablet-portrait-crop__stage .av-portrait-picker__crop-image { width: 100%; }
+.tablet-portrait-crop__placeholder { display: block; width: 100%; aspect-ratio: 3 / 2; }
+.tablet-portrait-crop__controls { display: flex; align-items: flex-end; gap: var(--space-3); }
+.tablet-portrait-crop__controls .step-slider { flex: 1; margin: 0; }
+.tablet-portrait-crop__previews { display: flex; align-items: flex-end; gap: var(--space-4); }
+.tablet-portrait-crop__preview.av-portrait { width: 96px; height: 120px; border-radius: var(--radius-mark); }
+@media (prefers-reduced-motion: no-preference) {
+  .tablet-portrait-crop__covers img, .tablet-portrait-crop__stage img { animation: collection-art-arrive 180ms var(--ease-standard); }
+}

@@ -9,7 +9,8 @@ import {HeartIcon as HeartSolidIcon} from '@heroicons/react/24/solid';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import {BottomSheet} from './BottomSheet';
-import type {Asset} from './types';
+import type {Asset, Classification} from './types';
+import type {LibraryArtist} from './artistsModel';
 import {imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
@@ -84,7 +85,9 @@ export function Viewer(props: Omit<Parameters<typeof ViewerContent>[0], 'openedO
   return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props} openedOn={openedOn.current} textOpen={textOpen} setTextOpen={setTextOpen} textGateway={textGateway}/>;
 }
 
-function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault,openedOn,textOpen,setTextOpen,textGateway}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault,openedOn,textOpen,setTextOpen,textGateway,classifications,onArtist}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+  classifications?:readonly Classification[];
+  onArtist?(artist:LibraryArtist):void;
   /** The asset id the viewer was opened on while it is still shown; only that video autoplays. */
   openedOn?: string;
   textOpen?: boolean;
@@ -511,13 +514,13 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       {vault&&<footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className="viewer-title">{vault.label(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>}
       {!vault&&<nav className="viewer-nav-a11y" aria-label="자산 이동"><button type="button" aria-label="이전 자산" disabled={index === 0} onClick={() => change(index - 1)}>이전 자산</button><button type="button" aria-label="다음 자산" disabled={index === items.length - 1} onClick={() => change(index + 1)}>다음 자산</button></nav>}
       </div>
-      {!vault&&info&&landscape&&<aside className="viewer-info-dock" aria-label="미디어 정보"><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo}/></aside>}
+      {!vault&&info&&landscape&&<aside className="viewer-info-dock" aria-label="미디어 정보"><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo} classifications={classifications} onArtist={onArtist}/></aside>}
       {!vault&&<>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
       {trashNotice}
-      {info&&!landscape&&<BottomSheet title="미디어 정보" reading={halfSheet} onClose={closeInfo}><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo}/></BottomSheet>}
+      {info&&!landscape&&<BottomSheet title="미디어 정보" reading={halfSheet} onClose={closeInfo}><ViewerInfo asset={asset} mediaError={error} onClose={closeInfo} classifications={classifications} onArtist={onArtist}/></BottomSheet>}
       </>}
     </div>
   </Dialog></ImageTextContext>;

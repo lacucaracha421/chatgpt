@@ -12,6 +12,8 @@ import './CatalogReader.css';
 import {ReaderControlBar} from '../src/manga/ReaderControlBar';
 import {useTabletCatalogMasked} from './catalogMask';
 import {ActionSheet} from './ActionSheet';
+import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
+import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 
 type Transform={scale:number;x:number;y:number};
 /** Share of the stage width on each side whose tap turns the page. */
@@ -41,7 +43,8 @@ export function CatalogReader(props: Parameters<typeof CatalogReaderContent>[0])
   return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : <CatalogReaderContent {...props}/>;
 }
 
-function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean}){
+function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookmark}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean;bookmark?:{desired:boolean;pending:boolean;disabled:boolean;failure:string;toggle():void}}){
+  const bookmarkBusy=useDelayedBusy(!!bookmark?.pending);
   const [current,setCurrent]=useState(0),[chrome,setChrome]=useState(false),[transform,setTransform]=useState<Transform>({scale:1,x:0,y:0});
   const [target,setTarget]=useState(0);
   const [scrubbing,setScrubbing]=useState(false),[controlsFocused,setControlsFocused]=useState(false),[menuOpen,setMenuOpen]=useState(false);
@@ -116,7 +119,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
         </div>
         <BusyLabel busy={target!==current&&!targetPages.some(page=>failedPages.includes(page.index))} idle={target!==current&&targetPages.some(page=>failedPages.includes(page.index))&&<span className="reader-loading-next" role="status"><Button size="sm" onClick={()=>{setFailedPages([]);setAttempt(n=>n+1);}}>다시 시도</Button></span>}><span className="reader-loading-next" role="status">{`${target+1}페이지 준비 중…`}</span></BusyLabel>
       </div>
-      <header className="catalog-reader-bar"><IconButton label="읽기 닫기" icon={ArrowLeftIcon} onClick={onClose}/><div><strong>{title}</strong></div><IconButton label="읽기 메뉴" icon={EllipsisHorizontalIcon} onClick={()=>setMenuOpen(true)}/></header>
+      <header className="catalog-reader-bar"><IconButton label="읽기 닫기" icon={ArrowLeftIcon} onClick={onClose}/><div><strong>{title}</strong>{bookmark&&<span className="catalog-reader-bookmark-status" role={bookmark.failure?'alert':'status'}>{bookmark.failure||(bookmarkBusy?'저장 대기':'')}</span>}</div>{bookmark&&<BookmarkToggle label={bookmark.desired?'북마크 해제':'북마크'} bookmarked={bookmark.desired} disabled={bookmark.disabled} aria-busy={bookmark.pending} onClick={bookmark.toggle}/>}<IconButton label="읽기 메뉴" icon={EllipsisHorizontalIcon} onClick={()=>setMenuOpen(true)}/></header>
       {menuOpen&&<ActionSheet target={{thumb:<BookOpenIcon/>,name:title}} items={[{id:'refresh-pages',label:'페이지 주소 갱신',icon:'refresh',disabled:refreshing,run:onRefresh}]} onClose={()=>setMenuOpen(false)}/>}
       {transform.scale>1&&<div className="catalog-reader-zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={()=>setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="catalog-reader-footer" onPointerDownCapture={()=>setControlsFocused(false)} onKeyDownCapture={()=>{setControlsFocused(true);setChrome(true);}} onFocusCapture={event=>{setControlsFocused(event.target.matches(':focus-visible'));setChrome(true);}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setControlsFocused(false);}}>

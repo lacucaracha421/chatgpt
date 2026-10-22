@@ -17,7 +17,7 @@ import { ContextMenu } from "../../shared/ui/ContextMenu";
 import { CollectionCard } from "../CollectionCard";
 import { collectionCoverUrl } from "../CollectionBrowser";
 import { FavoriteProfileEditor } from "./FavoriteProfileEditor";
-import { birthdayDays, isManualFavorite } from "./model";
+import { birthdayDays, favoriteFacts, hasFavoriteProfile, isManualFavorite } from "./model";
 import { FavoritePortrait } from "./FavoritePortrait";
 import { browseFavoriteAssets, type FavoriteCatalog } from "./useFavoriteCatalog";
 
@@ -38,14 +38,7 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
   const manual = isManualFavorite(entry.characterId);
   const series = entry.seriesName ?? catalog.classifications.find(folder => folder.id === target.seriesClassificationId)?.name ?? "";
   const profile = entry.profile;
-  const birthday = profile.birthMonth && profile.birthDay ? `${profile.birthMonth}월 ${profile.birthDay}일` : null;
-  const rows = [
-    { label: "생일", value: birthday, birthday: true },
-    { label: "키", value: profile.heightCm != null ? `${profile.heightCm}cm` : null },
-    { label: "성우", value: profile.voiceActor },
-    { label: "소속", value: profile.affiliation },
-    { label: "메모", value: profile.memo },
-  ].filter(row => row.value);
+  const rows = favoriteFacts(profile);
   const works = entry.workIds.flatMap(id => collections.find(work => work.id === id) ?? []);
   const loadMore = async () => {
     if (!page.nextCursor || loading.current) return;
@@ -73,7 +66,7 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
         {editing ? <FavoriteProfileEditor name={target.displayName} series={series} entry={entry} collections={collections} busy={busy} onCancel={() => onEdit(false)} onSave={onSave} /> : <>
           <div className="favorite-profile__name"><h3>{target.displayName}</h3><span>{[profile.originalName, series].filter(Boolean).join(" · ")}</span></div>
           {!!rows.length && <dl className="favorite-facts">{rows.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}{row.birthday && <DDay as="text" className="favorite-birthday" days={birthdayDays(profile.birthMonth, profile.birthDay)} />}</dd></div>)}</dl>}
-          {!Object.values(profile).some(value => value != null && value !== "") && <Button variant="quiet" size="sm" onClick={() => onEdit(true)}><PlusIcon aria-hidden="true" />정보 추가</Button>}
+          {!hasFavoriteProfile(profile) && <Button variant="quiet" size="sm" onClick={() => onEdit(true)}><PlusIcon aria-hidden="true" />정보 추가</Button>}
         </>}
       </aside>
       <div className="favorite-detail__right">

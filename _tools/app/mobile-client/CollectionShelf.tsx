@@ -38,7 +38,18 @@ export function useShelfColumns(): (portraitColumns: number, gap?: number) => nu
 /** Every type starts on the shelf; stored user choices take precedence. */
 const fallbackView = (): ShelfView => ({layout: 'shelf', perRow: SHELF_PER_ROW.fallback});
 
+/** Before 배우 묶기 the AV list had its own 작품 · 배우별 tabs; a device left on 배우별 opens grouped by performer. */
+const LEGACY_AV_LIST_VIEW_KEY = 'lakomics.mobile.avListView';
+function legacyPerformerView(): boolean {
+  try { return localStorage.getItem(LEGACY_AV_LIST_VIEW_KEY) === 'performers'; } catch { return false; }
+}
+
 function readView(type: CollectionKind): ShelfView {
+  const view = readStoredView(type);
+  return type === 'av' && !view.grouping && legacyPerformerView() ? {...view, grouping: 'performer'} : view;
+}
+
+function readStoredView(type: CollectionKind): ShelfView {
   const fallback = fallbackView();
   try {
     const value = JSON.parse(localStorage.getItem(viewKey(type)) ?? 'null') as Partial<ShelfView> | null;

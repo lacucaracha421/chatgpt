@@ -23,3 +23,4 @@
 .catalog-reader.chrome-visible .reader-loading-next{bottom:calc(90px + env(safe-area-inset-bottom))}
 
 .catalog-reader-footer .reader-control-bar{width:100%;gap:inherit}
+.catalog-reader-bookmark-status { display:block; min-height:var(--line-meta); font-size:var(--type-meta); color:var(--color-muted); }

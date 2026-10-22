@@ -653,3 +653,43 @@ fn av_default_stashdb_portrait_preserves_explicit_choices_and_rejects_unmatched_
     c.execute("UPDATE collection_person_profiles SET status='matched',images_json='[{\"id\":\"bad\",\"url\":\"https://example.invalid/photo\",\"width\":300,\"height\":400}]' WHERE person_id='p'", []).unwrap();
     assert!(portrait(&c, "p").unwrap().is_none());
 }
+#[test]
+fn av_performer_credits_list_each_performer_once_without_directors() {
+    let (_dir, lib) = setup();
+    let duo = work(
+        &lib,
+        "Duo",
+        None,
+        None,
+        None,
+        &[("q", "performer"), ("p", "performer"), ("d", "director")],
+    );
+    let solo = work(&lib, "Solo", None, None, None, &[("p", "performer")]);
+    work(&lib, "Nobody", None, None, None, &[("d", "director")]);
+    let credits = lib.list_av_performer_credits().unwrap();
+    let ids: Vec<_> = credits
+        .people
+        .iter()
+        .map(|person| person.id.as_str())
+        .collect();
+    assert_eq!(ids, ["p", "q"]);
+    assert_eq!(credits.people[0].name_ja.as_deref(), Some("日本名"));
+    let mut rows: Vec<_> = credits
+        .credits
+        .iter()
+        .map(|credit| {
+            (
+                credit.collection_id.clone(),
+                credit.person_id.as_str(),
+                credit.order,
+            )
+        })
+        .collect();
+    rows.sort();
+    let mut expected = vec![(duo.clone(), "q", 0), (duo, "p", 1), (solo, "p", 0)];
+    expected.sort();
+    assert_eq!(rows, expected);
+    let json = serde_json::to_value(&credits).unwrap();
+    assert!(json["people"][0]["displayName"].is_string());
+    assert!(json["credits"][0]["collectionId"].is_string());
+}

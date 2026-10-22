@@ -1,9 +1,8 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { SimilarityClues } from "./SimilarityClues";
 import { assetClueSide, choiceLabel, EMPTY_CLUES, reasonSentence, sideNames, SIMILARITY_CHOICES } from "./clues";
-import { Badge } from "../shared/ui/Badge";
 import { assetUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ImageSimilarityScan, LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
@@ -16,6 +15,8 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { VideoSimilarityPanel } from "./video/VideoSimilarityPanel";
 import { SIMILARITY_REVIEW_CHANGED_EVENT } from "./useSimilarityReviewInbound";
+import { CompareTools, ImageCompare, useImageCompare, type CompareImage, type CompareSurfaceState } from "./compare/ImageCompare";
+import { FIT } from "./compare/compareView";
 
 type Props = {
   gateway: LibraryGateway;
@@ -57,6 +58,7 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   useAutoDismiss(message, setMessage);
   const generationRef = useRef(0);
   const mountedRef = useRef(false);
+  const compare = useImageCompare(review?.id);
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
@@ -187,8 +189,9 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
     {loading && !review ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
     ) : <>
+      <CompareTools className="similarity-review__compare-tools" state={compare} names={names} />
       <div className="similarity-review__pairs">
-        {[review, ...(staged ? [staged.review] : [])].map(pair => <ReviewPair key={pair.id} review={pair} visible={pair.id === review.id} onReady={pair.id === staged?.review.id ? promote : undefined} />)}
+        {[review, ...(staged ? [staged.review] : [])].map(pair => <ReviewPair key={pair.id} review={pair} compare={compare} visible={pair.id === review.id} onReady={pair.id === staged?.review.id ? promote : undefined} />)}
       </div>
       <footer className="similarity-review__actions">
         {review.clues !== undefined && sides && <p className="similarity-review__reason" data-none={!review.reason || undefined}>{reasonSentence(review.reason ?? null, review.clues ?? EMPTY_CLUES, names, [...sides])}</p>}
@@ -227,29 +230,35 @@ function HistoricalScanStatus({ scan, running, onRun }: {
   </section>;
 }
 
-function ReviewPair({review, visible, onReady}: {review: SimilarityReviewSummary; visible: boolean; onReady?: () => void}) {
+const ignore = () => {};
+
+function ReviewPair({review, compare, visible, onReady}: {review: SimilarityReviewSummary; compare: CompareSurfaceState; visible: boolean; onReady?: () => void}) {
   const loaded = useRef(new Set<string>());
   const names = sideNames(review.historical);
   useEffect(() => { if (loaded.current.size === 2) onReady?.(); }, [onReady]);
   const ready = (id: string) => { loaded.current.add(id); if (loaded.current.size === 2) onReady?.(); };
-  return <div className="similarity-review__comparison" data-staged={!visible || undefined} aria-hidden={!visible || undefined}>
-    <ReviewAssetPanel side={names[0]} position="a" reviewAsset={review.existing} onReady={() => ready(review.existing.asset.id)} />
-    <ReviewAssetPanel side={names[1]} position="b" reviewAsset={review.candidate} onReady={() => ready(review.candidate.asset.id)} />
+  // A staged (preloading) pair waits in the same mode at the fit, unzoomed and showing A.
+  const state: CompareSurfaceState = visible ? compare : {mode: compare.mode, view: FIT, setView: ignore, showB: false, wipe: compare.wipe, setWipe: ignore};
+  const image = (index: 0 | 1, reviewAsset: SimilarityReviewAsset): CompareImage => ({
+    name: names[index], label: names[index], size: {width: reviewAsset.asset.width, height: reviewAsset.asset.height},
+    render: ({className, style}) => <ReviewImage reviewAsset={reviewAsset} label={names[index]} className={className} style={style} onReady={() => ready(reviewAsset.asset.id)} />,
+  });
+  return <div className="similarity-review__comparison" data-mode={compare.mode} data-staged={!visible || undefined} aria-hidden={!visible || undefined}>
+    <ImageCompare state={state} images={[image(0, review.existing), image(1, review.candidate)]}
+      className={index => `similarity-review__preview similarity-review__preview--${index === 0 ? "a" : "b"}`} />
     <SimilarityClues names={names} sides={[assetClueSide(review.existing.asset, review.existing.accountRole, review.existing.format), assetClueSide(review.candidate.asset, review.candidate.accountRole, review.candidate.format)]} clues={review.clues} reason={review.reason} recommended={review.recommendedAssetId === review.existing.asset.id ? "a" : review.recommendedAssetId === review.candidate.asset.id ? "b" : null} />
   </div>;
 }
 
-function ReviewAssetPanel({ side, position, reviewAsset, onReady }: { side: string; position: "a" | "b"; reviewAsset: SimilarityReviewAsset; onReady(): void }) {
+/** The original at once (it is local); the privacy mask instead while privacy mode is on. */
+function ReviewImage({ reviewAsset, label, className, style, onReady }: { reviewAsset: SimilarityReviewAsset; label: string; className: string; style: CSSProperties; onReady(): void }) {
   const { privacyMode } = usePrivacy();
   const masked = useAssetMask(reviewAsset.asset);
   useEffect(() => { if (privacyMode || masked) onReady(); }, [privacyMode, masked, onReady]);
   const { asset } = reviewAsset;
-  return <section className={`similarity-review__preview similarity-review__preview--${position}`} aria-label={side}>
-    {privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <AssetImage asset={asset} src={assetUrl(asset.id)} alt={side} onLoad={event => {
-      const image = event.currentTarget;
-      if (typeof image.decode === "function") void image.decode().catch(() => {}).then(onReady);
-      else onReady();
-    }} onError={onReady} />}
-    <Badge variant="scrim">{side}</Badge>
-  </section>;
+  return privacyMode ? <Skeleton className={`privacy-mask ${className}`} label="비공개 모드" /> : <AssetImage asset={asset} src={assetUrl(asset.id)} alt={label} className={className} style={style} draggable={false} onLoad={event => {
+    const image = event.currentTarget;
+    if (typeof image.decode === "function") void image.decode().catch(() => {}).then(onReady);
+    else onReady();
+  }} onError={onReady} />;
 }

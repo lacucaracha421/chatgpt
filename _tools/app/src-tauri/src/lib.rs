@@ -596,6 +596,7 @@ pub fn run() {
             commands::av_link::av_link_pending_count,
             commands::av::get_av_details,
             commands::av::get_av_related,
+            commands::av::list_av_performer_credits,
             commands::av::get_av_performer,
             commands::av::get_av_performer_profile,
             commands::av::refresh_av_performer_profile,

@@ -951,6 +951,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onCollectionsChanged={() => void refreshCollections()}
                     onMembershipChanged={refreshMembershipCounts}
                     sort={preferences.assetSort}
+                    durationFilter={preferences.assetDurationFilter}
+                    onDurationFilterChange={(assetDurationFilter) => updatePreferences({ assetDurationFilter })}
                     galleryLayout={preferences.galleryLayout}
                     onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })}
                     metadataVisible={preferences.metadataVisible}

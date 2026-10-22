@@ -40,16 +40,6 @@
 .favorite-assets { display: flex; flex-direction: column; min-width: 0; height: max(480px, calc(100dvh - 2 * var(--toolbar-height))); }
 .favorite-assets > .asset-gallery { flex: 1; min-height: 0; }
 .favorite-assets .asset-gallery__intro { padding-bottom: var(--space-3); }
-.favorite-editor { display: flex; flex-direction: column; gap: var(--space-4); animation: favorite-editor-enter 140ms var(--ease-standard) both; }
-.favorite-editor__two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.favorite-editor textarea { width: 100%; min-height: 64px; height: auto; resize: vertical; }
-.favorite-editor__works { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
-.favorite-editor__free { display: flex; gap: var(--space-1); width: 100%; }
-.favorite-editor__free > input { width: 0; flex: 1; }
-.favorite-editor__foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-2); }
-.favorite-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.favorite-chip { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding-left: var(--space-2); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font-size: var(--type-meta); overflow-wrap: anywhere; }
-.favorite-error { margin: 0; color: var(--color-danger); font-size: var(--type-meta); }
 .favorite-work-search { display: flex; flex-direction: column; gap: var(--space-2); width: 320px; padding: var(--space-3); }
 .favorite-work-search__list { display: flex; flex-direction: column; align-items: stretch; max-height: 320px; overflow: auto; }
 .favorite-add-menu { padding: 0; }
@@ -87,11 +77,7 @@
 .favorite-cover-drop p { margin: 0; font-size: var(--type-body); }
 @media (prefers-reduced-motion: reduce) {
   .favorite-card__count, .favorite-profile__swap { transition: none; }
-  .favorite-editor, .favorite-grid { animation: none; }
-}
-@keyframes favorite-editor-enter {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
+  .favorite-grid { animation: none; }
 }
 /* The grid fades in once as a whole when the view opens; cards do not rise one by one. */
 .favorite-grid { animation: favorite-grid-enter 200ms var(--ease-standard) both; }

@@ -3,10 +3,11 @@ import {useEffect, useRef, useState} from 'react';
 import {displayDate} from '../src/shared/displayDate';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {BottomSheet} from './BottomSheet';
-import {Button, Dialog, DialogDescription, EmptyState, Field, TextInput} from './ui';
+import {Button, Dialog, DialogDescription, EmptyState, Field, SegmentedControl, TextInput} from './ui';
 import {outboxConnection} from './outboxConnection';
-import {personRevision, readCommands, sameAuthority, validatePortraitManifest, type PersonRevisionCommand, type PortraitManifest} from './collectionCommandOutbox';
-import type {CollectionPerson} from './collectionModel';
+import {personRevision, portraitCropSelection, readCommands, sameAuthority, selectionCrop, validatePortraitManifest, type PersonRevisionCommand, type PortraitManifest, type PortraitSelection} from './collectionCommandOutbox';
+import type {CollectionPerson, CollectionSummary} from './collectionModel';
+import {AvPortraitCrop} from './AvPortraitCrop';
 import type {useCollectionAuthority} from './useCollectionAuthority';
 import {stashdbError, stashdbPreview, stashdbRead, STASHDB_NOT_CONFIGURED, STASHDB_OLD_SERVER, type StashdbPerformer} from './stashdbModel';
 import './avStashdb.css';
@@ -52,11 +53,16 @@ export function StashdbProfileActions({person, authority, name, onClose}: {perso
   </>;
 }
 
-export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, onClose, onPortrait}: {
+export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, covers, onClose, onPortrait}: {
   mode: 'profile' | 'portrait'; person: CollectionPerson; name: string; nameJa?: string | null; privacy: boolean; authority: Authority;
+  /** The published works and their revision, for 표지에서 자르기. */
+  covers?: {works: CollectionSummary[]; revision: string};
   onClose(): void; onPortrait(command: PersonRevisionCommand, url: string | null, operationId: string): void;
 }) {
   const [scope] = useState(() => ({connection: outboxConnection(), identity: authority.identity}));
+  // As on the PC: a cover crop opens on 표지에서 자르기, and so does a performer with no StashDB profile.
+  const [source, setSource] = useState<'stashdb' | 'crop'>(() => covers && (selectionCrop(person.portraitSelection) || !person.stashdbId) ? 'crop' : 'stashdb');
+  const cropping = mode === 'portrait' && source === 'crop';
   const [query, setQuery] = useState(nameJa?.trim() || name), [results, setResults] = useState<StashdbPerformer[] | null>(null);
   const [photos, setPhotos] = useState<StashdbPerformer | null>(null), [urls, setUrls] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState(false), [busy, setBusy] = useState(true), [failure, setFailure] = useState('');
@@ -99,7 +105,7 @@ export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, 
     }
     return () => controller.abort();
   }, [results, photos, privacy, mode, scope, retry]);
-  const enqueue = (wish: {commandType: 'setPersonProfile'; stashdbId: string | null} | {commandType: 'setPersonPortrait'; portrait: ({kind: 'image'} & PortraitManifest) | null}, url: string | null = null) => {
+  const enqueue = (wish: {commandType: 'setPersonProfile'; stashdbId: string | null} | {commandType: 'setPersonPortrait'; portrait: PortraitSelection | null}, url: string | null = null) => {
     const currentRevision = stashdbCommandRevision(scope, authority, person);
     const command: PersonRevisionCommand = {...wish, personId: person.id, expectedRevision: currentRevision};
     const row = authority.enqueue(command, name);
@@ -139,12 +145,17 @@ export function AvStashdbSheet({mode, person, name, nameJa, privacy, authority, 
         {person.stashdbId && <Button disabled={!ready || busy || !configured} onClick={() => act(() => enqueue({commandType: 'setPersonProfile', stashdbId: person.stashdbId!}))}>새로고침</Button>}
         {(person.stashdbId || person.profile) && <Button disabled={!ready || lock.current} onClick={() => setConfirm('profile')}>연결 해제</Button>}
       </> : <>
-        {privacy ? <p>프라이버시 모드에서는 사진을 표시하지 않습니다.</p> : !person.stashdbId ? <p>StashDB 프로필을 먼저 선택해 주세요.</p> : <div className="tablet-stashdb__photos" aria-label="StashDB 사진">{photos?.images.map((photo, index) => <Button key={photo.id} variant="ghost" aria-label={`사진 ${index + 1} 선택`} disabled={!ready || busy || !urls[photo.id]} onClick={() => void choosePhoto(photo.id)}>{urls[photo.id] ? <img src={urls[photo.id]} alt=""/> : <span>사진 {index + 1}</span>}</Button>)}{photos && photos.images.length === 0 && <p>StashDB 사진이 없습니다.</p>}</div>}
+        {covers && <SegmentedControl fullWidth label="대표 이미지 출처" value={source} onChange={setSource} options={[{value: 'stashdb', label: 'StashDB'}, {value: 'crop', label: '표지에서 자르기'}]}/>}
+        {privacy ? <p>프라이버시 모드에서는 사진을 표시하지 않습니다.</p>
+          : cropping && covers ? <AvPortraitCrop personId={person.id} name={name} works={covers.works} revision={covers.revision} disabled={!ready}
+            onSave={(artworkId, rect, url) => act(() => enqueue({commandType: 'setPersonPortrait', portrait: portraitCropSelection(artworkId, rect)}, url))}/>
+          : !person.stashdbId ? <p>StashDB 프로필을 먼저 선택해 주세요.</p> : <div className="tablet-stashdb__photos" aria-label="StashDB 사진">{photos?.images.map((photo, index) => <Button key={photo.id} variant="ghost" aria-label={`사진 ${index + 1} 선택`} disabled={!ready || busy || !urls[photo.id]} onClick={() => void choosePhoto(photo.id)}>{urls[photo.id] ? <img src={urls[photo.id]} alt=""/> : <span>사진 {index + 1}</span>}</Button>)}{photos && photos.images.length === 0 && <p>StashDB 사진이 없습니다.</p>}</div>}
         <Button disabled={!ready || lock.current} onClick={() => setConfirm('portrait')}>사진 지우기</Button>
       </>}
       {!ready && <p>앞선 배우 변경을 보낸 뒤 다시 선택해 주세요.</p>}
-      {showBusy && <p role="status">{mode === 'profile' ? '조회 중' : '사진 준비 중'}</p>}
-      {failure && <div role="alert"><p>{failure}</p><Button disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>}
+      {/* StashDB's own status and errors belong to the StashDB source; a cover crop needs no provider. */}
+      {showBusy && !cropping && <p role="status">{mode === 'profile' ? '조회 중' : '사진 준비 중'}</p>}
+      {failure && !cropping && <div role="alert"><p>{failure}</p><Button disabled={busy} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></div>}
     </div>
     {confirm && <Dialog open title={confirm === 'profile' ? 'StashDB 연결을 해제할까요?' : '사진을 지울까요?'} onClose={() => setConfirm(null)}><DialogDescription>다른 기기에도 적용됩니다.</DialogDescription><div className="ui-dialog__actions"><Button onClick={() => setConfirm(null)}>취소</Button><Button variant="primary" disabled={!ready || lock.current} onClick={() => act(() => enqueue(confirm === 'profile' ? {commandType: 'setPersonProfile', stashdbId: null} : {commandType: 'setPersonPortrait', portrait: null}))}>{confirm === 'profile' ? '연결 해제' : '사진 지우기'}</Button></div></Dialog>}
   </BottomSheet>;

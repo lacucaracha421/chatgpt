@@ -251,6 +251,43 @@ describe("AssetBrowser", () => {
     );
   });
 
+  it("applies duration bounds, clears them for images and resets the active chip", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    function DurationBrowser() {
+      const [durationFilter, setDurationFilter] = useState<import("../shared/assetDurationFilter").AssetDurationFilter>("all");
+      return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser
+        view={{ kind: "classification", classificationId: null }} classifications={[]} sort="newest"
+        durationFilter={durationFilter} onDurationFilterChange={setDurationFilter}
+        metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()}
+        refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()}
+      />)}</LibraryProvider>;
+    }
+    render(<DurationBrowser />);
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("radio", { name: "30초–1분" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ durationMsMin: 30_000, durationMsMax: 60_000, after: null })));
+    await user.click(screen.getByRole("radio", { name: "이미지" }));
+    expect(screen.queryByRole("radiogroup", { name: "길이" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      const query = vi.mocked(gateway.listAssets).mock.lastCall![0];
+      expect(query.mediaKind).toBe("images");
+      expect(query.durationMsMin).toBeUndefined();
+      expect(query.durationMsMax).toBeUndefined();
+    });
+    await user.click(screen.getByRole("radio", { name: "영상" }));
+    expect(within(screen.getByRole("radiogroup", { name: "길이" })).getByRole("radio", { name: "전체" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("radio", { name: "5분 이상" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "필터 초기화" }));
+    await waitFor(() => {
+      const query = vi.mocked(gateway.listAssets).mock.lastCall![0];
+      expect(query.mediaKind).toBeNull();
+      expect(query.durationMsMin).toBeUndefined();
+    });
+  });
+
   it("applies toolbar filters to asset queries and preserves them across asset views", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });

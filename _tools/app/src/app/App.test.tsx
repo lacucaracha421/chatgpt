@@ -943,6 +943,7 @@ describe("App", () => {
         classificationOrderIds: [],
         expandedAlbumIds: [],
         assetSort: "random",
+        assetDurationFilter: "all",
         thumbnailRowHeight: 180,
         creatorCardSize: 200,
         collectionType: "manga",

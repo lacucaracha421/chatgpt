@@ -671,6 +671,9 @@ pub struct AssetQuery {
     pub media_kind: Option<MediaKindFilter>,
     /// 가로·세로·정사각 필터. None은 전체.
     pub aspect_ratio: Option<AspectRatioFilter>,
+    /// Video-only bounds: inclusive minimum, exclusive maximum; unknown durations do not match.
+    pub duration_ms_min: Option<u64>,
+    pub duration_ms_max: Option<u64>,
     pub sort: AssetSort,
     pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,

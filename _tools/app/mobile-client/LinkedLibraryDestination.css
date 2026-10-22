@@ -1,0 +1,2 @@
+.linked-library-destination { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--color-bg); }
+.linked-library-destination > .character-browser { flex:1; min-height:0; }

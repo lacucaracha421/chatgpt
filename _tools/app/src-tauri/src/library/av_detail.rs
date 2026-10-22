@@ -103,6 +103,21 @@ impl Library {
             label,
         })
     }
+    /// Performer credits of every AV work, first credited first; directors are left out.
+    pub fn list_av_performer_credits(&self) -> Result<AvPerformerCredits, AvError> {
+        let c = self.connection()?;
+        let credits = c.prepare("SELECT r.collection_id,r.person_id,r.sort_order FROM collection_person_relations r JOIN collections c ON c.id=r.collection_id AND c.type='av' WHERE r.role='performer' ORDER BY r.collection_id,r.sort_order,r.person_id")?
+            .query_map([], |r| Ok(AvWorkCredit { collection_id: r.get(0)?, person_id: r.get(1)?, order: r.get(2)? }))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let ids: std::collections::BTreeSet<&str> = credits.iter().map(|credit| credit.person_id.as_str()).collect();
+        let metadata = super::collection_authority::PersonDisplayMetadata::read(&c)?;
+        let mut people = Vec::with_capacity(ids.len());
+        for id in ids {
+            let (display_name, name_ja) = c.query_row("SELECT display_name,name_ja FROM collection_people WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            people.push(AvCreditPerson { profile_metadata: metadata.person(&c, id)?, id: id.into(), display_name, name_ja, portrait: portrait(&c, id)? });
+        }
+        Ok(AvPerformerCredits { people, credits })
+    }
     pub fn get_av_performer(&self, id: &str) -> Result<AvPerformerPage, AvError> {
         performer_page(&*self.connection()?, id)
     }

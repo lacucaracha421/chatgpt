@@ -258,6 +258,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_home_overview": return { failed: [], assets: { total: 300, today: 30, week: 180, images: 283, videos: 17 }, collections: { game: 12, manga: 12, movie: 12, av: 12 }, tagger: previewTaggerCounts(), avPerformer: null, server: { configured: true, live: true, confirmedAt: "2026-09-29T06:00:00.000Z", capturesPending: 3 } };
     case "get_revisit_slate": return { localDate: "2026-09-29", createdAt: "2026-09-29T00:00:00.000Z", revision: 1, bundles: [{ id: "revisit-date", kind: "date", title: "1년 전 오늘", reason: "지난해 오늘 저장한 그림", assetIds: previewAssets.slice(80, 88).map(asset => asset.id), revision: 1 }] };
     case "list_av_favorites": return [];
+    case "list_av_performer_credits": return { people: [], credits: [] };
     case "get_artist_overview": return { settings: { mainMinCount: 10, recentMinCount: 3, recentDays: 30 }, total: previewArtists.length, main: 7, other: 2, twoToFour: 1, single: 0, hidden: 0, reposter: 1, styleSuggestionCount: 4, unknownNone: 12, unknownSource: 7, mergeSuggestions: 1, sourceFillable: 7, pinned: previewArtists.filter(artist => artist.pinned) };
     case "list_artists": {
       const query = (args.query ?? {}) as { search?: string; bucket?: string; offset?: number; limit?: number };

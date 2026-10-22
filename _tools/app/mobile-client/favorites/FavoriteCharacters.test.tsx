@@ -130,3 +130,44 @@ it('keeps a manual detail and link picker on conflict, then adopts the linked ch
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'에셋 캐릭터와 연결'})).toBeNull());
   expect(posts()).toEqual([{commands:[{op:'link',id:'manual-new',characterId:'b'}]},{commands:[{op:'link',id:'manual-new',characterId:'b'}]}]);
 });
+
+it('edits an Asset character profile and its works with the update command, without renaming it',async()=>{
+  const handler=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string,signal:unknown,body?:unknown)=>path.startsWith('/v1/collections?')
+    ?{ready:true,revision:'r1',publishedAt:null,nextCursor:null,items:[{id:'w1',name:'작품 하나',type:'manga',showcase:false}]}
+    :path.startsWith('/v1/collections/')?{revision:'r1',item:{id:'w1',name:'작품 하나',type:'manga',showcase:false}}:handler(path,signal,body));
+  mount();
+  fireEvent.click(await screen.findByRole('button',{name:'a · 작품'}));
+  const detail=await screen.findByRole('dialog',{name:'a'});
+  fireEvent.click(within(detail).getByRole('button',{name:'정보 편집'}));
+  const sheet=screen.getByRole('dialog',{name:'정보 편집'});
+  expect(within(sheet).getByLabelText('이름')).toHaveProperty('readOnly',true);
+  fireEvent.change(within(sheet).getByLabelText('생일 · 월'),{target:{value:'4'}});
+  fireEvent.change(within(sheet).getByLabelText('일'),{target:{value:'31'}});
+  expect(within(sheet).getByRole('alert').textContent).toBe('생일의 월과 일을 확인하세요.');
+  expect((within(sheet).getByRole('button',{name:'완료'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(within(sheet).getByLabelText('일'),{target:{value:'12'}});
+  fireEvent.change(within(sheet).getByLabelText('키 · cm'),{target:{value:'158'}});
+  fireEvent.click(within(sheet).getByRole('button',{name:'작품 연결'}));
+  const picker=screen.getByRole('dialog',{name:'작품 연결'});
+  fireEvent.click(await within(picker).findByRole('button',{name:'작품 하나'}));
+  expect(within(sheet).getByText('작품 하나')).toBeTruthy();
+  expect(posts()).toEqual([]);
+  fireEvent.click(within(sheet).getByRole('button',{name:'완료'}));
+  await waitFor(()=>expect(posts()).toEqual([{commands:[{op:'update',id:'a',set:{profile:{originalName:'original a',birthMonth:4,birthDay:12,heightCm:158},workIds:['w1'],extraWorks:[]}}]}]));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'정보 편집'})).toBeNull());
+});
+
+it('renames a character added by name from 정보 편집',async()=>{
+  document.entries.push({...entry('manual-new'),name:'새 캐릭터',seriesName:'새 작품'});
+  mount();
+  const card=await screen.findByRole('button',{name:'새 캐릭터 · 새 작품'});
+  fireEvent.keyDown(card,{key:'F10',shiftKey:true});
+  fireEvent.click(within(screen.getByRole('dialog',{name:'새 캐릭터'})).getByRole('button',{name:'정보 편집'}));
+  const sheet=screen.getByRole('dialog',{name:'정보 편집'});
+  fireEvent.change(within(sheet).getByLabelText('이름'),{target:{value:'  고친 이름 '}});
+  fireEvent.change(within(sheet).getByLabelText('컬렉션에 없는 작품 이름'),{target:{value:'극장판'}});
+  fireEvent.click(within(sheet).getByRole('button',{name:'추가'}));
+  fireEvent.click(within(sheet).getByRole('button',{name:'완료'}));
+  await waitFor(()=>expect(posts()).toEqual([{commands:[{op:'update',id:'manual-new',set:{profile:{originalName:'original manual-new'},workIds:[],extraWorks:['극장판'],name:'고친 이름',seriesName:'새 작품'}}]}]));
+});

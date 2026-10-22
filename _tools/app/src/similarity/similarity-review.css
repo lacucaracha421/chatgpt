@@ -32,6 +32,9 @@
 .similarity-review__preview--a { grid-column: 1; }
 .similarity-review__preview--b { grid-column: 3; }
 .similarity-review__preview > .ui-badge--scrim { position: absolute; top: var(--space-2); left: var(--space-2); }
+/* 깜빡임 / 와이프: both shared compare surfaces stack across the whole image row. */
+.similarity-review__comparison:not([data-mode="side"]) > .image-compare__surface { grid-column: 1 / -1; }
+.similarity-review__compare-tools { padding: var(--space-3) var(--space-4) 0; }
 .similarity-review__comparison > .similarity-clues { grid-column: 1 / -1; grid-row: 2; margin-top: var(--space-3); }
 /* The old per-panel <dl>, filename and top difference line are gone. */
 

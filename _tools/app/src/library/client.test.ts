@@ -599,3 +599,11 @@ describe("collection trash gateway", () => {
     expect(invoke).toHaveBeenCalledWith("restore_collection_work", { workId: "work", expectedRevision: 2, libraryId: "library", epoch: 1 });
   });
 });
+
+it("passes duration bounds through the native asset query", async () => {
+  const query = { classificationId: null, albumId: null, collectionId: null, directOnly: false,
+    unclassifiedOnly: false, mediaKind: null, aspectRatio: null, sort: "newest" as const,
+    randomPivot: null, after: null, durationMsMin: 30_000, durationMsMax: 60_000, limit: 20 };
+  await libraryGateway.listAssets(query);
+  expect(invoke).toHaveBeenLastCalledWith("list_assets", { query });
+});

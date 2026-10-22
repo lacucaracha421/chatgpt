@@ -8,16 +8,21 @@ import { CASE_MM, isSpineSize, workCaseSize, type SpineSize } from "./case/caseD
 import { collectionReleaseYear } from "./collectionFormat";
 
 /** 격자 is flat front covers, 선반 the turned cases on planks, 책장 the bookcase (manga volumes; for games and AV the spine-only shelf). */
-export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort" | "decade" | "director"; /** Bookcase spine size, saved per Collection type. */ spineSize?: SpineSize };
+export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort" | "decade" | "director" | "performer"; /** Bookcase spine size, saved per Collection type. */ spineSize?: SpineSize };
 /** Which types have a 책장 in their 보기 menu. */
 export const hasBookcase = (type: CollectionType) => type === "manga" || type === "game" || type === "av" || type === "movie";
 export function isCollectionGrouping(type: CollectionType, value: unknown): value is CollectionViewSettings["grouping"] {
-  return (type === "movie" ? ["sort", "decade", "director"] : ["device", "year", "sort"]).includes(value as string);
+  return (type === "movie" ? ["sort", "decade", "director"] : type === "av" ? ["sort", "performer"] : ["device", "year", "sort"]).includes(value as string);
 }
+/**
+ * Groups a caller builds itself (AV by performer): `key` identifies the group, `heading` replaces the plain section
+ * label. One work may stand in several groups; its cells are keyed per group.
+ */
+export type CollectionListGroup<T> = { key: string; label: string; items: T[]; heading?: ReactNode };
 type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate" | "director">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
-    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: type === "movie" ? "sort" : "device", spineSize: "normal" };
+    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: type === "movie" || type === "av" ? "sort" : "device", spineSize: "normal" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
       if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (hasBookcase(type) && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: isCollectionGrouping(type, value.grouping) ? value.grouping : fallback.grouping, spineSize: isSpineSize(value.spineSize) ? value.spineSize : "normal" }];
@@ -74,8 +79,10 @@ export function shelfRowRatio(type: CollectionType | undefined): number | null {
 const SHELF_OVERSCAN_VIEWPORTS = .5;
 
 /** Flat, keyed cells retain shelf geometry even while their cases are outside the window. */
-export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false, windowRows = false, pickedId, restoredFocusId }: {
+export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false, windowRows = false, pickedId, restoredFocusId, groups: customGroups }: {
   items: T[]; view: CollectionViewSettings; render(item: T): ReactNode; label: string;
+  /** Replaces the type's own grouping, on the shelf and the grid alike (not with `showcase`). */
+  groups?: CollectionListGroup<T>[];
   onPick(id: string): void; showcase?: boolean;
   /** Opt in to vertical rows, or visible columns for a single-plank showcase. */
   windowRows?: boolean; pickedId?: string | null; restoredFocusId?: string | null;
@@ -109,7 +116,8 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
   const grouping = view.grouping;
   const windowed = windowRows && shelf;
   const { groups, positions, ordered, rowStarts } = useMemo(() => {
-    const groups = shelf && !showcase ? shelfGroups(items, grouping) : [{ label: "", items }];
+    const groups: CollectionListGroup<T>[] = customGroups && !showcase ? customGroups
+      : (shelf && !showcase ? shelfGroups(items, grouping) : [{ label: "", items }]).map(group => ({ ...group, key: group.label }));
     const ordered = groups.flatMap(group => group.items);
     const positions: { row: number; column: number }[] = [];
     const rowStarts: { row: number; index: number }[] = [];
@@ -124,7 +132,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
       row += Math.ceil(group.items.length / perRow);
     }
     return { groups, positions, ordered, rowStarts };
-  }, [items, shelf, showcase, grouping, perRow]);
+  }, [items, shelf, showcase, grouping, perRow, customGroups]);
 
   useLayoutEffect(() => {
     if (!windowed) return;
@@ -176,22 +184,22 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     const children: ReactNode[] = [];
     let row = 1, itemIndex = 0;
     for (const group of groups) {
-      if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}><SectionLabel title={group.label} count={group.items.length} /></div>);
+      if (group.label) children.push(<div key={`group:${group.key}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.heading ?? <SectionLabel title={group.label} count={group.items.length} />}</div>);
       group.items.forEach(item => {
         const position = positions[itemIndex];
         const windowKey = showcase ? itemIndex + 1 : position.row;
-        children.push(<div key={item.id} className="collection-list__cell" data-list-index={itemIndex++}
+        children.push(<div key={customGroups ? `${group.key}/${item.id}` : item.id} className="collection-list__cell" data-list-index={itemIndex++}
           style={{ gridRow: position.row, gridColumn: position.column + 1, height: windowed ? "calc(var(--case-height) + 80px)" : undefined }}>
           {!windowed || nearRows.has(windowKey) || pinnedRows.has(windowKey) ? render(item) : null}
         </div>);
       });
       for (let index = 0; index < (showcase ? Math.min(1, group.items.length) : Math.ceil(group.items.length / perRow)); index++) {
-        children.push(<div key={`plank:${group.label}:${index}`} className="collection-list__plank" aria-hidden="true" style={{ gridRow: row + index, gridColumn: showcase ? `1 / ${Math.max(perRow, group.items.length) + 1}` : "1 / -1" }} />);
+        children.push(<div key={`plank:${group.key}:${index}`} className="collection-list__plank" aria-hidden="true" style={{ gridRow: row + index, gridColumn: showcase ? `1 / ${Math.max(perRow, group.items.length) + 1}` : "1 / -1" }} />);
       }
       row += Math.ceil(group.items.length / perRow);
     }
     return children;
-  }, [groups, positions, perRow, showcase, render, windowed, nearRows, pinnedRows]);
+  }, [groups, positions, perRow, showcase, render, windowed, nearRows, pinnedRows, customGroups]);
   return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}${rowRatio ? " collection-list--fitted" : ""}`} role="group" aria-label={label}
     data-per-row={perRow} style={{ "--columns": perRow, "--cell-width": `${cellWidth}px`, "--case-reserve": `${height}px`, ...(rowRatio ? { "--row-ratio": rowRatio.toFixed(4) } : {}) } as CSSProperties}
     onFocusCapture={event => {

@@ -42,6 +42,7 @@ import {RectangleStackIcon, ChevronRightIcon, PlayIcon, Squares2X2Icon} from '@h
 import {AREA_ICONS} from '../src/shared/ui/areaIcons';
 import {Exchange} from './Exchange';
 import {TabletCardAlbum} from './cards/TabletCardAlbum';
+import {LinkedLibraryDestination, type LinkedDestination} from './LinkedLibraryDestination';
 import {useExchange} from './useExchange';
 import {sendingSummary} from './homeDashboard';
 
@@ -172,6 +173,7 @@ export function App() {
   const [exchangeOpen,setExchangeOpen]=useState(false);
   const exchangeBack=useRef<(()=>boolean)|null>(null);
   const [cardAlbumOpen,setCardAlbumOpen]=useState(false);
+  const [linkedDestination,setLinkedDestination]=useState<LinkedDestination|null>(null);
   const cardAlbumBack=useRef<(()=>boolean)|null>(null);
   const [artistsOpen,setArtistsOpen]=useState(false),[artistSelection,setArtistSelection]=useState<LibraryArtist|null>(null),[calendarOpen,setCalendarOpen]=useState(false),[calendarKind,setCalendarKind]=useState<'game'|'movie'|undefined>();
   const calendarBack=useRef<(()=>boolean)|null>(null);
@@ -1333,12 +1335,13 @@ export function App() {
     {imageSheet&&selectedIds.size>0&&<ImageActionSheet assets={[...new Map([...(characterSelection?characterItems.current:[...visibleItems,...(sparse?.ranges.flatMap(range=>range.items)??[])])].map(asset=>[asset.id,asset])).values()].filter(asset=>selectedIds.has(asset.id))}
       count={selectedIds.size} scopeName={page.view.title} busy={selectionActions.busy||albumBatchOpen||!!classificationBatchIds} albumCount={albumTree?.adopted?albumTree.albums.length:0} inAlbum={!!page.view.album}
       onAlbum={openAlbumBatch} onRemoveFromAlbum={()=>void selectionActions.run('remove')} onInfo={selectedAsset?()=>setAssetInfo(selectedAsset):undefined} onTrash={trash.available?()=>void selectionActions.run('trash'):undefined} onClose={()=>setImageSheet(false)}/>}
-    {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
-    {viewer && <Viewer totalCount={viewer.source==='library'?libraryTotal:undefined} onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
+    {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)} classifications={classifications} onArtist={artist=>setLinkedDestination({kind:'artist',artist})}/>}
+    {viewer && <Viewer classifications={classifications} onArtist={artist=>setLinkedDestination({kind:'artist',artist})} totalCount={viewer.source==='library'?libraryTotal:undefined} onNearEnd={viewer.source==='library'?nearEnd:viewer.source==='character'?characterNearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <div className="tablet-layer" ref={trashLayer}><TrashLayer endpoint={status.endpoint} store={findStore} key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/></div>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <div className="tablet-layer" ref={exchangeLayer}><Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/></div>}
-    {cardAlbumOpen && status.configured && <div className="tablet-layer" ref={cardAlbumLayer}><TabletCardAlbum backRef={cardAlbumBack} onClose={()=>setCardAlbumOpen(false)}/></div>}
+    {cardAlbumOpen && status.configured && <div className="tablet-layer" ref={cardAlbumLayer}><TabletCardAlbum backRef={cardAlbumBack} onClose={()=>setCardAlbumOpen(false)} onOpenAsset={id=>setLinkedDestination({kind:'asset',id})} onCharacter={id=>setLinkedDestination({kind:'character',id})}/></div>}
+    {linkedDestination && <LinkedLibraryDestination target={linkedDestination} endpoint={status.endpoint} classifications={classifications} knownAssets={page.items} onClose={()=>setLinkedDestination(null)}/>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key} ref={exchangeToast} data-state="open"><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}
   </div></MotionScope></MoreContext.Provider></FindContext.Provider></RecentDestinationsContext.Provider>;
 }

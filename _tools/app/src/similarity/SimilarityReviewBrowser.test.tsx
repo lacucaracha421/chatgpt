@@ -195,6 +195,41 @@ it.each([true, false])("renders Rust clues and uses a primary decision only with
   }
 });
 
+it("compares the pair in one pane with mouse and keyboard without reloading the images", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([review("review-1")], 1));
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+  const existing = await screen.findByRole("img", { name: "기존 이미지" });
+  const candidate = screen.getByRole("img", { name: "새 이미지" });
+
+  await userEvent.click(screen.getByRole("radio", { name: "깜빡임" }));
+  const stage = screen.getByRole("region", { name: "비교 화면" });
+  expect(stage.dataset.showing).toBe("A");
+  const hold = screen.getByRole("button", { name: "누르는 동안 새 이미지 보기" });
+  fireEvent.keyDown(hold, { key: " " });
+  expect(stage.dataset.showing).toBe("B");
+  fireEvent.keyUp(hold, { key: " " });
+  expect(stage.dataset.showing).toBe("A");
+
+  // Keyboard zoom on the focused stage moves both images together; Esc returns to the fit.
+  fireEvent.keyDown(stage, { key: "+" });
+  expect(existing.style.transform).toContain("scale(1.5)");
+  expect(candidate.style.transform).toContain("scale(1.5)");
+  fireEvent.keyDown(stage, { key: "Escape" });
+  expect(existing.style.transform).toContain("scale(1)");
+
+  await userEvent.click(screen.getByRole("radio", { name: "와이프" }));
+  const divider = screen.getByRole("slider", { name: "와이프 위치" });
+  fireEvent.keyDown(divider, { key: "End" });
+  expect(divider).toHaveAttribute("aria-valuenow", "100");
+  expect((candidate.parentElement as HTMLElement).style.clipPath).toBe("inset(0 0 0 100%)");
+
+  await userEvent.click(screen.getByRole("radio", { name: "나란히" }));
+  expect(screen.queryByRole("region", { name: "비교 화면" })).not.toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "기존 이미지" })).toBe(existing);
+  expect(screen.getByRole("img", { name: "새 이미지" })).toBe(candidate);
+});
+
 function review(id: string): SimilarityReviewSummary {
   return {
     id,

@@ -52,3 +52,6 @@
 @keyframes favorite-appear { from { opacity:0; } }
 @media (prefers-reduced-motion:reduce) { .favorite-grid,.favorite-detail > section { animation:none; } }
 @media (max-width:600px) { .favorite-detail-top { grid-template-columns:minmax(120px,40%) minmax(0,1fr); gap:var(--space-4); } }
+/* 정보 편집: the shared profile form in a tall sheet; the sheet's own motion replaces the PC form's entrance. */
+.favorite-profile-sheet.favorite-editor { animation: none; }
+.favorite-profile-sheet .favorite-editor__foot { position: sticky; bottom: 0; padding-block: var(--space-3); background: var(--color-sidebar); }

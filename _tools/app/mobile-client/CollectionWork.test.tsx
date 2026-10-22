@@ -77,7 +77,7 @@ it('renders AV rim, booklet and stored performer crops together, then masks them
   expect(container.querySelector('.case-pola-more')).toHaveTextContent('+3');
   expect(container.querySelector('.case-director')).toHaveTextContent('감독 · Director');
   expect(container.querySelector('.k-floor .note')).toBeNull();
-  const portrait = container.querySelector<HTMLElement>('.case-pola .av-portrait')!;
+  const portrait = container.querySelector<HTMLElement>('.case-pola .av-portrait .av-portrait__crop')!;
   expect(portrait.style.backgroundImage).toContain('/portrait-crop');
   expect(portrait.style.backgroundSize).toBe('200% 200%');
   expect(portrait.style.backgroundPosition).toBe('50% 20%');

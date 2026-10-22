@@ -41,6 +41,13 @@ describe("UI preferences", () => {
       expect(loadUiPreferences(target).appZoom).toBe(100);
     }
   });
+  it("persists video duration and defaults older preferences to all", () => {
+    const target = storage();
+    target.setItem(UI_PREFERENCES_KEY, JSON.stringify({ assetSort: "oldest" }));
+    expect(loadUiPreferences(target).assetDurationFilter).toBe("all");
+    saveUiPreferences({ ...loadUiPreferences(target), assetDurationFilter: "over_5m" }, target);
+    expect(loadUiPreferences(target).assetDurationFilter).toBe("over_5m");
+  });
   it("preserves the AV collection scope across restart", () => {
     const target = storage();
     saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, collectionType: "av" }, target);
@@ -64,6 +71,7 @@ describe("UI preferences", () => {
       pinnedClassificationIds: ["pinned-folder"],
       expandedAlbumIds: ["album-a"],
       assetSort: "oldest" as const,
+      assetDurationFilter: "all" as const,
       thumbnailRowHeight: 220,
       creatorCardSize: 240,
       collectionType: "manga" as const,
@@ -110,6 +118,7 @@ describe("UI preferences", () => {
       pinnedClassificationIds: [],
       expandedAlbumIds: [],
       assetSort: "newest",
+      assetDurationFilter: "all",
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",
@@ -145,6 +154,7 @@ describe("UI preferences", () => {
       pinnedClassificationIds: [],
       expandedAlbumIds: [],
       assetSort: "random",
+      assetDurationFilter: "all",
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",

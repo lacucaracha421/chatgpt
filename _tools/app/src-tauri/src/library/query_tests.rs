@@ -805,6 +805,125 @@
         assert_eq!(head.total_count, 6);
     }
 
+    #[test]
+    fn duration_query_bounds_count_and_paging_match_video_semantics() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let durations = [0, 29_999, 30_000, 59_999, 60_000, 299_999, 300_000];
+        for (index, duration) in durations.iter().enumerate() {
+            let id = format!("v{index}");
+            insert_matrix_asset(
+                &library,
+                &id,
+                "video",
+                640,
+                360,
+                None,
+                &format!("2026-07-{:02}T00:00:00Z", index + 20),
+                false,
+            );
+            library.connection().unwrap().execute(
+                    "INSERT INTO video_assets (asset_id, duration_ms, container, video_codec, preparation_state) VALUES (?1, ?2, 'mp4', 'h264', 'pending')",
+                    rusqlite::params![id, duration],
+                ).unwrap();
+        }
+        for (id, kind) in [("unknown", "video"), ("image", "image"), ("gif", "gif")] {
+            insert_matrix_asset(
+                &library,
+                id,
+                kind,
+                640,
+                360,
+                None,
+                "2026-07-28T00:00:00Z",
+                false,
+            );
+        }
+        for (min, max, expected) in [
+            (None, Some(30_000), vec!["v0", "v1"]),
+            (Some(30_000), Some(60_000), vec!["v2", "v3"]),
+            (Some(60_000), Some(300_000), vec!["v4", "v5"]),
+            (Some(300_000), None, vec!["v6"]),
+        ] {
+            for sort in [
+                AssetSort::Newest,
+                AssetSort::Oldest,
+                AssetSort::Favorites,
+                AssetSort::Random,
+            ] {
+                let mut query = chrono_query(sort);
+                query.duration_ms_min = min;
+                query.duration_ms_max = max;
+                query.random_pivot = Some("pivot".into());
+                query.limit = 1;
+                let mut found = Vec::new();
+                loop {
+                    let page = library.list_assets(query.clone()).unwrap();
+                    assert_eq!(page.total_count, expected.len() as u64);
+                    found.extend(page.items.into_iter().map(|asset| asset.id));
+                    query.after = page.next_cursor;
+                    if query.after.is_none() {
+                        break;
+                    }
+                }
+                found.sort();
+                assert_eq!(found, expected);
+            }
+        }
+        let mut query = chrono_query(AssetSort::Newest);
+        query.duration_ms_min = Some(30_000);
+        query.duration_ms_max = Some(300_000);
+        query.limit = 2;
+        let first = library.list_assets(query.clone()).unwrap();
+        assert_eq!(ids(&first), ["v5", "v4"]);
+        query.after = first.next_cursor.clone();
+        let second = library.list_assets(query.clone()).unwrap();
+        assert_eq!(ids(&second), ["v3", "v2"]);
+        let refreshed = library
+            .refresh_assets(
+                query.clone(),
+                vec!["v0".into(), "v2".into(), "unknown".into(), "image".into()],
+            )
+            .unwrap();
+        assert_eq!(
+            refreshed
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["v2"]
+        );
+        query.duration_ms_min = None;
+        assert!(matches!(
+            library.list_assets(query.clone()),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
+        query.duration_ms_min = Some(30_000);
+        query.after = None;
+        query.limit = 4;
+        query.around_date = Some("2026-07-23".into());
+        let anchor = library.list_assets(query.clone()).unwrap();
+        assert_eq!(anchor.total_count, 4);
+        assert!(anchor
+            .items
+            .iter()
+            .all(|asset| ["v2", "v3", "v4", "v5"].contains(&asset.id.as_str())));
+        query.around_date = None;
+        query.limit = 2;
+        query.around_date = Some("2026-07-22".into());
+        let anchored = library.list_assets(query.clone()).unwrap();
+        assert!(anchored.previous_cursor.is_some());
+        query.around_date = None;
+        query.before = anchored.previous_cursor;
+        let before = library.list_assets(query.clone()).unwrap();
+        assert_eq!(before.total_count, 4);
+        assert_eq!(ids(&before), ["v5", "v4"]);
+        query.duration_ms_max = None;
+        assert!(matches!(
+            library.list_assets(query),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
+    }
+
     fn insert_matrix_asset(
         library: &Library,
         id: &str,

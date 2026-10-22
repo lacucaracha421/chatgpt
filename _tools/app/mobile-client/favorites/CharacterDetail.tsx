@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {PlusIcon} from '@heroicons/react/24/outline';
 import type {FavoriteEntry} from '../../src/library/types';
 import {BusyLabel} from '../../src/shared/ui/BusyLabel';
 import {Button,DDay,SectionLabel} from '../ui';
@@ -8,10 +9,10 @@ import {markViewerOpen} from '../perf';
 import {api,errorText} from '../transport';
 import type {CharacterIndex,CharacterNode} from '../characterModel';
 import type {CollectionSummary} from '../collectionModel';
-import {birthdayDays,isManualFavorite,representativeAsset} from './model';
+import {birthdayDays,favoriteFacts,hasFavoriteProfile,isManualFavorite,representativeAsset} from './model';
 import {CharacterPortrait,useCharacterAssets} from './CharacterAssets';
 
-export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWork,cover,onLink,onReady}:{entry:FavoriteEntry;node:CharacterNode;index:CharacterIndex;series:string;active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode;onLink():void;onReady():void}) {
+export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWork,cover,onLink,onEdit,onWorks,onReady}:{entry:FavoriteEntry;node:CharacterNode;index:CharacterIndex;series:string;active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode;onLink():void;/** 정보 추가 / 정보 편집. */onEdit():void;/** The linked works as read, so the editor names them. */onWorks?(works:CollectionSummary[]):void;onReady():void}) {
   const manual=isManualFavorite(entry.characterId);
   const assets=useCharacterAssets(node.id,index.revision??'',active&&!manual);
   const [portraitReady,setPortraitReady]=useState<string|null|undefined>();
@@ -20,12 +21,12 @@ export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWo
   useEffect(()=>{if(portraitReady===portraitId&&(manual||assets.page||assets.error))ready.current();},[portraitReady,portraitId,manual,assets.page,assets.error]);
   const [works,setWorks]=useState<{revision:string;item:CollectionSummary}[]>([]),[workError,setWorkError]=useState(''),[retry,setRetry]=useState(0);
   const [viewer,setViewer]=useState<number|null>(null),viewerBack=useRef<(()=>boolean)|null>(null),scroll=useRef(0);
-  const workKey=JSON.stringify(entry.workIds);
+  const workKey=JSON.stringify(entry.workIds),worksRead=useRef(onWorks);worksRead.current=onWorks;
   useEffect(()=>{
     if(!active)return;
     const controller=new AbortController();
     void Promise.all(entry.workIds.map(id=>api<{revision:string;item:CollectionSummary}>(`/v1/collections/${encodeURIComponent(id)}`,controller.signal)))
-      .then(reply=>{if(!controller.signal.aborted){setWorks(reply);setWorkError('');}},reason=>{if(!controller.signal.aborted)setWorkError(errorText(reason));});
+      .then(reply=>{if(!controller.signal.aborted){setWorks(reply);setWorkError('');worksRead.current?.(reply.map(work=>work.item));}},reason=>{if(!controller.signal.aborted)setWorkError(errorText(reason));});
     return()=>controller.abort();
   },[workKey,active,retry]);
   useEffect(()=>{
@@ -37,11 +38,8 @@ export function CharacterDetail({entry,node,index,series,active,backRef,onOpenWo
     <div className="favorite-detail-top">
       <div className="favorite-portrait"><CharacterPortrait entry={entry} node={node} index={index} firstAsset={assets.page?.items[0]} onPrepared={setPortraitReady}/></div>
       <div className="favorite-profile"><h3>{node.name}</h3><p className="favorite-meta">{[profile.originalName,series].filter(Boolean).join(' · ')}</p>
-        <dl>{profile.birthMonth&&profile.birthDay&&<div><dt>생일</dt><dd>{profile.birthMonth}월 {profile.birthDay}일 <DDay as="text" className="favorite-meta" days={birthdayDays(profile.birthMonth,profile.birthDay)}/></dd></div>}
-          {profile.heightCm!=null&&<div><dt>키</dt><dd>{profile.heightCm}cm</dd></div>}
-          {profile.voiceActor&&<div><dt>성우</dt><dd>{profile.voiceActor}</dd></div>}
-          {profile.affiliation&&<div><dt>소속</dt><dd>{profile.affiliation}</dd></div>}
-          {profile.memo&&<div><dt>메모</dt><dd>{profile.memo}</dd></div>}</dl>
+        <dl>{favoriteFacts(profile).map(row=><div key={row.label}><dt>{row.label}</dt><dd>{row.value}{row.birthday&&<> <DDay as="text" className="favorite-meta" days={birthdayDays(profile.birthMonth,profile.birthDay)}/></>}</dd></div>)}</dl>
+        {!hasFavoriteProfile(profile)&&<Button variant="quiet" onClick={onEdit}><PlusIcon aria-hidden="true"/>정보 추가</Button>}
       </div>
     </div>
     {(works.length>0||entry.extraWorks.length>0||workError)&&<section><SectionLabel title="등장 작품"/>

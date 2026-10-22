@@ -23,6 +23,19 @@ beforeEach(()=>{localStorage.clear();
 });
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 
+it('toggles the shared bookmark without leaving the reader or changing its page',async()=>{
+  const toggle=vi.fn(),close=vi.fn();
+  const props={manifest,title:'만화',onClose:close,onRefresh:vi.fn(),refreshing:false};
+  const view=render(<CatalogReader {...props} bookmark={{desired:false,pending:false,disabled:false,failure:'',toggle}}/>);
+  await screen.findByRole('img',{name:'1페이지'});
+  fireEvent.click(screen.getByRole('button',{name:'북마크'}));expect(toggle).toHaveBeenCalledOnce();expect(close).not.toHaveBeenCalled();
+  view.rerender(<CatalogReader {...props} bookmark={{desired:true,pending:true,disabled:false,failure:'',toggle}}/>);
+  expect(screen.getByRole('button',{name:'북마크 해제'}).getAttribute('aria-busy')).toBe('true');
+  view.rerender(<CatalogReader {...props} bookmark={{desired:true,pending:false,disabled:false,failure:'연결 실패',toggle}}/>);
+  expect(screen.getByRole('alert').textContent).toBe('연결 실패');
+  expect(visiblePages()).toEqual([0]);
+});
+
 it('previews 25 / 40 throughout a long drag, then loads only the destination neighborhood and waits for decoding',async()=>{
   let finish!:()=>void;
   mocks.decode.mockImplementation((url:string)=>url.endsWith('-24')?new Promise(resolve=>{finish=()=>resolve({naturalWidth:600,naturalHeight:900});}):Promise.resolve({naturalWidth:600,naturalHeight:900}));

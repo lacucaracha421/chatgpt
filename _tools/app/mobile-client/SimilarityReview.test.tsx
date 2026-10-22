@@ -169,7 +169,7 @@ describe('similarity review screen',()=>{
     install(feed());const {back,onClose}=mount();
     await screen.findByRole('table',{name:'단서 비교'});
     await waitFor(()=>expect(screen.getAllByRole('img')).toHaveLength(2));
-    doubleTap(screen.getByLabelText('A 이미지',{selector:'div'}));
+    doubleTap(screen.getByLabelText('A 이미지',{selector:'section'}));
     await waitFor(()=>expect(scales()).toEqual(['2','2']));
     expect(vi.mocked(mediaTicket).mock.calls.map(([asset,variant])=>[asset.id,variant])).toEqual([['a','original'],['s1','original']]);
     act(()=>{expect(back.current?.()).toBe(true);});
@@ -181,9 +181,12 @@ describe('similarity review screen',()=>{
   it('compares in one pane with hold, automatic flicker and a wipe divider',async()=>{
     install(feed());mount();
     await screen.findByRole('table',{name:'단서 비교'});
-    fireEvent.click(screen.getByRole('button',{name:'한 화면에서 비교'}));
+    await waitFor(()=>expect(screen.getAllByRole('img')).toHaveLength(2));
+    const before=screen.getAllByRole('img');
+    fireEvent.click(screen.getByRole('radio',{name:'깜빡임'}));
     const stage=screen.getByLabelText('비교 화면');
     expect(stage.dataset.showing).toBe('A');
+    expect(screen.getAllByRole('img')).toEqual(before);
     const hold=screen.getByRole('button',{name:'누르는 동안 B 보기'});
     fireEvent.pointerDown(hold);expect(stage.dataset.showing).toBe('B');
     fireEvent.pointerUp(hold);expect(stage.dataset.showing).toBe('A');
@@ -197,12 +200,12 @@ describe('similarity review screen',()=>{
     act(()=>{vi.advanceTimersByTime(1500);});
     expect(screen.getByLabelText('비교 화면').dataset.showing).toBe('A');
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole('tab',{name:'와이프'}));
-    fireEvent.change(screen.getByLabelText('와이프 위치'),{target:{value:'30'}});
-    const layer=screen.getByLabelText('비교 화면').querySelector('.similarity-layer') as HTMLElement;
-    expect(layer.style.clipPath).toBe('inset(0 0 0 30%)');
-    fireEvent.click(screen.getByRole('button',{name:'나란히 보기'}));
+    fireEvent.click(screen.getByRole('radio',{name:'와이프'}));
+    fireEvent.keyDown(screen.getByRole('slider',{name:'와이프 위치'}),{key:'ArrowLeft'});
+    expect((screen.getByRole('img',{name:'B 이미지'}).parentElement as HTMLElement).style.clipPath).toBe('inset(0 0 0 45%)');
+    fireEvent.click(screen.getByRole('radio',{name:'나란히'}));
     expect(screen.queryByLabelText('비교 화면')).toBeNull();
+    expect(screen.getAllByRole('img')).toEqual(before);
   });
   it('explains PC update, offline with saved decisions, and an old server',async()=>{
     install(feed({ready:false,items:[],counts:{open:0,pendingPc:0,skipped:0}}));mount();

@@ -18,6 +18,32 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe('tablet album management',()=>{
+  it('moves using a confirmed revision, excludes self and descendants, and publishes the new parent',async()=>{
+    const rows=[album,{...album,id:'child',name:'하위',parentId:album.id},{...album,id:'grandchild',name:'손자',parentId:'child'},{...album,id:'target',name:'도착'}];
+    mocks.api.mockImplementation(async(path:string,_signal:unknown,body:Record<string,unknown>)=>path.includes('/baseline')?baseline({items:rows}):{album:{...album,id:album.id,parentId:body.parentId,entityRevision:8}});
+    const close=vi.fn(),changed=vi.fn();window.addEventListener(ALBUM_TREE_CHANGED,changed);
+    try{
+      render(<AlbumManagement tree={tree} album={album} onClose={close}/>);
+      await waitFor(()=>expect((screen.getByRole('button',{name:'이동'}) as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(screen.getByRole('button',{name:'이동'}));
+      const picker=within(screen.getByRole('group',{name:'이동할 상위 앨범'}));
+      expect(picker.queryByRole('button',{name:/여행|하위|손자/})).toBeNull();
+      expect((screen.getByRole('button',{name:'저장'}) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(picker.getByRole('button',{name:'도착'}));fireEvent.click(screen.getByRole('button',{name:'저장'}));
+      await waitFor(()=>expect(close).toHaveBeenCalledOnce());
+      expect(commands()[0][2]).toMatchObject({commandType:'moveAlbum',albumId:album.id,parentId:'target',expectedRevision:7});
+      expect(changed.mock.calls[0][0].detail.albums.find((row:{id:string})=>row.id===album.id).parentId).toBe('target');
+    }finally{window.removeEventListener(ALBUM_TREE_CHANGED,changed);}
+  });
+  it('can move an album to the root and preserves the form when the server rejects a stale move',async()=>{
+    const nested={...album,parentId:'parent'};
+    mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/baseline'))return baseline({items:[nested,{...album,id:'parent'}]});throw new Error('다른 기기에서 변경되었습니다.');});
+    const close=vi.fn();render(<AlbumManagement tree={tree} album={nested} onClose={close}/>);
+    await waitFor(()=>expect((screen.getByRole('button',{name:'이동'}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button',{name:'이동'}));fireEvent.click(screen.getByRole('button',{name:'최상위'}));fireEvent.click(screen.getByRole('button',{name:'저장'}));
+    await screen.findByRole('alert');expect(close).not.toHaveBeenCalled();
+    expect(commands()[0][2]).toMatchObject({commandType:'moveAlbum',parentId:null,expectedRevision:7});
+  });
   it('creates an album using the authority identity and publishes its confirmed row',async()=>{
     const close=vi.fn(),changed=vi.fn();window.addEventListener(ALBUM_TREE_CHANGED,changed);
     try {

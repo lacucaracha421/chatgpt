@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import type { AvPortrait as AvPortraitData } from "../avTypes";
+import { portraitCropStyle } from "./portraitCrop";
 import "./avPortrait.css";
 
 export type AvPortraitProps = {
@@ -30,11 +31,8 @@ export function AvPortrait({ portrait, name, size = "detail", className = "" }: 
   if (privacyMode || !portrait || (imageSrc && imageSrc === failedSrc)) return <span className={classNames} style={style} aria-label={`${name} 이니셜`}>{initials(name)}</span>;
   if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} referrerPolicy="no-referrer" onError={() => setFailedSrc(portrait.dataUrl)} /></span>;
 
-  const rect = portrait.rect;
-  const backgroundSize = `${100 / rect.w}% ${100 / rect.h}%`;
-  const backgroundPosition = `${rect.w >= 1 ? 0 : (rect.x / (1 - rect.w)) * 100}% ${rect.h >= 1 ? 0 : (rect.y / (1 - rect.h)) * 100}%`;
   // The crop is 3:4; square and round boxes show its upper part instead of stretching it.
   return <span className={classNames} style={style} aria-label={`${name} 대표 이미지`}>
-    <span className="av-portrait__crop" style={{ backgroundImage: `url("${revisioned(workArtworkThumbnailUrl(portrait.artworkId), portrait.revision)}")`, backgroundSize, backgroundPosition }} />
+    <span className="av-portrait__crop" style={portraitCropStyle(revisioned(workArtworkThumbnailUrl(portrait.artworkId), portrait.revision), portrait.rect)} />
   </span>;
 }

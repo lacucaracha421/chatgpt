@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
-import {EllipsisHorizontalIcon,InformationCircleIcon,PlusIcon} from '@heroicons/react/24/outline';
+import {EllipsisHorizontalIcon,InformationCircleIcon,PencilIcon,PlusIcon} from '@heroicons/react/24/outline';
 import {useLongPress} from '../../src/shared/useLongPress';
 import {BusyLabel} from '../../src/shared/ui/BusyLabel';
 import {createKoreanMatcher} from '../../src/shared/koreanSearch';
@@ -15,6 +15,7 @@ import {useSyncSignal} from '../syncSignals';
 import {CharacterImage,CharacterPortrait} from './CharacterAssets';
 import {CharacterDetail} from './CharacterDetail';
 import {CoverSheet} from './CoverSheet';
+import {ProfileSheet} from './ProfileSheet';
 import {useFavorites} from './useFavorites';
 import {containerId,createFavoriteCommand,isManualFavorite,linkFavoriteCommand,favoriteFolders,favoriteNode,favoriteScopes,indexFavoriteTargets,reorderCommand,visibleFavorites} from './model';
 import {useFavoriteHero} from './useFavoriteHero';
@@ -31,12 +32,14 @@ function CharacterCard({entry,node,index,series,onOpen,onActions}:{entry:Favorit
 export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFolder,onOpenWork,cover}:{open:boolean;covered:boolean;active:boolean;onClose():void;backRef:MutableRefObject<(()=>boolean)|null>;onOpenFolder(node:CharacterNode):void;onOpenWork(id:string):void;cover(work:CollectionSummary,revision:string):ReactNode}) {
   const favorites=useFavorites(open&&active);
   const [source,setSource]=useState<{index:CharacterIndex;folders:ClassificationList['items']}|null>(null),[sourceError,setSourceError]=useState(''),[sourceBusy,setSourceBusy]=useState(false),[retry,setRetry]=useState(0);
-  const [scope,setScope]=useState('all'),[sheet,setSheet]=useState<'add'|'link'|'actions'|'cover'|null>(null),[subject,setSubject]=useState<string|null>(null);
+  const [scope,setScope]=useState('all'),[sheet,setSheet]=useState<'add'|'link'|'actions'|'cover'|'edit'|null>(null),[subject,setSubject]=useState<string|null>(null);
   const hero=useFavoriteHero(),{selected}=hero;
   const [linkDestination,setLinkDestination]=useState<{from:string;id:string}|null>(null);
   const selectedId=linkDestination&&selected===linkDestination.from&&favorites.document?.entries.some(entry=>entry.characterId===linkDestination.id)?linkDestination.id:hero.displayed;
   const shownDetail=useRef(selectedId);shownDetail.current=selectedId;
   const detailBack=useRef<(()=>boolean)|null>(null),childBack=useRef<(()=>boolean)|null>(null);
+  // Names of the works the open detail links, as it read them, for the editor's chips.
+  const workNames=useRef<Record<string,string>>({});
   useSyncSignal('characters',()=>setRetry(n=>n+1),open&&active);
   useSyncSignal('listGeneration',()=>setRetry(n=>n+1),open&&active);
   useEffect(()=>{
@@ -74,7 +77,7 @@ export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFo
   useEffect(()=>{
     if(!source||!favorites.document)return;
     if((selected||hero.pending)&&!node)hero.reset();
-    if((sheet==='actions'||sheet==='cover')&&!actionNode)setSheet(null);
+    if((sheet==='actions'||sheet==='cover'||sheet==='edit')&&!actionNode)setSheet(null);
   },[source?.index.ready,favorites.document,selected,node,sheet,actionNode]);
   const move=async(destination:number)=>{
     if(!actionEntry||!favorites.document)return;
@@ -109,11 +112,12 @@ export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFo
         {favorites.document&&source&&!sourceBusy&&!visible.length&&<EmptyState inline title="고른 캐릭터가 없습니다"/>}
       </div>
     </Overlay></div>
-    <div ref={hero.detail} className="favorite-layer"><Overlay preparing={!!hero.pending} noMotion={hero.noMotion} open={open&&!!current&&!!node} covered={covered||!active} title={node?.name??'캐릭터'} onClose={hero.close} onBack={hero.close} headerActions={<IconButton label="캐릭터 더보기" icon={EllipsisHorizontalIcon} onClick={()=>{setSubject(current?.characterId??null);setSheet('actions');}}/>}>
-      {current&&node&&index&&<CharacterDetail key={node.id} entry={current} node={node} index={index} series={series(node)} active={open&&active&&!covered} backRef={detailBack} onOpenWork={onOpenWork} cover={cover} onLink={()=>setSheet('link')} onReady={hero.ready}/>}
+    <div ref={hero.detail} className="favorite-layer"><Overlay preparing={!!hero.pending} noMotion={hero.noMotion} open={open&&!!current&&!!node} covered={covered||!active} title={node?.name??'캐릭터'} onClose={hero.close} onBack={hero.close} headerActions={<><IconButton label="정보 편집" icon={PencilIcon} onClick={()=>{setSubject(current?.characterId??null);setSheet('edit');}}/><IconButton label="캐릭터 더보기" icon={EllipsisHorizontalIcon} onClick={()=>{setSubject(current?.characterId??null);setSheet('actions');}}/></>}>
+      {current&&node&&index&&<CharacterDetail key={node.id} entry={current} node={node} index={index} series={series(node)} active={open&&active&&!covered} backRef={detailBack} onOpenWork={onOpenWork} cover={cover} onLink={()=>setSheet('link')} onEdit={()=>{setSubject(current.characterId);setSheet('edit');}} onWorks={works=>{for(const work of works)workNames.current[work.id]=work.name;}} onReady={hero.ready}/>}
     </Overlay></div>
     {open&&active&&!covered&&sheet==='actions'&&actionEntry&&actionNode&&index&&<BottomSheet title={actionNode.name} onClose={()=>setSheet(null)} heading={<><span className="favorite-subject-image"><CharacterPortrait entry={actionEntry} node={actionNode} index={index}/></span><span><strong>{actionNode.name}</strong><small className="favorite-meta">{series(actionNode)}{!isManualFavorite(actionEntry.characterId)&&` · ${(index.scopes.find(scope=>scope.nodeId===actionNode.id&&scope.filter==='all')?.totalCount??0).toLocaleString('ko-KR')}장`}</small></span></>}>
       {favorites.error&&<p role="alert">{favorites.error}</p>}
+      <button className="sheet-option" disabled={favorites.busy} onClick={()=>setSheet('edit')}>정보 편집</button>
       {!isManualFavorite(actionEntry.characterId)&&<><button className="sheet-option" disabled={favorites.busy} onClick={()=>setSheet('cover')}>대표 이미지 바꾸기</button>
       <button className="sheet-option" onClick={()=>{setSheet(null);close();onOpenFolder(actionNode);}}>에셋 폴더 열기</button></>}
       {!selected&&<>{(['앞으로','뒤로','맨 앞으로','맨 뒤로'] as const).map((label,i)=>{
@@ -125,6 +129,8 @@ export function FavoriteCharacters({open,covered,active,onClose,backRef,onOpenFo
     {open&&active&&!covered&&sheet==='cover'&&actionEntry&&!isManualFavorite(actionEntry.characterId)&&actionNode&&index?.revision&&<>
       <CoverSheet entry={actionEntry} node={actionNode} revision={index.revision} busy={favorites.busy} error={favorites.error} onClose={()=>setSheet(null)} onSave={(coverAssetId,coverY)=>favorites.change({op:'update',id:actionEntry.characterId,set:{coverAssetId,coverY}})}/>
     </>}
+    {open&&active&&!covered&&sheet==='edit'&&actionEntry&&actionNode&&<ProfileSheet key={actionEntry.characterId} entry={actionEntry} name={actionNode.name} series={series(actionNode)} workNames={workNames.current} busy={favorites.busy} error={favorites.error} backRef={childBack}
+      onClose={()=>setSheet(null)} onSave={set=>favorites.change({op:'update',id:actionEntry.characterId,set})}/>}
     {open&&active&&!covered&&(sheet==='add'||sheet==='link')&&source&&<AddSheet index={source.index} folders={folders} entries={entries} busy={favorites.busy} error={favorites.error} backRef={childBack} onClose={()=>setSheet(null)} onAdd={ids=>favorites.change({op:'add',ids})} onCreate={name=>favorites.change(createFavoriteCommand(name))} onLink={sheet==='link'?link:undefined}/>}
   </>;
 }
