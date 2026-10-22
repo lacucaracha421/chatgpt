@@ -71,7 +71,8 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 - Inspect added, duplicate, similarity-review, and failure counts after import, and open an existing duplicate — PC-only.
 - Receive browser captures with source, creator, publication date, and chosen classification; cloud capture can accept media while the PC is off.
 - Explicitly re-save a previously deleted capture to revive it; automatic retries of an old capture do not revive it.
-- Export from the viewer or drag selected Assets to another application as copies — PC-only; Linux recipients have separate [acceptance limits](docs/operations/linux-desktop.md#linux-drag-out-follow-up-2026-09-09).
+- Export from the viewer or drag selected Assets to another application as copies on PC; Linux recipients have separate [acceptance limits](docs/operations/linux-desktop.md#linux-drag-out-follow-up-2026-09-09).
+- Save an ordinary Asset's original to the gallery (Pictures/Movies/Download › Lakomics) or share it through the Android share sheet from the tablet viewer (원본 저장, 원본 공유).
 - Import legacy metadata from a chosen folder in Settings → Advanced (고급), or repeat the last folder import — PC-only.
 
 ### Browse, filter, and select
@@ -86,16 +87,16 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 - Open a context menu without changing selection — PC-only; actions target the pointed Asset or the applicable selection.
 - Open Information (정보) for an Asset or selection; PC uses a docked panel and tablet a touch-sized sheet.
 - Inspect artist, source post, publication date, filename, collected date, classification, tags, and saved image text where present.
-- Open other Assets from the same source post from Information when that group is available — PC-only.
+- Open other Assets from the same source post from Information when that group is available.
 
 ### Classification folders, Albums, and Likes
 
-- Create/rename classification folders on PC and child folders on tablet; edit folder icons/colors on either client. Folder move/delete remain PC-only.
+- Create classification folders (top-level and child) and rename them on either client; edit folder icons/colors on either client. Folder move/delete remain PC-only.
 - Share pinned folders across clients; PC offers an accordion, follow-current-location and recent-folder controls. Tablet offers a folder drawer, recent destinations and long-press action sheets.
 - Move Assets between classifications; each Asset has at most one direct classification, while parent views can include descendants.
 - Browse child-folder shelves and breadcrumbs, and distinguish directly stored images (미분류) from the full descendant scope (전체).
 - Reorder classification folders/shelf entries on PC; the published order is used by tablet navigation and the collector.
-- Create/rename Albums (앨범) on PC and tablet, organize their hierarchy with PC move controls, and reuse Assets in several Albums without duplication.
+- Create/rename Albums (앨범) on PC and tablet, move them within the Album hierarchy on either client, and reuse Assets in several Albums without duplication.
 - Add/remove selected Assets from an Album, including removing them only from the current Album.
 - Toggle an Asset's Like heart; membership in the designated Likes Album (마음에 들어요) is the same state on PC and tablet.
 - Keep a same-named ordinary Album separate from the designated Likes Album; the designated Album cannot be deleted.
@@ -245,7 +246,7 @@ See [Works boundaries](docs/agents/lakomics-works-handoff-v2.md) and
 - Inspect alternate names, portraits, profile facts, and library Works for linked people; edit supported personal/profile fields.
 - Choose jacket front/spine/back artwork — PC-only for local-file jacket import/cropping.
 - Search/refresh StashDB profiles and choose portraits when the server/provider is configured.
-- Use available alternate portrait sources/cropping — PC-only for local and Wikimedia portrait tools.
+- Use available alternate portrait sources and crop a portrait from a cover on either client — local-file and Wikimedia portrait tools are PC-only.
 
 ### AV inbox and linking
 

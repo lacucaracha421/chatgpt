@@ -65,6 +65,8 @@ Status: `PARTIAL` — 3.5.41 (`a36403e9`) added capture-phase handling, a per-si
 ## PARITY-20261022 — Unify features that exist on only one client (2026-10-22)
 
 Status: `PARTIAL` — user request: unify everything that is not genuinely device-bound. Inventory and batches in [feature-parity.md](../agents/feature-parity.md) (32 unifiable gaps, 12 device-bound groups, 10 earlier intentional exclusions). Order: A (tablet catch-up on existing contracts: links, card→original, info→artist, classification path, reader bookmark, Album move), B (PC video-duration filter; PC flicker/wipe compare), C (tablet favourite profile edit, performer crop), then D–F (server read projections, media import/preview, PC-owned intents) one domain at a time. AV performer grouping on PC is part of this round.
+- **Done so far:** A–C (`c00572ec`, tablet 0.9.147), D read projections and tablet UI parity (`e800bde5`, server deployed 2026-10-22, tablet 0.9.148), U02 link preview, U04 viewer 원본 저장/공유, U23 representative edition, U28 Find actions/settings links (`f95a3314`, server deployed 2026-10-23, tablet 0.9.149). Device checks of these tablet screens are pending.
+- **Open:** import family U03/U05/U19/U22/U21 (each needs a tablet image upload or provider relay path; the user was asked on 2026-10-23 which of them they actually use — confirm before starting), PC-owned intents U09/U13/U16/U17, video U30/U32. Row details in [feature-parity.md](../agents/feature-parity.md).
 
 ## MOVIE-BOOKCASE-001 — Movie bookcase with poster spines (2026-10-22)
 
