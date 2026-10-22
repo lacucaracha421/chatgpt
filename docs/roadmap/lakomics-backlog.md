@@ -16,7 +16,7 @@ Updated 2026-10-18 against `main` at `9bb8e8ad`. PC remains canonical for design
 4. **`COLLECTOR-MENU-SCOPE-001`** — retain unconfirmed site-by-site menu gaps and the later save-X-post/link/page idea; selection chip and broader menu support shipped in 3.5.41.
 5. **`CLOUD-POST-001` step 3 with `SEC-TOKEN-001`** — keep the calendar/wishlist fallback; AV pick retirement is source-complete.
 6. **`COLLECTOR-IMGTEXT-001`** — other hotlink-protected hosts; pixiv is delivered.
-7. **`UI-REVIEW-20261011`** — user decisions only: P14c copy rewrites and catalog detail layout.
+7. **`UI-REVIEW-20261011`** — closed 2026-10-22: P14c wording shipped (`50bc9944`); the user keeps the tablet catalog detail as it is.
 8. **Small residual debt** — `TABLET-PARITY-001` retained parity/diagnostic limits and `HOME-OPT-001` test reliability.
 
 `LINUX-DESKTOP-001` stays (the user still uses Linux); other low-priority and held items keep their recorded order.
@@ -72,16 +72,15 @@ Status: `PARTIAL` — two read-only bug-hunt rounds (server, desktop Rust, PC/ta
 - Tablet UI sweep done the same evening (`.tmp/ui-review-20261022-tablet/`, T1–T13) and fixed in tablet 0.9.142 (installed); device checks of the new tablet screens and the folder-drawer Back fix are pending (Back root cause unconfirmed on device; the overlay now consumes Back once whichever listener runs first).
 - Tablet game hero now passes `readable` (same-origin media cache, unverified on device); confirm normal hero art still shows.
 - Pre-existing ratchet failures fixed (settings.css token, tablet duplicate exports, homeTablet.css spacing).
-- "건너뜀 N" on the empty similar-review screen counts decisions the PC skipped as stale/handled, not user-skipped pairs; rename or hide is a later wording decision.
+- Settled 2026-10-22 (`f3e49c62`): the tablet count reads "반영 안 된 결정 N"; "송신 보류" → "보내기 보류"; "영상 유사 검토" → "유사 영상 검토". Round 3 (uncovered screens, `.tmp/ui-review-20261022-r3/`) and round-3 bug fixes shipped in `7c3453fe`/`50bc9944`; P14c status wording shipped in `50bc9944`.
 - The empty `NAI_Backup…json` came from the NAI app's Android export (`V:\nai_frontend`, `services/backup.ts`), not from Lakomics transfer (unconfirmed); the tablet now refuses to send empty files.
-- "영상 유사 검토" in the video panel kept its name (video feature); decide whether it follows "유사 이미지 검토".
 
 ## UI-REVIEW-20261011 — Automated UI sweep findings
 
 Status: `PARTIAL` — 2026-10-11 sweep of PC (release, 960×640 and maximized) and Galaxy Tab S11 (portrait and landscape) main screens with a DOM lint, reviewed by the design reviewer. Report with screenshots: https://claude.ai/artifact/GUva3DvrULedEUzmeafeCx (local copy `.tmp/ui-review/`). Sweep tool: session temp `ui-sweep/sweep.mjs` (CDP + lint + adb screencap), not in the repo.
 - **Fixed and capture-verified:** tablet 0.9.66 (`d37da69f`, landscape device captures; user confirmed the work detail scrolls to the end), 0.9.67 (`0fada402`), 0.9.68 (`b9b0fb3f`), PC dev build + tablet 0.9.69 (`f17f6cf0`), PC + tablet 0.9.71 (`a73082f3`): landscape column counts, 작품 관리 and 컬렉션 편집 dialog layout, one bottom-nav marker, 44 px touch targets and 24 px tablet margin, real asset totals and formatted counts, calendar line breaks, release-card layout, notes list clear of the 새 메모 button, square catalog-detail tags, P1/P3/P5/P6/P9–P11/P13–P19 (PC rail, Home release titles, collection shelf, find input/chip, 지금 하는 중 strip, 전송 help, settings rows, focus ring, empty labels, notes cards, folder chevrons, 망가 refresh menu, Home column cap) and tablet P12/P19. Home NEW now follows the server notice read state on every device and no longer recurs daily. T15 (memo search twice, sync label) is resolved by the 0.9.73 top-bar rule (`31a9c281`: memo search moved to Find, sync status in the PC/tablet menu).
 - **Tablet findings closed:** T10/T12/T13/T17/T18/T19 (`dd843b09`, `6114dad6`); T8/T11/T14 already fixed by the shared top bar (`593494ca`, `31a9c281`). Closure details are in the [2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--claude-character-decisions-arca-picker-tablet-batches-and-motion).
-- **Open — user decisions only:** P14c copy rewrites for the sync/trash status lines (user decision); catalog detail description visibility and the landscape two-column layout (design decision).
+- **Closed 2026-10-22:** P14c status wording shipped (`50bc9944`); catalog detail kept as is (user), landscape layout dropped (user rarely uses tablet landscape).
 
 ## Status legend
 
