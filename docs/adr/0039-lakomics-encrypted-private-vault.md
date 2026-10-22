@@ -2,7 +2,7 @@
 
 Status: Accepted; amended 2026-09-24 (Android access via OTG, see the amendment at the end)
 
-Supersedes: the "Lakomics does not encrypt or unlock containers" rule of `docs/superpowers/specs/2026-09-13-private-vault-design.md` (LONG-003). The rest of that spec (desktop-only, never in the main library, cloud or Android) still applies unless changed below.
+Supersedes: the "Lakomics does not encrypt or unlock containers" rule of `docs/archive/superpowers/specs/2026-09-13-private-vault-design.md` (LONG-003). The rest of that spec (desktop-only, never in the main library, cloud or Android) still applies unless changed below.
 
 2026-09-24 user decision: stop using VeraCrypt for the Private Vault USB and let Lakomics encrypt the vault contents itself. Threat model: **someone who plugs the USB into another computer must not be able to see its contents.** The user's own PC is trusted.
 
@@ -48,7 +48,7 @@ Vault data still never enters the main library database or the cloud. Android is
 
 ## Amendment (2026-09-24): Android access via OTG
 
-User decision (2026-09-24), following the accepted design in [`docs/research/mobile-private-vault-design-20260924.md`](../research/mobile-private-vault-design-20260924.md) (option A): the Android tablet may open the vault USB directly over USB-C OTG and decrypt on the tablet. The encrypted cloud copy (option B) is not adopted, and streaming through the PC (option C) stays rejected. Every PC rule above is unchanged.
+User decision (2026-09-24), following the accepted design in [`docs/archive/research/mobile-private-vault-design-20260924.md`](../archive/research/mobile-private-vault-design-20260924.md) (option A): the Android tablet may open the vault USB directly over USB-C OTG and decrypt on the tablet. The encrypted cloud copy (option B) is not adopted, and streaming through the PC (option C) stays rejected. Every PC rule above is unchanged.
 
 ### Scope
 

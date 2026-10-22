@@ -1,5 +1,7 @@
 # Windows desktop development
 
+Sandbox clarification — 2026-10-22: ordinary interactive development may use Git Bash, but Git Bash cannot start in this Codex sandbox. Use `powershell -NoProfile` and `powershell -NoProfile -File scripts/cargo-test.ps1 -- <filter>` from the repository root for targeted Rust checks. Do not substitute `pwsh`. WSL is an available setup, not a documentation-audit requirement; use the [server test guide](../../server/lakomics-api/tests/README.md) for existing native environments and restricted-runner limits. No WSL/service/dependency setup was performed here.
+
 The main development PC runs Windows 11 since the 2026-10-04 move from Linux. This page records how
 work is done there; the application itself is the same React/Vite + Tauri app as on Linux
 (`linux-desktop.md`).

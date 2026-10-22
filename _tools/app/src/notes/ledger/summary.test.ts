@@ -11,7 +11,7 @@ const entry = (id: string, date: string, amount: number, name: string, change: P
 const monthNote = (month: string, entries: LedgerEntry[], change: Partial<MonthNoteLike> = {}): MonthNoteLike =>
   ({ id: `m-${month}`, type: "ledger-month", ledger: "L", month, income: null, entries, deleted: false, updatedAt: "2026-09-25T00:00:00Z", ...change });
 
-// The mockup (docs/prototypes/budget-notes-20260925): 2,300,000 − 1,612,500 − 124,890 = 562,610 on 2026-09-25.
+// The mockup (docs/archive/prototypes/budget-notes-20260925): 2,300,000 − 1,612,500 − 124,890 = 562,610 on 2026-09-25.
 const recurring = [
   rec("rent", "월세", 800000, "2026-01-01"),
   rec("insurance", "보험", 98400, "2026-01-05"),

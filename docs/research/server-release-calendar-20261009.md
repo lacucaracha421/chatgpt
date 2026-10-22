@@ -1,5 +1,7 @@
 # Dormant server release calendar contract (2026-10-09)
 
+Scope correction — 2026-10-22: The server release calendar has shipped/activated. The backlog records a real refresh on 2026-10-10 at 23:18 KST; subsequent delivery is in the [completed ledger](../roadmap/lakomics-completed.md), including the upcoming-lane optimization (`700dc3b5`). The dormant contract below is historical; fallback and original rollout/verification limits remain recorded, without a new live check.
+
 Audited `release_calendar.rs`, `release_wishlist.rs`, `home_publications.rs`,
 `igdb.rs`, `tmdb.rs`, `server_release_checks.rs`, `home_upcoming.py`, and the
 Kakao worker. Server/fixture changes only; no activation, deployment, live

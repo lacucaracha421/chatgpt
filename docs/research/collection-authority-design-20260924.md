@@ -1,5 +1,7 @@
 # Collections to server authority (+ mobile work-info lookup) — design
 
+Scope correction — 2026-10-22: Section 1 is the pre-cutover audit. Collections authority is activated (`8d368991`, `59461c1c`): the server owns shared Works/artwork/bindings/Trash and clients use supported commands. Section 8 remains the retained decision reference; earlier PC-only ownership is historical.
+
 Status: design accepted 2026-09-24 with the §6 decisions. Goal: phone and PC are both owners of Collections (create, edit, delete works with the PC off), and the phone can look up work info (TMDB/IGDB/books) without the PC.
 
 ## 1. Current state
@@ -149,7 +151,7 @@ A partial cutover where the PC keeps overwriting other fields of the same work w
 
 ## 8. User decisions 2026-10-04 (before slice 1B)
 
-Inventory: [collection-authority-1b-survey-20261004.md](collection-authority-1b-survey-20261004.md).
+Inventory: [../archive/research/collection-authority-1b-survey-20261004.md](../archive/research/collection-authority-1b-survey-20261004.md).
 1. Provider and import operations that do not yet have authority commands may be temporarily unavailable after activation (fenced with a clear message) instead of blocking 1C on full command coverage.
 2. Changing a work's type is rarely needed: it is not supported under authority (the PC hides or fences it after activation; recreate the work instead). No `changeType` command.
 3. Tablet covers change only by choosing a provider candidate (TMDB/IGDB/Kakao/MangaDex) through the server lookup of slice 2 (the server fetches the chosen image into R2, then `addArtwork` + `selectArtwork`). No uploads of tablet files and no picking from library assets; 1B's tablet editing therefore covers create, rename, basic info and record, and cover editing arrives with slice 2. (User, 2026-10-04, replacing an earlier same-day note about tablet uploads.)

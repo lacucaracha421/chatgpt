@@ -1,5 +1,7 @@
 # Section bar (2026-10-01)
 
+Scope correction — 2026-10-22: PC and tablet list section bars scroll away. PC reveals the bar through top-bar hover/title; tablet uses the title/pull-down shade. The fixed-bar prescription below is historical; shared SectionBar provenance remains.
+
 Accepted 2026-10-01. One thin bar of a tab's sections (컬렉션 게임·만화·영화·AV, 에셋 전체·이미지·영상,
 망가 카탈로그·북마크·로컬, 메모 kinds) under the top bar, the same part on PC and tablet.
 

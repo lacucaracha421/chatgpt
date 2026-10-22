@@ -1,9 +1,9 @@
 # AV inbox step 1: server candidates and artwork preparation
 
 Source contract, 2026-10-09. Server and contract only. This extends the approved
-[AV link design](av-link-design-20260927.md),
-[people authority contract](collection-authority-av-step3a-20261007.md), and
-[StashDB relay contract](collection-authority-av-step4-stashdb-20261008.md).
+[AV link design](../archive/research/av-link-design-20260927.md),
+[people authority contract](../archive/research/collection-authority-av-step3a-20261007.md), and
+[StashDB relay contract](../archive/research/collection-authority-av-step4-stashdb-20261008.md).
 The approved chooser, privacy rules, per-field choices and manual-surface protection
 remain unchanged. There is no deployment or production-library operation here.
 Collections authority contract version remains **1**; no new apply command is added.

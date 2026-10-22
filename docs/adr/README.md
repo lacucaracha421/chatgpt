@@ -18,26 +18,26 @@
 | --- | --- | --- |
 | [0001 Managed asset ingestion](0001-managed-asset-ingestion.md) | Accepted | Media Vault가 자산 파일 생명주기를 소유하는 기본 원칙 |
 | [0002 Windows first](0002-windows-first.md) | **Partly superseded by current platform policy** | Windows 전용 최초 범위는 역사; 현재 AGENTS.md와 Linux 운영 reference에 따라 Windows/Linux 지원 및 라이브러리 이식성 유지 |
-| [0003 Local first](0003-local-first.md) | Accepted, clarified by ADR-0033 | 로컬 라이브러리와 오프라인 사용 우선 |
+| [0003 Local first](0003-local-first.md) | Accepted, clarified 2026-10-22 | ADR-0033/0036/0038 clarify per-domain authority; no-backend scope is historical. |
 | [0004 Tags and collections over folders](0004-tags-and-collections-over-folders.md) | **Superseded** | ADR-0013이 현재 Classification 모델을 정의함 |
 | [0005 Typed hierarchical tags](0005-typed-hierarchical-tags.md) | **Superseded** | hierarchy 취지는 유지되지만 다중 직접 membership은 ADR-0013으로 대체 |
 | [0006 User-defined classification is not behavior](0006-user-defined-classification-is-not-behavior.md) | Accepted | 사용자 이름/위치로 기능 분기하지 않음 |
-| [0007 Exact and similar duplicates](0007-exact-and-similar-duplicates.md) | Accepted | exact duplicate와 similarity review를 구분 |
-| [0008 Chromium-extension-first ingestion](0008-chromium-extension-first-ingestion.md) | Accepted | 확장 수집 경로의 기본 결정; 현재 bundled `extension/` 구현을 함께 확인 |
-| [0009 Rewrite browser extension around a small interface](0009-rewrite-browser-extension-around-a-small-interface.md) | Accepted | 확장 내부 구현은 현재 코드가 source of truth |
-| [0010 Progressive two-ring donut](0010-progressive-two-ring-donut.md) | Accepted | 현재 radial interaction의 역사/행동 원칙 |
+| [0007 Exact and similar duplicates](0007-exact-and-similar-duplicates.md) | Accepted; amended 2026-10-22 | Original-author auto-resolution and explicit re-save revival; ambiguous pairs retain review and Trash. |
+| [0008 Chromium-extension-first ingestion](0008-chromium-extension-first-ingestion.md) | Accepted; amended 2026-10-22 | Extension-first remains; initial image-only scope is historical. See [Companion](../../extension-list/README.md). |
+| [0009 Rewrite browser extension around a small interface](0009-rewrite-browser-extension-around-a-small-interface.md) | Partially superseded; amended 2026-10-22 | ADR-0033/0038 replace PC-running-only capture ownership; narrow capture boundary remains. |
+| [0010 Progressive two-ring donut](0010-progressive-two-ring-donut.md) | Partially superseded; amended 2026-10-22 | Current [Companion](../../extension-list/README.md) semicircle/explicit-save interaction replaces two-ring/release-to-save mechanics. |
 | [0011 Library trash before file deletion](0011-library-trash-before-file-deletion.md) | Accepted | 앱 휴지통을 거쳐 삭제 |
 | [0012 Classification tree is primary navigation](0012-classification-tree-is-primary-navigation.md) | Accepted | Asset Library 탐색 원칙; ADR-0013이 membership 경계를 명확히 함 |
 | [0013 Classification tree + single direct membership](0013-classification-tree-single-direct-membership.md) | **Accepted** | 현재 Classification/Album/Collection 경계 |
 | [0013 자산 목록은 높이가 같은 행으로 배치한다](0013-justified-row-asset-gallery.md) | **Superseded by ADR-0034** | justified rows는 선택 보기로 유지; PC 기본은 날짜별 masonry |
 | [0014 기존 Lakomics 데이터는 한 번 가져오고 형식 호환은 유지하지 않는다](0014-one-time-legacy-lakomics-import.md) | Accepted | 복사 기반 이전과 원본 보존; 기존 rollout을 재실행하는 지시가 아님 |
-| [0015 이미지 5만 개와 영상 5천 개를 성능 목표로 삼는다](0015-fifty-thousand-images-five-thousand-videos.md) | Accepted, partly superseded | 규모 목표 유지; 영상 원본 접근 제한은 ADR-0025로 대체 |
+| [0015 이미지 5만 개와 영상 5천 개를 성능 목표로 삼는다](0015-fifty-thousand-images-five-thousand-videos.md) | Accepted; partially superseded by ADR-0025 | Status reconciled 2026-10-22; scale/virtualization retained, video-original restriction replaced. |
 | [0016 첫 버전은 영상을 관리하되 직접 재생하지 않는다](0016-manage-video-before-building-a-player.md) | Superseded by ADR-0025 | 외부 플레이어만 사용하던 초기 범위 |
 | [0017 데스크톱 앱은 Tauri와 작은 Rust 핵심부로 만든다](0017-tauri-desktop-with-a-small-rust-core.md) | Accepted | Tauri + React/TypeScript + Rust 경계; Windows WebView2, Linux WebKitGTK |
 | [0018 라이브러리는 SQLite와 일반 미디어 폴더로 구성한다](0018-self-contained-library-folder.md) | Accepted | SQLite와 미디어/백업 폴더 소유 경계 |
 | [0019 자산 파일은 내용 해시로 이름을 정한다](0019-content-addressed-asset-files.md) | Accepted | 내용 해시 기반 저장과 사용자 파일명 메타데이터 분리 |
 | [0020 확장 프로그램은 인증된 로컬 HTTP로 앱과 연결한다](0020-authenticated-loopback-extension-interface.md) | Accepted for direct PC transport | 선택적 Cloud 경로는 ADR-0033과 현재 X Collector reference를 함께 확인 |
-| [0021 X를 우선하고 Pixiv를 보조하는 출처 어댑터를 만든다](0021-twitter-first-source-adapters.md) | Historical initial scope | 현재 지원 출처/메타데이터/수집 행동은 X Collector reference와 코드로 확인; Pixiv 구현 지시가 아님 |
+| [0021 X를 우선하고 Pixiv를 보조하는 출처 어댑터를 만든다](0021-twitter-first-source-adapters.md) | Historical initial scope | Clarified 2026-10-22; use [Companion](../../extension-list/README.md) for current supported sources. |
 | [0022 SQLite 메타데이터 백업을 자동으로 순환 보관한다](0022-rotating-sqlite-metadata-backups.md) | Accepted | 순환 백업 및 복구 전 보존 원칙 |
 | [0023 백그라운드 작업은 중단 후 다시 이어갈 수 있어야 한다](0023-resumable-background-jobs.md) | Accepted | 중단 복구 및 파일/메타데이터 commit 안전성 |
 | [0024 기존 공통 UI를 발전시키고 shadcn을 도입하지 않는다](0024-evolve-existing-ui-system-without-shadcn.md) | Accepted; icon detail updated | 기존 공통 UI/CSS 유지; 현재 아이콘 구현은 app/package.json의 Heroicons |
@@ -49,9 +49,9 @@
 | [0030 일반 폴더는 단일 직접 소속, 앨범은 다중 수동 묶음으로 사용한다](0030-single-folder-and-manual-albums.md) | Accepted; clarified by ADR-0013/0031 | 단일 직접 분류와 수동 Album 유지; Works의 초기 미래형 표현은 역사 |
 | [0031 컬렉션을 타입별 작품 모델로 재정의하고 외부 메타데이터를 연동한다](0031-collection-as-typed-work-model.md) | Accepted | 타입별 Works 경계; 초기 구현 순서는 완료 상태를 증명하지 않음 |
 | [0032 Provider artwork stays outside the Asset Library](0032-provider-artwork-stays-out-of-the-asset-library.md) | Accepted | WorkArtwork와 사용자 Asset 생명주기 구분 |
-| [0033 Local authority with optional cloud sync](0033-local-authority-with-optional-cloud-sync.md) | **Accepted** | 로컬 권위를 유지하며 선택적 단방향 클라우드 복제를 허용 |
+| [0033 Local authority with optional cloud sync](0033-local-authority-with-optional-cloud-sync.md) | Partially superseded; amended 2026-10-22 | ADR-0036/0038 and Collections cutover replace universal local authority; offline replicas remain. |
 | [0034 Current PC archive shell and browsing defaults](0034-current-pc-archive-shell-and-browsing-defaults.md) | **Accepted** | Chrome 03b shell, masonry 기본, contextual icon tooltip 규칙 |
-| [0035 Encrypted personal Notes](0035-encrypted-personal-notes.md) | **Accepted** | 별도 복구키, 로컬 암호문 저장, Notes 전용 양방향 revision 동기화; Notes v2 checklists, colours, safe Markdown, item-level merge with automatic both-copies on collision (amended 2026-09-24) |
+| [0035 Encrypted personal Notes](0035-encrypted-personal-notes.md) | Accepted; amended 2026-10-22 | Shared plain Text/To-do editor and sections (2026-10-02); encryption, revision sync and conflict-copy history retained. |
 | [0036 Staged server authority](0036-staged-server-authority.md) | **Accepted** | Staged domain cutover pattern; Catalog bookmarks activated first, remaining domains migrate explicitly. **Collections authority activated in production 2026-10-06** (epoch 1): the server owns Collection works, artwork, bindings and trash; PC and tablet write through authority commands, and operations without a command yet stay fenced on the PC (tracked in `docs/roadmap/lakomics-backlog.md`, e.g. `AV-AUTHORITY-001`). Runbook and rollback: `docs/research/collection-authority-1b-plan-20261006.md` §7 |
 | [0037 Server Authority v2 replica and command contract](0037-server-authority-v2-replica-and-command-contract.md) | Proposed | Per-domain cursors/epochs, aggregate wake/status, durable PC/Android replicas, fenced recovery and migration order |
 | [0038 Asset lifecycle authority](0038-asset-lifecycle-authority.md) | **Accepted** | Server-owned Asset identity/lifecycle + cloud-first Capture promotion; PC materializes under the same ID, Android/PC replicate lifecycle, mobile invalidates cached views from a list generation. **Activated in production 2026-09-19** (library `e6395585…`, epoch 1) and accepted on a disposable canary Asset. Physical R2 GC remains deferred |

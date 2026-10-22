@@ -1,6 +1,8 @@
 # 개인 메모는 별도 복구키로 암호화하여 동기화한다
 
-Status: Accepted; amended 2026-09-24 (Notes v2: checklists, colours, Markdown, item-level merge) and 2026-09-25 (labels, archive, secret notes, per-device PIN, keyring prompt); see the amendments at the end
+Status amendment — 2026-10-22: Accepted; amended 2026-10-22 to record the 2026-10-02 shared plain editor with Text/To-do sections and section operations, without Markdown rendering. Encryption, revision synchronization and conflict-copy/merge history remain; earlier Markdown behavior below is historical.
+
+Earlier status: Accepted; amended 2026-09-24 (Notes v2: checklists, colours, Markdown, item-level merge) and 2026-09-25 (labels, archive, secret notes, per-device PIN, keyring prompt); see the amendments at the end
 
 Clarifies: ADR-0033, Notes domain only. Asset replication authority is unchanged.
 
@@ -42,7 +44,7 @@ Linux에서는 동일한 Notes 키를 GNOME Keyring 등 Secret Service의 기본
 
 ## Amendment (2026-09-24): Notes v2 (checklists, colours, Markdown)
 
-User decision (2026-09-24), accepting every recommendation of [`docs/research/notes-v2-design-20260924.md`](../research/notes-v2-design-20260924.md) (see its "User decisions" section). Encryption, key handling and the sync transport above are unchanged.
+User decision (2026-09-24), accepting every recommendation of [`docs/archive/research/notes-v2-design-20260924.md`](../archive/research/notes-v2-design-20260924.md) (see its "User decisions" section). Encryption, key handling and the sync transport above are unchanged.
 
 ### Unchanged
 

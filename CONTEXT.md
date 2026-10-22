@@ -1,5 +1,7 @@
 # Personal Media Library
 
+Source clarification — 2026-10-22 (`2e8db984`): Asset Like is distinct from Showcase Works, favourite performers, curated favourite characters and the collectible card album. Favourite characters may start as manual name entries and later link to Asset characters; they are not another Collection type. New cover-only media is excluded from Asset lists/counts/search/Home, while an existing Asset reused as a cover retains its ordinary lifecycle. Kakao binding configuration may select multiple series with part-relative numbering/ranges; Work, Volume and Edition identities remain distinct.
+
 이미지와 영상 같은 파일을 수집·분류하고, 게임·만화·영화·AV 같은 작품을 다시 발견하고 감상하기 위한 개인 미디어 라이브러리다. 전시와 꾸미기는 라이브러리에 저장된 자료를 표현하는 방식이다.
 
 ## Language
@@ -61,7 +63,7 @@ _Avoid_: 작품 (별도 엔티티), 폴더, 앨범, 라이브러리
 _Avoid_: 컬렉션 provider, 컬렉션 가져오기, 로컬 작품 데이터베이스
 
 **컬렉션 유형 (Collection Type)**:
-컬렉션이 나타내는 작품 종류다. 게임, 만화, 영화, AV 네 가지가 있으며 유형마다 표시·편집하는 상세 정보가 다르다. AV는 PC의 수동 정보·인물 연결·로컬 표지를 지원하며 모바일 컬렉션 공개 목록에는 포함하지 않는다.
+Collection types are game, manga, movie and AV, each with type-specific details. AV browsing and supported edits use Collections authority on PC and tablet; local jacket import/cropping remains PC-only.
 _Avoid_: 콘텐츠 종류, 미디어 타입
 
 **레거시 종류 (Legacy Kind)**:

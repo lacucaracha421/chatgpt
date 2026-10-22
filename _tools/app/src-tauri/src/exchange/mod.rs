@@ -1,7 +1,7 @@
 //! PC side of the file exchange (보내기/받기): send files to another of the user's
 //! devices and receive files from them into `<Downloads>/Lakomics/`.
 //!
-//! Separate from the Library (docs/research/file-exchange-design-20260924.md). Two
+//! Separate from the Library (docs/archive/research/file-exchange-design-20260924.md). Two
 //! native threads own the network, independent of the WebView so receiving keeps
 //! working while the window is hidden in the tray:
 //!

@@ -1,5 +1,7 @@
 # Lakomics PC design reference
 
+Current presentation amendment — 2026-10-22 (`2e8db984`): any second shortcut row or separate sort/rating controls below is superseded by the single row and 보기 menu. Manga/game/AV support spine shelves alongside flat cover grids, shared shelf pull-out/turn, zoom and optional sounds. Manga spine size is adjustable. Games support Switch, Switch 2, PS4, PS5 and PC with matching marks/spines; older unmarked-case prescriptions below are historical. Physical paperback parameters/budgets apply to that renderer, not every shelf. The former design-direction logs are retained in [the archive](../archive/agents/approved-design-direction.md) and [chrome archive](../archive/agents/approved-chrome-direction.md).
+
 > Status: current PC visual/interaction reference. The Android tablet shares the `DESIGN.md` §12 Foundation; PC is canonical and tablet differences are limited to touch, portrait layout and gestures.
 > Baseline: Lab 06 content direction + Chrome 03b B left-centric shell, integrated by commit `2d7bac2`, then refined by PC-UI-001 and PC-DECLUTTER-001.
 > `DESIGN.md` is the short constitution; this file holds implementation-level design contracts. Product terms come from `CONTEXT.md`; feature behavior lives in its subsystem reference (Works: `lakomics-works-handoff-v2.md` and `works-viewer-design.md`; characters: `docs/research/character-classification-quiet-workflow-design-20260911.md`). Verification history lives in `docs/roadmap/lakomics-completed.md`.
@@ -7,7 +9,7 @@
 
 ## 1. Scope and superseded records
 
-This reference replaces the former `approved-design-direction.md` and `approved-chrome-direction.md` decision logs (now pointers only) and the visual assumptions of a permanent horizontal toolbar, a fixed old sidebar/topbar, justified rows as the only Asset layout, and flat game/manga collection objects.
+This reference replaces the former `../archive/agents/approved-design-direction.md` and `../archive/agents/approved-chrome-direction.md` decision logs (now pointers only) and the visual assumptions of a permanent horizontal toolbar, a fixed old sidebar/topbar, justified rows as the only Asset layout, and flat game/manga collection objects.
 
 Do not restart the 1–6 reference comparison or the Chrome A/B/C vote unless the user explicitly reopens the design direction.
 
@@ -44,7 +46,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 ### Contextual index
 
 - **Assets**: broad scopes, Classification tree, Album tree, folder counts and user appearance.
-- **Collections** (2026-10-02): no sidebar index; the list uses the full content width. Types (게임/만화/영화/AV) use the shared section bar, with sort/view at its right. A second shortcut row carries 쇼케이스, 신간 and 발매 캘린더 and opens the existing PC views. There is no Library/Showcase mode. An open work owns its title, personal state, management actions and edition controls in the work screen.
+- **Collections** (amended 2026-10-22): no sidebar; one section-bar row holds types, 쇼케이스, 캐릭터 (no count), and 신간 / 발매 캘린더 where supported. One 보기 menu owns sort, personal-rating filter, layout and density/spine size. Open Works own their facts, personal state and management actions.
 - **Manga**: local/online/catalog context and controls owned by the corresponding browser. Hide the sidebar from its header and restore it from the top bar, remembering the choice per area; hiding it must leave catalog search reachable.
 - Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one concept (`CONTEXT.md`).
 
@@ -57,7 +59,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 - One-time setup and rare management actions live in the owning `… 더보기` menu or panel (e.g. `폴더 더보기`, `시리즈 더보기`, `캐릭터 더보기`), not as persistent header buttons. Frequent actions may keep a labeled button (e.g. `캐릭터 만들기`).
 - Do not add persistent refresh buttons: background updates refresh the view automatically; error retry and a context-menu refresh remain for recovery.
 - **Section bar (user, 2026-10-01):** the shared bar sits at the start of the list and scrolls away on both PC and tablet. Once off screen, the top-bar title reads `<area> · <section> ⌄`. On PC, resting the pointer on the top bar for 150 ms drops the bar below it; it closes 300 ms after the pointer leaves both the top bar and the section bar. Clicking the title toggles it. Sort/view controls remain at the bar's right. Merging the section bar into the top bar as one row was considered and declined; scroll-direction auto-hide remains rejected.
-- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC uses the same second shortcut row (2026-10-02), opening existing views instead of tablet overlays. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
+- **Tablet shade (amended 2026-10-22):** pull down the top bar or tap its title to reveal the section bar; section choice or list scrolling closes it, without bounce. Collections shortcuts travel in the same single row as type tabs; 캐릭터 has no count. 보기 owns sort, personal-rating filter and layout. PC uses the same row with existing destinations. See [section-bar provenance](../prototypes/section-bar-20261001/README.md) and [superseded shortcut specimen](../prototypes/collection-shortcuts-20261001/README.md).
 
 ## 4. View settings
 
@@ -79,7 +81,7 @@ The Asset toolbar holds the title, search and 보기. Sort and tile size are ins
 
 Search is not the dominant daily action, so it has no persistent input.
 
-- The rail 찾기 palette (`Ctrl+Q`, also from a text field) searches names across works, artists, note titles, folders, screens and commands using data already on the device. Scope chips narrow results. The current screen's own search is the first row where supported; an empty query shows 확인할 것 and five recent items. The tablet shares the cross-name Find contract (`628b6da3`).
+- The rail 찾기 palette (`Ctrl+Q`, including from a text field) searches names from data already on the device. Rank names by the current area: Assets prioritizes characters/folders/Albums, tags and artists; Collections prioritizes Works (current type first); Manga prioritizes manga Works; Notes prioritizes notes; the menu area prioritizes menus. Keep scope chips and five-item recent history. The current screen’s own search appears first where supported; an empty query shows attention actions and recent items. Tablet shares the cross-name Find contract.
 - An applied query stays visible as a query badge in the view header with a direct `검색 해제` (the palette offers it too). Dismissing the palette never clears an applied query.
 - Online Catalog keeps its own search surface with suggestions/autocomplete and language/scope semantics.
 - Assets have no general text-search query contract. Do not fake one or add a new index/search engine for symmetry.
@@ -198,7 +200,7 @@ Wheel on PC and pinch on tablet zoom the object from 0.6× to 2.5×; retain drag
 
 ### Home, memo and ledger
 
-The accepted 2026-10-02 contracts live in [DESIGN.md §3 and §12](../../DESIGN.md): attention-first Home with 1년 전 오늘 below 오늘 할 것; 메모 글 / 할 일 with one editing surface, section operations and no Markdown rendering; and the budget/subscriptions/wishlist/manual-spending ledger. Use the shared `notes/memo/` editor and `notes/ledger/` presentation rather than reviving the removed checklist editor or a separate Markdown read view. Tablet differences are its quick-add field, long press and sheets.
+The current [DESIGN.md §3 and §12](../../DESIGN.md) contract uses the Home month calendar, day memo/ledger and compact cards/Transfer tools. Notes keeps one shared plain Text/To-do editor with section operations, without Markdown rendering; use `notes/memo/` and `notes/ledger/`. Tablet adapts the same parts for touch, portrait, long press and sheets.
 
 ## 12. Responsive and desktop constraints
 

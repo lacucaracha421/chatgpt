@@ -1,3 +1,5 @@
 # 계정과 서버 없이 로컬 우선으로 동작한다
 
+Status amendment — 2026-10-22: Accepted; clarified 2026-10-22 by ADR-0033/0036/0038 and activated per-domain authority. Local/offline media principles remain; the no-backend/no-cloud paragraph below records the original scope.
+
 첫 버전의 라이브러리와 메타데이터는 사용자가 선택한 로컬 저장소에 보관하며, 앱 계정·백엔드 서버·자체 클라우드 동기화는 제공하지 않는다. 여러 PC 간 백업과 동기화는 우선 운영체제, NAS, Syncthing 같은 외부 도구에 맡기되 한 라이브러리는 한 번에 한 PC에서만 수정한다. 앱은 같은 라이브러리를 두 인스턴스가 동시에 여는 것을 차단하고, 다른 PC에서는 앞선 앱이 종료되고 외부 동기화가 완료된 뒤 열도록 해 SQLite 충돌과 부분 동기화를 피한다.

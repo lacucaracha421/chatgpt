@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이미지 번역 보기</title>
+<!-- Loads the app's real font, tokens, shared base and controls; the viewer frames below copy only the
+     layout rules they need from asset-viewer.css / mobile-client/Viewer.css. -->
+<link rel="stylesheet" href="../../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../../_tools/app/src/styles/controls.css">
+<style>
+/* The app shell locks html/body height; this page scrolls as a document. */
+html, body { height: auto !important; min-height: 100%; overflow: visible !important; overflow-y: auto !important; }
+:root { --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/1.55 var(--font-ui); user-select: text; }
+button { font-family: inherit; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== Document chrome (outside the frames) ===== */
+.doc { width: 1440px; max-width: 100%; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+h2.sec { margin: 0 0 12px; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+h2.sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.lead, .note { margin: 0 0 8px; color: var(--color-muted); max-width: 100ch; line-height: 1.7; }
+.lead b, .note b { color: var(--color-text); font-weight: 600; }
+.cap { margin: 16px 0 8px; font-size: var(--type-meta); color: var(--color-faint); }
+.cap b { color: var(--color-muted); font-weight: 600; }
+
+.decide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.dcard { background: var(--color-sidebar); border: 1px solid var(--color-border); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.dcard h3 { margin: 0; font-size: var(--type-body); font-weight: 600; }
+.dcard ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.dcard li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; font-size: 14px; line-height: 1.6; color: var(--color-muted); }
+.dcard li > i { font-style: normal; font-weight: 600; color: var(--color-faint); }
+.dcard li.rec { color: var(--color-text); }
+.dcard li.rec > i { color: var(--color-accent); }
+.dcard .why { margin: 4px 0 0; font-size: 13px; color: var(--color-faint); line-height: 1.6; }
+.rec-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; margin-left: 4px; border-radius: 2px; background: var(--color-accent); color: var(--color-on-accent); font: 600 12px/1 var(--font-ui); vertical-align: 1px; }
+
+.rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; margin: 0; padding: 0; list-style: none; }
+.rules li { position: relative; padding-left: 16px; color: var(--color-muted); line-height: 1.7; font-size: 14px; }
+.rules li::before { content: ""; position: absolute; left: 0; top: .72em; width: 5px; height: 5px; background: var(--color-section-mark); }
+.rules li b { color: var(--color-text); font-weight: 600; }
+.impl { margin: 0; padding: 16px; background: var(--color-sidebar); border: 1px solid var(--color-border); color: var(--color-muted); font-size: 13px; line-height: 1.7; }
+.impl li { margin-bottom: 4px; }
+.impl code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--color-text); }
+.row { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+
+/* ===== Translation marker (shared piece; PC 20 / tablet 24) ===== */
+.mbox { position: relative; flex: none; transform-origin: 50% 50%; --z: 1; }
+.mbox > svg { display: block; width: 100%; height: 100%; }
+.mbox.anim { transition: transform 200ms var(--ease-standard); }
+.markers { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.show-markers .markers { opacity: 1; transition-duration: 140ms; }
+.show-markers .mk { pointer-events: auto; }
+.mk {
+  position: absolute; display: grid; place-items: center;
+  width: var(--mk, 20px); height: var(--mk, 20px); padding: 0;
+  transform: translate(-50%, -50%) scale(calc(1 / var(--z)));
+  border: 1px solid #fff; border-radius: var(--radius-mark);
+  background: #1d1d1f; color: #fff;
+  font: 600 var(--type-meta)/1 var(--font-ui); font-variant-numeric: tabular-nums;
+  cursor: pointer; transition: background-color 90ms var(--ease-standard), color 90ms var(--ease-standard);
+}
+.mk::before { content: ""; position: absolute; inset: calc((var(--mk, 20px) - var(--mk-hit, 28px)) / 2); }
+/* Over media the highlighted marker keeps a dark inner ring and a white outer ring so ivory reads on pale paper too. */
+.mk[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-on-accent); box-shadow: 0 0 0 1px #fff, 0 0 0 2px #1d1d1f; }
+/* While one line is highlighted the other markers recede, so the pick stands out on pale and dark artwork alike. */
+.has-sel .mk:not([aria-pressed="true"]) { opacity: .45; }
+.mk { transition-property: background-color, color, opacity; }
+.mk:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+
+/* ===== Translation section (shared piece in the info dock / sheet) ===== */
+.tr { min-width: 0; }
+.tr-head { display: flex; align-items: center; width: 100%; min-height: 32px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.tr-head .ui-section-label { flex: 1; }
+.tr-head .chev { width: 16px; height: 16px; flex: none; margin-left: 8px; color: var(--color-faint); transition: transform 140ms var(--ease-standard); }
+.tr[data-open="true"] .tr-head .chev { transform: rotate(180deg); }
+.tr-head:hover .chev, .tr-head:hover .ui-section-label { color: var(--color-text); }
+.tr-fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 140ms var(--ease-standard), opacity 140ms var(--ease-standard); }
+.tr[data-open="true"] .tr-fold { grid-template-rows: 1fr; opacity: 1; }
+.tr-fold > div { min-height: 0; overflow: hidden; }
+.tr-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.tr-list li + li { border-top: 1px solid var(--color-border); }
+.tr-row { display: grid; grid-template-columns: var(--badge-height) minmax(0, 1fr); gap: 12px; align-items: start; width: 100%; padding: 8px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; transition: background-color 90ms var(--ease-standard); }
+.tr-row:hover { background: var(--color-surface-hover); }
+.tr-row[aria-pressed="true"] { background: var(--color-selected); }
+.tr-num { display: grid; place-items: center; width: var(--badge-height); height: var(--badge-height); border-radius: var(--radius-mark); background: var(--color-surface-elevated); color: var(--color-text); font: 600 var(--type-meta)/1 var(--font-ui); font-variant-numeric: tabular-nums; transition: background-color 90ms var(--ease-standard), color 90ms var(--ease-standard); }
+.tr-num.none { background: transparent; color: var(--color-faint); }
+.tr-row[aria-pressed="true"] .tr-num:not(.none) { background: var(--color-accent); color: var(--color-on-accent); }
+.tr-ko { display: block; font-size: var(--type-body); line-height: 1.45; color: var(--color-text); }
+.tr-or { display: block; margin-top: 4px; font-size: var(--type-meta); line-height: 1.5; color: var(--color-muted); }
+.tr-or:lang(ja) { font-family: var(--font-ja); }
+
+/* ===== PC viewer frame (layout copied from asset-viewer.css) ===== */
+.pcv { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); width: 1376px; height: 760px; background: var(--color-viewer-bg); border: 1px solid var(--color-border); overflow: hidden; }
+.pcv.docked { grid-template-columns: minmax(0, 1fr) 340px; }
+.pcv .stage { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; }
+.pcv .stage[data-zoomed] { cursor: grab; }
+.pcv .media { display: grid; place-items: center; width: 100%; height: 100%; min-height: 0; }
+.pcv .mbox { height: 100%; aspect-ratio: 1000 / 1400; max-width: 100%; }
+.pcv .mbox.land { height: auto; width: 100%; aspect-ratio: 1400 / 1000; max-height: 100%; }
+.topbar { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: var(--space-3); height: 56px; padding: 0 var(--space-4); text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+.topbar::before { content: ""; position: absolute; z-index: -1; inset: 0 0 -40px; background: linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.45) 55%, transparent); pointer-events: none; }
+.vpos { flex: none; color: var(--color-muted); font-size: var(--type-body); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vpos b { color: var(--color-text); font-weight: 600; }
+.vtitle { display: flex; flex-direction: column; gap: 4px; min-width: 0; line-height: 1.2; }
+.vtitle strong { font-size: var(--type-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtitle small { font-size: var(--type-meta); color: var(--color-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; min-width: 8px; }
+.vbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 36px; min-height: 36px; padding: 0; color: var(--color-muted); background: transparent; border: 0; border-radius: var(--radius-control); cursor: pointer; font-size: var(--type-body); }
+.vbtn svg.i { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.55)); }
+.vbtn:hover { color: var(--color-text); background: rgba(255,255,255,.08); }
+.vbtn--text { width: auto; padding: 0 var(--space-2); white-space: nowrap; }
+.vbtn--text svg.i { width: 20px; height: 20px; }
+.vbtn--on { color: var(--color-accent); }
+.vbtn--danger { color: var(--color-danger); }
+.edge { position: absolute; z-index: 2; top: 56px; bottom: 88px; width: 96px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.55); background: transparent; border: 0; pointer-events: none; }
+.edge svg.i { width: 28px; height: 28px; }
+.edge.l { left: 0; } .edge.r { right: 0; }
+.strip { position: absolute; z-index: 2; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 2px; }
+.strip span { display: block; width: 26px; height: 36px; background: #3a3b3d; opacity: .7; }
+.strip span.cur { width: 30px; height: 42px; background: #d8d4ca; opacity: 1; outline: 1px solid var(--color-accent); outline-offset: 1px; }
+.strip span.w { width: 50px; }
+.dock { position: relative; z-index: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-sidebar); border-left: 1px solid var(--color-border); }
+.dock-head { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 var(--space-4); color: var(--color-faint); font-size: var(--type-meta); }
+.dock-body { min-height: 0; overflow: auto; padding: 0 var(--space-4) var(--space-4); display: grid; align-content: start; gap: var(--space-6); overscroll-behavior: contain; }
+.artist { display: flex; flex-direction: column; gap: 4px; }
+.artist strong { font-size: var(--type-title); font-weight: 600; line-height: 1.3; }
+.artist span { font-size: var(--type-meta); color: var(--color-muted); }
+.facts { display: grid; margin: 4px 0 0; font-size: var(--type-meta); }
+.facts > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--color-border); }
+.facts dt { color: var(--color-faint); }
+.facts dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ===== Tablet frame (tokens from mobile.css, layout from mobile-client/Viewer.css) ===== */
+.tab { --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px; --control-height: 44px; --control-height-compact: 36px; --badge-height: 24px; --badge-icon: 16px; --touch-target: 44px; --mk: 24px; --mk-hit: 44px; }
+.tabv { position: relative; width: 640px; height: 1024px; overflow: hidden; background: #111213; border: 1px solid var(--color-border); }
+.tabv .surface { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; transition: bottom 200ms var(--ease-sheet); }
+.tabv.reading .surface { top: 56px; bottom: 46%; }
+.tabv .mbox { height: 100%; aspect-ratio: 1000 / 1400; max-width: 100%; }
+.tabv .mbox.full { height: auto; width: 100%; aspect-ratio: 1000 / 1400; max-height: 100%; }
+.tabv .mbox.land { height: auto; width: 100%; aspect-ratio: 1400 / 1000; max-height: 100%; }
+.tbar { position: absolute; z-index: 4; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px; color: var(--color-muted); background: linear-gradient(#111213ee, #111213aa 68%, transparent); font-size: 13px; }
+.tbar .vpos { font-size: var(--type-meta); }
+.theading { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.2; }
+.theading strong { color: var(--color-text); font-size: var(--type-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theading small { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tact { display: flex; flex: none; gap: 2px; }
+.tbtn { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); cursor: pointer; }
+.tbtn svg.i { width: 22px; height: 22px; }
+.tbtn[aria-pressed="true"] { background: var(--color-selected); color: var(--color-text); }
+.tbtn.back { color: var(--color-text); }
+.tbtn.back svg.i { width: 24px; height: 24px; }
+.dim { position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.45); }
+.sheet { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--color-sidebar); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; }
+.sheet.half { height: 46%; z-index: 3; }
+.sheet .grip { flex: none; display: flex; justify-content: center; align-items: center; height: 24px; }
+.sheet .grip span { width: 36px; height: 4px; background: var(--color-border); border-radius: var(--radius-mark); }
+.sheet .stitle { flex: none; display: flex; align-items: center; min-height: 44px; padding: 0 var(--space-6); font-size: var(--type-body); font-weight: 600; }
+.sheet .sbody { min-height: 0; overflow: auto; padding: 0 var(--space-6) var(--space-6); display: grid; align-content: start; gap: var(--space-6); overscroll-behavior: contain; }
+.tab .tr-head { min-height: 44px; }
+.tab .tr-row { padding: 12px 8px; min-height: 64px; }
+.tab .artist strong { font-size: var(--type-title); }
+.tab .facts > div { grid-template-columns: 72px minmax(0, 1fr); min-height: 44px; }
+
+/* Small frames */
+.mini { zoom: .5; }
+.crop { position: relative; width: 460px; height: 220px; overflow: hidden; background: var(--color-viewer-bg); border: 1px solid var(--color-border); }
+.crop .mbox { width: 460px; height: 220px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .markers, .tr-fold, .tr-head .chev, .mk, .tr-row, .tr-num, .mbox.anim, .tabv .surface { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- Placeholder artwork: drawn here, no library images. Page = 1000×1400 SVG units. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="page" viewBox="0 0 1000 1400">
+      <rect width="1000" height="1400" fill="#f3f0e8"/>
+      <g fill="#e2ddd1" stroke="#1a1a1a" stroke-width="6">
+        <rect x="40" y="40" width="920" height="420"/>
+        <rect x="40" y="490" width="430" height="440"/>
+        <rect x="500" y="490" width="460" height="440"/>
+        <rect x="40" y="960" width="920" height="400"/>
+      </g>
+      <!-- figures -->
+      <g fill="#c6c0b2" stroke="#1a1a1a" stroke-width="4">
+        <path d="M330 460c0-90 50-140 120-140s120 50 120 140z"/><circle cx="450" cy="250" r="78"/>
+        <path d="M560 460c0-70 40-110 100-110s100 40 100 110z"/><circle cx="660" cy="300" r="56"/>
+        <path d="M150 930c0-80 40-120 110-120s110 40 110 120z"/><circle cx="260" cy="760" r="62"/>
+        <path d="M790 930c0-70 30-100 80-100s80 30 80 100z" /><circle cx="870" cy="790" r="44"/>
+        <path d="M430 1360c0-110 50-170 140-170s140 60 140 170z"/><circle cx="570" cy="1120" r="88"/>
+      </g>
+      <!-- speech bubbles with vertical text strokes -->
+      <g fill="#fff" stroke="#1a1a1a" stroke-width="4">
+        <ellipse cx="800" cy="160" rx="110" ry="90"/>
+        <ellipse cx="180" cy="330" rx="80" ry="70"/>
+        <ellipse cx="300" cy="600" rx="120" ry="90"/>
+        <ellipse cx="820" cy="600" rx="100" ry="80"/>
+        <ellipse cx="220" cy="1060" rx="110" ry="80"/>
+        <ellipse cx="820" cy="1240" rx="90" ry="70"/>
+      </g>
+      <g stroke="#555" stroke-width="9" stroke-linecap="round">
+        <path d="M850 105v100M820 95v130M790 100v120M760 115v80"/>
+        <path d="M205 290v80M180 285v90M155 300v55"/>
+        <path d="M360 545v110M330 535v130M300 540v120M270 550v95M240 565v60"/>
+        <path d="M865 550v100M835 545v110M805 555v95M775 570v50"/>
+        <path d="M275 1010v100M245 1000v120M215 1005v110M185 1020v70"/>
+        <path d="M855 1195v90M825 1190v100M795 1205v65"/>
+      </g>
+      <!-- large sound effect -->
+      <text x="650" y="880" text-anchor="middle" font-family="Yu Gothic UI, Meiryo, sans-serif" font-size="96" font-weight="900" fill="#1a1a1a" transform="rotate(-8 650 850)">ドドン</text>
+      <!-- caption box (its line has no stored position) -->
+      <rect x="60" y="1300" width="250" height="44" fill="#fff" stroke="#1a1a1a" stroke-width="3"/>
+      <path d="M80 1322h200" stroke="#555" stroke-width="9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="illus" viewBox="0 0 1400 1000">
+      <rect width="1400" height="1000" fill="#2c3d55"/>
+      <rect y="0" width="1400" height="560" fill="#5b7aa3"/>
+      <circle cx="1040" cy="260" r="110" fill="#f0d9a8"/>
+      <path d="M0 640 300 420 520 600 760 380 1080 640 1400 460V1000H0Z" fill="#2f4a3a"/>
+      <path d="M0 760 380 600 700 780 1000 640 1400 800V1000H0Z" fill="#1f3326"/>
+      <path d="M560 1000c20-160 60-260 140-260s120 100 140 260Z" fill="#c6c0b2"/>
+      <circle cx="700" cy="680" r="56" fill="#c6c0b2"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="doc">
+
+<header>
+  <h1>이미지 번역 보기 · PC와 태블릿 감상 화면</h1>
+  <p class="lead">확장에서 번역한 뒤 저장한 그림에만 생깁니다(대부분의 그림에는 아무것도 추가되지 않습니다). 번역 줄은 <b>접힌 채로</b> 시작하고, 펼치면 그림 위에 <b>번호 표식</b>이 나타나 목록과 서로 이어집니다. 표식이나 줄을 누르면 짝이 함께 강조되고, 다시 누르면 풀립니다. 이 페이지의 프레임은 눌러서 써 볼 수 있습니다(PC 펼침 프레임은 Ctrl+휠로 확대, 끌어서 이동).</p>
+</header>
+
+<section>
+  <h2 class="sec">결정할 것</h2>
+  <div class="decide">
+    <div class="dcard">
+      <h3>1. 번역을 어디에 둘까</h3>
+      <ol>
+        <li class="rec"><i>A</i><span>정보 패널 맨 위의 접힌 “번역” 섹션 + 상단 막대의 <b>번역</b> 버튼(번역이 있는 그림에만 보임, 누르면 패널이 열리며 펼쳐짐)<span class="rec-tag">추천</span></span></li>
+        <li><i>B</i><span>정보 패널 섹션만. 상단 막대에는 아무것도 없음</span></li>
+        <li><i>C</i><span>그림 위에 뜨는 별도 번역 패널(정보 패널과 따로)</span></li>
+      </ol>
+      <p class="why">A는 번역이 있다는 사실을 막대에서 한눈에 알려 주면서도, 내용은 이미 쓰고 있는 정보 패널 한 곳에만 둡니다. 버튼은 오른쪽 버튼 무리의 맨 왼쪽에 붙어서, 번역 없는 그림으로 넘겨도 다른 버튼 자리가 움직이지 않습니다.</p>
+    </div>
+    <div class="dcard">
+      <h3>2. 번호 표식은 언제 보일까</h3>
+      <ol>
+        <li class="rec"><i>A</i><span>번역 섹션을 펼쳤을 때만. 접으면 표식도 사라짐<span class="rec-tag">추천</span></span></li>
+        <li><i>B</i><span>표식 켜기/끄기를 따로 둠(접은 채 표식만 보거나, 펼친 채 표식을 숨길 수 있음)</span></li>
+      </ol>
+      <p class="why">A는 상태가 하나뿐이라 헷갈리지 않고, 평소 감상할 때 그림 위에 아무것도 올라오지 않습니다. 표식은 상단 막대가 사라져도(가만히 1.2초) 펼쳐 둔 동안 계속 보입니다.</p>
+    </div>
+    <div class="dcard">
+      <h3>3. 표식을 말풍선의 어디에 둘까</h3>
+      <ol>
+        <li class="rec"><i>A</i><span>말풍선 영역의 왼쪽 위 모서리(원문 글자를 가리지 않음)<span class="rec-tag">추천</span></span></li>
+        <li><i>B</i><span>말풍선 가운데(지금 확장 팝오버와 같음)</span></li>
+      </ol>
+      <p class="why">저장한 그림은 원문과 번역을 맞대 보는 일이 많아 글자가 보이는 쪽을 추천합니다. 어느 쪽이든 표식은 그림 가장자리 안으로 당겨 둡니다. 아래 “표식 위치 비교”에서 두 가지를 볼 수 있습니다.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">정한 것</h2>
+  <ul class="rules">
+    <li><b>접힘이 기본.</b> 감상 화면을 열 때마다 접힌 상태로 시작합니다. 감상 화면 안에서 넘겨 보는 동안에는 마지막으로 펼침/접힘한 상태를 그대로 따릅니다.</li>
+    <li><b>목록 모양.</b> 줄마다 번호 배지, 한국어(본문 크기), 그 아래 원문(작은 글자, 흐린 색). 줄 사이는 1px 선. 위치가 없는 줄은 번호만 흐리게 보이고 그림에 표식이 없습니다.</li>
+    <li><b>강조.</b> 표식은 강조색 면 + 어두운 숫자(어두운 테 · 흰 테 · 어두운 테의 얇은 세 겹), 나머지 표식은 흐려져 밝은 그림 위에서도 고른 표식이 눈에 띕니다. 줄은 옅은 면 색만 바뀝니다. 가장자리 줄·밑줄 표시는 쓰지 않습니다. 다시 누르면 풀립니다.</li>
+    <li><b>목록 스크롤.</b> 그림의 표식을 누르면 패널 안에서만 그 줄이 보이도록 스크롤합니다(뒤 화면이나 그림은 움직이지 않음).</li>
+    <li><b>확대·이동.</b> 표식은 그림에 붙어 함께 확대·이동하지만 크기는 늘 같습니다(PC 20, 태블릿 24). 확대한 상태에서 화면 밖 표식의 줄을 누르면 확대 배율은 그대로 두고 200ms 동안 부드럽게 그 표식이 보이게 옮깁니다.</li>
+    <li><b>다른 그림으로 넘길 때.</b> 새 그림이 화면에 나타나는 그 순간 표식과 목록도 한 번에 바뀝니다(깜빡임·빈 화면 없음, 이전 그림의 번역이 새 그림 위에 남지 않음). 번역 없는 그림이면 섹션과 표식이 없고 패널 폭·높이는 그대로입니다.</li>
+    <li><b>움직임.</b> 펼치기/접기 140ms 높이 변화, 표식은 140ms 페이드 인 · 90ms 페이드 아웃, 강조 색 90ms. 동작 줄이기 설정에서는 바로 바뀝니다.</li>
+    <li><b>표시하지 않는 경우.</b> 영상, 비공개 모드·NSFW 가림, 비밀 보관함 항목에는 섹션과 표식이 없습니다. 검색에는 넣지 않습니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== PC ===================== -->
+<section>
+  <h2 class="sec">PC 감상 화면</h2>
+  <p class="note">번역 섹션은 정보 패널의 맨 위(감상 화면에서는 그림이 빠지므로 작가 바로 위)에 접힌 한 줄로 있습니다. 상단 막대의 <b>번역</b>은 패널이 닫혀 있으면 열면서 펼치고, 펼쳐져 있으면 접습니다(단축키 제안: <b>T</b>).</p>
+
+  <p class="cap"><b>① 접힘</b> · 정보 패널을 연 상태, 번역은 한 줄로 접혀 있고 그림 위에는 아무것도 없음</p>
+  <div class="pcv docked" data-frame="pc-folded" data-sel="">
+    <div class="stage">
+      <div class="topbar">
+        <button class="vbtn" aria-label="뒤로"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+        <span class="vpos"><b>3</b> / 128</span>
+        <span class="vtitle"><strong>@hanagumi_s</strong><small>만화 › 단편 · 10.11 21:45</small></span>
+        <span class="spacer"></span>
+        <button class="vbtn vbtn--text" data-act="tr-toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg><span>번역</span></button>
+        <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg><span>캐릭터</span></button>
+        <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg><span>앨범</span></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="m9 13.5 3 3m0 0 3-3m-3 3v-6m1.06-4.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></button>
+        <button class="vbtn vbtn--danger"><svg class="i" viewBox="0 0 24 24"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+        <button class="vbtn vbtn--on"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+      </div>
+      <span class="edge l"><svg class="i" viewBox="0 0 24 24"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></svg></span>
+      <span class="edge r"><svg class="i" viewBox="0 0 24 24"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></span>
+      <div class="media"><div class="mbox" data-vb="0 0 1000 1400"><svg viewBox="0 0 1000 1400"><use href="#page"/></svg><div class="markers"></div></div></div>
+      <div class="strip"><span></span><span class="w"></span><span class="cur"></span><span></span><span class="w"></span><span></span><span></span></div>
+    </div>
+    <aside class="dock">
+      <div class="dock-head"><span>정보</span><button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button></div>
+      <div class="dock-body">
+        <section class="tr" data-open="false"></section>
+        <section class="artist"><strong>하나구미</strong><span>@hanagumi_s · 모은 그림 214장</span></section>
+        <section>
+          <div class="ui-section-label"><span class="ui-section-label__title">기록</span><span class="ui-section-label__rule"></span></div>
+          <dl class="facts">
+            <div><dt>게시물</dt><dd>x.com/hanagumi_s/status/18…</dd></div>
+            <div><dt>게시</dt><dd>10.11 20:12</dd></div>
+            <div><dt>파일</dt><dd>1600×2240 · 1.4 MB</dd></div>
+            <div><dt>가져옴</dt><dd>10.11 21:45 · 확장</dd></div>
+            <div><dt>폴더</dt><dd>만화 › 단편</dd></div>
+          </dl>
+        </section>
+        <section class="tags"><span class="ui-badge">교복</span><span class="ui-badge">방과 후</span><span class="ui-badge">서점</span></section>
+      </div>
+    </aside>
+  </div>
+
+  <p class="cap"><b>② 펼침</b> · 표식이 그림 위에, 3번 줄과 3번 표식이 함께 강조됨 (표식이나 줄을 눌러 보세요 · Ctrl+휠 확대)</p>
+  <div class="pcv docked show-markers" data-frame="pc-open" data-sel="3" data-zoomable>
+    <div class="stage">
+      <div class="topbar">
+        <button class="vbtn" aria-label="뒤로"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+        <span class="vpos"><b>3</b> / 128</span>
+        <span class="vtitle"><strong>@hanagumi_s</strong><small>만화 › 단편 · 10.11 21:45</small></span>
+        <span class="spacer"></span>
+        <button class="vbtn vbtn--text vbtn--on" data-act="tr-toggle" aria-pressed="true"><svg class="i" viewBox="0 0 24 24"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg><span>번역</span></button>
+        <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg><span>캐릭터</span></button>
+        <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg><span>앨범</span></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="m9 13.5 3 3m0 0 3-3m-3 3v-6m1.06-4.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></button>
+        <button class="vbtn vbtn--danger"><svg class="i" viewBox="0 0 24 24"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+        <button class="vbtn vbtn--on"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+        <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+      </div>
+      <span class="edge l"><svg class="i" viewBox="0 0 24 24"><path d="M15.75 19.5 8.25 12l7.5-7.5"/></svg></span>
+      <span class="edge r"><svg class="i" viewBox="0 0 24 24"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></span>
+      <div class="media"><div class="mbox" data-vb="0 0 1000 1400"><svg viewBox="0 0 1000 1400"><use href="#page"/></svg><div class="markers"></div></div></div>
+      <div class="strip"><span></span><span class="w"></span><span class="cur"></span><span></span><span class="w"></span><span></span><span></span></div>
+    </div>
+    <aside class="dock">
+      <div class="dock-head"><span>정보</span><button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button></div>
+      <div class="dock-body">
+        <section class="tr" data-open="true"></section>
+        <section class="artist"><strong>하나구미</strong><span>@hanagumi_s · 모은 그림 214장</span></section>
+        <section>
+          <div class="ui-section-label"><span class="ui-section-label__title">기록</span><span class="ui-section-label__rule"></span></div>
+          <dl class="facts">
+            <div><dt>게시물</dt><dd>x.com/hanagumi_s/status/18…</dd></div>
+            <div><dt>게시</dt><dd>10.11 20:12</dd></div>
+            <div><dt>파일</dt><dd>1600×2240 · 1.4 MB</dd></div>
+            <div><dt>가져옴</dt><dd>10.11 21:45 · 확장</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <div class="row">
+    <div>
+      <p class="cap"><b>③ 확대 2.4×</b> · 표식은 말풍선에 붙어 있고 크기는 그대로 (절반 크기로 축소해 표시)</p>
+      <div class="mini">
+        <div class="pcv docked show-markers" data-frame="pc-zoom" data-sel="3" data-zoom="2.4">
+          <div class="stage" data-zoomed>
+            <div class="media"><div class="mbox" data-vb="0 0 1000 1400"><svg viewBox="0 0 1000 1400"><use href="#page"/></svg><div class="markers"></div></div></div>
+          </div>
+          <aside class="dock">
+            <div class="dock-head"><span>정보</span></div>
+            <div class="dock-body"><section class="tr" data-open="true"></section></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="cap"><b>④ 번역 없는 그림</b> · 상단 막대에 번역 버튼 없음, 패널에도 섹션 없음 (절반 크기)</p>
+      <div class="mini">
+        <div class="pcv docked" data-frame="pc-none">
+          <div class="stage">
+            <div class="topbar">
+              <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+              <span class="vpos"><b>4</b> / 128</span>
+              <span class="vtitle"><strong>@sorairo_k</strong><small>풍경 · 10.11 21:47</small></span>
+              <span class="spacer"></span>
+              <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg><span>캐릭터</span></button>
+              <button class="vbtn vbtn--text"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg><span>앨범</span></button>
+              <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+              <button class="vbtn vbtn--on"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+              <button class="vbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+            </div>
+            <div class="media"><div class="mbox land"><svg viewBox="0 0 1400 1000"><use href="#illus"/></svg></div></div>
+          </div>
+          <aside class="dock">
+            <div class="dock-head"><span>정보</span></div>
+            <div class="dock-body">
+              <section class="artist"><strong>소라이로</strong><span>@sorairo_k · 모은 그림 58장</span></section>
+              <section>
+                <div class="ui-section-label"><span class="ui-section-label__title">기록</span><span class="ui-section-label__rule"></span></div>
+                <dl class="facts"><div><dt>게시</dt><dd>10.10 18:03</dd></div><div><dt>파일</dt><dd>2800×2000 · 2.1 MB</dd></div><div><dt>가져옴</dt><dd>10.11 21:47 · 확장</dd></div></dl>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="cap"><b>표식 위치 비교</b> (결정 3) · 왼쪽 A 모서리 · 오른쪽 B 가운데</p>
+  <div class="row">
+    <div class="crop show-markers" data-frame="crop-corner" data-sel="3"><div class="mbox" data-vb="40 490 920 440" data-anchor="corner"><svg viewBox="40 490 920 440" preserveAspectRatio="none"><use href="#page" x="0" y="0" width="1000" height="1400"/></svg><div class="markers"></div></div></div>
+    <div class="crop show-markers" data-frame="crop-center" data-sel="3"><div class="mbox" data-vb="40 490 920 440" data-anchor="center"><svg viewBox="40 490 920 440" preserveAspectRatio="none"><use href="#page" x="0" y="0" width="1000" height="1400"/></svg><div class="markers"></div></div></div>
+  </div>
+</section>
+
+<!-- ===================== Tablet ===================== -->
+<section class="tab">
+  <h2 class="sec">태블릿 감상 화면 (세로)</h2>
+  <p class="note">PC와 같은 섹션과 같은 표식입니다. 다른 점은 터치 크기(표식 24, 누르는 영역 44, 줄 높이 64)와 세로 배치뿐입니다. 세로에서 번역을 펼치면 정보 시트가 <b>화면 아래 46% 높이의 반 시트</b>가 되고 어둡게 덮지 않으며, 그림은 그 위 공간에 통째로 다시 맞춰져 모든 표식이 보입니다(PC에서 패널이 그림을 옆으로 미는 것과 같은 방식). 가로에서는 지금처럼 오른쪽 패널에 들어갑니다.</p>
+  <div class="row">
+    <div>
+      <p class="cap"><b>⑤ 접힘</b> · 막대의 번역 버튼, 정보 시트 맨 위에 접힌 번역 한 줄</p>
+      <div class="tabv" data-frame="tab-folded" data-sel="">
+        <div class="surface"><div class="mbox full" data-vb="0 0 1000 1400"><svg viewBox="0 0 1000 1400"><use href="#page"/></svg><div class="markers"></div></div></div>
+        <header class="tbar">
+          <button class="tbtn back"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+          <span class="vpos">3 / 128</span>
+          <div class="theading"><strong>@hanagumi_s</strong><small>10.11 21:45 · 만화 › 단편</small></div>
+          <span class="spacer"></span>
+          <div class="tact">
+            <button class="tbtn" data-act="tr-toggle" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+            <button class="tbtn" aria-pressed="true"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+          </div>
+        </header>
+        <div class="dim"></div>
+        <div class="sheet" style="height:40%">
+          <div class="grip"><span></span></div>
+          <div class="stitle">미디어 정보</div>
+          <div class="sbody">
+            <section class="tr" data-open="false"></section>
+            <section class="artist"><strong>하나구미</strong><span>@hanagumi_s</span></section>
+            <dl class="facts">
+              <div><dt>게시물</dt><dd>x.com/hanagumi_s/status/18…</dd></div>
+              <div><dt>게시</dt><dd>10.11 20:12</dd></div>
+              <div><dt>해상도</dt><dd>1,600 × 2,240</dd></div>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="cap"><b>⑥ 펼침</b> · 반 시트가 그림을 위로 밀고, 3번이 함께 강조됨 (눌러 보세요)</p>
+      <div class="tabv reading show-markers" data-frame="tab-open" data-sel="3">
+        <div class="surface"><div class="mbox" data-vb="0 0 1000 1400"><svg viewBox="0 0 1000 1400"><use href="#page"/></svg><div class="markers"></div></div></div>
+        <header class="tbar">
+          <button class="tbtn back"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+          <span class="vpos">3 / 128</span>
+          <div class="theading"><strong>@hanagumi_s</strong><small>10.11 21:45 · 만화 › 단편</small></div>
+          <span class="spacer"></span>
+          <div class="tact">
+            <button class="tbtn" data-act="tr-toggle" aria-pressed="true"><svg class="i" viewBox="0 0 24 24"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+            <button class="tbtn" aria-pressed="true"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+            <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+          </div>
+        </header>
+        <div class="sheet half">
+          <div class="grip"><span></span></div>
+          <div class="stitle">미디어 정보</div>
+          <div class="sbody">
+            <section class="tr" data-open="true"></section>
+            <section class="artist"><strong>하나구미</strong><span>@hanagumi_s</span></section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap"><b>⑦ 번역 없는 그림</b> · 막대에 번역 버튼 없음 (절반 크기)</p>
+  <div class="mini">
+    <div class="tabv" data-frame="tab-none">
+      <div class="surface"><div class="mbox land"><svg viewBox="0 0 1400 1000"><use href="#illus"/></svg></div></div>
+      <header class="tbar">
+        <button class="tbtn back"><svg class="i" viewBox="0 0 24 24"><path d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg></button>
+        <span class="vpos">4 / 128</span>
+        <div class="theading"><strong>@sorairo_k</strong><small>10.11 21:47 · 풍경</small></div>
+        <span class="spacer"></span>
+        <div class="tact">
+          <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"/></svg></button>
+          <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg></button>
+          <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg></button>
+          <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></button>
+          <button class="tbtn"><svg class="i" viewBox="0 0 24 24"><path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+        </div>
+      </header>
+    </div>
+  </div>
+
+  <h2 class="sec" style="margin-top:32px">태블릿 손동작</h2>
+  <ul class="rules">
+    <li><b>표식은 깨끗한 탭에만 반응합니다.</b> 한 손가락이 8px 안에서 떼어질 때만 그 표식을 고릅니다. 표식 위에서 시작해 끌면 그대로 그림 넘기기·이동이 되고, 두 번째 손가락이 닿으면 확대가 됩니다. 표식이 손동작을 가로채지 않습니다.</li>
+    <li><b>반 시트가 열린 동안에도</b> 위쪽 그림에서 두 손가락 확대, 확대 중 끌어 이동, 좌우로 밀어 다음 그림이 됩니다(지금은 정보 시트가 열리면 그림 손동작이 멈춤). 시트는 그대로 있고 새 그림이 보일 때 목록이 함께 바뀝니다.</li>
+    <li><b>그림 빈 곳을 한 번 탭</b>하면 지금처럼 막대가 숨었다 나타나고, 강조는 유지됩니다. 강조는 같은 표식이나 줄을 다시 탭해 풉니다.</li>
+    <li><b>시트 손잡이를 아래로</b> 밀면 시트가 닫히고(번역도 접힘) 그림이 원래 크기로 돌아옵니다. 반 시트에서는 아래쪽 필름 띠가 숨고, 시트를 닫으면 다시 나옵니다.</li>
+    <li><b>목록은 시트 안에서만</b> 스크롤되고, 표식을 탭하면 시트 안에서 그 줄이 보이게 움직입니다.</li>
+    <li><b>뒤로 가기</b>는 시트 → 감상 화면 순서로 닫습니다(지금과 같음).</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="sec">구현 메모</h2>
+  <ul class="impl">
+    <li>Shared piece (DESIGN.md §12 "screen pieces shared by default"): one <code>ImageTextSection</code> (collapsible section label + numbered rows) and one <code>ImageTextMarkers</code> overlay under <code>src/shared/viewer/</code>, taking plain data <code>{lines, selected, open}</code>. PC places them in <code>AssetInfoPanel</code> (viewer only, first section) and <code>AssetViewer</code>; the tablet in <code>ViewerInfo</code> and <code>Viewer</code>. Sizes come from tokens (<code>--badge-height</code>, <code>--type-meta</code>), not a tablet branch.</li>
+  <li>The collapsible header needs a new <code>SectionLabel</code> variant (whole row is a button with <code>aria-expanded</code>, trailing 16px chevron) instead of a screen-local copy. The fold can reuse the 0fr/1fr grid technique of <code>mobile-client/fold.css</code>, promoted to shared.</li>
+    <li>Markers live in a box sized exactly to the rendered image (object-fit: contain rect) and share the image's zoom transform; each marker counter-scales with <code>scale(1/zoom)</code>. Clamp each marker centre inside the image by half its size; if two centres are closer than one marker, push the later one down by one marker + 4px (still clamped). Markers sit above the PC edge arrows (z-index).</li>
+    <li>Tablet: do not let marker buttons capture <code>pointerdown</code>; resolve a marker on the surface's tap-up (single pointer, moved &lt; 8px). Allow pinch/pan/swipe while the reading sheet is open (today the surface returns early when <code>info</code> is open). Reading layout = info sheet non-modal at 46% height, surface <code>bottom: 46%</code>, filmstrip hidden.</li>
+    <li>No flash: swap markers and rows in the same commit as the displayed image (after the <code>StableImage</code> slot swap), never earlier. If the text arrives separately and takes &gt;400 ms, show the shared <code>BusyLabel</code> inside the section; never show the previous asset's lines over the new image.</li>
+    <li>Fold state: viewer-session state (starts folded on every viewer open). <code>T</code> toggles on PC. The 번역 button is the first item after the spacer so its absence never shifts other buttons.</li>
+    <li>Highlight colour here is the Lakomics accent (ivory) per the brief; the extension popover uses its blue focus colour for the same state. Ivory alone is weak on pale paper, so the highlighted marker gets hard 1px dark, white and dark rings (no blur) and the other markers drop to 45% opacity while a line is highlighted.</li>
+  </ul>
+</section>
+
+</div>
+
+<script>
+const LINES = [
+  { o: "ねえ、今日の放課後ひま？", k: "있잖아, 오늘 방과 후에 시간 있어?", b: [690, 50, 910, 179] },
+  { o: "急にどうしたの", k: "갑자기 왜?", b: [100, 186, 260, 286] },
+  { o: "駅前に新しい本屋ができたんだって", k: "역 앞에 새 서점이 생겼대.", b: [180, 364, 420, 493] },
+  { o: "行く！絶対行く！", k: "갈래! 무조건 갈래!", b: [720, 371, 920, 486] },
+  { o: "ドドン", k: "두둥", b: [505, 561, 795, 636] },
+  { o: "…また漫画ばっかり買うんでしょ", k: "…또 만화만 잔뜩 사겠지.", b: null },
+  { o: "今回は参考書も買うよ", k: "이번엔 참고서도 살 거야.", b: [110, 700, 330, 814] },
+  { o: "本当に？", k: "진짜?", b: [730, 836, 910, 936] },
+];
+const CHEVRON = '<svg class="i chev" viewBox="0 0 24 24"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>';
+
+function buildSection(section) {
+  const rows = LINES.map((l, i) => `<li><button type="button" class="tr-row" data-n="${i + 1}" aria-pressed="false"><span class="tr-num${l.b ? "" : " none"}">${i + 1}</span><span><span class="tr-ko">${l.k}</span><span class="tr-or" lang="ja">${l.o}</span></span></button></li>`).join("");
+  section.innerHTML = `<button type="button" class="tr-head" aria-expanded="${section.dataset.open}"><span class="ui-section-label"><span class="ui-section-label__title">번역</span> <span class="ui-section-label__count">${LINES.length}줄</span><span class="ui-section-label__rule"></span></span>${CHEVRON}</button><div class="tr-fold"><div><ol class="tr-list">${rows}</ol></div></div>`;
+}
+
+function placeMarkers(frame) {
+  frame.querySelectorAll(".mbox[data-vb]").forEach(box => {
+    const layer = box.querySelector(".markers");
+    const [vx, vy, vw, vh] = box.dataset.vb.split(" ").map(Number);
+    const W = box.offsetWidth, H = box.offsetHeight;
+    const size = parseFloat(getComputedStyle(box).getPropertyValue("--mk")) || 20;
+    const corner = (box.dataset.anchor || "corner") === "corner";
+    layer.innerHTML = "";
+    LINES.forEach((l, i) => {
+      if (!l.b) return;
+      const [x0, y0, x1, y1] = l.b;
+      // Normalized 0–1000 → page units (page is 1000×1400), then into this box's view.
+      let sx = corner ? x0 : (x0 + x1) / 2, sy = (corner ? y0 : (y0 + y1) / 2) * 1.4;
+      let px = (sx - vx) / vw * W, py = (sy - vy) / vh * H;
+      if (corner) { px += size / 2; py += size / 2; }
+      if (px < -size || py < -size || px > W + size || py > H + size) return;
+      px = Math.max(size / 2, Math.min(W - size / 2, px));
+      py = Math.max(size / 2, Math.min(H - size / 2, py));
+      const m = document.createElement("button");
+      m.type = "button"; m.className = "mk"; m.textContent = i + 1; m.dataset.n = i + 1;
+      m.setAttribute("aria-label", `${i + 1}번 대사`); m.setAttribute("aria-pressed", "false");
+      m.style.left = px + "px"; m.style.top = py + "px";
+      layer.appendChild(m);
+    });
+  });
+}
+
+function applySelection(frame, scroll) {
+  const sel = frame.dataset.sel;
+  frame.querySelectorAll("[data-n]").forEach(el => el.setAttribute("aria-pressed", String(el.dataset.n === sel)));
+  frame.classList.toggle("has-sel", !!sel);
+  if (scroll && sel) {
+    const row = frame.querySelector(`.tr-row[data-n="${sel}"]`);
+    const body = row && row.closest(".dock-body, .sbody");
+    if (row && body) {
+      const r = row.getBoundingClientRect(), v = body.getBoundingClientRect();
+      if (r.top < v.top) body.scrollTop += r.top - v.top - 8; else if (r.bottom > v.bottom) body.scrollTop += r.bottom - v.bottom + 8;
+    }
+  }
+}
+
+function zoomTo(frame, z, n, animate) {
+  const box = frame.querySelector(".mbox[data-vb]"); if (!box) return;
+  const l = LINES[n - 1]; const W = box.offsetWidth, H = box.offsetHeight;
+  const cx = ((l.b[0] + l.b[2]) / 2 / 1000 - .5) * W, cy = ((l.b[1] + l.b[3]) / 2 / 1000 - .5) * H;
+  setZoom(frame, { z, x: -cx * z, y: -cy * z }, animate);
+}
+function setZoom(frame, s, animate) {
+  const box = frame.querySelector(".mbox[data-vb]");
+  frame._zoom = s;
+  box.classList.toggle("anim", !!animate);
+  box.style.setProperty("--z", s.z);
+  box.style.transform = s.z === 1 ? "" : `translate(${s.x}px, ${s.y}px) scale(${s.z})`;
+  frame.querySelector(".stage")?.toggleAttribute("data-zoomed", s.z > 1);
+}
+
+function markerVisible(frame, n) {
+  const m = frame.querySelector(`.mk[data-n="${n}"]`), st = frame.querySelector(".stage, .surface");
+  if (!m || !st) return true;
+  const a = m.getBoundingClientRect(), b = st.getBoundingClientRect();
+  return a.left >= b.left && a.right <= b.right && a.top >= b.top + 56 && a.bottom <= b.bottom;
+}
+
+document.querySelectorAll("[data-frame]").forEach(frame => {
+  frame.querySelectorAll("section.tr").forEach(buildSection);
+  placeMarkers(frame);
+  if (frame.dataset.zoom) zoomTo(frame, Number(frame.dataset.zoom), Number(frame.dataset.sel), false);
+  applySelection(frame, false);
+
+  frame.addEventListener("click", e => {
+    const toggle = e.target.closest(".tr-head, [data-act='tr-toggle']");
+    if (toggle) {
+      const sec = frame.querySelector("section.tr"); if (!sec) return;
+      const open = sec.dataset.open !== "true";
+      sec.dataset.open = String(open);
+      sec.querySelector(".tr-head").setAttribute("aria-expanded", String(open));
+      frame.classList.toggle("show-markers", open);
+      if (frame.classList.contains("tabv")) {
+        frame.classList.toggle("reading", open);
+        frame.querySelector(".dim")?.toggleAttribute("hidden", open);
+        const sh = frame.querySelector(".sheet"); if (sh) { sh.classList.toggle("half", open); sh.style.height = open ? "" : "40%"; }
+        requestAnimationFrame(() => setTimeout(() => placeMarkers(frame) || applySelection(frame, false), 220));
+      }
+      const btn = frame.querySelector("[data-act='tr-toggle']");
+      if (btn) { btn.setAttribute("aria-pressed", String(open)); btn.classList.toggle("vbtn--on", open && btn.classList.contains("vbtn")); }
+      return;
+    }
+    const hit = e.target.closest(".mk, .tr-row");
+    if (!hit) return;
+    const n = hit.dataset.n;
+    frame.dataset.sel = frame.dataset.sel === n ? "" : n;
+    applySelection(frame, hit.classList.contains("mk"));
+    // Row picked while zoomed with its marker off screen: pan to it, keep the zoom level.
+    if (hit.classList.contains("tr-row") && frame._zoom && frame._zoom.z > 1 && frame.dataset.sel && LINES[n - 1].b && !markerVisible(frame, n)) zoomTo(frame, frame._zoom.z, Number(n), true);
+  });
+
+  if (frame.hasAttribute("data-zoomable")) {
+    const stage = frame.querySelector(".stage");
+    frame._zoom = { z: 1, x: 0, y: 0 };
+    stage.addEventListener("wheel", e => {
+      if (!e.ctrlKey) return; e.preventDefault();
+      const r = stage.getBoundingClientRect(), px = e.clientX - (r.left + r.width / 2), py = e.clientY - (r.top + r.height / 2);
+      const c = frame._zoom, z = Math.min(8, Math.max(1, c.z * Math.exp(-e.deltaY * .002)));
+      if (z === 1) return setZoom(frame, { z: 1, x: 0, y: 0 });
+      const k = z / c.z; setZoom(frame, { z, x: px - (px - c.x) * k, y: py - (py - c.y) * k });
+    }, { passive: false });
+    let pan = null;
+    stage.addEventListener("pointerdown", e => { if (frame._zoom.z === 1 || e.target.closest("button")) return; pan = { x: e.clientX, y: e.clientY }; stage.setPointerCapture(e.pointerId); });
+    stage.addEventListener("pointermove", e => { if (!pan) return; const c = frame._zoom; setZoom(frame, { z: c.z, x: c.x + e.clientX - pan.x, y: c.y + e.clientY - pan.y }); pan = { x: e.clientX, y: e.clientY }; });
+    stage.addEventListener("pointerup", () => { pan = null; });
+  }
+});
+window.addEventListener("resize", () => document.querySelectorAll("[data-frame]").forEach(f => { placeMarkers(f); applySelection(f, false); }));
+</script>
+</body>
+</html>

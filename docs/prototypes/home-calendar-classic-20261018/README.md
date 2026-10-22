@@ -1,6 +1,6 @@
 # Home month calendar, classic look (2026-10-18)
 
-Status: proposal (design mockup). App source is unchanged. Follows the user's request of 2026-10-18: the Home month calendar (HOME-CAL-001, spec in [`../home-calendar-20261017/README.md`](../home-calendar-20261017/README.md)) is hard to read; make it look like an ordinary calendar, Sunday to Saturday, even if it departs from the design theme (Samsung One UI Calendar as a reference).
+Status: proposal (design mockup). App source is unchanged. Follows the user's request of 2026-10-18: the Home month calendar (HOME-CAL-001, spec in [`../../archive/prototypes/home-calendar-20261017/README.md`](../../archive/prototypes/home-calendar-20261017/README.md)) is hard to read; make it look like an ordinary calendar, Sunday to Saturday, even if it departs from the design theme (Samsung One UI Calendar as a reference).
 
 Only the **grid's presentation** changes. Content, data, the day panel (PC), the day sheet (tablet), selection, keyboard, paging, privacy mode and the no-flash rules stay as in the HOME-CAL-001 spec.
 

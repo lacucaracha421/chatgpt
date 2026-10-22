@@ -1,9 +1,11 @@
 # Budget notes ("가계부") inside Lakomics Notes — design (2026-09-25)
 
+Scope correction — 2026-10-22: The simplified ledger has shipped. Current presentation follows [DESIGN Notes/Ledger](../../DESIGN.md#notes-and-ledger-accepted-2026-10-02) and Home calendar integration with day entry/edit and month total. The unimplemented status and alternatives below record the original research checkpoint.
+
 Status: Accepted in simplified form by the user on 2026-09-25 (section 7). Not implemented yet.
 
-- Mockups: `docs/prototypes/budget-notes-20260925/` (`index.html` plus PNG renders).
-- Builds on `docs/research/notes-v2-design-20260924.md` ("notes-v2") and its fixtures in `tests/fixtures/notes-v2/`.
+- Mockups: `docs/archive/prototypes/budget-notes-20260925/` (`index.html` plus PNG renders).
+- Builds on `docs/archive/research/notes-v2-design-20260924.md` ("notes-v2") and its fixtures in `tests/fixtures/notes-v2/`.
 
 ## 1. Request and scope
 
@@ -403,7 +405,7 @@ Deferred: rollover, installments, reminders before a charge, yearly report, a PI
   - `mobile-client/Notes.tsx` and `notes.css`; `src/notes/NotesView.tsx` and `notes.css`.
   - The server id pattern and the Rust notes limits (`notes/model.rs:11-21`).
   - `Cargo.toml` (`ring`, `sha2`).
-  - `docs/prototypes/mobile-design-20260925/` for style: top bar B and 60 px navigation.
+  - `docs/archive/prototypes/mobile-design-20260925/` for style: top bar B and 60 px navigation.
 - The mockups were re-rendered after the simplification with headless Google Chrome at DPR 1 (800 × 1232 tablet, 1440 × 900 PC) and inspected, with the annotations moved off the content. The numbers are fictional but consistent: 2,300,000 − 1,612,500 − 124,890 = 562,610.
 - Not verified:
   - Keypad feel and IME behaviour on the Tab S11.

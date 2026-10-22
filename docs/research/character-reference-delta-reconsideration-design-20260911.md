@@ -11,7 +11,7 @@ authorize implementation, production-library writes, a backfill, Git writes, or
 deployment.
 
 The proposal supplements the character-change policy in
-`character-autotag-steady-state-review-20260909.md`. The living backlog remains
+`../archive/research/character-autotag-steady-state-review-20260909.md`. The living backlog remains
 the source for task status and priority.
 
 This design covers **adding learned references**. Removing or replacing an

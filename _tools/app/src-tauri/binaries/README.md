@@ -3,7 +3,8 @@
 Lakomics는 Windows x86_64에서 FFmpeg와 FFprobe를 Tauri sidecar로 묶습니다. 실행 파일과 DLL은 저장소에 커밋하지 않고 다음 명령으로 고정된 배포본을 내려받습니다.
 
 ```powershell
-cd C:\chatgpt
+# From the repository root (current Windows example):
+cd V:\chatgpt
 powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1
 ```
 

@@ -2,6 +2,8 @@
 
 Living source of truth for **active** Lakomics work only. Completed and superseded records live in [lakomics-completed.md](lakomics-completed.md).
 
+Amended 2026-10-22 at `2e8db984`: current member-run/favourite-character/picker source scope reconciled; three commit-backed DONE entries transferred with old anchors retained. The 2026-10-18 reconciliation below remains dated evidence. No new runtime/device/deployment check.
+
 Reconciled 2026-10-18 against `main` at `9bb8e8ad`, using commit bodies since 2026-10-13, current source and the controller's dated delivery/acceptance record; no new network, runtime, device or production access. Finished slices are in the [2026-10-18 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-18--home-cards-tablet-structure-and-performance). Unmentioned later device/native checks count as passed under the user's 2026-10-12 rule; this is recorded acceptance, not a new observation. Older unresolved audit claims keep their dated unverified labels; external references were not revalidated online.
 
 ## Current priority
@@ -10,7 +12,7 @@ Updated 2026-10-18 against `main` at `9bb8e8ad`. PC remains canonical for design
 
 1. **`PERF-20261018`** — only item 1 remains: measure PC/tablet pack opening, reveal and album performance before optimizing (see [section](#perf-20261018)).
 2. **`PERF-ALL-001`** — startup character DB holds reported resolved by the user (2026-10-18); retain other measured performance scenarios. Manga catalog UI freeze fixes are delivered (see [section](#perf-all-001--whole-app-benchmark-and-optimization-pass)).
-3. **`CHAR-CLAUDE-001`** — slice 3 built 2026-10-18 (experiment on 118 hand-decided images: Sonnet ~97–100% for 2–5-member series, ~80–89% precision for 6+, "none" never correct; app feature: one-time backlog run with 2–5-member auto-accept and 6+ recommendations, ongoing auto until 2026-10-26, $45 run cap, 기타 subfolders excluded) — next: user starts the backlog run after reviewing counts/estimate; tablet review/feed retirement remains low priority (see [section](#char-claude-001)).
+3. **`CHAR-CLAUDE-001`** — member runs and refined policy are delivered (`d6c5f752`, `0d955f1b`, `10d383a1`, `57e1eb1a`); tablet review/feed retirement remains low priority. See the [current scope](#char-claude-001) and [source checkpoint](lakomics-completed.md#source-checkpoint--2026-10-22).
 4. **`COLLECTOR-MENU-SCOPE-001`** — retain unconfirmed site-by-site menu gaps and the later save-X-post/link/page idea; selection chip and broader menu support shipped in 3.5.41.
 5. **`CLOUD-POST-001` step 3 with `SEC-TOKEN-001`** — keep the calendar/wishlist fallback; AV pick retirement is source-complete.
 6. **`COLLECTOR-IMGTEXT-001`** — other hotlink-protected hosts; pixiv is delivered.
@@ -31,8 +33,8 @@ User rule (2026-10-12): a device/native check the user does not mention afterwar
 Status: `PARTIAL` — user request 2026-10-22; user picked card A + detail A. Server module deployed 2026-10-22 (uncommitted at deploy); PC release build opens the view and the add picker (271 characters listed); grid/detail feedback round 1 (quiet whole-grid fade, no profile scrollbar, no count on the 캐릭터 button) applied; tablet 0.9.139 installed 2026-10-22 (work covers now load; works row wraps instead of scrolling), device check pending. A curated "캐릭터" view in Collections (beside 쇼케이스) that references existing asset characters; it is not a new Collection type and does not duplicate character records.
 
 - Grid of user-chosen representative images in a user-set order; opening one shows a profile (birthday, height, appearing works and similar basics), links to the related Collection works, and the character's assets gathered automatically from the asset character folders.
-- First pass: only characters that already exist in 에셋. Characters without assets come later.
-- **FAV-CHAR-002 (user, 2026-10-22, in progress):** add characters that are not in 에셋 by name (manual entries). They show a name card until the user drops or pastes an image on the PC, which is imported as a cover-only image (excluded from Asset lists/counts/search/Home; manual covers imported before this are marked on favourite reads) and becomes the cover; 에셋 캐릭터와 연결 later turns the entry into a normal one. Server deployed 2026-10-22; PC build with hero open and Ctrl+V paste running; tablet 0.9.140 installed (name cards, 이름으로 추가, link, hero). Cover-only exclusion (2026-10-22): PC build running and server deployed; a pasted image that already exists as an asset stays a normal asset.
+- The initial Asset-character-only scope is superseded by shipped FAV-CHAR-002 manual entries/covers (`c8a8dc63`, `d6d40389`). Keep this item PARTIAL for the explicitly pending favourite-character feedback; source delivery does not clear that check.
+- **FAV-CHAR-002 (source delivered 2026-10-22; feedback remains under FAV-CHAR-001):** add characters that are not in 에셋 by name (manual entries). They show a name card until the user drops or pastes an image on the PC, which is imported as a cover-only image (excluded from Asset lists/counts/search/Home; manual covers imported before this are marked on favourite reads) and becomes the cover; 에셋 캐릭터와 연결 later turns the entry into a normal one. Server deployed 2026-10-22; PC build with hero open and Ctrl+V paste running; tablet 0.9.140 installed (name cards, 이름으로 추가, link, hero). Cover-only exclusion (2026-10-22): PC build running and server deployed; a pasted image that already exists as an asset stays a normal asset.
 - PC first, tablet in the same round. HTML mockup first (`docs/prototypes/fav-characters-20261022/`).
 
 
@@ -49,7 +51,7 @@ Status: `PARTIAL` — original item 1 is the only remainder. No PC/tablet pack-o
 
 Status: `PARTIAL` — slices 1 and 1b are committed in `310b37b4`, slice 2 in `38a3ff8d` (live since 2026-10-13); delivered decisions and experiment evidence are in the [2026-10-13 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-13--claude-character-decisions-arca-picker-tablet-batches-and-motion). PC automatic judgments use Haiku yes → accept, otherwise Sonnet no → reject / yes with confidence ≥ 0.9 → accept; the rest stays for the user. Automatic judgments are never learning examples or user judgments, and manual decisions take precedence. References are prompt-cached and the character's own references are skipped. Below 12% image height an accept stays for the user; full images are retained because the crop trial worsened errors.
 
-- **Slice 3 — series member identification experiment (user 2026-10-13):** ask which registered members of a series appear (several or none) in series-folder images with no character, decision or recommendation. The refined read-only count was 2,831 images (317 in the last 30 days, ~10/day); most earlier manual accepts were bursts in 태거 확인 and are already covered by the cascade. Narrow to ~5 recognition candidates, then ask Claude; "none" may route to 기타. Experiment on past manual decisions first, measuring accuracy by series size and cost; the ~$30–60 Sonnet backlog estimate is not a measured bill.
+- **Slice 3 — delivered member runs:** `d6c5f752`, refined by `0d955f1b`, `10d383a1`, `57e1eb1a`. Eligible series images include unassigned images and those with exactly one accepted member when other members remain undecided; pending tagger/Claude review is excluded and manual decisions win. S36 references are prepared on demand. For 2–5 members, Sonnet can auto-accept at ≥0.9 and recommends below; 6+ uses Haiku alone for recommendations. “None” is not a reliable auto-filing result. Backlog runs show counts/estimate and an editable spending cap (initially $45); the initial ongoing mode expires after 2026-10-26, with a separate monthly-budget mode available afterwards. The recorded 2,244-image run finished at $12.39 with 207 automatic acceptances and recommendations on 696 images (`57e1eb1a`); the earlier 2,831-image estimate is not the current queue.
 - **Related cleanup (low):** retire the tablet 캐릭터 확인 screen and review-feed publication when the tablet is next touched; character recognition remains PC-only. A server deployment is required for retirement.
 
 
@@ -223,15 +225,13 @@ Status: `TODO` — low priority; [review](../research/server-review-2026-09-24.m
 
 # Works / Collections
 
+<a id="collection-name-001--explain-names-reserved-by-trashed-collections-2026-10-18"></a>
 <a id="collection-name-001"></a>
-## COLLECTION-NAME-001 — Explain names reserved by trashed Collections (2026-10-18)
+Completed record: [COLLECTION-NAME-001](lakomics-completed.md#collection-name-001).
 
-Status: `DONE` 2026-10-18 (uncommitted at writing; see the commit that closes it) — user requested next. On Collection create/rename, explain when a trashed Collection holds the name and offer guidance to restore it or choose another name, instead of a silent conflict. Follow the AV inbox apply behaviour delivered in `a49bc846`; that fix does not cover general create/rename. PC first, tablet in the same round.
-
+<a id="manga-spine-size-001--manga-bookshelf-spine-size-2026-10-18"></a>
 <a id="manga-spine-size-001"></a>
-## MANGA-SPINE-SIZE-001 — Manga bookshelf spine size (2026-10-18)
-
-Status: `DONE` 2026-10-18 (uncommitted at writing; see the commit that closes it) — user requested next. Add 책등 크기 to the manga 책장 like game/AV, using the shared View controls; PC first, tablet in the same round. Current size controls are gated to game/AV. Larger spine thumbnails for 150% scaling are dropped (user 2026-10-18: 150% is not used).
+Completed record: [MANGA-SPINE-SIZE-001](lakomics-completed.md#manga-spine-size-001).
 
 <a id="long-001--av-metadatacover-acquisition-and-candidate-selection"></a>
 ## LONG-001 — AV lookup rollout
@@ -247,15 +247,8 @@ Status: `IDEA` — user 2026-10-11: put readable manga volume files into Collect
 - **Storage direction to evaluate:** originals stay on the PC library disk; a lighter reading copy goes to object storage (Cloudflare R2, ~$0.015/GB-month, no egress fee; ~$3/month for 200 GB) because the new VPS disk (80 GB) cannot hold it; the tablet streams pages on demand and keeps only recently read volumes cached, like the catalog reader.
 - **Open questions:** import flow (attach files to a volume, folder/zip/cbz), which volumes count (owned only?), reading position sync between PC and tablet, privacy mode and NSFW masking in the reader, and whether the catalog reader component is reused.
 
-## IMG-COVER-001 — Paper-colour translation covers overlap (2026-10-21)
-
-Status: `DONE` 2026-10-21 (3.5.58: covers grow only up to the midpoint toward neighbouring text, text clips to its own cover, paper text may shrink to 11px, cramped lines and busy backgrounds become card notes, crisper edge; user checked on the tablet). Original report: The selectable 지면색/카드 cover (mockup `docs/prototypes/overlay-cover-20261021/`, option C) works, but on a JoJo fan comic page the 지면색 covers collide:
-
-- Neighbouring balloons: covers stay on their own boxes and every text sits above every cover, so the Korean of one balloon (맡겨달라고) runs into the next (부서진 베이글 장비가 잔뜩 있어서~… 부탁해~).
-- A small, dense in-picture caption (a paper note) got a long Korean sentence that spills far outside its cover and over another balloon's text (죠스케 군~), unreadable.
-- The soft 3 px edge reads as a white smear over line art where the cover bleeds past the balloon.
-
-Next: keep texts inside their own cover (shrink or clip, or fall back to a card note for boxes that cannot fit), let overlapping covers resolve against each other, and reconsider the bleed/blur on non-flat backgrounds. Decide before committing 3.5.58.
+<a id="img-cover-001--paper-colour-translation-covers-overlap-2026-10-21"></a>
+Completed record: [IMG-COVER-001](lakomics-completed.md#img-cover-001).
 
 <a id="somi-001--in-app-kone-somisoft-board-browsing-and-reading"></a>
 ## SOMI-001 — In-app kone.gg 소미소프트 board browsing and reading (2026-10-21)
@@ -307,7 +300,7 @@ These two user-selected candidates are **new top-level Lakomics capabilities**, 
 Status: `IDEA` — user 2026-10-08 selected as a promising **independent utility area**; not approved to build. Purpose: **perform a useful one-off operation now**, not catalog/classify/keep the input as an Asset. The PC user drops or selects any supported external file/folder; no Library or Collection membership is created by choosing files.
 - **Proposed MVP:** a compact PC workspace with drag/drop and file picker; inspect file type/size and choose one explicit operation: image conversion (`PNG/JPEG/WebP`), bulk image resize/compression, or video-to-`MP4` compatibility conversion via the available FFmpeg capability where feasible. Preview the planned output filenames and destination, run a bounded/cancellable job with progress and per-file failures, then **open/reveal output**. Never silently overwrite, delete, relabel or import originals; avoid filename collisions; allow a user-selected output location. The first small tool set must match *actual* frequent user tasks, not a generic editor.
 - **Presets are the feature:** e.g. `웹 업로드용` (size/dimensions/conversion settings) and `영상 호환 변환` (predictable MP4 format), with settings and last-used preference visible. Inspect whether an image has animation, multiple pages or alpha and explain loss before converting.
-- **Later, only if repeated use shows demand:** archive/ZIP/CBZ inspection/extraction/repack, batch format-specific operations, drag/drop out, explicit **전송으로 보내기**, explicit save/import to the Lakomics Library, or passing output to the future Arca Live picker (`COLLECTOR-PICKER-001`). These are **integration options**, not prerequisites or automatic side effects.
+- **Later, only if repeated use shows demand:** archive/ZIP/CBZ inspection/extraction/repack, batch format-specific operations, drag/drop out, explicit **전송으로 보내기**, explicit save/import to the Lakomics Library, or passing output to the shipped Arca Live picker (COLLECTOR-PICKER-001; a future Workshop handoff is still only an integration option). These are **integration options**, not prerequisites or automatic side effects.
 - **Technical and safety boundaries:** reuse existing media/FFmpeg code cautiously without coupling to managed asset lifecycle; constrain archive extraction paths/size against zip-slip and decompression bombs; bound memory/parallelism and huge-video jobs, sanitize filenames, treat input as untrusted, support cancellation. Native PC first; tablet equivalence is not implied. Benchmark video/audio codecs against the bundled FFmpeg before promising a preset.
 - **Acceptance target:** the user processes external files, obtains independently saved output, and continues elsewhere **without adding the inputs or outputs to Lakomics**.
 
@@ -337,7 +330,7 @@ Status: `PARTIAL` — authority command work in steps 1–6 is implemented; unme
 1. Front/spine/back authority artwork: `5036ed28`.
 2. AV details/cast: server + PC `5f7ef78d` (deployed 2026-10-07), tablet `47c4fab8` / 0.9.42; field CAS, creditName and shared limits.
 3. People memo/favourite/portrait: PC/server `a182f38e`, tablet memo/favourite `cc1c35c7`; tablet StashDB photo/clear `c74deb8a`. The originally requested arbitrary tablet portrait crop is not established by that image-only route (unverified 2026-10-10); keep it as residual scope.
-4. StashDB server relay/profile/photo: `170de2cc`, PC `a3c7f844`, preview `2b77c8a5`, tablet `c74deb8a`; deployed/key configured per [handoff](../operations/handoff-2026-10-09-linux-laptop.md). Profiles belong to people, not work bindings.
+4. StashDB server relay/profile/photo: `170de2cc`, PC `a3c7f844`, preview `2b77c8a5`, tablet `c74deb8a`; deployed/key configured per [handoff](../archive/operations/handoff-2026-10-09-linux-laptop.md). Profiles belong to people, not work bindings.
 5. Server inbox: `5c3ea3d9` deployed; PC `278c1e57`, tablet `dcb7e0c4` / 0.9.48. Durable apply and one-time migration exist; do not describe lookup as local. Contract: [AV inbox](../research/av-inbox-server-20261009.md).
 6. Manual profiles/names: server `ce23a0a3` deployed, PC/tablet `a9d68042` / 0.9.49; compact editor/copy controls `41c4366f`, `595de29b`. Contract: [profile editing](../research/av-person-profile-edit-20261009.md).
 
@@ -397,9 +390,9 @@ Reader gesture/loading references: Mihon (no resume/following features); writing
 
 Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric definitions (unverified 2026-10-10); never infer activity from file timestamps. Source exists; native acceptance was closed 2026-10-05.
 
-# Browser collector — `extension-list/` ("Lakomics Companion" 3.5.40)
+# Browser collector — `extension-list/` ("Lakomics Companion" 3.5.64)
 
-Since 2026-10-12 the collector is named **Lakomics Companion** (current manifest 3.5.40). Delivered work is recorded in the archive: X translation port, stuck fix and speed; YouTube subtitles with a server cache; custom right-click menu; image-text and page-body translation. The separate standalone extension `V:\yt-subs` ("자막다듬이" 1.0.2, its own git repo) stays independent; the collector hides its own YouTube button when the standalone one is on the page. Source rules: `extension-list/AGENTS.md`; behavior: [extension-list/README.md](../../extension-list/README.md).
+Since 2026-10-12 the collector is named **Lakomics Companion** (current source manifest 3.5.64; checked 2026-10-22). Delivered work is recorded in the archive: X translation port, stuck fix and speed; YouTube subtitles with a server cache; custom right-click menu; image-text and page-body translation. The separate standalone extension `V:\yt-subs` ("자막다듬이" 1.0.2, its own git repo) stays independent; the collector hides its own YouTube button when the standalone one is on the page. Source rules: `extension-list/AGENTS.md`; behavior: [extension-list/README.md](../../extension-list/README.md).
 
 <a id="collector-translate-001--context-aware-web-page-translation"></a>
 ## COLLECTOR-TRANSLATE-001 — Context-aware web page translation in the collector (2026-10-12)

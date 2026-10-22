@@ -1,74 +1,31 @@
-# Lakomics X Collector Privacy Policy
+# Lakomics Companion Privacy Policy
 
-Effective date: August 30, 2026
+Implementation/data-flow reconciliation: 2026-10-22, source `2e8db984` (Companion 3.5.64). This updates the August 30, 2026 description; it is not a legal review.
 
-Lakomics X Collector is a browser extension for collecting and organizing media from X (Twitter) into a personal Lakomics library. This policy explains what data the extension processes and how that data is used.
+## Data processed and purpose
 
-## Data the extension may process
+Depending on enabled features and user actions, Companion processes:
 
-Depending on the features the user chooses to use, Lakomics X Collector may process:
+- Selected media, source/page URLs, author identifiers, publication dates and classification choices for capture and saved-media indicators, on X and other supported pages.
+- X posts, selected text and nearby context, visible page blocks, and user dictionary terms for translation. Page translation can send navigation, captions and comments as well as body text; fields and excluded content are skipped.
+- Image bytes (including a canvas fallback), resized image content, recognized original/Korean lines and region boxes for image translation. Permanent image saves can retain translated lines/boxes; paper colour is display-only.
+- YouTube video/track identifiers, caption text, timing, glossary and speaker settings for subtitle cleanup/translation. Optional PC ASR sends audio to the configured local service for Japanese transcription/diarization, then text to the configured subtitle provider; it can fall back to YouTube captions.
+- Connection/pairing credentials, provider keys, preferences, classification caches, local history and completed subtitles needed for these features.
 
-- X/Twitter website content such as post text, post URLs, image and video URLs, author handles, publication timestamps, and related media metadata.
-- User-selected classification/tag information used to organize saved media in Lakomics.
-- Lakomics connection settings and authentication credentials entered by the user.
-- Optional translation-provider settings and API credentials entered by the user.
-- Extension preferences such as radial-menu layout, pinned classifications, saved-media markers, gallery preferences, and download behavior.
+## Storage and Lakomics server
 
-Lakomics X Collector does not intentionally collect health information, financial or payment information, precise location, credit information, or data for advertising profiles.
+Browser extension storage holds settings, credentials and caches. Page scripts do not receive provider keys. Paired profile/settings synchronization stores the supported portable settings in the user's Lakomics scope; device connection secrets remain governed by pairing and the settings whitelist. Completed subtitles can be shared through `/v1/extension/subtitles`; partial failures stay local. Local fallback remains available when shared storage is unavailable.
 
-## How data is used
+Permanent capture sends source/media URLs and relevant metadata to the paired Lakomics server, which retrieves and stores media. Library state and captured media remain until removed through that setup. The Arca picker reads selected library folders/characters/images through the PC connection or paired server and passes chosen images to Arca's upload handling; it does not submit posts.
 
-Data is processed only to provide the extension's user-facing features, including:
+## Optional providers
 
-- Saving user-selected X images, videos, and related metadata.
-- Organizing collected media with Lakomics classifications and radial tagging.
-- Checking whether media has already been saved.
-- Sending selected media metadata or capture requests to a Lakomics server configured by the user.
-- Translating X post text when the user enables and invokes a supported translation provider.
-- Maintaining extension settings and local cached state.
+Text translation uses the configured OpenRouter, Anthropic or Neuralwatt/DeepSeek path. Image translation supports the configured Claude, Gemini or Neuralwatt DeepSeek vision option. YouTube processing uses Anthropic and the shared dictionary/key settings; it has no Gemini subtitle provider. Credentials are used by the extension worker for the selected provider. Content sent to a provider is subject to that provider's retention practices. See the [Companion guide](extension-list/README.md) for current model/settings choices and [local ASR setup](_tools/asr/README.md) for the separate PC service.
 
-The extension does not use user data for advertising, credit scoring, lending decisions, or unrelated analytics.
+## Downloads and control
 
-## Local storage
+Temporary downloads are explicit actions, separate from permanent server capture and its retry workflow. Server failure is not an automatic legacy download fallback. Local file retention follows the user's filesystem/download controls.
 
-Extension settings, connection information, optional API credentials, cached classifications, saved-media state, and interface preferences may be stored in the browser's extension storage on the user's device.
+Disable optional features or excluded sites in settings, clear local caches/storage, or uninstall the extension. Subtitle controls can clear this browser's completed/resume data or delete all shared subtitle entries in the paired scope; that does not clear the API key, dictionary or X translation cache. Remove server media/settings through the relevant Lakomics controls. Local settings/caches otherwise remain until changed or cleared; provider retention is controlled by the provider.
 
-This locally stored data remains until it is changed or removed by the user, the extension data is cleared, or the extension is uninstalled.
-
-## Data sent to Lakomics
-
-When the user enables Lakomics server features or saves media through the server capture workflow, the extension may send information such as the source post URL, media URL, classification identifier, publication timestamp, and related metadata to the Lakomics server configured by the user.
-
-Media and metadata stored by Lakomics remain under the user's Lakomics setup and are retained until removed according to that setup.
-
-## Optional translation services
-
-When the user enables translation and requests a translation, relevant X post text may be sent to the translation service selected or configured by the user. Supported integrations may include services such as OpenRouter, Google Gemini, Ollama, or compatible AI gateways.
-
-Lakomics X Collector sends data to these services only to perform the requested translation. Data handled by an external translation provider is also subject to that provider's own privacy and retention practices.
-
-## Downloads
-
-When the user chooses to save media locally, the extension may use the browser downloads API to save images, videos, and related metadata files to the user's device. The extension may also use local downloading as a fallback when a configured Lakomics server is unavailable.
-
-## Data sharing and sale
-
-Lakomics X Collector does not sell user data.
-
-User data is not transferred to third parties except when necessary to provide a feature explicitly requested or configured by the user, such as sending selected content to the user's Lakomics server or to a user-selected translation service.
-
-## Remote code
-
-Lakomics X Collector does not execute remotely hosted JavaScript or other remotely hosted executable code. Executable extension code is included in the distributed extension package. Network requests are used only for data transfer, media retrieval, Lakomics communication, and optional translation API requests.
-
-## Tracking and analytics
-
-Lakomics X Collector does not include advertising trackers and does not collect browsing history or user behavior for advertising or cross-site profiling.
-
-## User control
-
-Users can disable server capture, translation integrations, or other optional features in the extension settings. Users can also remove locally stored extension data by clearing the extension's storage or uninstalling the extension. Data stored in a user-controlled Lakomics server can be removed through that Lakomics setup.
-
-## Changes to this policy
-
-This policy may be updated when the extension's data practices or features change. Material changes will be reflected in the version of this document published with the project.
+Companion does not sell user data, use advertising trackers or execute remotely hosted executable code. Network requests retrieve content, communicate with the user's Lakomics setup, upload selected images to Arca, or call configured translation services. Data is not used for advertising or unrelated profiling.

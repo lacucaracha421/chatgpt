@@ -1,6 +1,8 @@
 # 로컬 권위를 유지하며 선택적 클라우드 복제를 허용한다
 
-Status: Accepted
+Status amendment — 2026-10-22: Partially superseded by ADR-0036/0038 and activated Collections authority (amended 2026-10-22). Server-owned domains and cloud-first capture replace universal local authority and PC-only media preparation; local replicas/offline media principles remain. Earlier ownership statements below are historical.
+
+Original status: Accepted (see the current amendment above).
 
 Clarifies: ADR-0003 Local first
 

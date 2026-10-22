@@ -14,7 +14,7 @@ through the Cloud API, and a browser collector saves media while browsing.
 | Cloud API | Serve shared library reads, authoritative changes, captures, releases, cards, and transfers | FastAPI server and object storage | [Cloud reference](docs/agents/cloud-capture.md) |
 | Browser collector | Capture media, translate text/images, process YouTube subtitles, and insert library images into Arca Live posts | Chromium MV3; desktop browsers and supported Android extension browsers | [Lakomics Companion](extension-list/README.md) |
 
-This guide describes reachable features in the source checked on 2026-10-17,
+This guide describes reachable features in the source checked on 2026-10-22 at `2e8db984`,
 not installed-client versions or a new live-service/device verification.
 Features are for **PC and tablet** unless marked otherwise. Connection,
 publication, provider credentials, or a running PC may be required as stated.
@@ -35,9 +35,11 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 
 ### Calendar and things to check
 
-- Check the release calendar (발매 캘린더), including game, movie, anime, and linked manga releases, and open a release's details.
+- Browse a Sunday–Saturday month grid of saved images and game, movie, anime, and linked manga releases; select a day to inspect its entries.
+- Write a selected-day memo, add or edit ledger entries, and inspect the monthly total; subscriptions and wishlist lists start folded.
+- Korean lunar/election holiday dates are supplied for 2026–2027; later years need an updated holiday table.
 - See collected-image counts by date and reopen the corresponding Assets from the calendar.
-- See ledger payment reminders alongside releases and open their associated note.
+- See ledger payment reminders alongside releases and open their associated note; daily cards sit beside the compact Transfer column.
 - Open Today's tasks (오늘 할 것) to reach character confirmation, similar-image review, Unsorted Assets, pending captures, or received AV codes where applicable.
 - Check server/device connection summaries and open the relevant destination when work is waiting.
 - Open character Confirmation (확인) on PC; tablet confirmation appears when the PC has published the review capability and candidates.
@@ -51,10 +53,11 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 - Open a card full-screen on PC and tablet; use original-Asset/character-folder links on PC where available.
 - Move unwanted cards to the album's own Trash and restore them there, separately from Asset Trash.
 
-### Quick memo and kept links
+<a id="quick-memo-and-kept-links"></a>
+### Quick memo, links, and transfer
 
 - Write in Quick memo (빠른 메모) without leaving Home and keep it with synchronized Notes data.
-- Paste a URL into Link keeping (링크 보관), retain its title/available preview, and reopen it; PC also supports dropping, copying, and removing links.
+- Open Link keeping (링크 보관) from More or Find, paste a URL, retain its title/available preview, and reopen it; PC also supports dropping, copying, and removing links.
 - Browse all kept links or only image links and import available images with Images to Assets (이미지를 에셋으로) — PC-only expanded link tools.
 - Drop files onto Home's Transfer tile (전송) to send them to another device — PC-only; a Home file drop is a transfer action.
 
@@ -78,7 +81,7 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 - Sort by newest, oldest, Likes, or random order, and reshuffle the random view.
 - Filter images/videos and square/landscape/portrait proportions, use available video-length controls, and clear filters from their active chip.
 - Jump through long lists with the scrubber's date or position feedback.
-- Select several Assets for classification, Album, Like, or Trash changes; tablet offers touch selection.
+- Select several Assets for classification, Album, Like, or Trash changes; tablet offers select all, drag selection and long-press action sheets.
 - Use click, Ctrl-click, Shift-click, Ctrl+A for loaded Assets, and keyboard focus navigation — PC-only.
 - Open a context menu without changing selection — PC-only; actions target the pointed Asset or the applicable selection.
 - Open Information (정보) for an Asset or selection; PC uses a docked panel and tablet a touch-sized sheet.
@@ -87,7 +90,8 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 
 ### Classification folders, Albums, and Likes
 
-- Create/rename classification folders on PC and child folders on tablet; move/delete folders and edit classification icons/colors on PC.
+- Create/rename classification folders on PC and child folders on tablet; edit folder icons/colors on either client. Folder move/delete remain PC-only.
+- Share pinned folders across clients; PC offers an accordion, follow-current-location and recent-folder controls. Tablet offers a folder drawer, recent destinations and long-press action sheets.
 - Move Assets between classifications; each Asset has at most one direct classification, while parent views can include descendants.
 - Browse child-folder shelves and breadcrumbs, and distinguish directly stored images (미분류) from the full descendant scope (전체).
 - Reorder classification folders/shelf entries on PC; the published order is used by tablet navigation and the collector.
@@ -167,6 +171,9 @@ a Collection represents a Work. Online Catalog is a separate browsing area.
 - Let the PC classify new/pending images using reference recognition and tag evidence; manual judgments provide learning feedback.
 - Enable/pause automation, broader parent-folder recognition, and reference reinforcement in Settings → Library — PC-only.
 - Enable Claude review for clear automatic judgments, leaving ambiguous cases in Confirmation — PC-only, with an Anthropic key; images/references are sent to Anthropic.
+- Run series-member identification on eligible series images, including images with one accepted character when other members remain undecided; pending review and manual decisions are protected.
+- For 2–5-member series, high-confidence Sonnet results can be accepted automatically; 6+ member series use Haiku-only recommendations for user confirmation. A “none” result does not guarantee automatic filing.
+- Prepare missing recognition references on demand and inspect a backlog run’s counts, estimate and spending limit before starting — PC-only.
 - Inspect recognition, learning examples, and decision status in Settings → Advanced → Character recognition status (캐릭터 인식 상태) — PC-only.
 
 See the [character publication contract](docs/agents/mobile-character-contract.md)
@@ -178,9 +185,10 @@ for tablet reads and the PC's recognition responsibilities.
 
 - Switch Games (게임), Manga (만화), Movies (영화), and AV: typed Collections representing Works.
 - Browse flat cover Grid (격자) or physical Shelf (선반), adjust density, and retain view choices per type.
-- Open Bookshelf (책장) for manga volume spines and game/AV case spines; adjust game/AV spine size.
+- Open Bookshelf (책장) for manga volume spines and game/AV case spines; adjust manga/game/AV spine size.
 - Group supported shelves by device/year or leave them ungrouped; sort by release date, added date, or title.
 - Search Work titles and filter by an exact personal rating or Unrated (미평가).
+- Pull a book/case out from its shelf, turn it, or open its details.
 - Open Work artwork/facts, turn/zoom and open/close a supported 3D book/case, or reset to Front (정면으로).
 - Browse manga volume covers/spines, game platform cases, AV jackets, and movie posters/backdrops.
 - Create/edit a Work through the available Collection forms; tablet creation requires Collections authority capability.
@@ -198,6 +206,7 @@ for tablet reads and the PC's recognition responsibilities.
 ### Manga Collections and releases
 
 - Add/connect a manga Work through MangaDex; connect Kakao separately for Korean published volumes and dates.
+- Select multiple Kakao series (up to 40), map parts with their own volume numbering and ranges, and clean up obsolete ranges when changing the selection without changing the Work’s identity.
 - Browse numbered volumes/alternate editions, choose the displayed edition, and inspect covers in the book view.
 - Record owned-volume counts and inspect owned, unowned, and upcoming volumes on the bookshelf.
 - Enable Release Watch (신간 감시) for a supported binding, refresh information, and review unacknowledged changes in New releases (신간).
@@ -210,11 +219,18 @@ for tablet reads and the PC's recognition responsibilities.
 - Inspect synopsis, production facts, external scores, and season information when supplied by the connected record.
 - Keep personal ratings/notes alongside provider information without treating external scores as your rating.
 
+### Favourite characters
+
+- Open Characters (캐릭터) beside Showcase to curate favourite characters in your own order; this is separate from the four Work types.
+- Choose representative images and open a profile, related Works, and automatically gathered character Assets with cover-to-detail transitions.
+- Add a character by name without an Asset character; link it to an Asset character later. Paste or drop a cover image on PC.
+- Newly imported cover-only images stay out of Asset lists, counts, search and Home. Reusing an existing Asset as a cover keeps it an ordinary Asset.
+
 ### Showcase and release wishlist
 
 - Add/remove Works in Showcase (쇼케이스) independently of personal ratings and browse the curated display by type.
 - Arrange Showcase order on PC; tablet reads the shared selection and offers supported Showcase changes.
-- Open the release calendar (발매 캘린더) for games, movies, and anime; search and narrow to Interest (관심) entries.
+- Open the separate text-list release calendar (발매 캘린더) for games, movies, and anime; search and narrow to Interest (관심) entries.
 - Add/remove release wishlist entries and acknowledge release notifications; the server shares this state between PC and tablet.
 
 See [Works boundaries](docs/agents/lakomics-works-handoff-v2.md) and
@@ -225,7 +241,7 @@ See [Works boundaries](docs/agents/lakomics-works-handoff-v2.md) and
 ### Works, people, and jackets
 
 - Browse AV Works/performer views in Collections, open performer pages, and follow related Works.
-- Edit product code, release information, maker/label/series, performers/directors, and personal notes through AV controls.
+- Edit product code, release information, maker/label/series, performers, and personal notes through AV controls.
 - Inspect alternate names, portraits, profile facts, and library Works for linked people; edit supported personal/profile fields.
 - Choose jacket front/spine/back artwork — PC-only for local-file jacket import/cropping.
 - Search/refresh StashDB profiles and choose portraits when the server/provider is configured.
@@ -370,8 +386,9 @@ See [local ASR setup](_tools/asr/README.md); this service is PC-only.
 - Open the custom menu on supported HTTP(S) pages/frames, selections, links, images, and media; Shift+right-click keeps the browser menu.
 - Copy links/images, download pages/posters/current video frames where allowed, or send AV codes through Cover lookup (표지 찾기).
 - Exclude sites or disable the menu; protected pages, DRM/CORS, and site handling can limit actions.
-- Open Arca Live's post-editor image panel via toolbar or Alt+Shift+L, choose folder/character/group, preview random library images, and insert selections.
-- Use the picker through PC's read-only connection or tablet's server relay; PC availability is required to supply picker data.
+- Open Arca Live's post-editor image panel via toolbar or Alt+Shift+L; choose a folder/character/group, browse random or newest images, load more newest results, and insert selections.
+- Search folders/characters in one flat list with Up/Down/Enter; use the docked desktop panel or portrait tablet sheet.
+- The picker tries the PC connection first and falls back to the paired server; tablet uses the server relay. Unpublished PC-only changes need publication before they appear through the server.
 - Insert using Arca's paste/upload handling and close via controls/tablet swipe; the picker does not submit posts.
 
 See the [collector guide](extension-list/README.md) for gestures and pairing.
@@ -391,8 +408,8 @@ See the [collector guide](extension-list/README.md) for gestures and pairing.
 
 - Open combined Trash (휴지통) for Assets, Collections, and Notes and restore records of the selected kind.
 - Set PC Asset Trash retention, disable automatic deletion, or explicitly empty Asset Trash.
-- Restore a local metadata backup in Settings → Advanced; management-data recovery does not replace missing originals.
-- Create a server recovery point or use server restore/replication repair controls from PC advanced settings.
+- Metadata recovery does not replace missing originals. Full-database snapshot restore is fenced after server authority adoption; use only the recovery actions available for the active library and follow the [migration guide](docs/operations/pc-migration.md).
+- Inspect server recovery points and available replica/replication repair controls in PC advanced settings; snapshot controls may be unavailable under active authority.
 - Create/open an encrypted Private Vault (비밀 보관함), manage password/recovery setup, and lock it independently of Privacy mode — PC-only setup.
 - Import vault images/videos/folders, organize folders, export media, and manage vault Trash — PC-only management.
 - Browse/view an unlocked attached vault on tablet; it is separate from normal Assets and Notes.

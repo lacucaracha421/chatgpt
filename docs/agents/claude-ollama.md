@@ -1,5 +1,7 @@
 # Claude Code with Ollama Cloud
 
+Known tooling limitation — 2026-10-22: `scripts/claude-ollama.ps1` still hard-codes the obsolete `C:\chatgpt` checkout. The current Windows checkout is `V:\chatgpt`; the procedure below is not a working launch instruction for it. A wrapper repair requires a separate code task. This pass did not launch Ollama or query model availability.
+
 The repository launcher delegates to `ollama launch claude --model <Model>` and defaults to `glm-5.3-flash:cloud`. The script itself does not edit PATH or machine-wide settings; Ollama/Claude own their launch and authentication behavior.
 
 ## First-time sign-in

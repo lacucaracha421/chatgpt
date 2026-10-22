@@ -11,8 +11,8 @@ Current implementation facts remain owned by source, migrations and APIs. Active
 Related references:
 - [staged server authority ADR](../adr/0036-staged-server-authority.md)
 - [Server Authority v2 replica/command ADR](../adr/0037-server-authority-v2-replica-and-command-contract.md)
-- [2026-09-15 PC publication/recovery audit](server-authority-v2-pc-audit-20260915.md)
-- [2026-09-13 server-authority audit](server-authority-model-audit-20260913.md)
+- [2026-09-15 PC publication/recovery audit](../archive/research/server-authority-v2-pc-audit-20260915.md)
+- [2026-09-13 server-authority audit](../archive/research/server-authority-model-audit-20260913.md)
 - [mobile direction](../agents/mobile.md)
 - [living backlog](../roadmap/lakomics-backlog.md)
 

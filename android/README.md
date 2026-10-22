@@ -1,20 +1,26 @@
 # Lakomics Android client
 
-Current source version: **0.8.27 (64)** (built, not installed; 0.8.10 was installed and tested end to end by the user), declared in [AndroidManifest.xml](AndroidManifest.xml). The version history below starts at 0.7.9; 0.8.1–0.8.9 are recorded in the commit log. 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source version: **0.9.140 (277)**, declared in [AndroidManifest.xml](AndroidManifest.xml), checked on 2026-10-22 at `2e8db984`. The [backlog](../docs/roadmap/lakomics-backlog.md#fav-char-001) separately records installation of 0.9.140 and pending favourite-character feedback; this pass did not inspect a device. Older releases below retain their dated evidence.
 
 ## Current functionality and remaining gates
 
-- Independent authenticated Home, Library and read-only Collections; Continue was removed in favor of Recent and classification/date/creator discovery.
+- Authenticated Home, Assets, Collections, Catalog and Notes; authority-backed Collection creation/edits, AV lookup/apply and performer profiles/portraits work without waiting for PC publication.
+- Manage Albums and child folders, folder icons/colors, shared pins, folder drawers and recent destinations; use long-press sheets, select all and drag selection. Folder move/delete and deep character management remain PC-only.
+- Home has a Sun–Sat month grid, day memo, ledger entry/edit and monthly total, quick memo, daily cards/card album and Transfer. Collections includes curated favourite characters, manual name entries and later Asset-character linking.
+- Notes uses the shared plain editor with Text/To-do sections; older Markdown descriptions below are release history.
 - Shared Manga Catalog search, detail, editions and bookmark filtering. The reader shows one page in portrait and Japanese two-page spreads after the cover in landscape, with hidden-by-default overlay controls, horizontal navigation, 1x–5x zoom and bounded pan, device-local position, nearby-page prefetch and one expired-manifest refresh.
 - Shared 1 GiB native media cache and cache-clear controls; Asset videos request autoplay and looping while preserving a paused retry state.
 - Read-only DocumentsProvider and integrated CloudMediaProvider, plus device-only temporary image saves. Provider implementation does not guarantee every receiving app's picker compatibility.
-- Remaining gates include the recorded 0.4.3 device install/reader checks, recipient Picker/SAF multi-select/restart compatibility and real media timing. Catalog bookmark mutations, server refresh authority, System Share quick-save and extension update management remain separate backlog work.
+- Remaining work is tracked in the [backlog](../docs/roadmap/lakomics-backlog.md), including laptop update/sync, card pack/reveal/album measurements and favourite-character feedback. Recipient picker compatibility remains device/app-specific; old install/reader/bookmark gates are historical.
 
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` Photo Picker PoC was removed on 2026-10-17 (it was not installed). Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
-## Unreleased — foreground status long-poll (PERF-ALL-001 T1, not built)
+<a id="unreleased--foreground-status-long-poll-perf-all-001-t1-not-built"></a>
+## Shipped-source checkpoint — foreground status long-poll
+
+Present in 0.9.140 source. The checks and device limitation below describe the original delivery checkpoint, not a new run on 2026-10-22.
 
 - While an activity is resumed, `StatusWatcher` (owned by `AlbumReplicaService`) holds `/v1/sync/status?wait=50&signals=1` with the same credential as the Library pass (device exchange token, else Library token), its own ETag and a 70 s read timeout. `onPause` disconnects it; nothing runs in the background.
 - A Library change (domain cursors or `signals.listGeneration`) wakes the Library pass at once; `exchange.revision` goes to the exchange service; any signal move is sent to the page as `lakomics-sync-signals` `{live, signals}` (a page loaded later asks with the `syncSignals` bridge call).
@@ -35,7 +41,7 @@ User feedback on 0.8.15: 휴지통 and 복구키 보기 moved off the Notes list
 
 ## 0.8.15 — Notes v2 on the tablet, built, not installed (2026-09-25)
 
-Parity with the PC Notes v2 ([design](../docs/research/notes-v2-design-20260924.md), including its Android deviations section; ADR-0035 amendments).
+Parity with the PC Notes v2 ([design](../docs/archive/research/notes-v2-design-20260924.md), including its Android deviations section; ADR-0035 amendments).
 
 - **Notes:** checklists (add, check, long-press drag on the handle, collapsible 완료 group), eight note colours, labels with filter chips, 보관함, search (secret notes by title only), rendered Markdown with tappable task boxes and the Markdown help, text ↔ checklist conversion. Notes from a newer app stay listed read-only; unreadable rows are counted instead of failing the list or sync.
 - **Sync:** unknown fields survive saves, a pull meeting a local edit merges three-way against the stored base, a save queued before a pull is rebased, and only a real collision keeps both copies (사본).
@@ -65,7 +71,7 @@ Parity with the PC Notes v2 ([design](../docs/research/notes-v2-design-20260924.
 
 ## 0.8.10 — PC ↔ tablet file exchange (보내기/받기), built, not installed (2026-09-25)
 
-Design: [docs/research/file-exchange-design-20260924.md](../docs/research/file-exchange-design-20260924.md)
+Design: [docs/archive/research/file-exchange-design-20260924.md](../docs/archive/research/file-exchange-design-20260924.md)
 (stages 3 and 4); the server contract is `server/lakomics-api/file_exchange.py`.
 
 - **Entry:** a 보내기/받기 icon in the Home header with a count badge for new arrivals, and a
@@ -543,7 +549,7 @@ This section supersedes the cache/separate-Picker behavior recorded in the earli
 
 Installing this APK updates the main app and its DocumentsProvider. Android controls Photo Picker eligibility and one selected cloud provider per profile; declaring a provider alone does not make a personal debug APK generally eligible. See the [official integration guide](https://developer.android.com/guide/topics/providers/cloud-media-provider).
 
-On the reconnected authorized tablet, first record its current selected cloud provider and `mediaprovider/allowed_cloud_providers` override. The existing device research in `docs/research/android-cloud-media-provider-poc-20260906.md` documents the shell-only mechanism already used for the PoC. A transition would preserve every existing entry, add `com.lakomics.mobile`, and select `com.lakomics.mobile.cloud`; do not reset global DeviceConfig synchronization or remove unrelated entries. Restore the recorded prior values if acceptance fails. This task did not perform any of those device changes. The app opens normal Photo Picker settings and gives a manual-menu hint on unsupported firmware.
+On the reconnected authorized tablet, first record its current selected cloud provider and `mediaprovider/allowed_cloud_providers` override. The existing device research in `docs/archive/research/android-cloud-media-provider-poc-20260906.md` documents the shell-only mechanism already used for the PoC. A transition would preserve every existing entry, add `com.lakomics.mobile`, and select `com.lakomics.mobile.cloud`; do not reset global DeviceConfig synchronization or remove unrelated entries. Restore the recorded prior values if acceptance fails. This task did not perform any of those device changes. The app opens normal Photo Picker settings and gives a manual-menu hint on unsupported firmware.
 
 After reconnection: install in place, refresh albums, verify nested classification membership in Collections and DocumentsUI, select multiple images and a video into a receiving app without publishing, verify readable bytes/MIME/seekability and cancellation, then check warm reuse after process restart, cache clearing and disconnect/account-change isolation. Measure cold/warm gallery and video first-frame times. Retain the old PoC until those pass. Eligibility, actual recipient attachment, large-library memory and real transfer timings remain unverified while disconnected.
 

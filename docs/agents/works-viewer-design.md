@@ -30,7 +30,7 @@ Manga is volume-centric. The pleasure is seeing covers together, understanding s
 
 - Use cover-first rows/shelves with a subtle shared support/contact cue.
 - Front cover remains roughly 90–95% of the perceived object.
-- Approved Paperback FINAL supplies the closed paper-cover/page-block model. Thin physical depth is intentional; heavy wood, room furniture and spine-only browsing are not.
+- Paperback FINAL remains a paper-cover/page-block reference. Current manga/game/AV presentation supports spine shelves and flat covers, shared shelf pull-out, turn/zoom and optional sounds on PC/tablet; earlier spine-only rejection is superseded. Keep medium-specific detail grammar and avoid room furniture.
 - Library/volume rows show cached static renders of that model. Only the current appreciation book is live 3D; no per-tile WebGL contexts.
 - Preserve source aspect ratio rather than cropping every volume into one cabinet shape.
 
@@ -156,7 +156,7 @@ Names and exact component boundaries are implementation choices, not a requireme
 
 Ordinary grids remain static image surfaces. The approved Paperback FINAL allows one shared, on-demand WebGL2 renderer to bake nearby book thumbnails and display one live appreciation book. It does not authorize a WebGL canvas per tile, continuous animation, or unbounded full-resolution decoding.
 
-Current implementation is in `_tools/app/src/collections/physical/`: a common 7,888-triangle model, serialized/cancellable snapshot queue, reference-counted bounded raster cache, and one live-book owner. The shared raster cache holds at most 256 entries / 64 MiB of encoded snapshots with 128 pending, on-screen covers first (`RenderCache.ts`); GPU cover textures have an estimated 12 MiB / 4-entry budget. These are managed-resource estimates, not total browser RAM/VRAM measurements. Live input is capped at 30fps, DPR 1.5 and 1.4 million pixels; drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes. Source keys include library scope, artwork URL, revision, render preset and pixel bucket; no DB or provider state moves into the renderer. Finished renders persist in the WebView's IndexedDB (`snapshotStore.ts`, same source key, LRU at 64 MiB, versioned), so they survive restart. Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes (`src-tauri/src/collectible_cors.rs`); CSP permits local blob images, not remote script execution, and failure falls back to the original cover.
+Renderer scope amendment — 2026-10-22: the following budgets describe the retained paperback physical renderer in `_tools/app/src/collections/physical/`, not every current shelf or shared game/AV case. Shelf placement is separately defined in `spineShelfLayout.ts`; no new performance measurements are claimed. The retained renderer uses a common 7,888-triangle model, serialized/cancellable snapshot queue, reference-counted bounded raster cache, and one live-book owner. The shared raster cache holds at most 256 entries / 64 MiB of encoded snapshots / 128 MiB estimated decoded pixels with 128 pending, on-screen covers first (`RenderCache.ts`); GPU cover textures have an estimated 12 MiB / 4-entry budget. These are managed-resource estimates, not total browser RAM/VRAM measurements. Live drawing follows the selected performance-profile frame budget (30fps in restricted mode), with DPR capped at 1.5 and 1.4 million pixels; drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes. Source keys include library scope, artwork URL, revision, render preset and pixel bucket; no DB or provider state moves into the renderer. Finished renders persist in the WebView's IndexedDB (`snapshotStore.ts`, same source key, LRU at 64 MiB, versioned), so they survive restart. Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes (`src-tauri/src/collectible_cors.rs`); CSP permits local blob images, not remote script execution, and failure falls back to the original cover.
 
 Game optimization reuses the existing `drawGameCase.ts` projection unchanged, snapshots through a shared 2D surface, and releases offscreen tile subscriptions. It is not a game-case redesign. Movie detail remains unchanged.
 
@@ -173,6 +173,6 @@ Do not turn Works into:
 
 ## 10. Backlog boundary
 
-This file describes stable intent only. Outstanding implementation work belongs in `docs/roadmap/lakomics-backlog.md`, especially LONG-002A, WORKS-001, LONG-002B, and LONG-004.
+This file describes stable intent. Remaining work is in the [backlog](../roadmap/lakomics-backlog.md), including AV-AUTHORITY-001 tablet portrait cropping, COLLECTION-READ-001 and the pending laptop update/sync. Retired WORKS/LONG presentation IDs are recorded in the completed ledger.
 
-The retired `docs/roadmap/works-collection-visual-redesign-plan.md` is historical planning context and must not compete with the living backlog or this reference.
+The retired `docs/archive/roadmap/works-collection-visual-redesign-plan.md` is historical planning context and must not compete with the living backlog or this reference.

@@ -1,5 +1,7 @@
 # 에셋 화면 덜 복잡하게 (2026-10-02)
 
+Scope correction — 2026-10-22: Select circles were removed (`f901c437`). This retained specimen documents the image-only grid and information dock, not current selection mechanics; the original drawing is unchanged.
+
 Mockup for backlog `PC-POLISH-20261002` item 2, based on a comparison of Eagle, Google Photos, Apple Photos, Lightroom
 and Immich. Accepted by the user on 2026-10-02 ("시안대로", with attention to smooth motion):
 

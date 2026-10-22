@@ -1,5 +1,7 @@
 # Lakomics Companion
 
+Current source: **3.5.64**, checked on 2026-10-22 at `2e8db984`. This identifies source, not a newly reloaded or installed browser build.
+
 The active extension is `extension-list/`. Load this directory as the unpacked
 extension. After updating it, reload the extension and the collecting page so the
 new content scripts are active. The existing connection and portable profile are
@@ -78,11 +80,14 @@ URLs only. The menu explains this limitation instead of sending unusable data.
 HTTP image translation and Lakomics collection explain the HTTPS-original
 requirement; direct clipboard actions are hidden without the Clipboard API.
 
-Arca Live picker (3.5.37, desktop Chrome, `arca.live/b/*/write*` only): the toolbar
-button next to "이미지 업로드" or Alt+Shift+L opens a side panel that lists random
-pictures from a chosen PC library folder, character or character group and inserts the
-selected ones into the post body through Arca's own paste/upload handling. It needs PC Lakomics running a build with
-the picker API and the PC 연결 키 (options › 연결). The post is never submitted.
+Arca Live picker (`arca.live/b/*/write*` only): the toolbar button beside
+"이미지 업로드" or Alt+Shift+L opens a docked desktop panel or portrait tablet
+sheet. Choose a folder, character or group, switch random/newest order, and load
+more newest results. Folder/character search is a flat list with Up/Down/Enter
+selection. Insert selected images through Arca's paste/upload handling; the picker
+never submits a post. Desktop tries the configured PC picker connection first,
+then the paired server; tablet uses the server relay. PC-only changes must be
+published before server browsing can show them. Pairing/connection setup is in options.
 
 On touch devices, a 500 ms hold on links or an already existing selection opens
 the menu; images keep the save picker and two-finger translation stays unchanged.
@@ -118,7 +123,7 @@ The image popover has a 저장 button beside 모두 복사 when the collector ca
 that image. It opens the same folder/temporary-save picker at the image centre,
 temporarily fades and disables the popover while the picker is open, then restores
 it at the same position after save, cancellation or temporary save. If the picker
-cannot open, the popover stays visible. No translation text is sent with a save.
+cannot open, the popover stays visible. Image saves preserve original/Korean text and region boxes through the saved-translation whitelist; paper colour is display-only.
 The touch image popover is up
 to 360 px wide with 24 px viewport margins, prefers space beside or below the image, and otherwise
 overlays its lower edge. It stays fixed on screen when the page scrolls; outside

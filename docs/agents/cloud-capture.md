@@ -1,8 +1,8 @@
 # Cloud Capture / Cloud Sync Reference
 
-> Status: current repository architecture/reference, source/documentation reconciliation 2026-09-09 against `0c61206`; no new live deployment verification. Task status lives in `docs/roadmap/lakomics-backlog.md`; code changes do not by themselves prove deployment.
+> Status: current repository architecture/reference, source/documentation reconciliation 2026-10-22 against `2e8db984`; no new live deployment verification. Task status lives in `docs/roadmap/lakomics-backlog.md`; code changes do not by themselves prove deployment.
 
-Lakomics keeps the local library authoritative. Cloud features are optional transport/replication paths; they do not make the VPS or R2 the canonical library.
+Authority is per domain (ADR-0036/0038): activated server domains own shared commands/state, while the PC keeps a local replica and owns recognition and remaining local workflows. Cloud-first capture creates server Assets that the PC later materializes; inbound capture and outbound replication remain independent queues.
 
 ## Two independent directions
 
@@ -211,6 +211,8 @@ reference checks and left unchanged. No dependencies or service units were chang
 
 ## Current desktop inbound behavior
 
+Source checkpoint — 2026-10-22 (`89603205`, `700dc3b5`): the desktop upload-progress supervisor backs off to 60 seconds while idle; this is separate from capture polling below. Upcoming releases are server-owned with the retained fallback. This is source evidence, not a new rollout or runtime check.
+
 The desktop Cloud Capture consumer:
 
 - requires Cloud sync to be enabled and an API base URL to be configured;
@@ -237,7 +239,7 @@ The repository implementation now includes the core `CLOUD-001` / `CLOUD-002` pa
 
 The backlog records the `CLOUD-001` / `CLOUD-002` rollout and `VERIFY-001` real-image/video verification as completed. These are retained results, not pending rollout tasks.
 
-`CLOUD-UI-001` remains `VERIFY` for its recorded acceptance limits. `CLOUD-006`, including queued-work pause/wait/restart/resume acceptance, is recorded `DONE` in the living backlog. The full-library backfill itself is complete and must not be rerun by default. `CLOUD-003` is obsolete/incident-only unless a real reproducible failure warrants reopening it.
+Historical rollout/acceptance limits for CLOUD-UI-001 and CLOUD-006 are recorded in the [completed ledger](../roadmap/lakomics-completed.md). The full-library backfill is complete and must not be rerun by default; incident recovery requires separate scope.
 
 ## Batch-drain semantics
 
@@ -294,7 +296,7 @@ Since 2026-10-17 this address is served by the Vultr Seoul VPS (public IP 141.16
 
 ## Current implementation order
 
-Use the living backlog's active item statuses and dependencies rather than a second execution sequence here. CLOUD-006's pause/wait/restart/resume gate is recorded complete; follow the remaining CLOUD-UI-001 verification scope in the backlog. Do not repeat the completed inbound rollout, E2E verification, or full backfill merely because an older procedure mentions them. Production writes and deployments require separate explicit authorization.
+Use the [living backlog](../roadmap/lakomics-backlog.md) for current work and the [completed ledger](../roadmap/lakomics-completed.md) for CLOUD-006/CLOUD-UI-001 delivery and dated acceptance limits. Do not repeat the completed inbound rollout, E2E verification or full backfill because an older procedure mentions them. Production writes and deployments require separate explicit authorization.
 
 
 ## Historical Settings reorganization checkpoint (2026-09-06)
@@ -310,6 +312,9 @@ The following describes that implementation session, including its migration inc
 - Backup lists load only in Data management, on a blocking worker thread. Existing snapshot verification and restore validation remain intact.
 - This implementation does not close device/native acceptance by itself. During editing an already-running development watcher unexpectedly migrated the active library to v38; it was stopped. A verified pre-migration v37 backup exists. v39 must not be applied to the active library without authorization.
 
-## Android album metadata replica
+<a id="android-album-metadata-replica"></a>
+## Historical Android album metadata replica — 2026-09-07
 
-The existing metadata poll also publishes album definitions and normal-asset memberships through `/v1/library/album-snapshot`. This is metadata-only and never queues media backfill. The Android provider reads the selected album IDs from `/v1/library/album-media`; only cloud-committed items with thumbnail metadata appear. Album membership removal affects the returned view, not original media retention. The selected temporary album has no TTL or automatic deletion. Deployed and verified on the S11 on 2026-09-07; exact selected-album membership matched the PC. Deployment/native evidence is recorded in `../research/android-cloud-media-provider-poc-20260906.md`.
+Correction — 2026-10-22: `/v1/library/album-media` and the separate Photo Picker PoC were removed (`c7d61bbd`). The paragraph below records that earlier deployment only. The current APK retains a read-only DocumentsProvider and integrated CloudMediaProvider (Photo Picker enabled on API 33+); recipient compatibility is separate from implementation.
+
+The existing metadata poll also publishes album definitions and normal-asset memberships through `/v1/library/album-snapshot`. This is metadata-only and never queues media backfill. The Android provider reads the selected album IDs from `/v1/library/album-media`; only cloud-committed items with thumbnail metadata appear. Album membership removal affects the returned view, not original media retention. The selected temporary album has no TTL or automatic deletion. Deployed and verified on the S11 on 2026-09-07; exact selected-album membership matched the PC. Deployment/native evidence is recorded in `../archive/research/android-cloud-media-provider-poc-20260906.md`.

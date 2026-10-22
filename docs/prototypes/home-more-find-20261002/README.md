@@ -1,5 +1,7 @@
 # 홈 · 더보기 · 찾기 (2026-10-02)
 
+Scope correction — 2026-10-22: Find uses Ctrl+Q. Rank names by the current area: Assets prioritizes characters/folders/Albums, tags and artists; Collections prioritizes Works (current type first); Manga prioritizes manga Works; Notes prioritizes notes; the menu area prioritizes menus. Keep scope chips and five-item recent history. More/Find reach secondary tools such as kept links, Transfer, Artists, Trash and Settings. The Home composition below is superseded by the month calendar/day memo/ledger and compact cards/Transfer; the drawing has not been regenerated.
+
 Mockup for backlog `PC-POLISH-20261002` items 12 (Home) and 4 (더보기 · 찾기). Accepted as drawn by the user on 2026-10-02.
 
 - 홈: left column 「오늘 할 것」 (non-zero review counts, ledger reminders, open items of pinned 할 일 notes, connection

@@ -975,7 +975,7 @@ startup_mobile_characters = register_characters(
 # modules so the same startup ordering still creates `authority_domains` first.
 from sync_status import register_sync_status
 
-# File exchange (보내기/받기, docs/research/file-exchange-design-20260924.md): separate
+# File exchange (보내기/받기, docs/archive/research/file-exchange-design-20260924.md): separate
 # from the Library, own R2 prefix `exchange/`. Off until the PC and Android clients ship.
 EXCHANGE_ENABLED = os.environ.get("LAKOMICS_EXCHANGE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 if EXCHANGE_ENABLED:

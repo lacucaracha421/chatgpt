@@ -1,5 +1,7 @@
 # Lakomics Mobile product direction
 
+Current source checkpoint — 2026-10-22: Android **0.9.140 (277)** at `2e8db984`, with a Java WebView shell and shared React frontend (the earlier Kotlin suggestion is historical). Activated per-domain authority supports shared Album/folder management, Collection creation/edits and AV/provider tools; Home has calendar/day memo/ledger, cards and Transfer. Favourite characters include manual entries and cover-only images. Recognition and deep character management remain PC-owned. See [Android capabilities](../../android/README.md) and [remaining checks](../roadmap/lakomics-backlog.md). No new device/deployment check is claimed. All 0.4/0.5/0.6 rollout, read-only Collections, later-Catalog and proposed-authority descriptions below are dated history, not current gates.
+
 Status: current product direction with retained rollout history
 
 Current visual foundation: `DESIGN.md` §12 covers both PC and the Android tablet.
@@ -7,7 +9,8 @@ PC is canonical; design each screen on PC first with shared components, then bri
 the tablet along in the same round with differences only for touch, portrait layout
 and gestures.
 
-## Character source checkpoint — 2026-09-13
+<a id="character-source-checkpoint--2026-09-13"></a>
+## Historical character source checkpoint — 2026-09-13
 
 Library now includes series/group/character/ordinary-folder browsing against an
 explicit PC-published server projection. See the [character contract](mobile-character-contract.md)

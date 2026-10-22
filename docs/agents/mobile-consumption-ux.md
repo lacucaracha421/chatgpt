@@ -1,18 +1,17 @@
 # Lakomics Mobile consumption UX
 
 Status: approved consumption design with historical implementation checkpoints.
-Current source/documentation reconciliation: 2026-09-09 against `0c61206`.
-Home/Library behavior here remains a focused reference; Android source is 0.4.3 (14)
-and also includes Collections and Catalog/Reader outside this document's scope.
-See the [Android README](../../android/README.md) and the living backlog for current
-feature coverage and the separate installed-device/acceptance status.
+Current source checkpoint: 2026-10-22 at `2e8db984`, Android **0.9.140 (277)**.
+See the [Android README](../../android/README.md) and [backlog](../roadmap/lakomics-backlog.md)
+for capabilities and separately recorded installation/acceptance. Earlier release
+gates below are historical; this pass performed no device checks.
 
 The shared visual foundation for the PC and Android tablet is `DESIGN.md` §12. PC is
 canonical; the tablet follows in the same design round and differs only for touch,
 portrait layout and gestures. Current tablet navigation is verified in
 `_tools/app/mobile-client/App.tsx`.
 
-The new `_tools/app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
+The shipped `_tools/app/mobile-client` / `android` client includes Collections authority, Catalog/Reader and supported organization writes. Earlier MOBILE-004 preview/device gates below record their original scope; current residual work belongs in the backlog.
 
 This document defines the consumption-oriented UI and loading behavior for the
 Galaxy Tab Lakomics client. It refines the product direction in `mobile.md`;
@@ -53,7 +52,7 @@ This design does not cover:
 - Online Manga Catalog browsing, catalog bookmarks, or reading-progress sync;
 - Android `DocumentsProvider` or the native application shell;
 - a new cloud `display.webp` representation;
-- classification editing, bulk organization, or other desktop management work.
+- deep desktop management; supported tablet folder/Album edits and batch organization now follow the current shared tools.
 
 Collections and the Online Manga Catalog are current tablet destinations; their
 detailed behavior is outside this focused consumption reference and follows the
@@ -68,7 +67,7 @@ initial bottom navigation contained two destinations:
   or discovery experiences;
 - **Library** — browse the existing classification hierarchy and its assets.
 
-The current tablet bottom navigation is **홈 · 에셋 · 컬렉션 · 카탈로그 · 메모**.
+The current tablet bottom navigation is **홈 · 에셋 · 컬렉션 · 카탈로그 · 메모**. More reaches secondary tools. Use shared pins and the folder drawer, recent destinations, long-press action sheets, select all and drag selection. Android Back closes the foremost surface before navigating away. Supported writes include Albums, child folders/icon/color, Asset organization and authority-backed Collections/AV; folder move/delete and deep character management remain PC-only.
 
 Connection status and settings move to the top-right overflow menu. They must
 remain accessible without occupying a persistent consumption tab. Empty future
@@ -76,19 +75,10 @@ destinations are not shown merely to reserve space.
 
 ## Home
 
-Home starts directly with the Recent toolbar and gallery. The introductory
-heading and Continue section were removed at user request on 2026-09-07.
-
-The vertical order is:
-
-1. **Recent additions** — the dominant, full-width gallery. It uses the same
-   canonical Recent query as the Library (`{type: "recent"}`), not a fabricated
-   classification ID.
-2. **Revisit and discovery** — secondary modules below Recent. They should be
-   concise and must not delay the first useful Recent paint.
-
-Recent, Revisit, and discovery maintain separate viewer sequences. Opening an
-item in one section must not leak navigation into another section.
+Current Home (amended 2026-10-22) uses the Sun–Sat month grid, selected-day
+memo and ledger entry/edit/month total, daily cards, Transfer and quick memo.
+Subscription/wishlist lists start folded; kept links are reached through More/Find.
+The earlier dominant Recent/revisit gallery is superseded. Do not add Continue.
 
 ## Aspect-ratio-preserving gallery
 

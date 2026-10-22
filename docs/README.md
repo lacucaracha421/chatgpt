@@ -1,127 +1,80 @@
 # Lakomics Documentation Map
 
-This directory maps current Lakomics references and retained historical records.
 Start with the [repository overview](../README.md) for the product and applications.
+This map was reconciled on 2026-10-22 against `2e8db984`; it routes readers to retained
+references without renewing their dated acceptance or deployment evidence.
 
-Documentation reconciliation: 2026-10-02 against `main` through `71855626` for the accepted
-Asset, Home/Find, Notes/Ledger and work-stage designs, removed UI/routes and audit closure
-records, including the Home/server follow-up committed during reconciliation. This records
-source/document consistency, not new native acceptance or production verification.
+## Start by task
 
-## Application entry points
+| Task | References |
+| --- | --- |
+| Desktop setup | [Desktop package](../_tools/app/README.md), [Windows](operations/windows-desktop.md), [Linux](operations/linux-desktop.md) |
+| Android | [Build and capabilities](../android/README.md), [mobile direction](agents/mobile.md), [consumption UX](agents/mobile-consumption-ux.md) |
+| Browser capture, translation and picker | [Active Companion collector](../extension-list/README.md), [Cloud Capture](agents/cloud-capture.md) |
+| Cloud and domain authority | [Capture and sync](agents/cloud-capture.md), [authority product decisions](research/server-authority-v2-product-decisions-20260915.md), [ADR index](adr/README.md) |
+| Works and AV | [Product boundaries](agents/lakomics-works-handoff-v2.md), [presentation](agents/works-viewer-design.md), [server inbox](research/av-inbox-server-20261009.md), [person profiles](research/av-person-profile-edit-20261009.md) |
+| Assets and characters | [PC design](agents/pc-design-reference.md), [quiet classification](research/character-classification-quiet-workflow-design-20260911.md), [mobile character contract](agents/mobile-character-contract.md) |
+| Notes and ledger | [Accepted design](../DESIGN.md#notes-and-ledger-accepted-2026-10-02), [retained ledger contract](research/budget-notes-design-20260925.md) |
+| Performance or recovery | [Measurement method](agents/implementation.md#performance-work), [catalog troubleshooting](agents/catalog-troubleshooting.md), [PC migration and recovery](operations/pc-migration.md) |
 
-- [Desktop setup and behavior](../_tools/app/README.md): Windows and Linux Tauri application.
-- [Linux platform setup and acceptance limits](operations/linux-desktop.md).
-- [Windows development PC: paths, shells, WSL server tests and Android builds](operations/windows-desktop.md).
-- [Handoff of 2026-10-08/09 Linux laptop work to the Windows PC (Korean)](operations/handoff-2026-10-09-linux-laptop.md).
-- [Android build, current source version and acceptance](../android/README.md).
-- [Browser collector (active, `extension-list/`)](../extension-list/README.md). The legacy `extension/` collector was removed on 2026-09-26 (see Git history); [edge-extension.md](edge-extension.md) remains as its historical operation guide.
+## Product, design and architecture
 
-Package-path reconciliation: 2026-09-12. The active desktop package and shared
-mobile frontend are under `_tools/app/`, relative to the repository root.
-Older dated records may still use `app/`; preserve those historical paths and
-resolve present-day commands against the current package. This path update does
-not renew older native acceptance or production verification results.
+Read applicable repository instructions and only the references needed for the task.
+Separate implemented facts from authority to change them:
 
-Current summaries and the living backlog take precedence over older dated rollout
-paragraphs. Source version, built artifact, deployed service and installed client
-are separate states; a dated test result only covers its recorded revision and inputs.
+1. Current code, migrations, schemas and contracts define the inspected implementation.
+2. [Repository instructions](../AGENTS.md), [domain vocabulary](../CONTEXT.md) and [design language](../DESIGN.md) define repository and product rules. `DESIGN.md` §12 is the shared PC/tablet foundation; PC design comes first.
+3. [Accepted ADRs](adr/README.md) define architecture constraints. Proposed ADRs, including ADR-0037, remain proposals within their stated scope.
+4. [PC design](agents/pc-design-reference.md), [Works presentation](agents/works-viewer-design.md) and relevant subsystem contracts define stable intent. Dated implementation sections are evidence for their recorded checkpoint.
+5. The [backlog](roadmap/lakomics-backlog.md) records intended work; the [completed ledger](roadmap/lakomics-completed.md) and Git history record closure and provenance.
 
-## Choose references by task
+See also [domain conflict resolution](agents/domain.md), [implementation and review](agents/implementation.md)
+and [portable user preferences](agents/user-preferences.md).
 
-Applicable `AGENTS.md` instructions govern the work. Read the references needed
-for the current task; this list is a map, not a mandatory reading sequence.
+## Subsystem contracts and retained research
 
-- `../CONTEXT.md` — product vocabulary and domain boundaries when behavior or terminology is affected.
-- `../DESIGN.md` — current design language for visual changes; §12 Foundation (PC and tablet, with PC first) is canonical and is grounded in `prototypes/design-foundation-20260928/`.
-- `agents/pc-design-reference.md` — PC shell, content, and interaction contracts for affected desktop UI; it follows the shared `DESIGN.md` §12 foundation.
-- `adr/README.md` — architecture decision status when changing architectural boundaries.
-- `roadmap/lakomics-backlog.md` — active pending work when checking priorities, recording a request, or resuming a tracked item.
-- `roadmap/lakomics-completed.md` — completed/superseded/historical records; not an executable backlog.
+- [PC responsibilities](agents/pc-required-features.md), [mobile character publication](agents/mobile-character-contract.md) and [manga index](agents/manga-index-contract.md).
+- [Collection objects](research/collection-objects-design-20261004.md), [authority design](research/collection-authority-design-20260924.md) and [retained activation/runbook record](research/collection-authority-1b-plan-20261006.md). Consult current source and backlog before acting on dated batch sections.
+- [Character reference deltas](research/character-reference-delta-reconsideration-design-20260911.md), [automation research direction](research/character-autonomy-and-jev-direction-20260921.md) and [mobile review design](research/mobile-character-review-design-20260924.md).
+- [Release calendar](research/server-release-calendar-20261009.md) and [motion system](research/motion-system-20261004.md).
 
-## Current reference documents
+Research is scoped evidence or design input, not runtime activation or an execution queue.
 
-- `agents/pc-design-reference.md` — Chrome 03b shell, Asset browsing, selection, floating surfaces, search, Works physicality, responsive/performance rules, and current implementation checkpoint.
-- `agents/works-viewer-design.md` — type-specific Works presentation inside the shared PC design and §12 foundation: manga shelf, game exhibit, video poster archive, Showcase.
-- `agents/lakomics-works-handoff-v2.md` — Collection/Works product and architecture boundaries.
-- `agents/domain.md` — how to resolve documentation/domain conflicts.
-- `agents/implementation.md` — implementation/shared-UI rules, review scope, and verification evidence.
-- `agents/cloud-capture.md` — Cloud Capture / sync architecture and known gaps.
-- `agents/mobile.md` — Mobile direction and current checkpoint.
-- `agents/user-preferences.md` — the user's portable working preferences (Korean messages, no flash/pop-in, test cadence, Codex quota rule) for any agent or machine.
-- `agents/pc-required-features.md` — source-audited list of what only the PC can do, which tablet actions wait for the PC, and what works with the PC off.
-- `agents/mobile-character-contract.md` — implemented character read publication/API/mobile navigation, authority limits and verification evidence.
-- `research/server-authority-model-audit-20260913.md` — current PC/server/mobile data mapping, character and Collection gaps, and server-authority transition design inputs; execution status lives in CLOUD-AUTH-001.
-- `research/server-authority-v2-product-decisions-20260915.md` — confirmed Server Authority v2 product decisions, Android/mobile audit findings, and pre-design migration constraints; not an implementation plan.
-- `research/server-authority-v2-pc-audit-20260915.md` — PC publication/recovery audit: stale-snapshot risks, local-vs-shared state, and safe retirement order.
-- `adr/0037-server-authority-v2-replica-and-command-contract.md` — proposed common per-domain authority, client-replica/outbox, recovery and fence contract for the next CLOUD-POST-001 batches.
-- `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior; some early navigation and implementation checkpoints are historical, so current tablet source and `DESIGN.md` §12 take precedence.
-- `edge-extension.md` — legacy `extension/` collector routing and Cloud Library behavior (historical; the code was removed 2026-09-26); the active collector is documented in `../extension-list/README.md`, with source rules in `../extension-list/AGENTS.md`.
-- `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
-- `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
-- `operations/windows-desktop.md` — the Windows development PC: checkout and library paths, Git Bash/PowerShell, WSL server tests, Android builds.
-- `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
-- `research/server-review-2026-09-24.md` — Cloud API review: upload/disconnect and WAL fixes, synthetic polling measurements, module correctness findings, and `data/` retention proposals; no deployment or production verification.
-- `research/pc-ui-design-decisions-20260923.md` — open PC UI consistency decisions and visual-direction proposals from the 2026-09-23 screenshot review; not approved design.
-- `research/reference-projects.md` — optional external-project research, not adopted implementation.
-- [Seed-first character automation and Jev evaluation direction](research/character-autonomy-and-jev-direction-20260921.md) — user automation requirements, source-verified constraints, corrected assumptions, and staged evidence/Jev experiments; research direction, not runtime activation or a second backlog.
-- `research/character-classification-quiet-workflow-design-20260911.md` — approved quiet character workflow, parent-folder inference scope, reference curation, and normal-folder conversion.
-- `research/character-reference-delta-reconsideration-design-20260911.md` — accepted batched reference expansion and delta-only historical reconsideration contract.
-- `research/character-ingestion-flow-audit-20260912.md` — image arrival cases, character classification paths, failure visibility gaps, historical refresh coverage, and bottleneck candidates; diagnostic findings, not an implementation plan.
-- `agents/issue-tracker.md` — backlog and explicitly requested GitHub Issue tracking boundaries.
-- `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
-- `performance/desktop-navigation-20260912.md` — folder/tab/cover optimization changes, synthetic before/after measurements, targeted checks, and native acceptance limits.
-- `operations/catalog-hybrid-count-gate.md` — retained CATALOG-007A native acceptance evidence.
+## Operations and verification
 
-## Current editors and list controls
+Use the current [Windows](operations/windows-desktop.md), [Linux](operations/linux-desktop.md)
+and [migration](operations/pc-migration.md) guides for commands and recovery boundaries.
+The [PowerShell Rust-test wrapper](../scripts/cargo-test.ps1) is available when Git Bash
+cannot start in the Windows sandbox.
 
-- [Notes and ledger design](../DESIGN.md#notes-and-ledger-accepted-2026-10-02): 메모 uses the shared `_tools/app/src/notes/memo/` editor for 글 / 할 일 and sections on PC/tablet; legacy checklists open in 할 일. `NoteChecklist` and `ChecklistEditor` are retired entry points. Markdown rendering and a separate memo read/edit mode are retired; existing markup is literal text.
-- [Asset and list controls](agents/pc-design-reference.md#6-asset-browser): image-only Asset tiles, docked information panel and `_tools/app/src/shared/ui/scrubber/` on PC/tablet replace the old captions and `AssetGalleryScrollbar`.
-- The unused `/v1/extension-backup` routes were removed in `7b90c5ef`. Use the [active collector documentation](../extension-list/README.md) for supported behavior; do not target the removed backup route.
+Measurement kits: [native desktop](../_tools/app/scripts/native-check/README.md),
+[frontend](../_tools/app/scripts/perf/README.md), [Android device](../android/tools/PERFORMANCE.md)
+and [local API](../server/lakomics-api/tools/PERFORMANCE.md).
+Static checks, frontend fixtures, native acceptance, device checks and production sync
+are separate evidence levels. Source versions do not establish installed or deployed
+versions. Historical recovery records do not authorize a backfill or catalog replacement.
 
-## Performance kits
+## Prototype references
 
-Follow [the measurement method](agents/implementation.md#performance-work) before optimizing. Kits landed in `888f528c`; their availability does not prove an improvement or target-platform acceptance.
+These are specimens, not production code or blanket approval of every alternative.
+Shared design rules and current screen references take precedence.
 
-- [Native Linux kit and command overview](../_tools/app/scripts/native-check/README.md#one-command-per-kit): isolated fixture/window scenarios, durations, frames and process samples.
-- [PC render and work-count kit](../_tools/app/scripts/perf/README.md): deterministic fixture counts and diagnostic React timings.
-- [Tablet fixture and Android device kit](../android/tools/PERFORMANCE.md): frontend counters and `LakomicsPerf` device collection.
-- [Local API kit](../server/lakomics-api/tools/PERFORMANCE.md): synthetic in-process requests, bytes and timing; no production target.
+- Foundation and core screens: [foundation](prototypes/design-foundation-20260928/), [calm Asset grid](prototypes/assets-calm-20261002/), [Find priority](prototypes/find-priority-20261013/), [Notes/ledger](prototypes/notes-ledger-20261002/), [section controls](prototypes/section-bar-20261001/).
+- Recent screen rounds: [classic Home calendar](prototypes/home-calendar-classic-20261018/), [cards](prototypes/gacha-cards-20261013/), [card back/pack](prototypes/card-back-pack-20261015/), [shelves](prototypes/spine-shelf-20261017/), [picker panel](prototypes/picker-panel-ux-20261021/), [favourite characters](prototypes/fav-characters-20261022/), [tablet structure](prototypes/tablet-structure-20261017/).
+- Retained with limited or uncertain applicability: [Collection shortcuts](prototypes/collection-shortcuts-20261001/) and [Home/Find alternatives](prototypes/home-more-find-20261002/). Their presence does not establish an active navigation or layout decision.
 
-## Execution tracking
+Other retained specimens remain under `prototypes/`; use their local notes and the
+backlog to establish scope. Superseded bundles are indexed in the archive below.
 
-Pending product/design work is tracked only in `roadmap/lakomics-backlog.md`. Completed/superseded records move to `roadmap/lakomics-completed.md`; that archive must not become a competing task list. Do not create a competing design plan when an active item already exists.
+## Work tracking, brand and history
 
-The old `roadmap/works-collection-visual-redesign-plan.md` is retired. Current actionable Works/AV scope is represented by active `WORKS-001` and `LONG-001`; completed presentation work is preserved in `roadmap/lakomics-completed.md`.
+The [backlog](roadmap/lakomics-backlog.md) is the single active work queue.
+Completed, superseded and historical entries belong in the [completed ledger](roadmap/lakomics-completed.md),
+with existing anchors preserved; neither dated plans nor the archive create new tasks.
 
-## Source-of-truth order
+The [brand guide](brand/README.md) distinguishes the selected identity and production
+assets from retained design studies.
 
-Separate implemented facts from authority to change them.
-
-1. Current checkout code, migrations, schemas, and type/contracts define the inspected implementation.
-2. `AGENTS.md`, `CONTEXT.md`, and `DESIGN.md` define repository/product rules.
-3. Accepted ADRs define active architecture constraints.
-4. `agents/pc-design-reference.md` and relevant current subsystem references define stable UX/subsystem intent.
-5. `roadmap/lakomics-backlog.md` describes active planned/incomplete work; it does not prove implementation. `roadmap/lakomics-completed.md` preserves closure/history and is not a source of new authorization.
-6. Git history is historical context only.
-
-## Historical / superseded design records
-
-- `agents/approved-design-direction.md` — superseded Lab 06 decision log pointer; current rules moved to `pc-design-reference.md`.
-- `agents/approved-chrome-direction.md` — superseded Chrome 03b comparison/handoff pointer; current rules moved to `pc-design-reference.md`.
-- `roadmap/works-collection-visual-redesign-plan.md` — retired implementation plan; do not execute it as a current plan.
-- `prototypes/lakomics-works-v6-reference.html` — retained historical Works visual/interaction reference, not production code or current visual source of truth.
-
-## Device research records
-
-- `research/android-cloud-media-provider-poc-20260906.md` — Galaxy Tab S11 Android Photo Picker / custom `CloudMediaProvider` device PoC, album-filtering findings, ADB eligibility caveats, and the related temporary/one-use media inbox proposal. This is validated research evidence, not an adopted replacement for the current Mobile roadmap.
-
-## Retained execution plans
-
-Dated files under `research/` preserve original design, batch contracts and acceptance
-evidence. They are not a second source of active task status or fresh authorization.
-In particular, [the mobile catalog plan](research/mobile-catalog-execution-plan-20260908.md)
-and [three-lane coordination record](research/parallel-roadmap-execution-20260908.md)
-predate later Reader and deployment work. `MOBILE-006` is archived as completed; use the Android README for the current implementation and the active `CLOUD-AUTH-001` / `MOBILE-007` / `MOBILE-008` entries for remaining Mobile work.
-Character batch records, video-similarity plans and AV/cover plans likewise retain
-their recorded scope; consult the corresponding backlog item before resuming work.
+Use the [historical archive index](archive/README.md) for superseded guides, concluded
+operations and measurements, executed research/plans and older prototype bundles.
+Archive paths, commands and versions are intentionally dated and are not current guidance.

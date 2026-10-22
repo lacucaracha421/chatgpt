@@ -7,7 +7,7 @@ import type {LedgerEntry,Planned,Recurring} from '../src/notes/ledger/model';
 const mock=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mock.native,errorText:(e:Error)=>e.message}));
 
-// The mockup fixture (docs/prototypes/budget-notes-20260925, summary.test.ts): on 2026-09-25,
+// The mockup fixture (docs/archive/prototypes/budget-notes-20260925, summary.test.ts): on 2026-09-25,
 // 2,300,000 − 1,612,500 − 124,890 = 562,610.
 const rec=(id:string,name:string,amount:number,start:string,change:Partial<Recurring>={}):Recurring=>({id,name,amount,every:1,unit:'month',start,trial:false,until:null,memo:'',order:id,...change});
 const plan=(id:string,name:string,amount:number,month:string|null,change:Partial<Planned>={}):Planned=>({id,name,amount,month,memo:'',dropped:false,order:id,...change});

@@ -1,5 +1,7 @@
 # Server Authority v2 uses per-domain authority with durable client replicas
 
+Scope clarification — 2026-10-22: **Proposed** remains the status of this generic architecture. Shipped Classification/Asset subcontracts and implementation appendices do not ratify the whole proposal. References below to frozen `extension/` are historical: that collector was removed on 2026-09-26; [Companion](../../extension-list/README.md) is the active collector.
+
 Status: Proposed — architecture checkpoint for broader `CLOUD-POST-001` work.
 
 Clarifies [ADR-0036](0036-staged-server-authority.md). It does not replace the

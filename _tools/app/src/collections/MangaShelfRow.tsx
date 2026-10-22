@@ -6,7 +6,7 @@ import "./work/collectionWork.css";
 import "./mangaShelf.css";
 
 /**
- * The Collections 만화 list as shelves (accepted 2026-09-30, docs/prototypes/pc-collection-detail-20260930/):
+ * The Collections 만화 list as shelves (accepted 2026-09-30, docs/archive/prototypes/pc-collection-detail-20260930/):
  * one row per work — its title and owned count, then the work screen's own bookcase of
  * cover-strip spines on the thin plank. PC and tablet share this row; each client loads the
  * volumes, focuses and cover URLs its own way once the row comes near the viewport.

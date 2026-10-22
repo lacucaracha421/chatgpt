@@ -1,6 +1,6 @@
 """Server-owned daily new-volume checks of Kakao-bound manga Collections (SERVER-INDEP-001, slice 1).
 
-Design: ``docs/research/server-release-checks-20261009.md``. Until now only a running PC
+Design: ``docs/archive/research/server-release-checks-20261009.md``. Until now only a running PC
 checked for new volumes (``collection_updates.rs``), so nothing happened while it was off. This
 module lets the server do the same for Kakao: once a day per work it re-runs the Kakao search a
 binding stores, merges the result exactly as the PC does, and records the changes through the

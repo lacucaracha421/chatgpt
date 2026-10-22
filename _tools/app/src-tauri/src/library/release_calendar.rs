@@ -1,7 +1,7 @@
 //! The 발매 캘린더: upcoming games (IGDB), Korean theatrical movies and Japanese TV anime
 //! seasons (TMDB) for roughly the next six months, cached locally and refreshed daily.
 //!
-//! Sources and filters (see `docs/research/home-upcoming-sources-20260926.md`):
+//! Sources and filters (see `docs/archive/research/home-upcoming-sources-20260926.md`):
 //!
 //! * **Games — IGDB `/v4/games`.** A game is listed when one of its release dates falls in the
 //!   window on a current major platform ([`IGDB_MAJOR_PLATFORMS`]), it has at least

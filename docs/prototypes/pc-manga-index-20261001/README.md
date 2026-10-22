@@ -1,6 +1,6 @@
 # 망가 목차 (2026-10-01)
 
-Mockup for 망가 round slices 5–6, redrawing the accepted 2026-09-29 A/D sidebars (`../pc-manga-20260929/`) on the current section-bar
+Mockup for 망가 round slices 5–6, redrawing the accepted 2026-09-29 A/D sidebars (`../../archive/prototypes/pc-manga-20260929/`) on the current section-bar
 layout. Accepted as drawn by the user 2026-10-01 (night):
 
 - 카탈로그/북마크 index: 고정 (pinned, solid pin) → 자주 찾는 태그 (top 8) → 작가 (top 5), counted from the bookmarked works only;

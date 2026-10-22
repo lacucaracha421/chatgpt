@@ -1,5 +1,7 @@
 # Collection shortcuts row (2026-10-01)
 
+Scope correction — 2026-10-22: The second shortcut row is superseded. Current PC/tablet shortcuts share one section-bar row; one View menu owns sort, personal-rating filter and layout. Original HTML remains a historical comparison.
+
 Accepted 2026-10-01 for the tablet. The 컬렉션 section bar gets a second row in the same segmented track:
 the type's shortcuts (쇼케이스 with its work count; 발매 캘린더 with its new-event count, accent-coloured,
 hidden at zero). The second row is a set of shortcuts, never a selection: no accent fill.

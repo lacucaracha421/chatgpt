@@ -2,7 +2,7 @@
 
 Lakomics is a local-first media library with Windows and Linux desktop implementations, built with React/TypeScript, Vite, Tauri 2, and Rust. It manages assets, classifications, albums, typed Works/Collections, and an independent Online Catalog.
 
-Documentation reconciled on 2026-09-09 against source commit `0c61206`. See the [repository overview](../../README.md), [document map](../../docs/README.md), and [living backlog](../../docs/roadmap/lakomics-backlog.md) for other clients and remaining acceptance gates.
+Documentation reconciled on 2026-10-22 against source commit `2e8db984`; no new native or device verification. See the [repository overview](../../README.md), [document map](../../docs/README.md), and [living backlog](../../docs/roadmap/lakomics-backlog.md) for other clients and remaining acceptance gates.
 
 ## Run and verify
 
@@ -38,16 +38,17 @@ npm run tauri build -- --debug
 Set-Location src-tauri
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
 ```
+
+From the repository root, use `bash scripts/cargo-test.sh -- <filter>` for targeted Rust tests, or `powershell -NoProfile -File scripts/cargo-test.ps1 -- <filter>` in the Windows sandbox. Use `bash scripts/check-project.sh` for the full pre-commit check.
 
 ## Current daily-use behavior
 
-- Lakomics always starts in **All assets**. The sidebar also provides Unsorted, Recent, Favorites, classifications, Trash, and Library safety.
-- Asset browsing defaults to date-grouped masonry/waterfall; justified rows remain an alternative. Choose newest, oldest, favorites, or random sort. Adjust preview size and toggle thumbnail metadata independently. See [the PC design reference](../../docs/agents/pc-design-reference.md) for current shell and navigation behavior.
+- Lakomics starts on **Home**, with the month calendar, day memo/ledger and daily cards/Transfer. Main areas are Assets, Collections, Manga and Notes; More/Find reach secondary tools.
+- Asset browsing offers date-grouped waterfall and equal-height rows, image-only tiles, newest/oldest/Like/random sorting and preview density. See [the PC design reference](../../docs/agents/pc-design-reference.md) for navigation and the remembered information dock.
 - Click to select one asset, Ctrl-click to toggle, Shift-click for a loaded range, and Ctrl+A to select only currently loaded assets. Escape clears selection; arrow keys move focus; Delete moves the selection to Trash.
 - Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
-- The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
+- The information dock shows Asset metadata or a selection summary, supports classification changes, and remembers whether the user left it open.
 - Drop files anywhere in an ordinary asset view. A concrete classification view adds that classification; All assets, Unsorted, Recent, and Favorites ingest into Unsorted. Incoming files are copied, and user source files are never moved or deleted.
 - A completed media drop reports added, exact duplicate, similar-image review, and failure counts. Exact duplicates can open the existing asset; similar images stay outside ordinary asset views until reviewed. Videos use exact-byte duplicate detection and never enter image-similarity review.
 - MP4, WebM, and MOV videos are registered immediately, then prepared one at a time in the background. Lakomics creates a poster and up to 240 WebP scrub frames. Web-compatible H.264/AAC MP4/MOV and VP8/VP9/AV1 WebM files play from the managed original; incompatible media receives an H.264/AAC proxy capped at 1080p/30fps without upscaling.
@@ -56,15 +57,16 @@ cargo test
 - The Similar image review entry compares the existing and incoming images with public metadata. Choose Keep existing, Replace with new image, or Keep both. Existing-image replacement transfers its favorite and classifications while preserving the incoming image's source and collected date.
 - Existing images are prepared for similarity checks in non-blocking batches. The status bar reports remaining work and any images whose perceptual hash could not be prepared.
 - Drag assets onto a classification to move their single direct classification, or drag classifications to reorganize the tree. Dragging selected assets out uses native copy semantics and original names with collision suffixes. Windows uses OLE; Linux uses GTK file URIs and independent staging copies. Linux recipient acceptance remains pending; see the [platform guide](../../docs/operations/linux-desktop.md#linux-drag-out-follow-up-2026-09-09).
-- The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
+- The Work panel (작업) shows running/queued imports, media preparation, character work and synchronization; it is not a permanent activity history.
 
-Release Watch is opt-in per Aladin-connected manga. On startup Lakomics checks subscriptions whose last successful check is at least 24 hours old, shows an unread `신간 N` badge for new or changed Korean releases, and marks those changes read when the Collection is opened. Lakomics does not check while the app is closed.
+MangaDex and Kakao release checks are server-owned, with separate provider-specific notification lists and explicit acknowledgement. Kakao alerts use the entered owned count and enabled subscription. Aladin connections are legacy records; reconnect through Kakao for current Korean-release tracking.
 
 Folder-recursive ingestion and AVIF/HEIC are deferred.
 
-## Edge X image collection
+<a id="edge-x-image-collection"></a>
+## Browser collection
 
-The bundled [Chromium collector](../../extension/README.md) supports image/video collection, radial or list destination menus, and X translation. Direct PC ingestion uses an authenticated loopback connection; optional Cloud Capture supports remote collection. See the [installation and operation guide](../../docs/edge-extension.md) for routing and supported sources.
+The active [Lakomics Companion](../../extension-list/README.md) captures media through the paired server, translates text/images and processes YouTube subtitles. Its Arca picker uses PC-first/server-fallback reads; capture does not require a running PC.
 
 ## Historical acceptance records
 
@@ -137,6 +139,6 @@ Verified on 2026-08-09 with the library at
 - Moving an asset to the trash changes its library state. Its media file remains under `assets/` until the trash is purged.
 - Automatic trash purge defaults to 30 days. It can be set from 1 to 3,650 days or disabled.
 - Lakomics retains the seven most recent daily metadata backups.
-- Restoring a metadata backup restores library management data, not missing or changed original media files.
+- Metadata backups contain management data, not missing originals. Full-database restore is refused after server authority adoption; follow [current recovery guidance](../../docs/operations/pc-migration.md) for replica/bootstrap and media recovery.
 - For a full media backup, close Lakomics and copy the entire library folder to another location.
 - When using the library on multiple PCs, close Lakomics and wait for synchronization to finish before opening it on the next PC.

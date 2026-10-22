@@ -1,6 +1,8 @@
 # Collections authority slice 1B — implementation plan
 
-Status: batches 1-6 code complete 2026-10-06 (dry run and 1C pending approval); accepted with the §4 split (user chose "temporarily fence the rarer PC-only operations"). Builds on the [design](collection-authority-design-20260924.md) (§7 revised slices, §8 decisions) and the [1B survey](collection-authority-1b-survey-20261004.md) (write inventory at `d207ebf4`). Nothing here activates the authority; activation is slice 1C and needs its own approval.
+Scope correction — 2026-10-22: Collections authority activation is recorded complete (`8d368991`); later AV/provider replacement commands have shipped. Section 7 remains the historical activation/rollback runbook, including original receipts and command limits; it is not a new activation/recovery instruction.
+
+Status: batches 1-6 code complete 2026-10-06 (dry run and 1C pending approval); accepted with the §4 split (user chose "temporarily fence the rarer PC-only operations"). Builds on the [design](collection-authority-design-20260924.md) (§7 revised slices, §8 decisions) and the [1B survey](../archive/research/collection-authority-1b-survey-20261004.md) (write inventory at `d207ebf4`). Nothing here activates the authority; activation is slice 1C and needs its own approval.
 
 ## 1. What 1B delivers
 
