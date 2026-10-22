@@ -480,7 +480,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
     <header className="review-bar">
       <IconButton label="확인 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
       <div className="review-title"><h1>{title}</h1>
-        {state.phase === 'ready' && state.ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{mode === 'mark' && viewed.length > 0 && ` · 본 ${viewed.length}장${markedViewed.length > 0 ? ` · 아님 ${markedViewed.length}장` : ''}`}{pending > 0 && ` · PC 반영 대기 ${pending}`}{(counts?.skipped ?? 0) > 0 && ` · PC가 건너뜀 ${counts!.skipped}`}</p>}
+        {state.phase === 'ready' && state.ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{mode === 'mark' && viewed.length > 0 && ` · 본 ${viewed.length}장${markedViewed.length > 0 ? ` · 아님 ${markedViewed.length}장` : ''}`}{pending > 0 && ` · PC 반영 대기 ${pending}`}{(counts?.skipped ?? 0) > 0 && ` · 반영 안 된 결정 ${counts!.skipped}`}</p>}
       </div>
       {undo.length > 0 && !snackVisible && <IconButton label="마지막 판단 되돌리기" icon={ArrowUturnLeftIcon} onClick={revert}/>}
     </header>

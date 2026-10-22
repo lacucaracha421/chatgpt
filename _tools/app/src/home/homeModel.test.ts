@@ -23,7 +23,7 @@ describe('Home release sources', () => {
 });
 
 it('shows the hold when no sync problems are reported', () => {
-  expect(cloudLine({ syncHeld: true } as import('../library/types').CloudBackfillProgress, 0)).toEqual({ tone: 'idle', text: '받기만 · 송신 보류' });
+  expect(cloudLine({ syncHeld: true } as import('../library/types').CloudBackfillProgress, 0)).toEqual({ tone: 'idle', text: '받기만 · 보내기 보류' });
 });
 
 it("shows receive problems ahead of a hold", () => {

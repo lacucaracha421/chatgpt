@@ -275,7 +275,7 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   problemCount += failures.size;
 
   const notes: string[] = [];
-  if (health.assets.held || health.authorityHeld) notes.push("송신 보류 중 · 이 PC의 변경은 보류를 풀면 보냄");
+  if (health.assets.held || health.authorityHeld) notes.push("보내기 보류 중 · 이 PC의 변경은 보류를 풀면 보냄");
   const tabletWait = health.syncHold?.held ? health.syncHold.tabletWait : null;
   if (tabletWait && tabletWait.count > 0) notes.push(tabletWaitText(tabletWait.count));
   const waiting = health.albums.waitingCount + health.classifications.waitingCount;

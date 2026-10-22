@@ -18,7 +18,7 @@ export function cloudProblemCount(progress: CloudBackfillProgress): number {
     + (item.metadataLastError ? 1 : 0), 0);
 }
 
-/** Tablet decisions that name items this PC has not received yet (shown while 송신 보류 is on). */
+/** Tablet decisions that name items this PC has not received yet (shown while sending is held). */
 export function tabletWaitText(count: number): string {
   return `태블릿 변경 ${displayCount(count, "개")} · 이 PC에 아직 없는 항목을 기다림`;
 }

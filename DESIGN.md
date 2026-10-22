@@ -243,7 +243,7 @@ Leave out text the screen does not need: explanations, captions that restate wha
 | Retry after an error | 다시 시도 | 다시 불러오기, 다시 확인, 새로고침 |
 | Review of similar images (the queue; 확인 is character confirmation only) | 유사 이미지 검토 (top-bar status trigger `유사 N`) | 유사 검토, 확인 N for this queue |
 | Sync with the server now (Settings server row, memos) | 지금 동기화 | 지금 받기, 새로 받기; provider, catalog and calendar data keep `지금 갱신` |
-| Sync status lines (상태 panel 서버 동기화, Settings › 연결) | what happened from the user's side, then the next step when there is one: `서버가 거절해 멈춘 변경 N개`, `취소된 변경 N개 · 앨범이 삭제됨`, `서버에 연결할 수 없음 · 자동 재시도`, `송신 보류 중 · 이 PC의 변경은 보류를 풀면 보냄`, `동기화됨` | 서버 상태가 우선함, `최근: …`, 미적용, 막힌 변경, `· 문제 없음`, `~습니다` endings |
+| Sync status lines (상태 panel 서버 동기화, Settings › 연결) | what happened from the user's side, then the next step when there is one: `서버가 거절해 멈춘 변경 N개`, `취소된 변경 N개 · 앨범이 삭제됨`, `서버에 연결할 수 없음 · 자동 재시도`, `보내기 보류 중 · 이 PC의 변경은 보류를 풀면 보냄`, `동기화됨` | 서버 상태가 우선함, `최근: …`, 미적용, 막힌 변경, `· 문제 없음`, `~습니다` endings |
 
 **빼기 vs 제거 (and 제외):** 빼기 takes an item out of a set while the item itself remains — album, character, collection, 쇼케이스 and 관심 목록 membership, filter and scope chips, tags and labels on an item (`이 앨범에서 빼기`, `이 캐릭터에서 빼기`, `태그 필터 빼기`). 제거 removes a thing that then no longer exists in that place — a reference, a link or binding, an artwork choice (`레퍼런스 1 제거`, `참조에서 제거`, `연결 제거`). 제외 is kept for a standing rule that keeps something out of an automatic process or a search (`캐릭터 분류에서 제외`, `자동 인식 끄기`, a tag filter's 제외 mode, 작가 제외 폴더). A filter reset is `필터 초기화`. `src/shared/sharedPieces.test.ts` fails on the retired wordings.
 

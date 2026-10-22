@@ -170,7 +170,7 @@ function conclusion(progress: CloudBackfillProgress | null, error: string | null
   if (!progress) return error ? "동기화 상태를 확인하지 못함" : "동기화 상태 확인 중…";
   const problems = cloudProblemCount(progress);
   if (problems > 0) return `동기화 문제 ${displayCount(problems, "개")}`;
-  if (progress?.syncHeld) return "받기만 · 송신 보류";
+  if (progress?.syncHeld) return "받기만 · 보내기 보류";
   if (progress.replicationEnabled === false) return "클라우드로 복제 꺼짐";
   if (progress.controlState === "paused") return "동기화 일시 정지됨";
   if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "동기화 중";
@@ -184,7 +184,7 @@ function progressCount(progress: CloudBackfillProgress, total: number, percent: 
 
 function stateLabel(progress: CloudBackfillProgress | null, settled: boolean): string {
   if (!progress) return "상태 확인 중…";
-  if (progress.syncHeld) return "송신 보류";
+  if (progress.syncHeld) return "보내기 보류";
   if (progress.replicationEnabled === false) return "복제 꺼짐";
   if (progress.controlState === "paused") return "일시 정지";
   if (progress.controlState === "running" || progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 중";

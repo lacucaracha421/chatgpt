@@ -139,7 +139,7 @@ export function useStatusActivities(input: Inputs) {
   if (cloud) {
     const remaining = cloud.queued + cloud.preparing + cloud.uploading + cloud.committing;
     if (remaining > 0) {
-      const reason = (cloudPaused ?? (cloud.controlState === "paused")) ? "일시 정지됨" : cloud.replicationEnabled === false ? "동기화 꺼짐" : cloud.syncHeld ? "송신 보류" : null;
+      const reason = (cloudPaused ?? (cloud.controlState === "paused")) ? "일시 정지됨" : cloud.replicationEnabled === false ? "동기화 꺼짐" : cloud.syncHeld ? "보내기 보류" : null;
       add({ id: "local-cloud", kind: "cloud_upload", label: "클라우드 업로드", state: reason ? "paused" : "running", done: cloud.completed,
         total: cloud.totalAssets, countText: `${remaining.toLocaleString()}개 남음`, pausedReason: reason, pauseGroup: "cloud", pause: () => void cloudPause() });
     }

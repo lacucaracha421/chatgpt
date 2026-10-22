@@ -511,7 +511,7 @@ impl Library {
             } else if progress.control_state == BackfillControlState::Paused {
                 Some("일시 정지됨")
             } else if progress.sync_held {
-                Some("송신 보류")
+                Some("보내기 보류")
             } else {
                 None
             };
@@ -1477,7 +1477,7 @@ impl Library {
             } else if progress.control_state == BackfillControlState::Paused {
                 Some("일시 정지됨")
             } else if progress.sync_held {
-                Some("송신 보류")
+                Some("보내기 보류")
             } else {
                 None
             };

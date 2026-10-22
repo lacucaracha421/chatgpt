@@ -376,7 +376,7 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
     <header className="review-bar">
       <IconButton label="검토 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
       <div className="review-title"><h1>유사 이미지 검토</h1>
-        {ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{waitingText}{(counts?.skipped ?? 0) > 0 && ` · 건너뜀 ${counts!.skipped}`}</p>}
+        {ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{waitingText}{(counts?.skipped ?? 0) > 0 && ` · 반영 안 된 결정 ${counts!.skipped}`}</p>}
       </div>
       {ready && current && <IconButton label={compare ? '나란히 보기' : '한 화면에서 비교'} icon={Square2StackIcon} active={!!compare} onClick={() => { setCompare(value => value ? null : 'flicker'); setAuto(false); setHeld(false); }}/>}
     </header>

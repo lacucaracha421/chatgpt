@@ -133,14 +133,14 @@ export function VideoSimilarityPanel({ assetIds, onClose, api = videoSimilarityA
     void act(async () => { await api.decide(review.id, decision); await load(epoch); });
   }
 
-  return <section className="similarity-review video-similarity" aria-label="영상 유사 검토" onKeyDown={(event) => {
+  return <section className="similarity-review video-similarity" aria-label="유사 영상 검토" onKeyDown={(event) => {
     if (event.key === "Escape" && !event.defaultPrevented && !pendingRef.current) {
       event.preventDefault();
       onClose();
     }
     event.stopPropagation();
   }}>
-    <ViewToolbar title="영상 유사 검토" actions={<Button size="icon" variant="ghost" aria-label="영상 검토 닫기" disabled={pending} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}>
+    <ViewToolbar title="유사 영상 검토" actions={<Button size="icon" variant="ghost" aria-label="영상 검토 닫기" disabled={pending} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}>
       <span>검토 대기 {total}쌍</span>
     </ViewToolbar>
     <div className="video-similarity__scan">

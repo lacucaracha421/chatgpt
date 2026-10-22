@@ -21,16 +21,16 @@ it("enables before credentials and retains content while saving", async () => {
   let resolve!: (value: { held: boolean; releaseAfterRestart: boolean }) => void;
   const save = vi.fn().mockImplementation(() => new Promise(done => { resolve = done; }));
   render(<CloudSyncHold endpoint="https://fixture.invalid" read={read} save={save} />);
-  await userEvent.click(await screen.findByRole("button", { name: "송신 보류" }));
+  await userEvent.click(await screen.findByRole("button", { name: "보내기 보류" }));
   expect(screen.getByText("받기·보내기")).toBeVisible();
-  expect(screen.getByRole("button", { name: "송신 보류" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "보내기 보류" })).toBeDisabled();
   resolve({ held: true, releaseAfterRestart: false });
   await waitFor(() => expect(screen.getByText("받기만")).toBeVisible());
 });
 
 it("does not claim sends are enabled when reading fails", async () => {
   render(<CloudSyncHold endpoint="https://fixture.invalid" read={vi.fn().mockRejectedValue(new Error())} save={vi.fn()} />);
-  expect(await screen.findByText("송신 보류 상태를 확인하지 못했습니다.")).toBeVisible();
+  expect(await screen.findByText("보내기 보류 상태를 확인하지 못했습니다.")).toBeVisible();
   expect(screen.queryByText("받기·보내기")).toBeNull();
 });
 

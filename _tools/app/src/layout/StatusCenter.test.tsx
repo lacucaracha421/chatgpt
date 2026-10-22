@@ -430,5 +430,5 @@ it("reports held lanes and missing tablet targets as waiting, retaining receive 
   });
   expect(summary.problemCount).toBe(1);
   expect(summary.problems).toEqual(["서버가 연결 키를 거부함 · 설정에서 키 확인"]);
-  expect(summary.notes).toEqual(["송신 보류 중 · 이 PC의 변경은 보류를 풀면 보냄", "태블릿 변경 2개 · 이 PC에 아직 없는 항목을 기다림"]);
+  expect(summary.notes).toEqual(["보내기 보류 중 · 이 PC의 변경은 보류를 풀면 보냄", "태블릿 변경 2개 · 이 PC에 아직 없는 항목을 기다림"]);
 });

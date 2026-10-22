@@ -205,7 +205,7 @@ describe('character review screen, deciding one card at a time',()=>{
   });
   it('shows pending and PC-skipped counts', async()=>{
     install(feed({counts:{total:3,s36:2,b36:1,doubtful:0,pendingPc:4,skipped:2}}));mount();
-    expect(await screen.findByText('0 / 3 · PC 반영 대기 4 · PC가 건너뜀 2')).toBeTruthy();
+    expect(await screen.findByText('0 / 3 · PC 반영 대기 4 · 반영 안 된 결정 2')).toBeTruthy();
   });
 });
 
