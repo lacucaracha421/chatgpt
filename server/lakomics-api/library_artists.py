@@ -23,8 +23,9 @@ Artist
 ------
 ``{"id", "label", "displayName"|null, "sourceName"|null, "keys": [creatorKey, ... <= 500],
 "assetCount", "recentCount", "firstSavedAt"|null, "lastSavedAt"|null, "lastOpenedAt"|null,
-"pinned", "hidden", "main", "coverAssetIds": [assetId, ... <= 8]}`` - ``ArtistSummary`` of
-the PC (``label`` is what to show; ``main`` = 주요 작가 by the tier rule). ``id``/keys <= 1024
+"pinned", "hidden", "main", "reposter"?, "coverAssetIds": [assetId, ... <= 8]}`` - ``ArtistSummary`` of
+the PC (``label`` is what to show; ``main`` = 주요 작가 by the tier rule; the optional ``reposter``
+marks a 퍼온 계정 and is ``null`` when an older PC omits it). ``id``/keys <= 1024
 single-line characters; names <= 500; asset ids ``[A-Za-z0-9_-]{1,128}``. Ids and keys are
 unique across the snapshot.
 
@@ -166,6 +167,8 @@ class Artist(Strict):
     pinned: bool
     hidden: bool
     main: bool
+    # Additive (2026-10-22): PCs before the U14 publication change strip it.
+    reposter: bool | None = None
     coverAssetIds: list[AssetId] = Field(default_factory=list, max_length=8)
 
 

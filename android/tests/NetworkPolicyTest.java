@@ -294,6 +294,9 @@ public final class NetworkPolicyTest {
  for(String path:new String[]{"/v1/library/artists","/v1/library/artists/artist:a1","/v1/library/artists/https%3A%2F%2Fx.com%2Fbob","/v1/library/artists/alice_1.x~y"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  for(String path:new String[]{"/v1/library/artists/","/v1/library/artists/..","/v1/library/artists/.","/v1/library/artists/a/b","/v1/library/artists/../summary","/v1/library/artistsx","/v1/library/artists/a b"})reject(()->NetworkPolicy.api(path,"GET"));
  reject(()->NetworkPolicy.api("/v1/library/artists/"+"a".repeat(3073),"GET"));
+ // Parity batch D: three exact read-only GETs.
+ for(String path:new String[]{"/v1/library/assets/a-1_B/same-post","/v1/library/artist-rediscovery?artist=artist%3Aa1&localDate=2026-10-22&utcOffsetMinutes=540","/v1/library/statistics?utcOffsetMinutes=540"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/library/assets/a/b/same-post","/v1/library/assets/../same-post","/v1/library/assets/a/same-post/x","/v1/library/artist-rediscovery/x","/v1/library/statisticsx","/v1/library/statistics/"})reject(()->NetworkPolicy.api(path,"GET"));
  // Mobile Library Trash: the trash list is a GET, the lifecycle command route a PUT, and
  // trash-scoped tickets reuse the existing ticket POSTs with a query that widens nothing.
  pass(()->NetworkPolicy.api("/v1/library/trash","GET"));

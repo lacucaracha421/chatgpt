@@ -82,6 +82,8 @@ export function useLibraryArtists(active: boolean, revision: number, scope?: str
   const allArtists = overlayArtistEdits(normalizeArtists(reply, true), queued);
   return {artists: allArtists.filter(artist => !artist.hidden), allArtists,
     assignments: normalizeAssignments(reply), pending: queued.length,
+    // 작가 미상 Asset counts as the PC published them (no source / only a source URL).
+    unknown: {none: Math.max(0, Number(reply?.unknown?.none) || 0), source: Math.max(0, Number(reply?.unknown?.source) || 0)},
     loaded: reply !== undefined, state: allArtists.length ? 'ready' as const : state,
     error: storageError || error, retry: () => setRetry(value => value + 1)};
 }

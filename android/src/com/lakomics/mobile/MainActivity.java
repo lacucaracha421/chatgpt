@@ -39,6 +39,12 @@ public final class MainActivity extends Activity {
  private final ConcurrentHashMap<String,CancellationSignal> nonEssential=new ConcurrentHashMap<>();
  private volatile boolean stopped=true;
  private boolean destroyed=false;
+ /** In-app text size (Settings → 글자 크기), kept on this device: 0 follows the system font size. */
+ private static final String DISPLAY_PREFERENCES="display",TEXT_ZOOM="textZoom";
+ static boolean validTextZoom(int percent){return percent==0||percent==90||percent==100||percent==110||percent==125||percent==150;}
+ private int savedTextZoom(){int value=getSharedPreferences(DISPLAY_PREFERENCES,MODE_PRIVATE).getInt(TEXT_ZOOM,0);return validTextZoom(value)?value:0;}
+ /** The WebView's own text zoom before the in-app choice (it follows the system font size). */
+ private volatile int systemTextZoom=100;
  private volatile boolean foreground=false;
  private volatile String localStatusHint="{\"configured\":false,\"endpoint\":\"\"}";
  private void refreshLocalStatusHint(){try{localStatusHint=settings.status().toString();}catch(Exception ignored){localStatusHint="{\"configured\":false,\"endpoint\":\"\"}";}}
@@ -128,7 +134,10 @@ public final class MainActivity extends Activity {
    if(Build.VERSION.SDK_INT>=30)return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.statusBars(),android.graphics.Insets.NONE).setInsetsIgnoringVisibility(WindowInsets.Type.statusBars(),android.graphics.Insets.NONE).build();
    return insets.replaceSystemWindowInsets(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
   });
-  WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
+  WebSettings s=web.getSettings();
+  // Applied before the page loads, so the first paint already has the chosen text size.
+  systemTextZoom=s.getTextZoom();int textZoom=savedTextZoom();if(textZoom>0)s.setTextZoom(textZoom);
+  s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(PerfLog.enabled());
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");
   web.setWebViewClient(new WebViewClient(){
@@ -301,6 +310,15 @@ public final class MainActivity extends Activity {
   /** Local startup hint only: never exposes the saved token or performs a network check. */
   @JavascriptInterface public String localStatus(){return localStatusHint;}
   @JavascriptInterface public boolean perfEnabled(){return PerfLog.enabled();}
+  /** Settings → 글자 크기: read synchronously so the row shows the saved choice at once. */
+  @JavascriptInterface public int textZoom(){return savedTextZoom();}
+  /** Saves the choice on this device and applies it to the live WebView; refuses unknown values. */
+  @JavascriptInterface public boolean setTextZoom(int percent){
+   if(!validTextZoom(percent))return false;
+   getSharedPreferences(DISPLAY_PREFERENCES,MODE_PRIVATE).edit().putInt(TEXT_ZOOM,percent).apply();
+   runOnUiThread(()->{if(!destroyed&&web!=null)web.getSettings().setTextZoom(percent>0?percent:systemTextZoom);});
+   return true;
+  }
   @JavascriptInterface public void request(String id,String operation,String payload){
    if("perfLog".equals(operation)){
     if(PerfLog.enabled())try{workers.execute(()->PerfLog.javascript(payload));}catch(RejectedExecutionException ignored){/* Best-effort instrumentation. */}

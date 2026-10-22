@@ -104,3 +104,12 @@
   .artist-stats { grid-column:1; }
   .artist-other-picks { grid-template-columns:1fr; }
 }
+/* Hub buckets (PC 주요 · 그 외 · 한 장뿐인 · 퍼온 계정 · 작가 미상) and the artist page's 다시보기 rows. */
+.artist-bucket-row { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+.artist-bucket-row .numeric { color:var(--color-muted); }
+.artist-grid-toolbar { align-items:flex-start; }
+.artist-grid-toolbar .artist-bucket-row { flex:1; min-width:0; }
+.artist-rediscovery { display:flex; flex-direction:column; gap:var(--space-3); min-width:0; }
+.artist-rediscovery__row { display:flex; flex-direction:column; gap:var(--space-2); min-width:0; }
+.artist-rediscovery__row p { margin:0; font-size:var(--type-meta); color:var(--color-muted); }
+.artist-rediscovery__row p strong { color:var(--color-text); font-weight:600; }

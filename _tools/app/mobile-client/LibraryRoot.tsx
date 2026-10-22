@@ -1,10 +1,10 @@
 import {displayCount} from '../src/shared/displayDate';
 import {useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type React from 'react';
-import {ChevronDownIcon,ChevronRightIcon} from '@heroicons/react/24/outline';
+import {ChevronDownIcon,ChevronRightIcon,PlusIcon} from '@heroicons/react/24/outline';
 import {TopBar} from './TopBar';
 import {useSimilarityReviewCount} from './useSimilarityReview';
-import {SectionLabel} from './ui';
+import {IconButton,SectionLabel} from './ui';
 import {useSectionShade} from './SectionShade';
 import {Cover} from './CoverGroup';
 import {FolderCards} from './FolderCards';
@@ -63,7 +63,7 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   },[active,scroller,grid,key]);
   return fit;
 }
-export function LibraryRoot({active=true,onDrawer,onFolderActions,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onSearchSelect,onSearchFocus,endpoint='',onRefresh,albumTree,albumError,albumLoading=false,segment,onSegment,restoreScroll,onScroll,similarity,subtree=false}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the folder drawer (the ☰ button in the logo's place). */onDrawer?():void;/** Long press on a plain folder card (absent until the tablet may edit folders). */onFolderActions?(entry:Entry):void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSearchSelect?(item:AssetSuggestion):void;onSearchFocus?():void;endpoint?:string;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;albumLoading?:boolean;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void;/** The server serves subtree listings, so folder covers show the newest image anywhere below each folder. */subtree?:boolean;}) {
+export function LibraryRoot({active=true,onDrawer,onFolderActions,onCreateRoot,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onSearchSelect,onSearchFocus,endpoint='',onRefresh,albumTree,albumError,albumLoading=false,segment,onSegment,restoreScroll,onScroll,similarity,subtree=false}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the folder drawer (the ☰ button in the logo's place). */onDrawer?():void;/** Long press on a plain folder card (absent until the tablet may edit folders). */onFolderActions?(entry:Entry):void;/** 새 폴더 at the top level, as the PC's 분류 header offers (absent until the tablet may edit folders). */onCreateRoot?():void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSearchSelect?(item:AssetSuggestion):void;onSearchFocus?():void;endpoint?:string;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;albumLoading?:boolean;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void;/** The server serves subtree listings, so folder covers show the newest image anywhere below each folder. */subtree?:boolean;}) {
   const [searchOpen,setSearchOpen]=useState(false),[searchDraft,setSearchDraft]=useState('');
   const [artistNames,setArtistNames]=useState<string[]>([]);
   // The end line describes the first screen only; it leaves once the user scrolls.
@@ -103,7 +103,7 @@ export function LibraryRoot({active=true,onDrawer,onFolderActions,entries,charac
     {sections.inline}
     <div style={{display:segment==='folders'?undefined:'none'}}>
       <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment!=='folders'}/>)}</span><span className="result-name"><strong>모든 에셋</strong></span>{total!==undefined&&<span className="numeric muted">{displayCount(total)}</span>}<ChevronRightIcon/></button>
-      <section className="library-root-folders" ref={folders}><SectionLabel as="h2" className="section-label" title="분류" count={topFolders.length ? topFolders.length : undefined}/><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||!active||segment!=='folders'||searchOpen} revision={revision} subtree={subtree} onSelect={onSelect} onActions={onFolderActions}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
+      <section className="library-root-folders" ref={folders}><SectionLabel as="h2" className="section-label" title="분류" count={topFolders.length ? topFolders.length : undefined} actions={onCreateRoot?<IconButton label="새 폴더" icon={PlusIcon} onClick={onCreateRoot}/>:undefined}/><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||!active||segment!=='folders'||searchOpen} revision={revision} subtree={subtree} onSelect={onSelect} onActions={onFolderActions}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
       {fit&&fit.hidden>0&&!scrolled&&<p className="library-end-line"><ChevronDownIcon aria-hidden="true"/>아래에 분류 {fit.hidden}개 더</p>}</section>
     </div>
     <div style={{display:segment==='albums'?undefined:'none'}}>

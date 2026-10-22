@@ -413,7 +413,7 @@ fn artists_publish_complete_hub_schema_assignments_and_unique_creator_fallback_k
         json!({"id":"artist:a1","label":"앨리스","displayName":"앨리스",
         "sourceName":"alice","keys":["alice"],"assetCount":2,"recentCount":2,
         "firstSavedAt":"2026-09-01T00:00:00Z","lastSavedAt":"2026-09-01T00:00:00Z","lastOpenedAt":null,
-        "pinned":true,"hidden":false,"main":true,"coverAssetIds":["asset-9","asset-1"]})
+        "pinned":true,"hidden":false,"reposter":false,"main":true,"coverAssetIds":["asset-9","asset-1"]})
     );
     assert_eq!(body["artists"][1]["keys"], json!([]));
     assert_eq!(

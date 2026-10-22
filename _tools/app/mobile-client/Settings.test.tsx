@@ -114,3 +114,23 @@ it('turns the shared case sounds off and on from 화면, on by default',()=>{
  expect(toggle.checked).toBe(false);
  expect(localStorage.getItem('lakomics.caseSounds')).toBe('0');
 });
+
+it('keeps 글자 크기 on this device through the app and hides it on a build without the setting',async()=>{
+  const setTextZoom=vi.fn(()=>true);
+  window.LakomicsNative={request:vi.fn(),cancel:vi.fn(),textZoom:()=>110,setTextZoom};
+  try {
+    const view=render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
+    expect(screen.getByRole('radio',{name:'110%'}).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio',{name:'125%'}));
+    expect(setTextZoom).toHaveBeenCalledWith(125);
+    expect(screen.getByRole('radio',{name:'125%'}).getAttribute('aria-checked')).toBe('true');
+    // A refused choice keeps the saved size and says so.
+    setTextZoom.mockReturnValueOnce(false);fireEvent.click(screen.getByRole('radio',{name:'시스템'}));
+    expect(screen.getByRole('radio',{name:'125%'}).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('바꾸지 못했습니다. 다시 시도해 주세요.')).toBeTruthy();
+    view.unmount();
+    window.LakomicsNative={request:vi.fn(),cancel:vi.fn()};
+    render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
+    expect(screen.queryByText('글자 크기')).toBeNull();
+  } finally {delete window.LakomicsNative;}
+});

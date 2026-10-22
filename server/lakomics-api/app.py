@@ -914,6 +914,15 @@ def _home_client(authorization):
 lifecycle(app).on_startup(home_upcoming.register(app, get_db, _home_client, require_publisher))
 lifecycle(app).on_startup(library_artists.register(app, get_db, _home_client, require_publisher))
 
+# Tablet read projections (parity batch D): same-post strip, artist 다시보기, statistics.
+import library_artist_rediscovery
+import library_same_post
+import library_statistics
+
+library_same_post.register(app, sys.modules[__name__])
+library_artist_rediscovery.register(app, sys.modules[__name__])
+library_statistics.register(app, sys.modules[__name__])
+
 import folder_pins
 import favorite_characters
 

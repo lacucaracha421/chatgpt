@@ -27,6 +27,20 @@ const open=(props:Partial<Parameters<typeof FolderManagement>[0]>={})=>{
 const waitEnabled=(name:string)=>waitFor(()=>expect((screen.getByRole('button',{name}) as HTMLButtonElement).disabled).toBe(false));
 
 describe('tablet folder create and rename',()=>{
+  it('creates a top-level folder as a root with no parent, without reading a folder revision',async()=>{
+    const {onChanged}=open({folder:null});
+    expect(screen.getByRole('dialog',{name:'새 폴더 만들기'})).toBeTruthy();
+    // A top-level name already taken among the roots is refused before any command.
+    fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:' 부모 '}});
+    expect(screen.getByText('같은 위치에 같은 이름의 폴더가 있습니다.')).toBeTruthy();
+    expect((screen.getByRole('button',{name:'만들기'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('폴더 이름'),{target:{value:'새 분류'}});
+    fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+    await waitFor(()=>expect(onChanged).toHaveBeenCalledOnce());
+    expect(commands()[0][2]).toMatchObject({commandType:'createClassification',kind:'root',parentId:null,name:'새 분류'});
+    expect(onChanged).toHaveBeenCalledWith({type:'create',folder:expect.objectContaining({kind:'root',parentId:null,name:'새 분류'})});
+    expect(mocks.api.mock.calls.some(([path])=>String(path).includes('/baseline'))).toBe(false);
+  });
   it('creates a child folder as a tag under the open folder, with a new id',async()=>{
     const {onChanged}=open({folder:folders[0]});
     await waitEnabled('하위 폴더 만들기');

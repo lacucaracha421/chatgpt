@@ -6,16 +6,22 @@ import {readScopedToc, withScopedToc, type ScopedAssetPage} from './scopedAssetT
 import {preloadImages} from '../src/shared/motion/viewportImages';
 import {mediaMasked} from './assetMask';
 import {privacyMode} from './privacyMode';
-import type {LibraryArtist} from './artistsModel';
+import {isUnknownArtist, type LibraryArtist} from './artistsModel';
+import {readArtistRediscovery, type PreparedRediscovery} from './artistRediscovery';
 import type {PageWire} from './types';
 
 export type ArtistPage = ScopedAssetPage & {scope:string};
 // The navigation callback takes an artist only. This short-lived, object-keyed handoff lets
 // its detail mount with the prepared page without changing the Library/App contract.
-const entries = new WeakMap<LibraryArtist, {page:ArtistPage; at:number}>();
+const entries = new WeakMap<LibraryArtist, {page:ArtistPage; rediscovery?:PreparedRediscovery; at:number}>();
 export function preparedArtistPage(artist:LibraryArtist) {
   const entry=entries.get(artist);
   return entry && Date.now()-entry.at<60_000 ? entry.page : undefined;
+}
+/** The 다시보기 rows read with that same handoff (none for 작가 미상 scopes). */
+export function preparedArtistRediscovery(artist:LibraryArtist) {
+  const entry=entries.get(artist);
+  return entry && Date.now()-entry.at<60_000 ? entry.rediscovery : undefined;
 }
 
 export async function prepareArtistPage(page:ArtistPage, signal:AbortSignal) {
@@ -40,13 +46,15 @@ export function useArtistEntry(paused:boolean, onOpen:(artist:LibraryArtist)=>vo
     const params=new URLSearchParams({artist:artist.id,sort:'newest',limit:'100'});
     const toc=new URLSearchParams(params);toc.delete('limit');toc.set('toc','1');toc.set('utcOffsetMinutes',String(-new Date().getTimezoneOffset()));
     try {
+      const rediscovery=isUnknownArtist(artist.id)||privacyMode()?undefined:readArtistRediscovery(artist.id,controller.signal).catch(()=>undefined);
       const page=await withScopedToc(api<PageWire&{listGeneration?:string}>(`/v1/library/assets?${params}`,controller.signal)
         .then(raw=>({...normalizePage(raw),list_generation:raw.listGeneration,scope:`${artist.id}:newest:all`})),
         readScopedToc(`/v1/library/assets?${toc}`,controller.signal),'newest');
       const ready=privacyMode()?page:await prepareArtistPage(page,controller.signal);
+      const rows=await rediscovery;
       if(controller.signal.aborted)return;
       const selected={...artist};
-      entries.set(selected,{page:ready,at:Date.now()});
+      entries.set(selected,{page:ready,rediscovery:rows,at:Date.now()});
       onOpen(selected);
     } catch(reason) {if(!controller.signal.aborted)setError(errorText(reason));}
     finally {if(request.current===controller){request.current=null;setPending(false);}}

@@ -32,13 +32,15 @@ type TextOptions = {number?: boolean; measure?: boolean; chars?: 2 | 3 | 4; plac
 
 export type ProfileSurfaceProps = {title: string; onClose(): void; children: ReactNode};
 function ProfileDialog({title, onClose, children}: ProfileSurfaceProps) { return <Dialog open title={title} onClose={onClose} variant="medium">{children}</Dialog>; }
-type EditorProps = {surface?: ComponentType<ProfileSurfaceProps>; person: ProfilePerson; onClose(): void; onSave(changes: ProfileChanges, expected: ProfileExpected): Promise<void>; disabled?: boolean};
+type EditorProps = {surface?: ComponentType<ProfileSurfaceProps>; person: ProfilePerson; onClose(): void; onSave(changes: ProfileChanges, expected: ProfileExpected): Promise<void>; disabled?: boolean;
+  /** Content above the fields: the tablet puts its 대표 사진 action here. */
+  lead?: ReactNode};
 export function PersonProfileEditor(props: EditorProps) {
   const [reload, setReload] = useState(0);
   return <ProfileEditorDraft key={reload} {...props} onReload={() => setReload(value => value + 1)}/>;
 }
 const baselineLabel = (keys: ProfileKey[]) => keys.some(key => key === 'displayName' || key === 'nameJa') ? '원래 이름' : 'StashDB';
-function ProfileEditorDraft({surface: Surface = ProfileDialog, person, onClose, onSave, disabled = false, onReload}: EditorProps & {onReload(): void}) {
+function ProfileEditorDraft({surface: Surface = ProfileDialog, person, onClose, onSave, disabled = false, lead, onReload}: EditorProps & {onReload(): void}) {
   // Freeze the draft's initial values: a receipt or provider refresh never erases typing.
   const [initial] = useState(() => structuredClone(person));
   const [initialTokens] = useState(() => Object.fromEntries(profileKeys.map(key => [key, profileToken(initial, key)])));
@@ -99,6 +101,7 @@ function ProfileEditorDraft({surface: Surface = ProfileDialog, person, onClose, 
   };
   return <Surface title="프로필 편집" onClose={requestClose}>
     <div className="person-profile-editor">
+      {lead}
       {updated && <p role="status">다른 기기에서 바뀌었어요 · <Button variant="quiet" disabled={busy} onClick={onReload}>새로 불러오기</Button></p>}
       {linked && profileKeys.some(key => ownsProfile(effective, key)) && <Button variant="quiet" disabled={busy || disabled} onClick={() => { reset(profileGroups.filter(group => group.keys.some(key => ownsProfile(effective, key))).flatMap(group => group.keys)); setBirth((profileBase(initial, 'birthDate') as string | null ?? '').split('-')); }}>모두 되돌리기</Button>}
       <div className="person-profile-editor__grid">{editorGroups.map(group => <section className={`person-profile-editor__field person-profile-editor__field--${group.keys[0]}`} key={group.label}>

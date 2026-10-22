@@ -1,0 +1,13 @@
+/* Same-post grid and 다시보기 strip (PC asset-inspector__source-group / artist-strip). */
+.asset-strip { min-width:0; }
+.asset-strip--grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--space-1); }
+.asset-strip--grid .asset-strip__cell { aspect-ratio:1; }
+.asset-strip--row { display:flex; gap:var(--space-1); height:96px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+.asset-strip--row .asset-strip__cell { flex:none; height:100%; min-width:44px; max-width:192px; aspect-ratio:1; }
+.asset-strip__cell { display:block; min-width:0; }
+.asset-strip__item { display:block; width:100%; height:100%; min-height:44px; padding:0; overflow:hidden; border:0; border-radius:0; background:var(--color-surface-elevated); color:inherit; }
+.asset-strip__item .home-cover { display:block; width:100%; height:100%; }
+.asset-strip__item img { display:block; width:100%; height:100%; object-fit:cover; }
+.asset-strip__item[aria-current="true"] { outline:2px solid var(--color-accent); outline-offset:-2px; }
+.asset-strip__item:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
+.asset-strip__item:active { opacity:.8; }

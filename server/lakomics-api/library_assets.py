@@ -472,7 +472,7 @@ def list_mobile_classification_assets(
         else:
             query = asset_list_query.AssetListQuery(
                 "visible_assets AS asset", where_clause, clause_params + filter_params, sort,
-                prefer_id_lookup=filters.artist is not None)
+                prefer_id_lookup=filters.artist is not None and filters.artist not in asset_filters.UNKNOWN_ARTISTS)
         if ids_only:
             return asset_filters.search_response(
                 query.ids(db, generation), filters, if_none_match,

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => ({...await vi.importActual<typeof import('./transport')>('./transport'), api: mocks.api, native: mocks.native}));
@@ -44,6 +44,11 @@ beforeEach(() => {
   });
 });
 afterEach(() => {cleanup(); vi.unstubAllGlobals();});
+/** 사진 바꾸기 lives in 배우 관리 (and 프로필 편집), never on the portrait. */
+async function openPortraitSheet() {
+  fireEvent.click(await screen.findByRole('button', {name: '배우 관리'}));
+  const entry = screen.getByRole('button', {name: '사진 바꾸기'}); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+}
 it('uses the authority revision and shows profile text only after the receipt', async () => {
   render(<Harness/>); fireEvent.click(await screen.findByRole('button', {name: '배우 관리'})); const entry = await screen.findByRole('button', {name: 'StashDB 프로필 선택'}); await waitFor(() => expect(entry).toBeEnabled());
   expect(mocks.api.mock.calls.some(([path]) => path === '/v1/collections/people/p1?authority=1')).toBe(true);
@@ -54,15 +59,15 @@ it('uses the authority revision and shows profile text only after the receipt', 
   await waitFor(() => expect(finishCommand).toBeTypeOf('function'));
   person = {...person, entityRevision: 5, profile}; await act(async () => finishCommand({changed: true, person}));
   await waitFor(() => expect(document.querySelector('.tablet-performer__facts')?.textContent).toContain('160'));
-  expect(screen.getByRole('button', {name: '사진 바꾸기'})).toBeEnabled();
-  // 사진 바꾸기 remains on the portrait; StashDB actions now live in the management sheet.
-  expect(screen.getByRole('button', {name: '사진 바꾸기'}).closest('.tablet-performer__portrait')).not.toBeNull();
+  // The portrait carries no control; 사진 바꾸기 and the StashDB actions live in the management sheet.
+  expect(document.querySelector('.tablet-performer__portrait button')).toBeNull();
   expect(document.querySelector('.tablet-performer__footer .tablet-performer__stashdb')).toBeNull();
   fireEvent.click(screen.getByRole('button', {name: '배우 관리'}));
+  expect(screen.getByRole('button', {name: '사진 바꾸기'})).toBeEnabled();
   expect(screen.getByRole('button', {name: 'StashDB 프로필 선택'}).closest('.library-sheet')).not.toBeNull();
 });
 it('shows the chosen preview immediately and keeps it while receipt and confirmed media arrive', async () => {
-  render(<Harness/>); const entry = await screen.findByRole('button', {name: '사진 바꾸기'}); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  render(<Harness/>); await openPortraitSheet();
   const pick = await screen.findByRole('button', {name: '사진 1 선택'}); await waitFor(() => expect(pick).toBeEnabled()); fireEvent.click(pick);
   await waitFor(() => expect(readCommands()).toHaveLength(1));
   const portraitSrc = () => document.querySelector('.tablet-performer__portrait img')?.getAttribute('src');
@@ -77,9 +82,9 @@ it('shows the chosen preview immediately and keeps it while receipt and confirme
   expect(portraitSrc()).not.toBe('data:image/jpeg;base64,b2xk');
 });
 it('honors page privacy even when the shared privacy preference is off', async () => {
-  render(<Harness privacy/>); const entry = await screen.findByRole('button', {name: '사진 바꾸기'}); await waitFor(() => expect(entry).toBeEnabled());
+  render(<Harness privacy/>); await screen.findByRole('button', {name: '배우 관리'});
   expect(document.querySelector('.tablet-performer__portrait img')).toBeNull(); expect(mocks.native).not.toHaveBeenCalled();
-  fireEvent.click(entry); await screen.findByText('프라이버시 모드에서는 사진을 표시하지 않습니다.');
+  await openPortraitSheet(); await screen.findByText('프라이버시 모드에서는 사진을 표시하지 않습니다.');
   expect(mocks.native).not.toHaveBeenCalled();
 });
 
@@ -95,6 +100,22 @@ it('edits only touched profile fields from the management sheet and keeps names 
   await waitFor(()=>expect(readCommands()[0].command).toMatchObject({commandType:'setPersonProfileFields',changes:{heightCm:170},expected:{heightCm:{value:160,overridden:false}}}));
   expect(screen.queryByRole('dialog',{name:'프로필 편집'})).toBeNull();expect(readCommands()[0].command).not.toHaveProperty('changes.displayName');
   expect(screen.getByLabelText('키 직접 입력 비교')).toBeVisible();
+});
+it('changes the photo from inside 프로필 편집 and keeps the editor and its draft open',async()=>{
+  setOutboxConnection('https://editor-photo.example');
+  person={...person,displayName:'미오',profile,stashdbProfile:profile,profileOverrides:{}};
+  const previous=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(...args)=>args[0]===AUTHORITY_STATUS_PATH?{...identity,active:true,features:['personProfileFields']}:previous(...args));
+  render(<Harness/>);fireEvent.click(await screen.findByRole('button',{name:'프로필 편집'}));
+  const editor=screen.getByRole('dialog',{name:'프로필 편집'});
+  fireEvent.change(screen.getByLabelText('키 (cm)'),{target:{value:'170'}});
+  const entry=within(editor).getByRole('button',{name:'사진 바꾸기'});await waitFor(()=>expect(entry).toBeEnabled());fireEvent.click(entry);
+  const pick=await screen.findByRole('button',{name:'사진 1 선택'});await waitFor(()=>expect(pick).toBeEnabled());fireEvent.click(pick);
+  await waitFor(()=>expect(readCommands().some(row=>row.command.commandType==='setPersonPortrait')).toBe(true));
+  expect(screen.queryByRole('dialog',{name:'사진 바꾸기'})).toBeNull();
+  expect(screen.getByRole('dialog',{name:'프로필 편집'})).toBeVisible();expect(screen.getByLabelText('키 (cm)')).toHaveValue('170');
+  // The chosen photo shows in the editor's own row at once.
+  expect(within(screen.getByRole('dialog',{name:'프로필 편집'})).getByLabelText('미오 사진').querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,YQ==');
 });
 it('keeps the manual editor hidden when the status lacks the profile capability',async()=>{
  person={...person,profile,stashdbProfile:profile,profileOverrides:{}};render(<Harness/>);await screen.findByRole('button',{name:'배우 관리'});
@@ -139,7 +160,7 @@ it('shows a cover crop on the portrait as soon as it is queued and keeps it once
   mocks.api.mockImplementation(async (path: string, signal: unknown, body: AuthorityCommand) => path.startsWith('/v1/collections?') ? {ready: true, filterVersion: 1, revision: 'r1', items: [{id: 'w1', name: '작품', type: 'av', showcase: false,
     selectedWorkArtworkId: 'front-1', artworkVersions: {'front-1': {thumbnail: 't1', original: 'o1'}}, av: {productCode: 'ABC-001', genres: [], people: [{id: 'p1', name: '미오', role: 'performer', order: 0, portraitImage: person.portraitImage}]}}]} : api(path, signal, body));
   mocks.native.mockImplementation(async (op: string, body: {variant?: string}) => op === 'collectionArtwork' ? {url: `data:image/jpeg;base64,${body.variant === 'original' ? 'b3Jp' : 'dGh1'}`} : native(op, body));
-  render(<Harness/>); const entry = await screen.findByRole('button', {name: '사진 바꾸기'}); await waitFor(() => expect(entry).toBeEnabled()); fireEvent.click(entry);
+  render(<Harness/>); await openPortraitSheet();
   fireEvent.click(await screen.findByRole('radio', {name: '표지에서 자르기'}));
   const save = await screen.findByRole('button', {name: '대표 이미지로 쓰기'}); await waitFor(() => expect(save).toBeEnabled()); fireEvent.click(save);
   const crop = () => document.querySelector<HTMLElement>('.tablet-performer__portrait .av-portrait__crop')?.style;

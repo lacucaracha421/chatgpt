@@ -112,9 +112,12 @@
 .tablet-performer__band { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--space-6); align-items: stretch; }
 .tablet-performer__portrait { position: relative; align-self: start; aspect-ratio: 4 / 5; min-width: 0; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
 .tablet-performer__portrait .av-portrait-large { display: block; width: 100%; height: 100%; border-radius: 0; }
-/* 사진 바꾸기 sits on the portrait as on the PC; touch has no hover, so it stays visible. */
-.tablet-performer__portrait-change.ui-button { position: absolute; right: var(--space-2); bottom: var(--space-2); background: var(--color-cover-scrim); color: var(--color-text); font-size: var(--type-meta); }
-.tablet-performer__portrait-change.ui-button:disabled { opacity: .5; }
+/* 프로필 편집's 대표 사진 row: the current portrait small, with 사진 바꾸기 beside it. */
+.tablet-profile-portrait { display: grid; gap: var(--space-1); }
+.tablet-profile-portrait__label { font-size: var(--type-meta); color: var(--color-muted); }
+.tablet-profile-portrait__row { display: flex; align-items: center; gap: var(--space-4); }
+.tablet-profile-portrait__thumb { flex: none; width: 64px; aspect-ratio: 4 / 5; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.tablet-profile-portrait__thumb .av-portrait-large { display: block; width: 100%; height: 100%; border-radius: 0; }
 .tablet-performer__identity { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .tablet-performer__name { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .tablet-performer__identity h1 { margin: 0; font-size: var(--type-title); font-weight: 600; line-height: var(--line-title); overflow-wrap: anywhere; }

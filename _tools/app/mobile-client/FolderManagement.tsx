@@ -16,67 +16,77 @@ export const isOriginalsRoot=(folder:Pick<Classification,'id'|'name'|'parent_id'
  * 2026-10-17). Move and delete stay with the PC, whose character-series rule they depend on, so there
  * is no control for them.
  *
+ * With no `folder`, the sheet creates a top-level folder (a root, as the PC's 새 폴더 does).
  * A child folder is a tag, as on the PC. The server
  * checks every rule again; the checks here only spare a round trip. An attempt keeps its
  * operation id until the name or target changes, so retrying after a lost reply applies the
  * command once rather than twice.
  */
-export function FolderManagement({authority,folders,folder,initialMode='menu',onClose,onChanged}:{authority:FolderAuthority;folders:readonly Classification[];folder:Classification;/** A long-press sheet that already chose the action opens straight on its form. */initialMode?:'menu'|'create'|'rename'|'look';onClose():void;onChanged(change:FolderChange):void}) {
-  const [mode,setMode]=useState<'menu'|'create'|'rename'|'look'>(initialMode);
-  const [iconKey,setIcon]=useState(folder.icon_key??null),[colorKey,setColor]=useState(folder.color_key??null);
-  const [name,setName]=useState(initialMode==='rename'?folder.name:initialMode==='create'?'새 폴더':'');
+/**
+ * The kind a new folder gets under `parent`, by the PC's `validate_parent` rule that the server checks
+ * again: a root has no parent, and a folder made under any parent is a tag.
+ */
+export const newFolderKind=(parent:Pick<Classification,'id'>|null):'root'|'tag'=>parent?'tag':'root';
+
+export function FolderManagement({authority,folders,folder,initialMode='menu',onClose,onChanged}:{authority:FolderAuthority;folders:readonly Classification[];/** Null: create a top-level folder (only the create form is offered). */folder:Classification|null;/** A long-press sheet that already chose the action opens straight on its form. */initialMode?:'menu'|'create'|'rename'|'look';onClose():void;onChanged(change:FolderChange):void}) {
+  const top=folder===null;
+  const [mode,setMode]=useState<'menu'|'create'|'rename'|'look'>(top?'create':initialMode);
+  const [iconKey,setIcon]=useState(folder?.icon_key??null),[colorKey,setColor]=useState(folder?.color_key??null);
+  const [name,setName]=useState(!top&&initialMode==='rename'?folder.name:top||initialMode==='create'?'새 폴더':'');
   const [snapshot,setSnapshot]=useState<AuthorityFolder[]|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const lock=useRef(false),attempt=useRef<{key:string;operationId:string;folderId:string}|null>(null);
   const read=()=>{setError('');setSnapshot(null);return readFolderSnapshot(authority).then(setSnapshot,reason=>setError(folderErrorText(reason)));};
   useEffect(()=>{
+    // A top-level create names no existing folder, so there is no revision to read.
+    if(top)return;
     let live=true;const controller=new AbortController();
     void readFolderSnapshot(authority,controller.signal).then(value=>{if(live)setSnapshot(value);},reason=>{if(live&&!controller.signal.aborted)setError(folderErrorText(reason));});
     return()=>{live=false;controller.abort();};
-  },[authority.libraryId,authority.epoch,folder.id]);
-  const current=snapshot?.find(item=>item.id===folder.id);
-  const target=folder.id;
+  },[authority.libraryId,authority.epoch,folder?.id,top]);
+  const current=folder?snapshot?.find(item=>item.id===folder.id):undefined;
+  const target=folder?.id??null;
   const trimmed=name.trim();
   const problem=!trimmed?'':trimmed.length>FOLDER_NAME_LIMIT?'폴더 이름이 너무 깁니다.'
-    :mode==='create'&&siblingNameTaken(folders,folder.id,trimmed)?'같은 위치에 같은 이름의 폴더가 있습니다.'
-    :mode==='rename'&&trimmed!==folder.name&&siblingNameTaken(folders,folder.parent_id,trimmed,folder.id)?'같은 위치에 같은 이름의 폴더가 있습니다.':'';
+    :mode==='create'&&siblingNameTaken(folders,target,trimmed)?'같은 위치에 같은 이름의 폴더가 있습니다.'
+    :mode==='rename'&&folder&&trimmed!==folder.name&&siblingNameTaken(folders,folder.parent_id,trimmed,folder.id)?'같은 위치에 같은 이름의 폴더가 있습니다.':'';
   const close=()=>{if(!lock.current)onClose();};
   const unchangedLook=!current||(iconKey===current.iconKey&&colorKey===current.colorKey);
   const save=async()=>{
-    if(lock.current||mode==='menu')return;
+    if(lock.current||mode==='menu'||top&&mode!=='create')return;
     if(mode==='look'){if(!current||unchangedLook)return;}
     else if(!trimmed||problem)return;
     if(mode==='rename'&&(!current||trimmed===current.name))return;
     lock.current=true;setBusy(true);setError('');
     try {
       const key=mode==='look'?`look:${target}:${iconKey}:${colorKey}:${current?.entityRevision??0}`:`${mode}:${target}:${trimmed}:${current?.entityRevision??0}`;
-      if(attempt.current?.key!==key)attempt.current={key,operationId:crypto.randomUUID(),folderId:mode==='create'?crypto.randomUUID():folder.id};
+      if(attempt.current?.key!==key)attempt.current={key,operationId:crypto.randomUUID(),folderId:mode==='create'||!folder?crypto.randomUUID():folder.id};
       const {operationId,folderId}=attempt.current;
       const fields=mode==='create'
-        ?{classificationId:folderId,kind:'tag',name:trimmed,parentId:folder.id,iconKey:null,colorKey:null}
+        ?{classificationId:folderId,kind:newFolderKind(folder),name:trimmed,parentId:target,iconKey:null,colorKey:null}
         :mode==='look'?{classificationId:folderId,iconKey,colorKey,expectedRevision:current!.entityRevision}
         :{classificationId:folderId,name:trimmed,expectedRevision:current!.entityRevision};
       const reply=await folderCommand(authority,operationId,mode==='create'?'createClassification':mode==='look'?'updateClassificationAppearance':'renameClassification',fields);
-      if(!reply.classification||reply.classification.id!==folderId)throw new Error('변경 결과를 확인하지 못했습니다. 폴더 목록을 다시 확인해 주세요.');
+      if(!reply.classification||reply.classification.id!==folderId||mode==='create'&&(reply.classification.parentId??null)!==target)throw new Error('변경 결과를 확인하지 못했습니다. 폴더 목록을 다시 확인해 주세요.');
       onChanged({type:mode,folder:reply.classification});
       onClose();
     } catch(reason) {setError(folderErrorText(reason));}
     finally {lock.current=false;setBusy(false);}
   };
-  const title={menu:'폴더 관리',create:'하위 폴더 만들기',rename:'이름 바꾸기',look:'아이콘 및 색상'}[mode];
-  const originals=isOriginalsRoot(folder);
-  const checking=!snapshot&&!error;
+  const title={menu:'폴더 관리',create:top?'새 폴더 만들기':'하위 폴더 만들기',rename:'이름 바꾸기',look:'아이콘 및 색상'}[mode];
+  const originals=!!folder&&isOriginalsRoot(folder);
+  const checking=!top&&!snapshot&&!error;
   return <BottomSheet title={title} onClose={close}><div className="folder-management">
     <BusyLabel delay={400} busy={checking}>폴더 정보 확인 중</BusyLabel>
     {error&&<p role="alert" className="error-message">{error}{!snapshot&&<Button variant="ghost" disabled={busy} onClick={()=>void read()}>다시 시도</Button>}</p>}
-    {snapshot&&!current&&<p role="alert">이 폴더는 삭제되었거나 옮겨졌습니다. 목록을 새로 고쳐 주세요.</p>}
+    {!top&&snapshot&&!current&&<p role="alert">이 폴더는 삭제되었거나 옮겨졌습니다. 목록을 새로 고쳐 주세요.</p>}
     {mode==='menu'?<div className="folder-management-actions">
-      <Button disabled={!current||originals} onClick={()=>{setName(folder.name);setMode('rename');}}>이름 바꾸기</Button>
+      <Button disabled={!current||originals} onClick={()=>{if(folder)setName(folder.name);setMode('rename');}}>이름 바꾸기</Button>
       <Button disabled={!current} onClick={()=>{setIcon(current?.iconKey??null);setColor(current?.colorKey??null);setMode('look');}}>아이콘 및 색상</Button>
       <Button disabled={!current} onClick={()=>{setName('새 폴더');setMode('create');}}>하위 폴더 만들기</Button>
       {originals&&<p className="hint">오리지널 기본 영역의 이름은 유지됩니다.</p>}
       <p className="hint">폴더 이동과 삭제는 PC에서 할 수 있습니다.</p>
     </div>:mode==='look'?<>
-      <AppearanceChoices name={folder.name} kind={folder.kind??'tag'} iconKey={iconKey} colorKey={colorKey} busy={busy} onIcon={setIcon} onColor={setColor} onReset={()=>{setIcon(null);setColor(null);}}/>
+      <AppearanceChoices name={folder?.name??''} kind={folder?.kind??'tag'} iconKey={iconKey} colorKey={colorKey} busy={busy} onIcon={setIcon} onColor={setColor} onReset={()=>{setIcon(null);setColor(null);}}/>
       <div className="ui-dialog__actions"><Button disabled={busy} onClick={close}>취소</Button><Button variant="primary" disabled={busy||unchangedLook} onClick={()=>void save()}><BusyLabel delay={400} busy={busy} idle="저장">저장 중</BusyLabel></Button></div>
     </>:<>
       <Field label="폴더 이름"><TextInput value={name} disabled={busy} maxLength={FOLDER_NAME_LIMIT+20} onChange={event=>{setName(event.target.value);setError('');}} autoFocus/></Field>

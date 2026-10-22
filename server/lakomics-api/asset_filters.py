@@ -45,6 +45,9 @@ ASPECT_PREDICATES: dict[str, str] = {
 #: filter the database could evaluate; it is a rejected request.
 BOUND_MAX = 9_223_372_036_854_775_807
 
+#: The PC's two 작가 미상 scopes (``src/artists/types.ts``), accepted as ``artist`` values.
+UNKNOWN_ARTISTS = ("unknown:none", "unknown:source")
+
 MediaKind = Literal["images", "videos"]
 AspectRatio = Literal["square", "landscape", "portrait"]
 
@@ -145,7 +148,21 @@ def filter_clause(filters: Filters, alias: str = "asset") -> tuple[str, list]:
     for tag in filters.tags:
         conditions.append(f"{alias}.id IN (SELECT asset_id FROM library_asset_tags WHERE tag_id=?)")
         params.append(tag)
-    if filters.artist is not None:
+    if filters.artist in UNKNOWN_ARTISTS:
+        # 작가 미상 (PC `asset_artist_scope`): no assignment and no creator key, where the key
+        # is the PC-published tag row's when there is one, else the stored handle. `none` has
+        # no source either; `source` has only a source URL. PC artist-exclusion folders are not
+        # published, so this scope can include Assets the PC count leaves out.
+        source = "<>" if filters.artist == "unknown:source" else "="
+        conditions.append(f"""NOT EXISTS(SELECT 1 FROM library_artist_assignments assigned
+                                 WHERE assigned.asset_id={alias}.id)
+            AND COALESCE((SELECT tagged.creator_key FROM library_tag_assets tagged
+                          WHERE tagged.asset_id={alias}.id),
+                         CASE WHEN EXISTS(SELECT 1 FROM library_tag_assets tagged
+                                          WHERE tagged.asset_id={alias}.id)
+                              THEN NULL ELSE {alias}.creator_handle END, '') = ''
+            AND COALESCE({alias}.source_url, '') {source} ''""")
+    elif filters.artist is not None:
         # A manual/source-url assignment wins over the original creator key, as on PC.
         conditions.append(f"""{alias}.id IN (
             SELECT asset_id FROM library_artist_assignments WHERE artist_id=?

@@ -228,15 +228,21 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
       setEditError(''); return true;
     } catch (reason) { setEditError(errorText(reason)); return false; }
   };
+  // The page's portrait: a queued choice shows at once, then the server's own selection.
+  const portraitView = !hidePhotos && wishVisible && portraitWish ? portraitWish.crop && portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><span className="av-portrait__crop" style={portraitCropStyle(portraitWish.url, portraitWish.crop)}/></span>
+    : portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><img src={portraitWish.url} alt=""/></span> : <span className="av-portrait av-portrait-large" aria-label={`${page.person.name} 사진`}>{page.person.name.slice(0, 1)}</span>
+    : <PersonPortrait person={{...page.person, ...(selected ? {portraitImage: published.portraitImage, portraitCrop: shownCrop} : {})}} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large" privacy={hidePhotos}/>;
+  /** 대표 사진 in 프로필 편집: the photo sheet opens over the editor, so a draft is never lost. */
+  const portraitLead = <section className="tablet-profile-portrait" aria-label="대표 사진">
+    <span className="tablet-profile-portrait__label">대표 사진</span>
+    <div className="tablet-profile-portrait__row"><div className="tablet-profile-portrait__thumb">{portraitView}</div>
+      <Button variant="quiet" disabled={revision === null || refused} onClick={() => setStashSheet('portrait')}><CameraIcon aria-hidden="true"/>사진 바꾸기</Button></div>
+  </section>;
   return <article className="tablet-performer" aria-label="AV 배우" aria-busy={waiting} inert={waiting || undefined}>
     <header className="tablet-performer__band">
       {editable && managementRequest === undefined && <IconButton className="tablet-performer__manage" label="배우 관리" icon={EllipsisHorizontalIcon} onClick={() => setManageOpen(true)}/>}
-      <div className="tablet-performer__portrait" title={source ? `사진 출처: ${source}` : undefined}>
-        {!hidePhotos && wishVisible && portraitWish ? portraitWish.crop && portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><span className="av-portrait__crop" style={portraitCropStyle(portraitWish.url, portraitWish.crop)}/></span>
-          : portraitWish.url ? <span className="av-portrait av-portrait-large has-image" aria-label={`${page.person.name} 사진`}><img src={portraitWish.url} alt=""/></span> : <span className="av-portrait av-portrait-large" aria-label={`${page.person.name} 사진`}>{page.person.name.slice(0, 1)}</span>
-          : <PersonPortrait person={{...page.person, ...(selected ? {portraitImage: published.portraitImage, portraitCrop: shownCrop} : {})}} current={page.works[0]!} items={shelf!.works} revision={shelf!.revision} size="large" privacy={hidePhotos}/>}
-        {editable && <Button size="sm" variant="quiet" className="tablet-performer__portrait-change" disabled={revision === null || refused} onClick={() => setStashSheet('portrait')}><CameraIcon aria-hidden="true"/>사진 바꾸기</Button>}
-      </div>
+      {/* The portrait stays unobstructed; 사진 바꾸기 lives in 배우 관리 and in 프로필 편집. */}
+      <div className="tablet-performer__portrait" title={source ? `사진 출처: ${source}` : undefined}>{portraitView}</div>
       <div className="tablet-performer__identity">
         <div className="tablet-performer__name"><div className="tablet-performer__title"><h1>{shownName.primary}{profileEditable && <ProfileManualMark {...markProps} label="이름" keys={["displayName"]}/>}{!editable && published?.favorite && <span className="tablet-performer__favorite" role="img" aria-label="즐겨찾기한 배우"><StarSolidIcon aria-hidden="true"/></span>}</h1>
           {profileEditable && <IconButton label="프로필 편집" icon={PencilIcon} disabled={refused} onClick={() => setProfileOpen(true)}/>}
@@ -271,7 +277,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
       <Button variant="quiet" disabled={revision === null || refused} onClick={() => { setManageOpen(false); setStashSheet('profile'); }}>StashDB 프로필 선택</Button>
       {published && <StashdbProfileActions person={published} authority={authority!} name={shownName.primary} onClose={() => setManageOpen(false)}/>}
     </div></BottomSheet>}
-    {profileOpen && profileEditable && published && <PersonProfileEditor surface={TabletProfileSurface} person={{...page.person, ...published, displayName: published.displayName ?? page.person.name}} disabled={refused} onSave={saveProfile} onClose={() => setProfileOpen(false)}/>}
+    {profileOpen && profileEditable && published && <PersonProfileEditor surface={TabletProfileSurface} lead={portraitLead} person={{...page.person, ...published, displayName: published.displayName ?? page.person.name}} disabled={refused} onSave={saveProfile} onClose={() => setProfileOpen(false)}/>}
     {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
     {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={shownName.primary} nameJa={shownName.secondary} privacy={hidePhotos} authority={authority!} covers={{works: page.works, revision: shelf!.revision}} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
       if (command.commandType !== 'setPersonPortrait') return;

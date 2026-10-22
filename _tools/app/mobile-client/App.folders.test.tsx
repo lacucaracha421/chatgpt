@@ -223,10 +223,10 @@ describe('folder subtree',()=>{
 });
 
 describe('folder management entry points',()=>{
-  it('keeps root creation hidden and offers folder management only with authority',async()=>{
+  it('offers root creation and folder management only with authority',async()=>{
     render(<App/>);
     await screen.findByRole('button',{name:/^혼자/});
-    expect(screen.queryByRole('button',{name:'새 폴더'})).toBeNull();
+    expect(screen.getByRole('button',{name:'새 폴더'})).toBeTruthy();
     fireEvent.click(await screen.findByRole('button',{name:/^혼자/}));await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'더보기'}));expect(screen.getByRole('button',{name:'폴더 관리'})).toBeTruthy();
     cleanup();mocks.api.mockImplementation(server(2,{authority:null}));

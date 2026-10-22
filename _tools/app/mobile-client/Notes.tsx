@@ -25,6 +25,7 @@ import {NOTE_KIND_DEFINITIONS,type NoteKindFilter} from '../src/notes/noteFilter
 import {NoteCard} from '../src/notes/NoteCard';
 import {NoteLedger} from './NoteLedger';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
+import {QR_VIEWBOX_SIZE,createQrMatrix,qrSvgPath} from '../src/shared/ui/qrCode';
 import {revealCaret,useNoteEditor} from './noteCaret';
 import '../src/notes/noteCard.css';
 import './notes.css';
@@ -72,10 +73,13 @@ function RecoveryKey({store}:{store:NotesStore}) {
   async function unlockAndReveal(){setError('');const failure=await store.openSecrets('secretUnlock',{pin});setPin('');if(failure)setError(failure);else await reveal();}
   useEffect(()=>{void reveal();},[]);
   const showLoading = useDelayedBusy(key === null && !needPin && !error);
+  // Encoded here, offline, as the PC shows it; the key never leaves the device for a QR.
+  const qr=useMemo(()=>key?qrSvgPath(createQrMatrix(key)):'',[key]);
   return <div className="notes-recovery">
     {key!==null&&!showLoading?<>
+      {qr&&<svg className="notes-recovery__qr" role="img" aria-label="복구키 QR 코드" viewBox={`0 0 ${QR_VIEWBOX_SIZE} ${QR_VIEWBOX_SIZE}`} shapeRendering="crispEdges"><rect width={QR_VIEWBOX_SIZE} height={QR_VIEWBOX_SIZE} fill="#f2f0e8"/><path d={qr} fill="#171816"/></svg>}
       <textarea className="notes-recovery__key" aria-label="복구키" value={key} readOnly spellCheck={false}/>
-      <p className="hint">다른 사람이 보지 않는 곳에서 열고, 따로 보관해 주세요. 복사한 키는 30초 뒤 클립보드에서 지웁니다.</p>
+      <p className="hint">다른 기기에서는 QR을 카메라로 찍거나 키를 복사해 붙여넣으세요. 다른 사람이 보지 않는 곳에서 열고, 따로 보관해 주세요. 복사한 키는 30초 뒤 클립보드에서 지웁니다.</p>
       <Button onClick={()=>void copySecret(key).then(()=>setCopied(true),()=>setError('복사하지 못했습니다.'))}>{copied?'복사했습니다':'복구키 복사'}</Button>
     </>:needPin?<form onSubmit={event=>{event.preventDefault();void unlockAndReveal();}}>
       <label>암호 메모 PIN<input className="notes-secret-gate__pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8} value={pin} onChange={event=>setPin(event.target.value.replace(/\D/g,''))}/></label>

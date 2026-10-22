@@ -53,6 +53,8 @@ final class NetworkPolicy {
   // ARTIST-001: the read-only artist list and one artist by its id as a single encoded segment
   // (`/` as %2F); a segment of dots only is refused. The snapshot PUT is publisher-only.
   get=get || p.equals("/v1/library/artists") || (p.matches("/v1/library/artists/[A-Za-z0-9_%.~:-]{1,3072}") && !p.matches("/v1/library/artists/\\.+") && !new URI(p).getPath().equals("/v1/library/artists/intents"));
+  // Parity batch D (2026-10-22): read-only same-post strip, artist 다시보기 and statistics.
+  get=get || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/same-post") || p.equals("/v1/library/artist-rediscovery") || p.equals("/v1/library/statistics");
   // Shared folder pins: the list GET and the per-id command POST, nothing else.
   get=get || p.equals("/v1/library/folder-pins");
   get=get || p.equals("/v1/library/favorite-characters");

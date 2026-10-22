@@ -1,6 +1,7 @@
 import type {Asset} from './types';
 import {getChoseong} from 'es-hangul';
 import {artistHandle} from '../src/artists/format';
+import {UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist} from '../src/artists/types';
 import {createKoreanMatcher,normalizeSearchText} from '../src/shared/koreanSearch';
 
 export type LibraryArtist = {
@@ -17,6 +18,8 @@ export type LibraryArtist = {
   pinned: boolean;
   hidden: boolean;
   main: boolean;
+  /** 퍼온 계정: published by PCs from the U14 publication change on; absent means not marked. */
+  reposter?: boolean;
   coverAssetIds: string[];
   coverContentRatings?: Record<string, import("../src/shared/privacy/contentMask").ContentRating | null>;
 };
@@ -73,6 +76,7 @@ export function normalizeArtist(value: unknown): LibraryArtist | null {
     pinned: row.pinned === true,
     hidden: row.hidden === true,
     main: row.main === true,
+    ...(row.reposter === true ? {reposter: true} : {}),
     ...(row.coverContentRatings && typeof row.coverContentRatings === "object" ? {coverContentRatings:row.coverContentRatings} : {}),
     coverAssetIds: Array.isArray(row.coverAssetIds) ? row.coverAssetIds.filter((id): id is string => typeof id === 'string') : [],
   };
@@ -151,6 +155,27 @@ export function sortArtists(artists: LibraryArtist[], sort: ArtistSort): Library
   });
 }
 
+// The PC's two 작가 미상 scopes; the server lists their Assets by `artist`.
+export {UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist};
+
+/** Tablet hub buckets of the PC hub (`artists.rs` list filters): pins stay on top of 주요 작가 (no sidebar here). */
+export type ArtistBucket = 'main' | 'other' | 'single' | 'reposter' | 'unknown';
+
+/** Visible (not hidden) artists of one bucket; `unknown` holds no artists, only the two scopes. */
+export function bucketArtists(artists: LibraryArtist[], bucket: ArtistBucket): LibraryArtist[] {
+  return artists.filter(artist => !artist.hidden && (bucket === 'reposter' ? !!artist.reposter
+    : !artist.reposter && (bucket === 'main' ? artist.main || artist.pinned
+      : bucket === 'other' ? !artist.main && !artist.pinned
+        : bucket === 'single' ? !artist.main && !artist.pinned && artist.assetCount === 1 : false)));
+}
+
+/** A 작가 미상 scope shaped like an artist so the artist page can list it. */
+export function unknownArtist(id: typeof UNKNOWN_NONE | typeof UNKNOWN_SOURCE, count: number): LibraryArtist {
+  return {id, label: id === UNKNOWN_NONE ? '작가 미상 · 출처 없음' : '작가 미상 · 출처만 있음', displayName: null, sourceName: null,
+    keys: [], assetCount: count, recentCount: 0, firstSavedAt: null, lastSavedAt: null, lastOpenedAt: null,
+    pinned: false, hidden: false, main: false, coverAssetIds: []};
+}
+
 /** The server currently publishes tiers, not a separate today's-picks array. */
 export function todayArtists(artists: LibraryArtist[]): LibraryArtist[] {
   const ranked = [...artists].sort((a, b) => Number(b.main) - Number(a.main) || Number(b.pinned) - Number(a.pinned));
@@ -176,3 +201,5 @@ export function profileUrl(artist: LibraryArtist): string | null {
   }
   return null;
 }
+
+export const ARTIST_SORT_LABELS: Record<ArtistSort, string> = {recent: '최근 저장 순', count: '장수', name: '이름'};

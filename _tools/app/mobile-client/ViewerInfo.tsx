@@ -15,6 +15,7 @@ import {errorText, native} from './transport';
 import {useLibraryArtists} from './useLibraryArtists';
 import {artistName} from './artistsModel';
 import {artistHandle as assignedHandle} from '../src/artists/format';
+import {AssetStrip, usePreparedRead} from './AssetStrip';
 
 /**
  * Every row renders a field the mobile Asset actually carries; a value the device does
@@ -95,6 +96,13 @@ export function infoFields(asset: Asset, now = new Date()): {rows: (InfoField & 
   return {rows, heading: asset.creator_name?.trim() || (asset.creator_handle?.trim() ? handleLabel(asset.creator_handle) : '작가 미상')};
 }
 
+/** PC `source_group.rs`: only an x.com / twitter.com status link has other images from the same post. */
+export function samePostSource(url: string | undefined): boolean {
+  return !!url && /^https:\/\/(?:x|twitter)\.com\/[^/?#]+\/status\/\d+/i.test(url);
+}
+
+const samePostItems = (reply: {items?: Asset[]}) => Array.isArray(reply?.items) ? reply.items : [];
+
 const SECTIONS: {key: 'source' | 'file'; title: string}[] = [{key: 'source', title: '출처'}, {key: 'file', title: '파일'}];
 
 /**
@@ -131,7 +139,9 @@ export async function writeClipboard(text: string): Promise<void> {
  * `Viewer`, so those three overlays keep one owner.
  */
 /** `image`: lead with the large image (the gallery sheet); the viewer already shows the asset itself. */
-export function ViewerInfo({asset, mediaError = '', image = false, classifications = [], onArtist}: {asset: Asset; mediaError?: string; image?: boolean; classifications?:readonly Classification[]; onArtist?(artist:LibraryArtist):void; onClose?(): void}) {
+export function ViewerInfo({asset, mediaError = '', image = false, classifications = [], onArtist, onOpenAsset}: {asset: Asset; mediaError?: string; image?: boolean; classifications?:readonly Classification[]; onArtist?(artist:LibraryArtist):void; onClose?(): void;
+  /** Opens an Asset of the 같은 게시물 group in the viewer, with the whole group as its list. */
+  onOpenAsset?(items: Asset[], index: number): void}) {
   const privacy = useTabletAssetMask(asset);
   const imageText = useViewerImageText();
   const artistIndex = useLibraryArtists(true, 0);
@@ -163,6 +173,9 @@ export function ViewerInfo({asset, mediaError = '', image = false, classificatio
   const {rows} = useMemo(() => infoFields(asset), [asset]);
   const heading = infoFields(creatorAsset).heading;
   const source = openableSource(asset.source_url) ? asset.source_url : undefined;
+  const samePost = usePreparedRead<{items?: Asset[]}>(!asset.pending && samePostSource(asset.source_url) ? `/v1/library/assets/${encodeURIComponent(asset.id)}/same-post` : null, samePostItems);
+  // A sibling of the shown group keeps the group on screen until its own read is ready.
+  const group = samePost && samePostItems(samePost.reply).some(item => item.id === asset.id) ? samePostItems(samePost.reply) : [];
 
   useEffect(() => {setStatus(null); setCopied(''); setBusy(false);}, [asset.id]);
   useEffect(() => {
@@ -250,6 +263,10 @@ export function ViewerInfo({asset, mediaError = '', image = false, classificatio
           </dl>
         </section>;
       })}
+      {group.length > 1 && <section className="viewer-info-section" data-info-section="same-post" aria-label="같은 게시물">
+        <SectionLabel as="h3" title="같은 게시물" count={group.length}/>
+        <AssetStrip variant="grid" label="같은 게시물" items={group} currentId={asset.id} prepared={samePost?.prepared} onOpen={onOpenAsset ? index => onOpenAsset(group, index) : undefined}/>
+      </section>}
       {status && <p className={`viewer-info-copy ${status.kind}`} role="alert">
         {status.kind === 'copied' ? `${status.label}를 클립보드에 복사했습니다.` : status.label}
       </p>}

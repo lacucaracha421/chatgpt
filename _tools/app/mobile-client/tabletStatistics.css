@@ -1,0 +1,14 @@
+/* 통계 sheet (PC statistics.css: hairline sections, tabular numbers, large totals). */
+.tablet-statistics { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; padding-bottom:var(--space-6); }
+.tablet-statistics__skeleton { min-height:240px; }
+.tablet-statistics__section { min-width:0; }
+.tablet-statistics__grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:var(--space-6); }
+.tablet-statistics__totals { display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:var(--space-4); margin:var(--space-2) 0 0; }
+.tablet-statistics__totals > div { display:flex; flex-direction:column; gap:var(--space-1); min-width:0; }
+.tablet-statistics__totals dt { color:var(--color-muted); font-size:var(--type-meta); }
+.tablet-statistics__totals dd { margin:0; font-size:var(--type-number); font-weight:600; font-variant-numeric:tabular-nums; }
+.tablet-statistics__rows { margin:var(--space-2) 0 0; }
+.tablet-statistics__rows > div { display:flex; justify-content:space-between; gap:var(--space-4); min-height:44px; align-items:center; border-bottom:1px solid var(--color-border); }
+.tablet-statistics__rows dt { min-width:0; overflow-wrap:anywhere; }
+.tablet-statistics__rows dd { margin:0; flex:none; font-variant-numeric:tabular-nums; }
+.tablet-statistics__empty { margin:var(--space-2) 0 0; color:var(--color-muted); font-size:var(--type-meta); }

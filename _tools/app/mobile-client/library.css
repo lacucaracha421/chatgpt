@@ -121,6 +121,9 @@
 /* Library root: one screen, one conclusion. `.is-fit` is set when the covers were sized from the
    real viewport so the first screen ends on a whole row; scrolling then settles on row ends. */
 .library-root .section-label { margin:16px 0 12px; }
+/* 새 폴더 keeps its 44 px hit area without growing the label row, and eases in once folder editing is available. */
+.library-root-folders .ui-section-label__actions .ui-icon-button { margin-block:calc((var(--line-ui) - var(--touch-target)) / 2); animation:overlay-enter 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .library-root-folders .ui-section-label__actions .ui-icon-button { animation:none; } }
 .library-root .library-all { margin:0; }
 .library-root-folders .library-folder small { display:none; }
 .library-root.is-fit .library-root-folders .library-folder .home-cover-group { aspect-ratio:auto; height:var(--root-cover-height); }

@@ -17,10 +17,13 @@ import {Scrubber} from './Scrubber';
 import {DEFAULT_DENSITY, normalizePage} from './model';
 import {filterVersionOf, ASSET_FILTER_VERSION} from './assetFilters';
 import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from './scopedAssetToc';
-import {preparedArtistPage, prepareArtistPage, useArtistEntry, type ArtistPage} from './ArtistGridEntry';
+import {preparedArtistPage, preparedArtistRediscovery, prepareArtistPage, useArtistEntry, type ArtistPage} from './ArtistGridEntry';
+import {readArtistRediscovery, type PreparedRediscovery} from './artistRediscovery';
+import {AssetStrip} from './AssetStrip';
+import {TabletHelp} from './TabletHelp';
 import type {Asset, PageWire} from './types';
 import {usePrivacyMode} from './privacyMode';
-import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
+import {artistHandles, artistName, assetsFromIds, daysSince, isUnknownArtist, matchedPositions, matchesArtist, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
 import {displayDate} from '../src/shared/displayDate';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {ARTIST_LIST_ENTRANCE, PreparedCovers, usePreparedCovers} from './artistCovers';
@@ -164,23 +167,44 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen, on
 
 export function EmptyArtists() { return <EmptyState icon={PhotoIcon} title="PC 앱이 작가 목록을 아직 보내지 않았습니다" />; }
 
-function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, assets}: {artist: LibraryArtist; privateMode: boolean; sort: 'newest' | 'oldest'; filter: 'all' | 'image' | 'video'; onSort(): void; onFilter(value: 'all' | 'image' | 'video'): void; assets: Asset[]}) {
+/** PC artist page 다시보기 (`ArtistPage.tsx`): N년 전 오늘 and 오래 안 본 작품, each opening the viewer on its own Assets. */
+function ArtistRediscovery({rows, paused, onOpenViewer}: {rows: PreparedRediscovery; paused: boolean; onOpenViewer(items: Asset[], index: number): void}) {
+  const day = rows.value?.onThisDay, unseen = rows.value?.longUnseen;
+  if (!day && !unseen) return null;
+  return <section className="artist-rediscovery" aria-label="다시보기">
+    <SectionLabel as="h2" className="artist-section-heading" title="다시보기" actions={<TabletHelp title="다시보기"><p><strong>N년 전 오늘</strong>: 예전 해의 오늘 날짜에 저장한 그림입니다.</p><p><strong>오래 안 본 작품</strong>: 1년 넘게 전에 저장했고 1년 넘게 열지 않은 그림입니다. 열기 기록은 PC에만 있어, PC에서 이 작가를 1년 넘게 열지 않았을 때만 여기서 고릅니다. 태블릿에서 연 기록은 남지 않습니다.</p></TabletHelp>} />
+    {day && <div className="artist-rediscovery__row"><p><strong>{day.yearsAgo}년 전 오늘</strong> <span>{displayDate(day.localDate)}에 {day.total.toLocaleString('ko-KR')}장 저장</span></p>
+      <AssetStrip label={`${day.yearsAgo}년 전 오늘`} items={day.items} prepared={rows.prepared} paused={paused} onOpen={index => onOpenViewer(day.items, index)} /></div>}
+    {unseen && <div className="artist-rediscovery__row"><p><strong>오래 안 본 작품</strong> <span>1년 넘게 열지 않은 {unseen.total.toLocaleString('ko-KR')}장</span></p>
+      <AssetStrip label="오래 안 본 작품" items={unseen.items} prepared={rows.prepared} paused={paused} onOpen={index => onOpenViewer(unseen.items, index)} /></div>}
+    {rows.value && !rows.value.longUnseenKnown && <p className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />오래 안 본 작품은 PC 앱에서</p>}
+  </section>;
+}
+
+function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, assets, rediscovery}: {artist: LibraryArtist; privateMode: boolean; sort: 'newest' | 'oldest'; filter: 'all' | 'image' | 'video'; onSort(): void; onFilter(value: 'all' | 'image' | 'video'): void; assets: Asset[]; rediscovery?: ReactNode}) {
+  const unknown = isUnknownArtist(artist.id);
   const avatar = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)[0];
   const imageCount = assets.filter(asset => asset.kind !== 'video').length || Math.max(0, artist.assetCount - assets.filter(asset => asset.kind === 'video').length);
   const videoCount = assets.filter(asset => asset.kind === 'video').length;
   return <div className="artist-detail-intro">
-    <div className="artist-detail-identity"><span className="artist-avatar"><ArtistImage asset={avatar} privateMode={privateMode} /></span><span className="artist-detail-identity-text"><h2>{artistName(artist)}</h2><Handles artist={artist} /></span></div>
-    <ArtistStats artist={artist} detail />
-    <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />합치기는 PC 앱에서</div>
+    <div className="artist-detail-identity"><span className="artist-avatar"><ArtistImage asset={avatar} privateMode={privateMode} /></span><span className="artist-detail-identity-text"><h2>{artistName(artist)}</h2>{unknown ? <span className="artist-handle">{artist.assetCount.toLocaleString('ko-KR')}장</span> : <Handles artist={artist} />}</span>{unknown && <TabletHelp title="작가 미상"><p>작가 정보가 없는 그림을 출처 주소가 없는 것과 출처 주소만 있는 것으로 나눕니다. 장수는 PC가 보낸 집계입니다.</p><p>PC에서 작가에서 제외한 폴더의 그림도 여기에는 함께 보입니다.</p></TabletHelp>}</div>
+    {!unknown && <>
+      <ArtistStats artist={artist} detail />
+      <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />합치기는 PC 앱에서</div>
+    </>}
+    {!privateMode && rediscovery}
     <div className="artist-filter-row"><Button size="sm" variant="quiet" className="artist-sort-button" onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></Button><FilterChip aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</FilterChip><FilterChip aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</FilterChip></div>
   </div>;
 }
 
-function ArtistDetail({scopeChips,summary, initialPage, assignments, privateMode, paused, onBack, onOpenViewer, onEdit, notice, listed}: {scopeChips?:ReactNode;summary: LibraryArtist; initialPage?:ArtistPage; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void; onEdit: EditArtist; notice: ReactNode; listed: boolean | undefined}) {
+function ArtistDetail({scopeChips,summary, initialPage, initialRediscovery, assignments, privateMode, paused, onBack, onOpenViewer, onEdit, notice, listed}: {scopeChips?:ReactNode;summary: LibraryArtist; initialPage?:ArtistPage; initialRediscovery?: PreparedRediscovery; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void; onEdit: EditArtist; notice: ReactNode; listed: boolean | undefined}) {
   const artist = summary;
   const [missing, setMissing] = useState(false);
   const [page, setPage] = useState<ArtistPage|undefined>(initialPage);
   const seeded=useRef(initialPage);
+  const unknown = isUnknownArtist(summary.id);
+  const [rediscovery, setRediscovery] = useState<PreparedRediscovery|undefined>(initialRediscovery);
+  const rediscoveryRef = useRef(rediscovery); rediscoveryRef.current = rediscovery;
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
   const [busy, setBusy] = useState(false);
@@ -205,8 +229,9 @@ function ArtistDetail({scopeChips,summary, initialPage, assignments, privateMode
     return {...normalizePage(raw),list_generation:raw.listGeneration,scope};
   };
   useEffect(() => {
-    const controller = new AbortController();
     setMissing(false);
+    if (unknown) return;
+    const controller = new AbortController();
     void api<{artist?: LibraryArtist}>(`/v1/library/artists/${encodeURIComponent(summary.id)}`, controller.signal).then(reply => {
       // The list owns editable fields, including queued changes. A late detail read
       // must never overwrite them with the previous server state.
@@ -221,8 +246,10 @@ function ArtistDetail({scopeChips,summary, initialPage, assignments, privateMode
     seeded.current=undefined;
     if(privateMode){setBusy(false);return;}
     const controller=new AbortController();setBusy(true);setError('');
-    void withScopedToc(read(null,controller.signal).then(result=>prepareArtistPage(result,controller.signal)),readScopedToc(path(null,true),controller.signal),sort).then(result=>{
-      if(!controller.signal.aborted&&generation.current===version)setPage(result);
+    // The 다시보기 rows arrive with the first page, never later above a painted gallery.
+    const rows=unknown||rediscoveryRef.current?.artistId===summary.id?Promise.resolve(rediscoveryRef.current):readArtistRediscovery(summary.id,controller.signal).catch(()=>undefined);
+    void Promise.all([withScopedToc(read(null,controller.signal).then(result=>prepareArtistPage(result,controller.signal)),readScopedToc(path(null,true),controller.signal),sort),rows]).then(([result,found])=>{
+      if(!controller.signal.aborted&&generation.current===version){setPage(result);if(found)setRediscovery(found);}
     },reason=>{if(!controller.signal.aborted&&generation.current===version)setError(errorText(reason));})
       .finally(()=>{if(generation.current===version)setBusy(false);});
     return()=>{controller.abort();moreRequest.current?.abort();generation.current++;};
@@ -248,8 +275,8 @@ function ArtistDetail({scopeChips,summary, initialPage, assignments, privateMode
   const local = filter==='all'?fallback:fallback.filter(asset=>filter==='video'?asset.kind==='video':asset.kind!=='video');
   const shown = page?.items ?? (sort==='oldest'?[...local].reverse():local);
   const stale = !!page && page.scope!==scope;
-  return <div className="artist-screen"><ArtistEditMenu artist={artist} onEdit={onEdit} onBack={onBack} profile={profile??null}/>{notice}
-    <div className="artist-detail-scroll"><Gallery hasMore={!privateMode&&!!page?.next_cursor} sparse={privateMode?undefined:sparse} items={shown} privacy={privateMode} stale={stale} busy={busy||loadingMore} onRefresh={()=>setRetry(value=>value+1)} density={DEFAULT_DENSITY} identity={`artist:${page?.scope??scope}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setPage(current=>current?readyScopedAsset(current,ready):current)} onNearEnd={loadMore} paused={privateMode||paused} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={changeSort} onFilter={changeFilter} assets={shown} /></>} onOpen={index => { if (!privateMode&&!stale) onOpenViewer(shown, index); }} />{!shown.length&&!busy && <div className="artist-detail-empty">조건에 맞는 자산이 없습니다.</div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setRetry(value=>value+1)}>다시 시도</button></div>}</div>
+  return <div className="artist-screen">{unknown ? <TopBar back={{label:'작가 목록으로',onClick:onBack}} crumbs={<button className="top-bar__crumbs" onClick={onBack}>작가 ›</button>} title={artistName(artist)}/> : <ArtistEditMenu artist={artist} onEdit={onEdit} onBack={onBack} profile={profile??null}/>}{notice}
+    <div className="artist-detail-scroll"><Gallery hasMore={!privateMode&&!!page?.next_cursor} sparse={privateMode?undefined:sparse} items={shown} privacy={privateMode} stale={stale} busy={busy||loadingMore} onRefresh={()=>setRetry(value=>value+1)} density={DEFAULT_DENSITY} identity={`artist:${page?.scope??scope}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setPage(current=>current?readyScopedAsset(current,ready):current)} onNearEnd={loadMore} paused={privateMode||paused} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={changeSort} onFilter={changeFilter} assets={shown} rediscovery={rediscovery?.artistId===summary.id&&<ArtistRediscovery rows={rediscovery} paused={paused} onOpenViewer={onOpenViewer}/>} /></>} onOpen={index => { if (!privateMode&&!stale) onOpenViewer(shown, index); }} />{!shown.length&&!busy && <div className="artist-detail-empty">조건에 맞는 자산이 없습니다.</div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setRetry(value=>value+1)}>다시 시도</button></div>}</div>
   </div>;
 }
 
@@ -278,7 +305,7 @@ export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=fals
   const notice = <>{pending > 0 && <p className="artist-edit-status" role="status">작가 변경 전송 대기 중 · {pending}건</p>}{error && <div className="inline-error" role="alert">{error}<Button variant="quiet" onClick={retry}>다시 시도</Button></div>}</>;
   const resolved = detail ? resolveArtist(allArtists, detail) : undefined;
   const showLoading=useDelayedBusy(!allArtists.length&&(state==='loading'||state==='idle'));
-  if (detail) return <ArtistDetail scopeChips={scopeChips} summary={resolved ?? detail} initialPage={preparedArtistPage(detail)} listed={loaded ? !!resolved : undefined} assignments={assignments} privateMode={privateMode} paused={paused} notice={notice} onEdit={onEdit} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
+  if (detail) return <ArtistDetail scopeChips={scopeChips} summary={resolved ?? detail} initialPage={preparedArtistPage(detail)} initialRediscovery={preparedArtistRediscovery(detail)} listed={loaded ? !!resolved : undefined} assignments={assignments} privateMode={privateMode} paused={paused} notice={notice} onEdit={onEdit} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" search={{scope:'작가',run:setQuery}} onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<button className="top-bar__crumbs" onClick={()=>window.dispatchEvent(new Event('lakomics-back'))}>홈 ›</button>} title="작가" count={artists.length ? artists.length : undefined} search={state==='ready'?{scope:'작가',run:value=>{setQuery(value);setSearchOpen(true);}}:undefined} />;
   return <><div className="artist-screen" inert={entry.pending} aria-busy={entry.pending}>{header}{notice}
     <HiddenArtists endpoint={endpoint} artists={allArtists} onOpen={artist=>void entry.open(artist)} pending={pending} syncError={error} onRetry={retry} />

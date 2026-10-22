@@ -2455,16 +2455,9 @@ pub(crate) fn home_publication(
     {
         return Err(LibraryError::InvalidCloudResponse);
     }
-    // Version 1 is also consumed by the cloud/tablet strict schema. Style flags are
-    // PC-only until that publication contract is explicitly extended.
-    let published: Vec<_> = artists
-        .into_iter()
-        .map(|artist| {
-            let mut value = serde_json::json!(artist);
-            value.as_object_mut().unwrap().remove("reposter");
-            value
-        })
-        .collect();
+    // Version 1 is also consumed by the cloud/tablet strict schema, which accepts the
+    // optional reposter flag since 2026-10-22 (tablet 퍼온 계정 bucket).
+    let published: Vec<_> = artists.into_iter().map(|artist| serde_json::json!(artist)).collect();
     let (none, source) = snapshot.unknown_counts();
     Ok(
         serde_json::json!({"version": 1, "settings": snapshot.settings,

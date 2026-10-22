@@ -8,7 +8,7 @@ import './Viewer.css';
 import './AssetInfoSheet.css';
 
 /** Gallery overlay: portrait bottom sheet, landscape side sheet; the gallery keeps its position. */
-export function AssetInfoSheet({asset,onClose,classifications,onArtist}:{asset:Asset;onClose():void;classifications?:readonly Classification[];onArtist?(artist:LibraryArtist):void}) {
+export function AssetInfoSheet({asset,onClose,classifications,onArtist,onOpenAsset}:{asset:Asset;onClose():void;classifications?:readonly Classification[];onArtist?(artist:LibraryArtist):void;onOpenAsset?(items:Asset[],index:number):void}) {
   const start = useRef<{x:number;y:number}|null>(null);
   return <Dialog open title="미디어 정보" onClose={onClose}>
     <DialogDescription className="sr-only">선택한 에셋의 출처와 파일 정보</DialogDescription>
@@ -22,7 +22,7 @@ export function AssetInfoSheet({asset,onClose,classifications,onArtist}:{asset:A
       }} onPointerCancel={()=>{start.current=null;}}>
         <strong>정보</strong><IconButton label="정보 닫기" icon={XMarkIcon} onClick={onClose}/>
       </header>
-      <ViewerInfo asset={asset} image classifications={classifications} onArtist={onArtist}/>
+      <ViewerInfo asset={asset} image classifications={classifications} onArtist={onArtist} onOpenAsset={onOpenAsset}/>
     </div>
   </Dialog>;
 }

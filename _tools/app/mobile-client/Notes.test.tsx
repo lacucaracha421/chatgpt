@@ -4,6 +4,7 @@ import {useState,type ReactNode} from 'react';
 import {FindContext,type ScreenFind} from './FindContext';
 import {FindSheet} from './FindSheet';
 import {Notes,type MobileNote} from './Notes';
+import {createQrMatrix,qrSvgPath} from '../src/shared/ui/qrCode';
 function FindHost({children}:{children:ReactNode}){
  const [open,setOpen]=useState(false),[search,setSearch]=useState<ScreenFind>();
  return <FindContext.Provider value={value=>{setSearch(value);setOpen(true);}}>{children}<FindSheet context={{tab:'notes'}} open={open} search={search} onClose={()=>setOpen(false)} entries={[]} endpoint="notes-test" privacy={false}/></FindContext.Provider>;
@@ -545,8 +546,11 @@ it('protects the recovery sheet before its key arrives and releases protection o
   expect(sensitive).toHaveBeenLastCalledWith(false);
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'복구키 보기'}));
   expect(sensitive).toHaveBeenLastCalledWith(true);
+  expect(screen.queryByRole('img',{name:'복구키 QR 코드'})).toBeNull();
   await act(async()=>deliver({key:'a'.repeat(64)}));
   expect((await screen.findByRole('textbox',{name:'복구키'}) as HTMLTextAreaElement).value).toBe('a'.repeat(64));
+  // The revealed key also shows as a QR of exactly that key, encoded on the device.
+  expect(screen.getByRole('img',{name:'복구키 QR 코드'}).querySelector('path')?.getAttribute('d')).toBe(qrSvgPath(createQrMatrix('a'.repeat(64))));
   expect(sensitive).toHaveBeenLastCalledWith(true);
   act(()=>{backRef.current?.();});expect(sensitive).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole('button',{name:'더보기'}));

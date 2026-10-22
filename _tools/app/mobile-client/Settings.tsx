@@ -1,7 +1,7 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useEffect, useState} from 'react';
-import {Button, Field, SettingsGroup, SettingsRow, Switch, TextInput} from './ui';
+import {Button, Field, SegmentedControl, SettingsGroup, SettingsRow, Switch, TextInput} from './ui';
 import {TopBar} from './TopBar';
 import {errorText, native} from './transport';
 import type {Status} from './types';
@@ -83,6 +83,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
         </SettingsGroup>
 
         <SettingsGroup title="화면">
+          <TextZoomSetting/>
           <SettingsRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />} />
           <SettingsRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
           <SettingsRow name="케이스 소리" status="컬렉션에서 케이스와 책을 열고 닫을 때" control={<Switch aria-label="케이스 소리" checked={caseSounds} onChange={event => setCaseSounds(event.target.checked)} />} />
@@ -112,6 +113,26 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
       </div>
     </main>
   </div>;
+}
+
+const TEXT_ZOOM_OPTIONS=[{value:'0',label:'시스템'},...[90,100,110,125,150].map(level=>({value:String(level),label:`${level}%`}))] as const;
+
+/**
+ * 글자 크기 (PC: 화면 배율): the app's WebView text zoom, kept by Android on this device and applied
+ * before the page paints. Only text grows or shrinks, so layout, 44 px touch targets and the viewers'
+ * own pinch zoom stay as they are. Absent on an app build without the native setting.
+ */
+function TextZoomSetting() {
+  const bridge=typeof window.LakomicsNative?.textZoom==='function'&&typeof window.LakomicsNative.setTextZoom==='function'?window.LakomicsNative:null;
+  const [value,setValue]=useState(()=>{try{return String(bridge?.textZoom?.()??0);}catch{return '0';}});
+  const [failed,setFailed]=useState(false);
+  if(!bridge)return null;
+  const shown=TEXT_ZOOM_OPTIONS.some(option=>option.value===value)?value:'0';
+  return <SettingsRow name="글자 크기" status={failed?'바꾸지 못했습니다. 다시 시도해 주세요.':'사진과 뷰어의 확대는 그대로예요'} tone={failed?'off':undefined}
+    control={<SegmentedControl label="글자 크기" value={shown} options={TEXT_ZOOM_OPTIONS} onChange={next=>{
+      let saved=false;try{saved=bridge.setTextZoom?.(Number(next))===true;}catch{/* reported below */}
+      setFailed(!saved);if(saved)setValue(next);
+    }}/>}/>;
 }
 
 const warmLabels:Record<WarmState['status'],string>={off:'꺼짐',waiting:'앱을 다시 열면 이어서 받습니다',running:'받는 중',metered:'모바일 데이터에서는 멈춥니다',done:'모두 받아 두었습니다',error:'잠시 후 다시 시도합니다'};

@@ -93,6 +93,8 @@
 .notes-secret-gate .ui-button svg{width:20px;height:20px;margin-right:6px}
 .notes-recovery{display:flex;flex-direction:column;gap:12px;padding-bottom:12px}
 .notes-recovery form{display:flex;flex-direction:column;gap:12px}
+/* The QR keeps its own light ground in both themes so any camera reads it. */
+.notes-recovery__qr{display:block;align-self:flex-start;width:240px;height:240px;border-radius:var(--radius-sm)}
 
 
 /* The scroll pane shrinks above the IME; the quick bar remains its fixed flex sibling. */
