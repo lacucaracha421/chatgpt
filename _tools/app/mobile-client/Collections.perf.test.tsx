@@ -48,7 +48,7 @@ beforeEach(()=>{
   vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('collection-scroll')?900:0;});
   vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
     const list=this.closest<HTMLElement>('.collection-list'),root=this.closest<HTMLElement>('.collection-scroll');
-    const height=this.classList.contains('collection-list__cell')&&list?parseFloat(list.style.getPropertyValue('--case-height'))+64:900;
+    const height=this.classList.contains('collection-list__cell')&&list?parseFloat(list.style.getPropertyValue('--case-reserve'))+64:900;
     const top=this.classList.contains('collection-list__cell')?100+(Number(this.style.gridRow)-1)*(height+16)-(root?.scrollTop??0):0;
     return {top,bottom:top+height,left:0,right:768,width:768,height,x:0,y:top,toJSON(){}};
   });

@@ -9,3 +9,8 @@
 /* Preserve the case's animation raster while lifting and lowering. */
 .collection-light-case[data-front] .cs-box,
 .collection-light-case[data-settling] .cs-box { will-change: transform; }
+/* Shelf row height: the approved turned-cover reservation (--case-reserve), or, for a type whose front ratio is known
+   from its package (--row-ratio, set by CollectionList), only what that front reaches at this cell width with the PC
+   case-face fit (LightCase.css). The tablet applies its own face fit in collectionShelf.css. */
+.collection-list { --case-height: var(--case-reserve); }
+.collection-list--fitted { --case-height: min(var(--case-reserve), calc((var(--cell-width) + var(--space-4)) / var(--row-ratio))); }

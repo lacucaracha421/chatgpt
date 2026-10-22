@@ -4,7 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Re
 import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
-import { isSpineSize, type SpineSize } from "./case/caseDimensions";
+import { CASE_MM, isSpineSize, workCaseSize, type SpineSize } from "./case/caseDimensions";
 import { collectionReleaseYear } from "./collectionFormat";
 
 /** 격자 is flat front covers, 선반 the turned cases on planks, 책장 the bookcase (manga volumes; for games and AV the spine-only shelf). */
@@ -60,6 +60,16 @@ export function shelfGroups<T extends ShelfItem>(items: T[], grouping: Collectio
   }
   return [...groups].map(([label, works]) => ({ label, items: works }));
 }
+/**
+ * The front ratio a type's shelf cases are known to stand at, from its package size rather than loaded artwork: an AV
+ * jacket is a DVD case, a film its 2:3 poster board. A row then reserves only the height that front reaches at the cell
+ * width (`--row-ratio`, fitted in collectionShelfRules.css and per client like the case face), so a single case has no
+ * empty band above it. Games and manga vary by device or edition and keep the approved 2:3 turned-cover reservation.
+ */
+export function shelfRowRatio(type: CollectionType | undefined): number | null {
+  const size = type === "av" ? CASE_MM.av : type === "movie" ? workCaseSize("film") : null;
+  return size ? size.width / size.height : null;
+}
 // Half a viewport keeps scrolling prepared without decoding a second screen on entry.
 const SHELF_OVERSCAN_VIEWPORTS = .5;
 
@@ -95,6 +105,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
   const cellWidth = Math.max(1, (metrics.width - metrics.padding - metrics.gap * (perRow - 1)) / perRow);
   // Approved shelf geometry reserves the turned cover and the 22px spine.
   const height = Math.min(300, Math.max(1, (cellWidth - 13) / (.8 * (2 / 3))));
+  const rowRatio = shelf ? shelfRowRatio(items[0]?.type) : null;
   const grouping = view.grouping;
   const windowed = windowRows && shelf;
   const { groups, positions, ordered, rowStarts } = useMemo(() => {
@@ -181,8 +192,8 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     }
     return children;
   }, [groups, positions, perRow, showcase, render, windowed, nearRows, pinnedRows]);
-  return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}`} role="group" aria-label={label}
-    data-per-row={perRow} style={{ "--columns": perRow, "--cell-width": `${cellWidth}px`, "--case-height": `${height}px` } as CSSProperties}
+  return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}${rowRatio ? " collection-list--fitted" : ""}`} role="group" aria-label={label}
+    data-per-row={perRow} style={{ "--columns": perRow, "--cell-width": `${cellWidth}px`, "--case-reserve": `${height}px`, ...(rowRatio ? { "--row-ratio": rowRatio.toFixed(4) } : {}) } as CSSProperties}
     onFocusCapture={event => {
       const card = (event.target as HTMLElement).closest<HTMLElement>("[data-collection-id]");
       if (windowed && card) setFocusedId(card.dataset.collectionId ?? null);

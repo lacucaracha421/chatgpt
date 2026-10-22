@@ -19,6 +19,8 @@
 /* Reserve the spine lead (.08 * .6 of the face height, at least 4.8px) and full front.
    Both poses use the same hinge, so picking changes only the rotation, not its anchor. */
 .mobile-collections .collection-cover-cell .collection-light-case { --face-height:min(var(--case-height), calc((var(--cell-width) - 4.8px) / var(--case-ratio)), calc(var(--cell-width) / (var(--case-ratio) + .048))); }
+/* A row of a type with a known front ratio (AV, film) is only as tall as that front with the same fit, so one case leaves no empty band above it. */
+.mobile-collections .collection-list--fitted { --case-height:min(var(--case-reserve), calc((var(--cell-width) - 4.8px) / var(--row-ratio)), calc(var(--cell-width) / (var(--row-ratio) + .048))); }
 .mobile-collections .collection-cover-cell .collection-light-case .cs-box { transform-origin:0 100%; transition:transform 360ms var(--ease-sheet); }
 /* No pressed fill: the case itself turning is the feedback (a grey cell block read as a stray box). */
 .mobile-collections .collection-cover-cell:active { transform:none; background:none; }

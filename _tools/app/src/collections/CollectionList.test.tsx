@@ -100,7 +100,7 @@ function shelfGeometry() {
     const list = this.closest<HTMLElement>(".collection-list");
     let top = 0, height = 500;
     if (this.classList.contains("collection-list__cell") && list) {
-      const cardHeight = parseFloat(list.style.getPropertyValue("--case-height")) + 64;
+      const cardHeight = parseFloat(list.style.getPropertyValue("--case-reserve")) + 64;
       const groupRows = new Set([...list.querySelectorAll<HTMLElement>(".collection-list__group")].map(group => Number(group.style.gridRow)));
       const row = Number(this.style.gridRow);
       top = 16 - (root?.scrollTop ?? 0);
@@ -168,9 +168,9 @@ it("recomputes row geometry and window membership when columns or grouping chang
   const { container, rerender } = render(windowedShelf());
   const first = container.querySelector('[data-collection-id="work-0"]');
   const list = container.querySelector<HTMLElement>(".collection-list")!;
-  const oldHeight = list.style.getPropertyValue("--case-height");
+  const oldHeight = list.style.getPropertyValue("--case-reserve");
   rerender(windowedShelf(5));
-  expect(list.style.getPropertyValue("--case-height")).not.toBe(oldHeight);
+  expect(list.style.getPropertyValue("--case-reserve")).not.toBe(oldHeight);
   expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(37);
   expect(container.querySelectorAll("[data-collection-id]")).toHaveLength(10);
   expect(container.querySelector('[data-collection-id="work-0"]')).toBe(first);
@@ -237,7 +237,7 @@ it("windows opted-in horizontal performer shelves in the tablet scroll root", ()
     const list = this.closest<HTMLElement>(".collection-list"), root = this.closest<HTMLElement>(".collection-scroll");
     const cell = this.classList.contains("collection-list__cell");
     const width = cell && list ? parseFloat(list.style.getPropertyValue("--cell-width")) : 1440;
-    const height = cell && list ? parseFloat(list.style.getPropertyValue("--case-height")) + 64 : 500;
+    const height = cell && list ? parseFloat(list.style.getPropertyValue("--case-reserve")) + 64 : 500;
     const left = cell ? (Number(this.style.gridColumn) - 1) * (width + 16) - (list?.scrollLeft ?? 0) : 0;
     const top = cell ? 16 - (root?.scrollTop ?? 0) : 0;
     return { top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON() {} };
@@ -347,4 +347,21 @@ it("restores movie grouping independently and starts new movie views ungrouped o
   initial.unmount();
   const restored = renderHook(() => useCollectionView("movie"));
   expect(restored.result.current[0]).toMatchObject({ layout: "bookcase", grouping: "director", spineSize: "huge" });
+});
+
+it("sizes shelf rows from each type's known front ratio, not from loaded artwork; games and manga keep the 2:3 reservation", () => {
+  const list = (type: CollectionType, layout: "shelf" | "grid" = "shelf") => {
+    const { container, unmount } = render(<CollectionList items={works.slice(0, 1).map(work => ({ ...work, type }))} showcase view={{ layout, perRow: 8, grouping: "sort" }} label="선반" onPick={() => undefined} render={work => <button>{work.name}</button>} />);
+    const element = container.querySelector<HTMLElement>(".collection-list")!;
+    const fit = { fitted: element.classList.contains("collection-list--fitted"), ratio: Number(element.style.getPropertyValue("--row-ratio")) || null, reserve: element.style.getPropertyValue("--case-reserve") };
+    unmount(); return fit;
+  };
+  const game = list("game");
+  // An AV jacket is a 135 × 190 mm DVD case and a film a 2:3 poster board, so their rows end at that front.
+  expect(list("av")).toMatchObject({ fitted: true, reserve: game.reserve });
+  expect(list("av").ratio).toBeCloseTo(135 / 190, 3);
+  expect(list("movie").ratio).toBeCloseTo(2 / 3, 3);
+  expect(game).toMatchObject({ fitted: false, ratio: null });
+  expect(list("manga")).toMatchObject({ fitted: false, ratio: null });
+  expect(list("av", "grid")).toMatchObject({ fitted: false, ratio: null });
 });

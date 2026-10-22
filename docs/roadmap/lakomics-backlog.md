@@ -64,7 +64,7 @@ Status: `PARTIAL` — 3.5.41 (`a36403e9`) added capture-phase handling, a per-si
 
 ## MOVIE-BOOKCASE-001 — Movie bookcase with poster spines (2026-10-22)
 
-Status: `PARTIAL` — user picked option B of `docs/prototypes/movie-spines-20261022/` (poster slice + title band, poster-board height from the poster ratio, decade/director grouping). Implemented PC + tablet 0.9.144; PC capture-checked at 960×640 (bookcase and pull-out). Device check of the tablet bookcase pending. Later idea from the mockup: a per-work "책등 위치" (crop focus) control; series grouping needs stored series data.
+Status: `PARTIAL` — user picked option B of `docs/prototypes/movie-spines-20261022/` (poster slice + title band, poster-board height from the poster ratio, decade/director grouping). Implemented PC + tablet 0.9.144; PC capture-checked at 960×640 (bookcase and pull-out). Device check of the tablet bookcase pending. Shelf rows for AV and movies now follow the case ratio instead of the game-case reserve (tablet 0.9.146); tablet game shelves keep ~45 px slack on purpose (platform ratios differ). Later idea from the mockup: a per-work "책등 위치" (crop focus) control; series grouping needs stored series data.
 
 ## REVIEW-20261022 — Bug hunt and UI sweep (2026-10-22)
 
