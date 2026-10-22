@@ -28,6 +28,8 @@ Separate implemented facts from authority to change them:
 4. [PC design](agents/pc-design-reference.md), [Works presentation](agents/works-viewer-design.md) and relevant subsystem contracts define stable intent. Dated implementation sections are evidence for their recorded checkpoint.
 5. The [backlog](roadmap/lakomics-backlog.md) records intended work; the [completed ledger](roadmap/lakomics-completed.md) and Git history record closure and provenance.
 
+Device differences: [PC / Galaxy Tab feature parity](agents/feature-parity.md) (what exists on one client only, and the unification plan).
+
 See also [domain conflict resolution](agents/domain.md), [implementation and review](agents/implementation.md)
 and [portable user preferences](agents/user-preferences.md).
 

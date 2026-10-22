@@ -62,6 +62,10 @@ Status: `PARTIAL` — 3.5.41 (`a36403e9`) added capture-phase handling, a per-si
 - **Coverage:** the [2026-10-16 code-level inventory](../../extension-list/options/context-menu-coverage.md) records blocker causes, protected native menus, frame limitations and the PDF fallback. A live site-by-site inventory was not recorded; investigate remaining reported sites without overriding intentionally native menus.
 - **Later idea (user 2026-10-13):** save an X post (text + media as one item), a link or a whole page into Lakomics from the same menu. Current-frame saving still needs an image-byte upload API; existing capture accepts remote HTTPS URLs.
 
+## PARITY-20261022 — Unify features that exist on only one client (2026-10-22)
+
+Status: `PARTIAL` — user request: unify everything that is not genuinely device-bound. Inventory and batches in [feature-parity.md](../agents/feature-parity.md) (32 unifiable gaps, 12 device-bound groups, 10 earlier intentional exclusions). Order: A (tablet catch-up on existing contracts: links, card→original, info→artist, classification path, reader bookmark, Album move), B (PC video-duration filter; PC flicker/wipe compare), C (tablet favourite profile edit, performer crop), then D–F (server read projections, media import/preview, PC-owned intents) one domain at a time. AV performer grouping on PC is part of this round.
+
 ## MOVIE-BOOKCASE-001 — Movie bookcase with poster spines (2026-10-22)
 
 Status: `PARTIAL` — user picked option B of `docs/prototypes/movie-spines-20261022/` (poster slice + title band, poster-board height from the poster ratio, decade/director grouping). Implemented PC + tablet 0.9.144; PC capture-checked at 960×640 (bookcase and pull-out). Device check of the tablet bookcase pending. Shelf rows for AV and movies now follow the case ratio instead of the game-case reserve (tablet 0.9.146); tablet game shelves keep ~45 px slack on purpose (platform ratios differ). Later idea from the mockup: a per-work "책등 위치" (crop focus) control; series grouping needs stored series data.

@@ -1,5 +1,7 @@
 # What still needs the PC
 
+> Features that exist on only one client and the plan to unify them are tracked in [feature-parity.md](feature-parity.md) (2026-10-22).
+
 Source checkpoint: 2026-10-22 at `2e8db984`; Android 0.9.140 (277).
 This describes source capabilities. Deployment/installation evidence is in the
 [completed ledger](../roadmap/lakomics-completed.md) and [backlog](../roadmap/lakomics-backlog.md);
