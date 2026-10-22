@@ -30,7 +30,7 @@ Manga is volume-centric. The pleasure is seeing covers together, understanding s
 
 - Use cover-first rows/shelves with a subtle shared support/contact cue.
 - Front cover remains roughly 90–95% of the perceived object.
-- Paperback FINAL remains a paper-cover/page-block reference. Current manga/game/AV presentation supports spine shelves and flat covers, shared shelf pull-out, turn/zoom and optional sounds on PC/tablet; earlier spine-only rejection is superseded. Keep medium-specific detail grammar and avoid room furniture.
+- Paperback FINAL remains a paper-cover/page-block reference. Current manga/game/AV presentation supports spine shelves and flat covers, shared shelf pull-out, turn/zoom and optional sounds on PC/tablet; earlier spine-only rejection is superseded. Keep medium-specific detail grammar and avoid room furniture (shelf physical detail — board thickness, light, shadows — is allowed since 2026-10-23).
 - Library/volume rows show cached static renders of that model. Only the current appreciation book is live 3D; no per-tile WebGL contexts.
 - Preserve source aspect ratio rather than cropping every volume into one cabinet shape.
 
@@ -59,7 +59,7 @@ Games are work-centric. The core composition is **hero/main artwork + closed col
 
 - Use the seam-side closed neutral case defined in `pc-design-reference.md`.
 - The front cover remains immediately recognizable at normal grid size.
-- No platform branding, fake spine title, fake illustrated back, giant tilt, or continuous pointer tracking.
+- No platform branding, fake spine title, fake illustrated back, giant tilt, or continuous pointer tracking. Exception (user, 2026-10-23): manga 책장 volume spines may be synthesised printed spines when no real scan exists (DESIGN.md §8); backs are never synthesised.
 - Loading/fallback preserves the same case object silhouette instead of flashing a flat poster.
 
 ### Detail

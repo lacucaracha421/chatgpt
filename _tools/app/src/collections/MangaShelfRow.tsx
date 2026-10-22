@@ -4,6 +4,7 @@ import { useLongPress } from "../shared/useLongPress";
 import { MangaBookcase, type MangaWorkData } from "./work/MangaBookcase";
 import "./work/collectionWork.css";
 import "./mangaShelf.css";
+import { ShelfMaterial } from "./ShelfMaterial";
 
 /**
  * The Collections 만화 list as shelves (accepted 2026-09-30, docs/archive/prototypes/pc-collection-detail-20260930/):
@@ -85,7 +86,7 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     <div className="manga-shelf-row__shelf" onKeyDown={keyDown}>
       {manga
         ? <MangaBookcase touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
-        : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board" /></div></div>}
+        : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board"><ShelfMaterial /></div></div></div>}
     </div>
   </section>;
 }

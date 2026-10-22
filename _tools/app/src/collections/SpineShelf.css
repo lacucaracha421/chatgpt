@@ -3,6 +3,7 @@
    The spine print (.case-spine-art, .tpl, .spine-title) is the work case's own, from CollectionCase.css. */
 
 .spine-shelf {
+  --bk-gutter: var(--spine-gutter);
   --spine-gap: 1px;                               /* cases touch; the seam is a line, not spacing */
   --spine-rim: calc(2.5px * var(--spine-scale));  /* the top/bottom plastic lip around the printed insert */
   --spine-plank: 6px;
@@ -16,16 +17,12 @@
 /* One shelf row, absolutely placed from the precomputed packing. */
 .spine-shelf__row { position: absolute; left: var(--spine-gutter); right: var(--spine-gutter); }
 .spine-shelf__board { position: absolute; left: 0; right: 0; bottom: calc(var(--spine-plank) + var(--spine-row-gap)); height: var(--board-height); }
-/* The plank paints like the manga 책장's board. */
-.spine-shelf__board::after { content: ""; position: absolute; left: calc(var(--spine-gutter) * -1); right: calc(var(--spine-gutter) * -1); top: 100%; height: var(--spine-plank); background: linear-gradient(color-mix(in srgb, var(--color-text) 20%, transparent), color-mix(in srgb, var(--color-text) 7%, transparent)); mask-image: linear-gradient(90deg, transparent, black 3%, black 97%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 3%, black 97%, transparent); pointer-events: none; }
-.spine-shelf__board::before { content: ""; position: absolute; left: 2%; right: 2%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, black 55%, transparent), transparent 72%); pointer-events: none; }
-.spine-shelf__spines { position: relative; display: flex; align-items: flex-end; gap: var(--spine-gap); height: 100%; }
+.spine-shelf__spines { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: var(--spine-gap); height: 100%; }
 
 /* One case standing spine-out. */
 .spine { position: relative; flex: none; width: var(--w); height: var(--h); padding: 0; border: 0; background: none; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .spine__case { position: absolute; inset: 0; display: block; overflow: hidden; border-radius: 1px; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e;
   transition: transform 90ms var(--ease-standard); }
-.spine__case::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.12) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.35)); }
 .spine__case > .ins { position: absolute; inset: var(--spine-rim) 0; overflow: hidden; display: block; --cd: var(--w); }
 .spine__case > .ins.bare { display: flex; align-items: center; justify-content: center; }
 .spine__case > .ins > .case-spine-art > img { width: 100%; height: 100%; object-fit: fill; }
@@ -47,6 +44,7 @@
    (CollectionCase). The empty slot stays, so nothing reflows. The spine hides at once and shows again only when the
    case is back, because the edge-on 3D case starts and ends exactly over it. */
 .spine[data-out] .spine__case { opacity: 0; transition: none; }
+.spine[data-out]::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(255, 240, 220, .10), transparent 2px, transparent calc(100% - 2px), rgba(255, 240, 220, .06)), linear-gradient(rgba(0, 0, 0, .55), rgba(0, 0, 0, .8)); }
 /* Laid out while its faces decode, but not shown; the spine is still on the shelf. */
 .spine-shelf__out.is-preparing { opacity: 0; pointer-events: none; }
 .spine-shelf__row.is-holding { z-index: 2; }

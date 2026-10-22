@@ -10,6 +10,7 @@ import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, spineScaleForView, t
 import { workCaseSize, type CaseSizeMm } from "./case/caseDimensions";
 import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
+import { ShelfMaterial } from "./ShelfMaterial";
 
 /** One case on the 책장: plain data, so the PC and the tablet draw it the same way. */
 export type SpineWork = PackedWork & {
@@ -443,6 +444,7 @@ function ShelfRowView<W extends SpineWork>({ row, available, picked, leaving, la
   return <div className={`spine-shelf__row${entering !== undefined ? " is-entering" : ""}${outs.length ? " is-holding" : ""}`} data-shelf-row={row.index}
     style={{ top: row.top, height: row.height, "--board-height": `${row.board}px`, ...(entering !== undefined ? { "--i": entering } : {}) } as CSSProperties}>
     <div ref={board} className="spine-shelf__board">
+      <ShelfMaterial />
       <div className="spine-shelf__spines">
         {row.cells.map(cell => <Spine<W> key={cell.work.id} cell={cell} picked={picked === cell.work.id} out={outs.includes(cell.work.id) && shown.includes(cell.work.id) && !landing.includes(cell.work.id)} tabbable={tabbable === cell.work.id} privacy={privacy} menu={menu} art={art} />)}
       </div>
@@ -462,7 +464,10 @@ function SpineView<W extends SpineWork>({ cell, picked, out, tabbable, privacy, 
   const button = <button ref={host} type="button" className={`spine${work.platform === "film" ? " spine--board" : ""}`} data-collection-id={work.id} tabIndex={tabbable ? 0 : -1}
     aria-label={work.credit ? `${work.title} · ${work.credit}` : work.title} aria-pressed={picked} data-out={out || undefined}
     style={{ "--w": `${cell.width}px`, "--h": `${cell.height}px`, "--poster-height": `${cell.height}px`, "--plastic": CASE_PLASTIC[work.platform] } as CSSProperties}>
-    <span className="spine__case">{(privacy || !pending || work.platform === "film") && <SpineArtView key={work.platform === "film" ? "poster" : url ?? "template"} work={work} url={url} privacy={privacy} ratio={cell.coverWidth / cell.height} />}</span>
+    <span className="spine__case">
+      {(privacy || !pending || work.platform === "film") && <SpineArtView key={work.platform === "film" ? "poster" : url ?? "template"} work={work} url={url} privacy={privacy} ratio={cell.coverWidth / cell.height} />}
+      <span aria-hidden="true" className={`collection-spine-light${work.platform === "film" ? " collection-spine-light--board" : work.platform === "book" ? "" : " collection-spine-light--plastic"}${work.platform === "av" ? " collection-spine-light--sleeve" : ""}`} />
+    </span>
   </button>;
   return menu ? <ContextMenu items={menu(work.id)}>{button}</ContextMenu> : button;
 }

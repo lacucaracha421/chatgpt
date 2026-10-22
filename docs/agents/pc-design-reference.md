@@ -165,7 +165,7 @@ This covers Collection cards/info/details, TV seasons/episodes and Asset date he
 A game is a **closed, seam-side case**, inspired by a closed steelbook/package but not claiming a real edition.
 
 - Front artwork dominates; the seam/opening edge and restrained top/bottom shell geometry make it read as closed.
-- No invented platform stripe, console logo, illustrated spine or fake back cover.
+- No invented platform stripe, console logo, illustrated spine or fake back cover. (Manga 책장 spines are the 2026-10-23 exception in DESIGN.md §8.)
 - Loading/fallback keeps the case silhouette rather than flashing a flat poster.
 - Physical depth stays subtle enough for dense browsing. Thin edges must hold at non-integer DPR (the original jagged-edge defect was at DPR 1.125); do not claim universal anti-aliasing success without runtime evidence.
 
@@ -173,6 +173,7 @@ A game is a **closed, seam-side case**, inspired by a closed steelbook/package b
 
 Manga uses the approved **Paperback FINAL** model: separate thin covers, a recessed page block and satin print. The Collections 선반 work case has a matte paper spine printed with the work title (user, 2026-10-01); the earlier unprinted spine/back treatment is not its list contract. The supplied final artifact is the visual baseline (depth `.12`, right binding, live pose `.13/.34/.005`, static paper-side angle `.40`); these are local appreciation-renderer parameters, not the shelf case depth rule decided below or a claim about a real edition. A shelf is a contact cue, not furniture.
 
+- **Manga 책장 and shelf detail (user, 2026-10-23; supersedes the "support cue, not furniture" and "no invented/illustrated spine" rules for 책장):** manga volume spines use real proportions (tall and narrow, height from the trim size). Where the bookstore has a real spine/back scan for that volume, use it, normalised (edges and watermark trimmed, white point, shared light and shadow); otherwise synthesise a printed tankōbon spine from the cover (publisher label block, vertical title, volume-number emblem, art cut-in, author, publisher mark; series colour sampled from the cover, one frame per publisher so a run reads as a set). Back covers are never synthesised: a pulled-out volume flips to its back only when a real scan exists. Shelves of every kind may show physical detail (board thickness and front edge, under-shelf light, lit spine tops, foot shadows, case-rim and sleeve reflections). Per-kind room furniture and a whole-wall room view stay out (round 1 of `docs/prototypes/collection-exhibit-20261023/` rejected).
 - **Manga layouts (user, 2026-10-01, PC and tablet):** 보기 has 격자 (grid), 선반 (one paperback book case per work, like game/film shelf cases, with the title printed on a matte paper spine), and 책장 (per-work volume-spine rows, layout value `bookcase`). Default: 선반. The volume-spine rows belong to 책장, not 선반.
 - **Shelf case proportion (user, 2026-10-01):** depth follows the face height at about 8%, rather than a fixed 22px. Keep spine marks (including PS5/Switch heads) and spine text in real package proportions as cases shrink on the tablet.
 - Library and volume lists show cached static renders; only the appreciation view has one live book with on-demand cursor tilt. Its footer owns same-edition thumbnails, position and original-image mode and never overlays the large cover.
