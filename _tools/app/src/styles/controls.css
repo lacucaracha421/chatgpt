@@ -855,7 +855,7 @@ select.ui-text-input {
 .ui-selection-check::after { content: "\2713"; }
 
 /* 보기 (PC menu and tablet sheet): labelled sections (5px square + hairline), 24 between sections, 8 inside. */
-.ui-view-options { width: min(19rem, calc(100vw - var(--space-6))); max-height: var(--radix-dropdown-menu-content-available-height, none); overflow-y: auto; }
+.ui-view-options { box-sizing: border-box; width: min(19rem, calc(100vw - var(--space-6))); max-height: var(--radix-dropdown-menu-content-available-height, none); overflow-y: auto; }
 .ui-view-options__content { display: grid; gap: var(--space-6); padding: var(--space-4); }
 .ui-view-options__section { display: grid; gap: var(--space-2); }
 /* Slider (shared Slider): native range drawn in the accent (ivory thumb and filled track) on PC and

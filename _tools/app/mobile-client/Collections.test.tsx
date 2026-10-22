@@ -1003,7 +1003,7 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
   expect(within(shelf).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['1권 보기','2권 보기']);
   const second=within(shelf).getByRole('button',{name:'2권 보기'});
   expect(second.classList.contains('manga-spine--missing')).toBe(true);
-  expect(screen.getByLabelText('보유 1권').textContent).toBe('1권');
+  expect(screen.getByLabelText('보유 1권 / 전체 2권').textContent).toBe('1 / 2권');
   within(shelf).getAllByRole('button').forEach((spine,index)=>{
     spine.getBoundingClientRect=()=>({left:index*32,width:30,right:index*32+30,top:16,bottom:136,height:120,x:index*32,y:16,toJSON:()=>null});
   });

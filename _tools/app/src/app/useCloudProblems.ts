@@ -8,6 +8,7 @@ import { CLOUD_PROGRESS_EVENT } from "./useCloudBackfillSupervisor";
 import { nativeWorkload } from "./workloadProfile";
 import { readCloudProgress } from "./cloudProgressRead";
 import { afterLaunchSettled, launchSplashPresent } from "../shared/launch/LaunchSplash";
+import { displayCount } from "../shared/displayDate";
 
 // Queue failures are individual assets; transport/metadata failures are one
 // actionable problem per direction. A failed replication cycle is not counted twice.
@@ -15,6 +16,11 @@ export function cloudProblemCount(progress: CloudBackfillProgress): number {
   return progress.failed + (progress.activity ?? []).reduce((sum, item) => sum
     + (item.lastError && (item.direction === "capture" || progress.failed === 0) ? 1 : 0)
     + (item.metadataLastError ? 1 : 0), 0);
+}
+
+/** Tablet decisions that name items this PC has not received yet (shown while 송신 보류 is on). */
+export function tabletWaitText(count: number): string {
+  return `태블릿 변경 ${displayCount(count, "개")} · 이 PC에 아직 없는 항목을 기다림`;
 }
 
 export type CloudSyncStatus = { problemCount: number; progress: CloudBackfillProgress | null };

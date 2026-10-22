@@ -134,6 +134,11 @@ h1,h2,h3,p { margin:0; }
 /* The active state changes colour (and its mark fades in) over a short time; the tab content itself switches at once. */
 .bottom-nav button { transition:background-color var(--motion-micro) var(--ease-out), color var(--motion-micro) var(--ease-out); }
 @keyframes bottom-nav-mark { from { opacity:0; } }
+/* While the soft keyboard is open the navigation steps aside (App useSoftKeyboardOpen); showing it
+   again restarts the fade, so it eases back once the keyboard closes. */
+.bottom-nav { animation:bottom-nav-return var(--motion-small) var(--ease-out); }
+.bottom-nav.is-keyboard { display:none; }
+@keyframes bottom-nav-return { from { opacity:0; } }
 @media (prefers-reduced-motion:reduce) { .bottom-nav.bottom-nav button { transition:background-color var(--motion-micro) var(--ease-out), color var(--motion-micro) var(--ease-out) !important; } }
 /* A thin progress line that never takes space: its negative margin cancels its own height, so
    appearing and disappearing cannot move the content below it. A quiet track carries a soft

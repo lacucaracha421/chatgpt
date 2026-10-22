@@ -253,7 +253,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
       :<SecretEditor fields={note.fields??[]} memo={note.memo??''} readOnly={!editable} onChange={change=>edit(change)}/>)
     :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} backRef={memoBack}/>;
   const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
-  const footer=note&&!isSecret(note)?memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${memoSource.length.toLocaleString()}자`:null;
+  // Only to-do progress earns a footer; a text memo has no length limit worth counting.
+  const footer=note&&!isSecret(note)&&memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:null;
   return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모" onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={()=>setCompositionNote(null)}>
     {!state.ready?<TopBar title="메모" loading="메모 불러오는 중"/>:!state.unlocked?<>
       <TopBar title="메모"/>

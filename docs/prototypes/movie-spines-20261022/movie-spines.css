@@ -1,0 +1,38 @@
+/* PROPOSED spine prints for the 영화 책장. They extend the work case's own spine print in
+   _tools/app/src/collections/case/CollectionCase.css (.case-spine-art, .tpl, .t-head/.t-band/.t-foot, .spine-title, .t-pub)
+   and sit inside SpineShelf's .spine__case > .ins, where --cd is the spine thickness in px.
+   Print colours are package print colours (like the PS5/Switch template literals), not UI tokens. */
+
+/* ---------- A. 킵 케이스: a generated keep-case insert. White head with the release year, black band with the title,
+   studio at the foot. Blue keep-case plastic (CASE_PLASTIC.film) shows only as the top and bottom lips. ---------- */
+.case-spine-art .film .t-head { display: flex; align-items: center; justify-content: center; padding: 34% 0; background: #f1efea; }
+.case-spine-art .film .t-year { writing-mode: vertical-rl; text-orientation: sideways; white-space: nowrap; font: 800 calc(var(--cd) * .4) / 1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: .04em; color: #121316; }
+.case-spine-art .film .t-band, .case-spine-art .film .t-foot { background: #0c0d10; }
+.case-spine-art .film .t-foot { padding: 36% 0 44%; }
+.case-spine-art .film .t-pub { max-height: 7em; overflow: hidden; text-overflow: ellipsis; color: #a2abb5; font-weight: 600; }
+
+/* ---------- B. 포스터 책등: the poster's own key art, cut as a vertical slice at its focus, above a black title band.
+   No plastic: a thick poster board, so the lips are 0 and the board height follows the poster's aspect ratio. ---------- */
+.spine--board { --spine-rim: 0px; }
+.case-spine-art .pspine { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: #0b0c0e; }
+.case-spine-art .ps-art { position: relative; flex: none; height: 41%; overflow: hidden; background: #1c1d20; }
+/* The slice is the poster itself at the spine's height, shifted so its focus sits in the middle of the spine. */
+.case-spine-art .ps-art > .poster { inset: auto; top: 0; }
+/* A hairline of the print's ink closes the art window; a short shade keeps the title band from reading as a separate block. */
+.case-spine-art .ps-art::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: linear-gradient(transparent, rgba(11,12,14,.85)); }
+.case-spine-art .ps-band { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 34% 0 10%; }
+.case-spine-art .ps-band .spine-title { max-height: 100%; }
+.case-spine-art .ps-foot { flex: none; display: flex; justify-content: center; padding: 30% 0 46%; }
+.case-spine-art .ps-foot > span { writing-mode: vertical-rl; text-orientation: sideways; white-space: nowrap; font: 700 calc(var(--cd) * .3) / 1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: .04em; color: rgba(255,255,255,.62); }
+/* The poster is still decoding: the art window holds its neutral face, the title band is already final. */
+.case-spine-art .ps-art[data-settled="false"] > .poster { opacity: 0; }
+.case-spine-art .ps-art[data-settled="true"] > .poster { opacity: 1; transition: opacity 140ms var(--ease-standard); }
+
+/* ---------- C. 번호 전집: one uniform spine for every film, the colour sampled from the poster and toned down,
+   the collection number at the head (horizontal), the title, the director at the foot. Clear keep case. ---------- */
+.case-spine-art .numbered { background: var(--ink, #2a2c30); }
+.case-spine-art .numbered .t-no { flex: none; display: grid; place-items: center; padding: 38% 0 30%; font: 800 calc(var(--cd) * .4) / 1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: -.02em; color: rgba(255,255,255,.94); }
+.case-spine-art .numbered .t-no::after { content: ""; display: block; width: 46%; height: 1px; margin-top: 30%; background: rgba(255,255,255,.4); }
+.case-spine-art .numbered .t-band { padding: 4% 0 6%; }
+.case-spine-art .numbered .t-foot { padding: 30% 0 48%; }
+.case-spine-art .numbered .t-pub { color: rgba(255,255,255,.7); font-weight: 600; }

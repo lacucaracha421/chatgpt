@@ -32,7 +32,7 @@ it("loads trash, shows its purge date, and restores an asset", async () => {
   await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await waitFor(() => expect(gateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
-  expect(await screen.findByText("영구 삭제까지 12일")).toBeVisible();
+  expect(await screen.findByText("12일 후 영구 삭제")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "복원" }));
   expect(gateway.restoreAsset).toHaveBeenCalledWith("asset-1");
 });
@@ -286,12 +286,12 @@ it("confirms emptying the whole trash using the server totals", async () => {
   expect(gateway.emptyTrash).toHaveBeenCalledOnce();
 });
 
-it("uses the context chrome toolbar with the empty action in the index", async () => {
+it("uses the context chrome toolbar with the empty action in the content header", async () => {
   const gateway = createGateway();
   const { container } = renderTrash(<TrashBrowser />, gateway);
   await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
   expect(await screen.findByRole("toolbar")).toBeInTheDocument();
-  expect(container.querySelector(".view-toolbar--context")).toBeInTheDocument();
+  expect(container.querySelector(".view-toolbar--context")).toContainElement(await screen.findByRole("button", { name: "휴지통 비우기" }));
   expect(container.querySelector(".view-toolbar__actions")).not.toBeInTheDocument();
 });
 
@@ -399,7 +399,7 @@ it("remembers the section and queues a restore once while showing 대기", async
   const mounted = renderTrash(<TrashBrowser />, gateway);
   await screen.findByText("asset-1.png");
   await userEvent.click(screen.getByRole("tab", { name: "컬렉션 1" }));
-  const restore = await screen.findByRole("button", { name: "작품 되살리기" });
+  const restore = await screen.findByRole("button", { name: "작품 복원" });
   expect(screen.queryByRole("button", { name: "휴지통 비우기" })).not.toBeInTheDocument();
   await userEvent.click(restore);
   await waitFor(() => expect(restore).toBeDisabled());
@@ -409,12 +409,12 @@ it("remembers the section and queues a restore once while showing 대기", async
   expect(screen.getByText("대기")).toBeVisible();
   vi.mocked(gateway.listCollectionTrash).mockResolvedValue({ ...collectionTrash(), items: [] });
   act(() => { onSync(); });
-  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 되살리기" })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 복원" })).not.toBeInTheDocument());
   vi.mocked(gateway.listCollectionTrash).mockResolvedValue(collectionTrash(true));
   mounted.unmount();
   renderTrash(<TrashBrowser />, gateway);
   expect(screen.getByRole("tab", { name: /컬렉션/ })).toHaveAttribute("aria-selected", "true");
-  expect(await screen.findByRole("button", { name: "작품 되살리기" })).toBeDisabled();
+  expect(await screen.findByRole("button", { name: "작품 복원" })).toBeDisabled();
 });
 
 it("holds the old content inert until the next section is ready and preserves rows on reload", async () => {
@@ -436,7 +436,7 @@ it("holds the old content inert until the next section is ready and preserves ro
   await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(screen.getByText("작품")).toBeVisible();
   await act(async () => { resolve({ ...collectionTrash(), items: [] }); });
-  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 되살리기" })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole("button", { name: "작품 복원" })).not.toBeInTheDocument());
 });
 
 it("shows a one-line inactive authority error and retries", async () => {
@@ -464,7 +464,7 @@ it("restores deleted notes through the existing notes store without losing their
   await store.load();
   render(<NotesTrashSection store={store} />);
   expect(screen.getByText("옮긴 날 2025.7.20")).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "메모 되살리기" }));
+  await userEvent.click(screen.getByRole("button", { name: "메모 복원" }));
   await waitFor(() => expect(request).toHaveBeenCalledWith("save", expect.objectContaining({ id: "note", deleted: false, pinned: true, body: "내용" })));
   expect(await screen.findByText("휴지통이 비어 있습니다")).toBeVisible();
 });

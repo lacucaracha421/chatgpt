@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -236,6 +236,19 @@ it("keeps the local backup restore confirmation flow", async () => {
   expect(screen.getByText("현재 상태를 보존한 뒤 선택한 시점으로 복구합니다.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "복구 시작" }));
   await waitFor(() => expect(onRestore).toHaveBeenCalledWith("backup-1"));
+});
+
+it("shows an error with 다시 시도 when the backup list does not answer", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const listMetadataBackups = vi.fn().mockReturnValueOnce(new Promise(() => {})).mockResolvedValue([{ id: "backup-1", kind: "daily", createdAt: "2026-09-28T00:00:00Z", byteSize: 128 }]);
+    renderSettings(createGateway({ listMetadataBackups }), { initialSection: "advanced" });
+    await act(async () => { vi.advanceTimersByTime(15_000); });
+    expect(screen.getByRole("alert")).toHaveTextContent("백업 목록을 불러오지 못했습니다.");
+    vi.useRealTimers();
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByRole("button", { name: "이 시점으로 복구" })).toBeInTheDocument();
+  } finally { vi.useRealTimers(); }
 });
 
 it("keeps vault creation and recovery-key confirmation", async () => {

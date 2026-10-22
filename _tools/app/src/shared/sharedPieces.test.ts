@@ -17,7 +17,7 @@ const RULES: Record<string, RegExp> = {
   // D-day goes through ddayLabel / <DDay>.
   adHocDDay: /`D-\$\{|["']D-["']\s*\+/g,
   // One wording per role (DESIGN.md §12 Words).
-  retiredWording: /휴지통으로 이동["'`]|휴지통으로 보내기|메모를 휴지통으로|내 평점|내 점수|좋아요 취소|검색 결과가 없|일치하는 [가-힣]+(?:이|가) 없습니다|새로 고침|다시 불러오기|범위 제거|범위 해제|필터 해제["'`]|쇼케이스에서 제거|이 컬렉션에서 제거|이 앨범에서 제외|이 캐릭터에서 제외/g,
+  retiredWording: /휴지통으로 이동["'`]|휴지통으로 보내기|메모를 휴지통으로|내 평점|내 점수|좋아요 취소|검색 결과가 없|일치하는 [가-힣]+(?:이|가) 없습니다|새로 고침|다시 불러오기|범위 제거|범위 해제|필터 해제["'`]|쇼케이스에서 제거|이 컬렉션에서 제거|이 앨범에서 제외|이 캐릭터에서 제외|되살리기|영구 삭제까지|서버 상태가 우선함|최근: |미적용|문제 없음|지금 받기|막힌 변경/g,
   // Empty blocks are <EmptyState>; the tablet's old .empty-state copy is gone.
   handMadeEmptyState: /className=["'`{][^>]*?(?<![\w-])empty-state(?![\w-])/g,
   // Shared classes are rendered only by their component in src/shared/ui.
@@ -84,6 +84,7 @@ describe("shared pieces ratchet (PC and tablet)", () => {
     expect(hits("adHocDDay", "`D-${days}`")).toBe(1);
     expect(hits("retiredWording", "label: \"휴지통으로 이동\", '내 평점', \"검색 결과가 없습니다\", '일치하는 이름이 없습니다.'")).toBe(4);
     expect(hits("retiredWording", "\"휴지통으로 이동했습니다.\" 'StashDB 새로고침' '검색 결과 없음'")).toBe(0);
+    expect(hits("retiredWording", "`서버가 받지 않은 변경 1개 · 최근: ${r}` '서버 상태가 우선함' '동기화됨 · 문제 없음' '지금 받기'")).toBe(4);
     expect(hits("handMadeEmptyState", "<div className=\"empty-state review-empty\"> <p className='ui-empty-state--inline'> <div className=\"notes-empty\">")).toBe(1);
     expect(hits("rawSharedClass", "<span className=\"command-palette__thumb ui-skeleton\" /> <i className=\"ui-badges-x\" />")).toBe(1);
   });

@@ -186,7 +186,7 @@ function statusLabel(item: AvLinkInboxItem) {
 
 function targetCopy(item: AvLinkInboxItem) {
   if (applying(item)) return <><b>컬렉션에 적용하는 중</b><small>서버에 반영되면 목록에서 사라져요</small></>;
-  if (stopped(item)) return <><b>적용이 멈췄어요</b><small>다른 기기의 변경과 충돌했어요 · 상태 창의 “서버에서 막힌 변경”을 확인해 주세요</small></>;
+  if (stopped(item)) return <><b>적용이 멈췄어요</b><small>다른 기기의 변경과 충돌했어요 · 상태 창의 “서버가 거절해 멈춘 변경”을 확인해 주세요</small></>;
   if (activeStatus(item)) return <><b>LibreDMM에서 찾는 중</b><small>정보와 재킷을 가져오고 있어요</small></>;
   if (item.status === "not_found") return <><b>LibreDMM에 없는 품번</b><small>품번 표기가 다르거나 아직 등록 전일 수 있어요</small></>;
   if (item.status === "error") return <><b>가져오지 못했습니다</b><small>{item.lastError || "잠시 뒤 다시 시도해 주세요"}</small></>;

@@ -1,6 +1,6 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CasePlatform } from "./case/CollectionCase";
-import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, type PackedWork } from "./spineShelfLayout";
+import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, spineScaleForView, type PackedWork } from "./spineShelfLayout";
 
 const works = (count: number, platform: CasePlatform = "pc", prefix = "w"): PackedWork[] => Array.from({ length: count }, (_, index) => ({ id: `${prefix}${index}`, platform }));
 
@@ -46,4 +46,15 @@ it("resolves a tap to the spine under it, and to nothing on the bare shelf beyon
   expect(cellAtX(row, 9999)).toBeNull();
   expect(cellAtX(row, -3)).toBeNull();
   expect(cellAtX(undefined, 10)).toBeNull();
+});
+
+describe("spineScaleForView", () => {
+  it("keeps the chosen size when the pulled-out case fits and shrinks it on a short list", () => {
+    const pull = { grow: 1.28, lift: 12 };
+    expect(spineScaleForView(1.3, 900, pull)).toBe(1.3);
+    const short = spineScaleForView(3.15, 520, pull);
+    expect(short).toBeLessThan(3.15);
+    expect(190 * short * pull.grow + pull.lift).toBeLessThanOrEqual(520);
+    expect(spineScaleForView(3.15, 0, pull)).toBe(3.15);
+  });
 });

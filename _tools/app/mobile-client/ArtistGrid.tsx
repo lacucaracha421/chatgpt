@@ -1,13 +1,13 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon,ChevronDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {ArtistActionSheet} from './ArtistActions';
 import {useLongPress} from '../src/shared/useLongPress';
 import {ArtistImage,EmptyArtists} from './Artists';
 import {ARTIST_LIST_ENTRANCE,PreparedCovers,usePreparedCovers} from './artistCovers';
-import {EmptyState,SegmentedControl,Skeleton} from './ui';
+import {Button,EmptyState,SegmentedControl,Skeleton} from './ui';
 import {usePrivacyMode} from './privacyMode';
 import {PinSolidIcon} from '../src/shared/ui/PinIcon';
 import {useArtistEntry} from './ArtistGridEntry';
@@ -63,7 +63,7 @@ export function ArtistGrid({artists,state,paused,endpoint,onOpenArtist,onVisible
 
   return <><div ref={host} className="artist-grid-pane" aria-label="작가 목록" inert={entry.pending} aria-busy={entry.pending}>
     <div className="artist-grid-toolbar">
-      <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
+      <Button size="sm" variant="quiet" className="artist-sort-button" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}<ChevronDownIcon aria-hidden="true"/></Button>
     </div>
     {state === 'idle' || state === 'loading' || showLoading || state === 'ready' && !covers ? <div className="artist-empty">{showLoading && <Skeleton className="artist-empty__skeleton" label="작가 목록"/>}</div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <PreparedCovers.Provider value={covers ?? new Map()}><div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => void entry.open(artist)} onActions={() => setSheetArtist(artist)}/>)}</div></PreparedCovers.Provider> : <EmptyState title="검색 결과 없음"/>}
     {sheetArtist && <ArtistActionSheet artist={sheetArtist} endpoint={endpoint} onClose={() => setSheetArtist(null)}/>}

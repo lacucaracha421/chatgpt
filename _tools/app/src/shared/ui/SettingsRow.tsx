@@ -23,14 +23,15 @@ export function StatusWord({ tone, children }: { tone?: string; children: ReactN
   return <span className="settings-view__state" data-tone={tone}>{children}</span>;
 }
 
-export function SettingsGroup({ title, help, children }: { title: string; help?: string; children: ReactNode }) {
+/** `help` is the ⓘ text: one paragraph, or several. */
+export function SettingsGroup({ title, help, children }: { title: string; help?: string | readonly string[]; children: ReactNode }) {
   return <section className="settings-view__group" aria-labelledby={`settings-group-${title}`}>
     <SectionLabel as="h3" id={`settings-group-${title}`} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
     {children}
   </section>;
 }
 
-function HelpButton({ title, text }: { title: string; text: string }) {
+function HelpButton({ title, text }: { title: string; text: string | readonly string[] }) {
   const [open, setOpen] = useState(false);
-  return <AnchoredPanel open={open} onOpenChange={setOpen} title={title} trigger={<Button size="icon" variant="ghost" aria-label={`${title} 도움말`}><InformationCircleIcon aria-hidden="true" /></Button>}><p>{text}</p></AnchoredPanel>;
+  return <AnchoredPanel open={open} onOpenChange={setOpen} title={title} trigger={<Button size="icon" variant="ghost" aria-label={`${title} 도움말`}><InformationCircleIcon aria-hidden="true" /></Button>}>{(typeof text === "string" ? [text] : text).map(paragraph => <p key={paragraph}>{paragraph}</p>)}</AnchoredPanel>;
 }

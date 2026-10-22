@@ -1,6 +1,7 @@
 import { CardAlbumScope } from "./CardAlbumScope";
 import { CardAlbumAction } from "./CardAlbumAction";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { FilterChip } from "../shared/ui/FilterChip";
@@ -92,25 +93,25 @@ export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: 
   const albumAction = (card: CardData) => <CardAlbumAction key={card.id} card={card} trashed={trashed} setTrashed={api.setTrashed} onChanged={changed} />;
   const changeScope = (value: boolean) => { closeViewer(); setSeries(null); setTrashed(value); };
   return <div className="card-album">
-    <header className="card-album__header"><Button variant="quiet" onClick={onBack}>홈으로</Button><h1>카드 앨범</h1><span role="status"><BusyLabel busy={pending} delay={400}>불러오는 중</BusyLabel></span></header>
+    <header className="card-album__header"><Button size="icon" variant="ghost" aria-label="홈으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button><h1>카드 앨범</h1><span role="status"><BusyLabel busy={pending} delay={400}>불러오는 중</BusyLabel></span></header>
     <CardAlbumScope className="card-album__filters" trashed={trashed} onChange={changeScope}/>
     <div className="card-album__filters" aria-label="카드 등급"><FilterChip aria-pressed={tier === "all"} onClick={() => setTier("all")}>전체</FilterChip>{cardTiers.map(value => <FilterChip key={value} aria-pressed={tier === value} onClick={() => setTier(value)}>{value.toUpperCase()}</FilterChip>)}</div>
     {error && <p role="alert">카드 앨범을 불러오지 못했습니다. <Button variant="quiet" onClick={() => readRef.current()}>다시 시도</Button></p>}
-    <div className="card-album__body" inert={stale}>
-      <nav className="card-album__index" aria-label="시리즈"><Button variant="quiet" aria-pressed={!series} onClick={() => setSeries(null)}>모든 시리즈</Button>{groups.map(([name, characters]) => <Button key={name} variant="quiet" aria-pressed={series === name} onClick={() => setSeries(name)}>{name} · {characters.size}명</Button>)}</nav>
+    {/* The detail pane takes room only once a card has been chosen; until then the grid gets the width. */}
+    <div className="card-album__body" data-detail={detail ? "open" : undefined} inert={stale}>
+      <nav className="card-album__index" aria-label="시리즈"><Button variant="quiet" aria-pressed={!series} onClick={() => setSeries(null)}>모든 시리즈</Button>{groups.map(([name, characters]) => <Button key={name} variant="quiet" aria-pressed={series === name} aria-label={`${name} · ${characters.size}명`} onClick={() => setSeries(name)}><span>{name}</span><small>{characters.size}명</small></Button>)}</nav>
       <main className="card-album__list">
         {!data && pending && <Skeleton className="card-album__skeleton" label="카드 앨범" />}
         {visibleGroups.map(([name, characters]) => <section key={name}><SectionLabel title={name} count={characters.size} unit="명" /><div className="card-album__grid">{[...characters].map(([id, owned]) => {
           const best = owned[0];
           return <button type="button" className="card-album__tile" key={id} aria-pressed={selected === id} onClick={() => openViewer(best)} aria-label={`${best.characterName} · ${best.tier.toUpperCase()}`}>
             <span className="card-album__card"><TradingCard card={best} /></span><b>{best.characterName}</b><small>{best.tier.toUpperCase()} · ×{best.count} · Lv.{best.level}</small>
-            <span className="card-album__tiers" aria-label="보유 등급">{cardTiers.map(value => <i key={value} data-owned={owned.some(card => card.tier === value)}>{value.toUpperCase()}</i>)}</span>
           </button>;
         })}</div></section>)}
         {data && !visibleGroups.length && <p className="card-album__empty">{data.cards.length ? "이 등급의 카드가 없습니다" : data.trashed ? "카드 휴지통이 비어 있습니다" : "아직 모은 카드가 없습니다"}</p>}
         {data?.next && <Button disabled={pending} onClick={() => readRef.current(true)}>더 보기</Button>}
       </main>
-      <aside className="card-album__detail" aria-label="카드 상세">{detail ? <div key={detail.id} className="card-album__detail-content">
+      {detail && <aside className="card-album__detail" aria-label="카드 상세"><div key={detail.id} className="card-album__detail-content">
         <TradingCard card={detail} /><h2>{detail.characterName}</h2><p>{detail.seriesName}</p>
         <div className="card-album__ladder">{characterCards.map(card => <FilterChip key={card.id} aria-pressed={card.id === detail.id} onClick={() => setSelectedTier(card.tier)}>{card.tier.toUpperCase()} ×{card.count}</FilterChip>)}</div>
         <dl><dt>등급</dt><dd>{detail.tier.toUpperCase()}</dd><dt>보유</dt><dd>{detail.count}장</dd><dt>레벨</dt><dd>Lv.{detail.level}</dd><dt>처음 뽑음</dt><dd>{displayDate(detail.firstDrawnAt) || "—"}</dd></dl>
@@ -118,7 +119,7 @@ export function CardAlbum({ api = cardsApi, onBack, onOpenAsset, onCharacter }: 
         <Button onClick={() => openViewer(detail)}>크게 보기</Button>
         <Button disabled={!onOpenAsset || !detail.artAssetId} onClick={() => onOpenAsset?.(detail.artAssetId!)}>원본 열기</Button>
         <Button variant="quiet" disabled={!onCharacter || !detail.characterId} onClick={() => onCharacter?.(detail.characterId!)}>캐릭터 폴더</Button>
-      </div> : <p>카드를 선택해 주세요</p>}</aside>
+      </div></aside>}
     </div>
     {viewerIndex >= 0 && <CardViewer cards={viewerCards} index={viewerIndex} onClose={closeViewer} albumAction={albumAction} onOpenAsset={onOpenAsset} onCharacter={onCharacter} sharpArt={sharpArt}
       onIndexChange={next => { const card = viewerCards[next]; if (card) { choose(card); setViewerId(card.id); } }} />}

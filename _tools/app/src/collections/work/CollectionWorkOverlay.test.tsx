@@ -73,7 +73,7 @@ describe("Collection work open path", () => {
       expect(spine).toBeVisible();
       expect(shelf).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "소유 기기" })).toHaveTextContent("PS5");
-      fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+      fireEvent.click(screen.getByRole("button", { name: "목록으로" }));
       await act(async () => undefined);
       expect(container.querySelector(".collection-list")).toBeVisible();
       expect(work).not.toBeInTheDocument();
@@ -168,7 +168,7 @@ describe("Collection work open path", () => {
     api.getPerformer.mockImplementation((id: string) => id === "person" ? Promise.resolve(initial) : next);
     render(<Harness />); const user = userEvent.setup();
     await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
-    await user.click(await screen.findByRole("button", { name: /배우.*내 라이브러리/ }));
+    await user.click(await screen.findByRole("button", { name: /배우.*내 작품/ }));
     const actor = await screen.findByRole("article", { name: "AV 배우 상세" });
     await user.click(await within(actor).findByRole("button", { name: "동료 배우 2편" }));
     expect(screen.getByRole("article", { name: "AV 배우 상세" })).toBe(actor);
@@ -217,7 +217,7 @@ describe("Collection work open path", () => {
     for (const label of ["컬렉션 편집", "AV 정보 편집", "표지 앞면·책등·뒷면", "쇼케이스에 추가", "휴지통으로"]) expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "AV 정보 편집" })); expect(screen.getByRole("dialog", { name: "AV 정보 편집" })).toBeInTheDocument(); await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "표지 앞면·책등·뒷면" })); expect(screen.getByRole("dialog", { name: "표지 앞면·책등·뒷면" })).toBeInTheDocument(); await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: /배우.*내 라이브러리/ })); expect(await screen.findByRole("article", { name: "AV 배우 상세" })).toBeInTheDocument(); expect(api.getPerformer).toHaveBeenCalledWith("person"); await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /배우.*내 작품/ })); expect(await screen.findByRole("article", { name: "AV 배우 상세" })).toBeInTheDocument(); expect(api.getPerformer).toHaveBeenCalledWith("person"); await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "쇼케이스" })); await waitFor(() => expect(gateway.setCollectionShowcase).toHaveBeenCalledWith("a", true));
     await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "휴지통으로" })); const dialog = screen.getByRole("dialog", { name: "휴지통으로" });
     expect(gateway.deleteCollection).not.toHaveBeenCalled(); await user.click(within(dialog).getByRole("button", { name: "휴지통으로" })); await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("a"));

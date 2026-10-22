@@ -36,5 +36,5 @@ it("does not claim sends are enabled when reading fails", async () => {
 
 it("shows tablet changes waiting for missing IDs", async () => {
   render(<CloudSyncHold endpoint="https://fixture.invalid" read={vi.fn().mockResolvedValue({ held: true, releaseAfterRestart: false, tabletWait: { count: 2, targetIds: ["collection-a"] } })} save={vi.fn()} />);
-  expect(await screen.findByText(/태블릿 변경 2개가 누락된 항목을 기다립니다 · collection-a/)).toBeVisible();
+  expect(await screen.findByText(/태블릿 변경 2개 · 이 PC에 아직 없는 항목을 기다림/)).toBeVisible();
 });

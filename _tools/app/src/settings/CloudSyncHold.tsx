@@ -3,6 +3,7 @@ import type { CloudSyncHoldStatus } from "../library/types";
 import { SettingsRow } from "../shared/ui/SettingsRow";
 import { Button } from "../shared/ui/Button";
 import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
+import { tabletWaitText } from "../app/useCloudProblems";
 
 type Props = {
   endpoint: string;
@@ -36,7 +37,7 @@ export function CloudSyncHold({ endpoint, read, save }: Props) {
   return <SettingsRow name="이 PC의 동기화" value={<span role="status">
     {status && <span>{status.held ? "받기만" : "받기·보내기"}</span>}
     {status?.releaseAfterRestart && <> · <span>재시작 후 해제</span></>}
-    {status?.held && !!status.tabletWait?.count && <span> · 태블릿 변경 {status.tabletWait.count.toLocaleString()}개가 누락된 항목을 기다립니다 · {status.tabletWait.targetIds.join(", ")}</span>}
+    {status?.held && !!status.tabletWait?.count && <span> · {tabletWaitText(status.tabletWait.count)}</span>}
     {error && <span>{error}</span>}
   </span>} control={<Button variant="quiet" disabled={busy || !status || value?.endpoint !== endpoint || !!error}
     onClick={() => void change(!status?.held || !!status?.releaseAfterRestart)}>

@@ -25,7 +25,7 @@ import { Tabs } from "../shared/ui/Tabs";
 import { Badge } from "../shared/ui/Badge";
 import { KIND_LABEL } from "../collections/collectionFormat";
 import { notesStore, type NotesStore } from "../notes/store";
-import { deletedTrashNotes, rememberedTrashSection, rememberTrashSection, trashTabs, trashExpiry, TRASH_EMPTY, type TrashSection } from "./trashSections";
+import { deletedTrashNotes, rememberedTrashSection, rememberTrashSection, trashNotesNewestFirst, trashTabs, trashExpiry, TRASH_EMPTY, type TrashSection } from "./trashSections";
 import { setCollectionTrashCount } from "./trashCounts";
 import { StableImage } from "../shared/ui/StableImage";
 
@@ -153,7 +153,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     } catch (error) {
       restoringWorks.current.delete(item.workId);
       setCollectionPage(current => current && ({ ...current, items: current.items.map(row => row.workId === item.workId ? { ...row, restorePending: false } : row) }));
-      setCollectionError(commandErrorMessage(error, "작품을 되살리지 못했습니다."));
+      setCollectionError(commandErrorMessage(error, "작품을 복원하지 못했습니다."));
       setCollectionLoading(false);
     }
   }
@@ -259,9 +259,8 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
   return <section className="trash-browser" aria-label="휴지통">
     <ViewToolbar
       title="휴지통"
-      chrome={{
-        actions: shownSection === "assets" ? <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending || section !== shownSection}>휴지통 비우기</Button> : undefined,
-      }}
+      chrome={{}}
+      trailingAction={shownSection === "assets" ? <Button variant="danger" size="sm" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending || section !== shownSection}>휴지통 비우기</Button> : undefined}
     />
     <Tabs label="휴지통 섹션" tabs={trashTabs({ assets: page?.totalCount, collections: collectionPage?.items.length, notes: notesState?.ready ? deletedNotes.length : undefined }, { collections: collectionPage?.hasMore })} value={section} onChange={chooseSection} />
     <div inert={section !== shownSection}>
@@ -275,7 +274,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
     </details>
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {loadError && <div className="trash-browser__load-error" role="alert"><span>{loadError}</span><Button disabled={mutationPending} onClick={load}>다시 시도</Button></div>}
-    {pageLoading && !page ? <TrashSkeleton /> : pageError && !page ? null : !page || page.items.length === 0 ? <EmptyState title={TRASH_EMPTY} inline /> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><TrashThumbnail key={`${asset.id}:${privacyMode}`} asset={asset} hidden={privacyMode} /><div className="trash-browser__copy"><strong>{asset.title || asset.originalName}</strong><span>옮긴 날 {localDate(trashedAt)}</span><span>{purgeAt ? `영구 삭제까지 ${remainingDays(purgeAt)}일` : "자동 삭제 안 함"}</span></div><Button disabled={mutationPending} onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
+    {pageLoading && !page ? <TrashSkeleton /> : pageError && !page ? null : !page || page.items.length === 0 ? <EmptyState title={TRASH_EMPTY} inline /> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><TrashThumbnail key={`${asset.id}:${privacyMode}`} asset={asset} hidden={privacyMode} /><div className="trash-browser__copy"><strong>{asset.title || asset.originalName}</strong><span>옮긴 날 {localDate(trashedAt)}</span><span>{purgeAt ? trashExpiry(purgeAt) : "자동 삭제 안 함"}</span></div><Button disabled={mutationPending} onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
     </div>
     <div className="trash-browser__section" hidden={shownSection !== "collections"}>
       {collectionError && <div className="trash-browser__load-error" role="alert"><span>{collectionError}</span><Button onClick={loadCollections}>다시 시도</Button></div>}
@@ -283,7 +282,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
         <TrashWorkCover gateway={gateway} workId={item.workId} name={item.name} hidden={privacyMode} />
         <div className="trash-browser__copy"><strong>{item.name}</strong><span>{KIND_LABEL[item.type]} · {trashExpiry(item.purgeAt)}</span></div>
         {item.restorePending && <Badge>대기</Badge>}
-        <Button disabled={item.restorePending} aria-label={`${item.name} 되살리기`} onClick={() => void restoreWork(item)}>되살리기</Button>
+        <Button disabled={item.restorePending} aria-label={`${item.name} 복원`} onClick={() => void restoreWork(item)}>복원</Button>
       </li>)}</ul>}
     </div>
     <div className="trash-browser__section" hidden={shownSection !== "notes"}><NotesTrashSection store={store} /></div>
@@ -295,6 +294,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
 /** A trashed work's cached cover, fetched as bytes on demand; the icon stays until it decodes. */
 function TrashWorkCover({ gateway, workId, name, hidden }: { gateway: LibraryGateway; workId: string; name: string; hidden: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   useEffect(() => {
     if (hidden || !gateway.collectionTrashCover) return;
     let cancelled = false, objectUrl: string | null = null;
@@ -305,7 +305,7 @@ function TrashWorkCover({ gateway, workId, name, hidden }: { gateway: LibraryGat
     }, () => undefined);
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [gateway, workId, hidden]);
-  return <div className="trash-browser__thumbnail">{url && !hidden ? <StableImage src={url} alt={`${name} 표지`} /> : <RectangleStackIcon aria-label={hidden ? "비공개 모드" : "표지 없음"} role="img" />}</div>;
+  return <div className="trash-browser__thumbnail">{url && !hidden && url !== failedUrl ? <StableImage src={url} alt={`${name} 표지`} onError={() => setFailedUrl(url)} /> : <RectangleStackIcon aria-label={hidden ? "비공개 모드" : "표지 없음"} role="img" />}</div>;
 }
 
 function TrashSkeleton() {
@@ -314,14 +314,14 @@ function TrashSkeleton() {
 
 export function NotesTrashSection({ store }: { store: NotesStore | null }) {
   const state = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.snapshot ?? noNotes);
-  const notes = deletedTrashNotes(state?.notes ?? []);
+  const notes = trashNotesNewestFirst(state?.notes ?? []);
   const error = state?.error ?? (state?.ready && !state.unlocked ? "메모를 먼저 열어 주세요." : null);
   return <>
     {error && <div className="trash-browser__load-error" role="alert"><span>{error}</span><Button onClick={() => void (state?.unlocked ? store?.sync() : store?.refresh())}>다시 시도</Button></div>}
     {store && !state?.ready ? <TrashSkeleton /> : error && !notes.length ? null : !notes.length ? <EmptyState title={TRASH_EMPTY} inline /> : <ul className="trash-browser__list" aria-label="휴지통 메모">{notes.map(note => <li key={note.id} className="trash-browser__item">
-      <div className="trash-browser__thumbnail"><DocumentTextIcon aria-hidden="true" /></div>
+      <div className="trash-browser__thumbnail trash-browser__thumbnail--icon"><DocumentTextIcon aria-hidden="true" /></div>
       <div className="trash-browser__copy"><strong>{note.title || "제목 없는 메모"}</strong><span>옮긴 날 {displayDate(note.updatedAt)}</span></div>
-      <Button disabled={state?.saving} aria-label={`${note.title || "제목 없는 메모"} 되살리기`} onClick={() => { store?.edit({ ...note, deleted: false }); void store?.finish(); }}>되살리기</Button>
+      <Button disabled={state?.saving} aria-label={`${note.title || "제목 없는 메모"} 복원`} onClick={() => { store?.edit({ ...note, deleted: false }); void store?.finish(); }}>복원</Button>
     </li>)}</ul>}
   </>;
 }
@@ -333,12 +333,6 @@ function validRetentionDays(value: string): number | null {
 
 function retentionErrorMessage(value: string): string | undefined {
   return validRetentionDays(value) === null ? `보존 기간은 ${MIN_RETENTION_DAYS}일에서 ${MAX_RETENTION_DAYS}일 사이여야 합니다.` : undefined;
-}
-
-function remainingDays(purgeAt: string): number {
-  const timestamp = new Date(purgeAt).getTime();
-  if (Number.isNaN(timestamp)) return 0;
-  return Math.max(0, Math.ceil((timestamp - Date.now()) / 86_400_000));
 }
 
 function localDate(value: string): string {

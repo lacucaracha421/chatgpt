@@ -38,11 +38,11 @@ it('previews 25 / 40 throughout a long drag, then loads only the destination nei
   expect(screen.queryByText('25페이지 준비 중…')).toBeNull();
   expect((await screen.findByRole('status')).textContent).toBe('25페이지 준비 중…');
   // The requested page number shows at once and never flips back to the page still on screen.
-  expect(screen.getAllByText('25 / 40')).toHaveLength(2);expect(screen.queryByText('1 / 40')).toBeNull();
+  expect(screen.getAllByText('25 / 40')).toHaveLength(1);expect(screen.queryByText('1 / 40')).toBeNull();
   expect(requested()).toEqual([0,1,2,22,23,24,25,26]);expect(visiblePages()).toEqual([0]);
   await act(async()=>finish());
   await waitFor(()=>expect(visiblePages()).toEqual([24]));
-  expect(screen.getAllByText('25 / 40')).toHaveLength(2);
+  expect(screen.getAllByText('25 / 40')).toHaveLength(1);
   expect(document.querySelectorAll('.catalog-reader-leaf')).toHaveLength(5);
 });
 
@@ -72,7 +72,7 @@ it('jumps to the spread containing the selected page in landscape',async()=>{
   vi.stubGlobal('innerWidth',1280);vi.stubGlobal('innerHeight',800);
   const slider=await open();fireEvent.change(slider,{target:{value:'25'}});
   await waitFor(()=>expect(visiblePages()).toEqual([23,24]));
-  expect(screen.getAllByText('24–25 / 40')).toHaveLength(2);
+  expect(screen.getAllByText('24–25 / 40')).toHaveLength(1);
   expect(requested().every(index=>index<=2||(index>=21&&index<=26))).toBe(true);
 });
 
@@ -81,9 +81,9 @@ it('keeps counting from the requested page when next is tapped again while a pag
   mocks.decode.mockImplementation((url:string)=>/-(1|2|3)$/.test(url)&&!url.endsWith('-1')||url.endsWith('-1')?new Promise(resolve=>{pending.push(()=>resolve({naturalWidth:600,naturalHeight:900}));}):Promise.resolve({naturalWidth:600,naturalHeight:900}));
   await open();
   fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));
-  expect(screen.getAllByText('2 / 40')).toHaveLength(2);
+  expect(screen.getAllByText('2 / 40')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));
-  expect(screen.getAllByText('3 / 40')).toHaveLength(2);
+  expect(screen.getAllByText('3 / 40')).toHaveLength(1);
   expect(screen.queryByText('1 / 40')).toBeNull();
 });
 

@@ -58,6 +58,15 @@ it("sorts and deduplicates safe links, expands and collapses after five, and ope
   expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "FANZA", "제작사", "위키", "+2"]);
   expect(within(links).getByRole("button", { name: "링크 2개 더 보기" })).toHaveAttribute("aria-expanded", "false");
 });
+it("shows one link per platform and names further accounts by handle when expanded", () => {
+  const urls = [["Twitter", "https://x.com/one"], ["Twitter", "https://x.com/two"], ["Twitter", "https://twitter.com/three"], ["Instagram", "https://instagram.com/name"]]
+    .map(([name, url]) => ({ url, site: { name } }));
+  render(<ProfileLinks profile={profile({ urls })} />);
+  const links = screen.getByLabelText("배우 링크");
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X", "Instagram", "+2"]);
+  fireEvent.click(screen.getByRole("button", { name: "링크 2개 더 보기" }));
+  expect(within(links).getAllByRole("button").map(b => b.textContent)).toEqual(["X @one", "X @two", "X @three", "Instagram", "접기"]);
+});
 it("shows stored profile immediately then updates the page from background refresh", async () => {
   const pending = deferred<Profile>(); const api = gateway({ refreshPerformerProfile: vi.fn().mockReturnValue(pending.promise) });
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" api={api} onBack={vi.fn()} /></PrivacyProvider>);

@@ -43,9 +43,6 @@
 .tablet-card-album .trading-card, .tablet-card-album .trading-card .card { width:100%; }
 .tablet-card-album__tile b { font-size:var(--type-body); font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tablet-card-album__tile small { color:var(--color-muted); font-size:var(--type-meta); }
-.tablet-card-album__tiers { display:flex; gap:var(--space-1); margin-top:var(--space-1); }
-.tablet-card-album__tiers i { font-size:var(--type-meta); font-style:normal; color:var(--color-faint); opacity:.35; }
-.tablet-card-album__tiers [data-owned="true"] { opacity:1; color:var(--color-text); }
 .tablet-card-album__more { display:grid; place-items:center; padding:var(--space-4) 0; }
 
 /* The full-screen viewer covers the album: stop painting the blended card grid behind it (tablet freeze, 2026-10-16). */

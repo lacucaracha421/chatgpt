@@ -534,7 +534,7 @@ describe('delete and 휴지통', () => {
     expect(rows.map(row => row.querySelector('strong')!.textContent)).toEqual(['지운 영화', '지운 만화']);
     expect(rows[0].textContent).toContain('영화 · 10일 후 영구 삭제');
     expect(rows[1].textContent).toContain('만화 · 2일 후 영구 삭제');
-    fireEvent.click(within(rows[0]).getByRole('button', {name: '지운 영화 되살리기'}));
+    fireEvent.click(within(rows[0]).getByRole('button', {name: '지운 영화 복원'}));
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0]).toEqual({...identity, operationId: expect.any(String), commandType: 'restoreWork', workId: 'old-2', expectedRevision: 7});
     expect(within(sheet).queryByText('지운 영화')).toBeNull();
@@ -545,7 +545,7 @@ describe('delete and 휴지통', () => {
     trashItems = [{workId: 'old-2', type: 'movie', name: '지운 영화', trashedAt: '2026-10-05T00:00:00Z', purgeAt: new Date(Date.now() + 10 * DAY).toISOString(), entityRevision: 7}];
     const sheet = await openTrash();
     await within(sheet).findByText('지운 영화');
-    fireEvent.click(within(sheet).getByRole('button', {name: '지운 영화 되살리기'}));
+    fireEvent.click(within(sheet).getByRole('button', {name: '지운 영화 복원'}));
     await waitFor(() => expect(readCommands()[0]).toMatchObject({state: 'pending', attempts: 1, lastError: '오프라인'}));
     expect(within(sheet).getByText('지운 영화')).toBeTruthy();
   });

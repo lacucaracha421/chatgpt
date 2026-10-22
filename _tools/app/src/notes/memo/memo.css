@@ -23,6 +23,15 @@
 .memo-section-actions .memo-status { margin-right: 4px; }
 .memo-section-actions .ui-button--icon, .memo-section-actions .ui-menu__trigger { width: 28px; height: 28px; min-height: 28px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control, 4px); color: var(--color-muted); }
 .memo-section-actions .ui-button--icon svg, .memo-section-actions .ui-menu__trigger svg { width: 16px; height: 16px; }
+/* The tablet does not load the PC base button rules, so the menu trigger needs its own empty face. */
+.memo-section-actions .ui-menu__trigger { background: transparent; }
+.memo-section-actions .ui-menu__trigger:active:not(:disabled) { background: var(--color-surface-pressed); }
+/* PC: a section's tools appear while its head is hovered or holds keyboard focus. */
+.memo-editor:not(.memo-editor--touch) .memo-section-actions > :not(.memo-status) { opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.memo-editor:not(.memo-editor--touch) .memo-section-head:hover .memo-section-actions > *,
+.memo-editor:not(.memo-editor--touch) .memo-section-head:focus-within .memo-section-actions > *,
+.memo-editor:not(.memo-editor--touch) .memo-section-actions > [data-state="open"] { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .memo-editor:not(.memo-editor--touch) .memo-section-actions > * { transition: none; } }
 .memo-item { position: relative; display: flex; align-items: flex-start; gap: 8px; min-height: 32px; }
 .memo-item-text, .memo-body-text { display: block; flex: 1; min-width: 0; width: 100%; box-sizing: border-box; resize: none; overflow: hidden; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text); font: inherit; font-size: var(--type-body, 15px); line-height: 24px; user-select: text; -webkit-user-select: text; }
 .memo-item-text:focus-visible, .memo-body-text:focus-visible { outline: 0; box-shadow: 0 2px 0 var(--color-focus); }

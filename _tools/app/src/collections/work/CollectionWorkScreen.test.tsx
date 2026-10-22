@@ -331,7 +331,7 @@ it("opens the film form with a disc case, booklet facts and film record options"
   expect(screen.getByRole("article", { name: "영화 작품 화면" })).toBeInTheDocument();
   expect(container.querySelector(".asset-viewer__title small")).toHaveTextContent("감독 이름 · 9.1");
   expect(container.querySelector(".asset-viewer__position")).toBeNull();
-  for (const name of ["쇼케이스", "편집", "작품 관리", "정면으로", "정보", "닫기"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
+  for (const name of ["목록으로", "쇼케이스", "편집", "작품 관리", "정면으로", "정보"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
   fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
   expect(container.querySelector(".disc")).not.toBeNull();
   expect(container.querySelector(".cart-slot")).toBeNull();

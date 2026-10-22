@@ -843,9 +843,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/libraryTrash.css": {
-      "offScaleSpacing": 9,
-      "offRoleFontSize": 3,
-      "pillRadius": 1,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/mobile.css": {

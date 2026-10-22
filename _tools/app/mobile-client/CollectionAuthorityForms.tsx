@@ -118,7 +118,7 @@ export function AuthorityQueue({authority, workId, personId, item, onForm, onAvE
     || person(row) && (row.state === 'conflict' || !!row.lastError)));
   return <>{paused.map(plan=><div key={plan.id} className="collection-authority-queue"><Badge>멈춤</Badge><small className="collection-authority-queue__reason">받은 품번 · {plan.error??'다른 기기의 변경과 겹침'}</small><Button variant="ghost" onClick={()=>{cancelInboxPlan(plan.id);void authority.flush();}}>적용 취소</Button></div>)}{rows.map(row => person(row) ? <PersonQueueRow key={row.command.operationId} row={row} authority={authority} named/> : <div key={row.command.operationId} className="collection-authority-queue"><Badge>{row.state === 'conflict' ? '충돌' : '대기'}</Badge>
     {!workId && <span>{row.command.commandType === 'createWork' ? row.command.name : row.command.commandType === 'providerApply' ? `${row.command.provider.toUpperCase()}에서 추가`
-      : row.command.commandType === 'deleteWork' ? `${row.label ?? '작품'} 삭제` : row.command.commandType === 'restoreWork' ? `${row.label ?? '작품'} 되살리기` : ''}</span>}
+      : row.command.commandType === 'deleteWork' ? `${row.label ?? '작품'} 삭제` : row.command.commandType === 'restoreWork' ? `${row.label ?? '작품'} 복원` : ''}</span>}
     {row.state === 'conflict' && <>{(row.command.commandType==='createWork'||row.command.commandType==='updateWork'&&Object.keys(row.command.changes).some(key=>!['description','myScore','showcase','status','ownedPlatform'].includes(key)))&&<Button variant="ghost" onClick={() => {
       const created = createdWork(row);
       if (created) onForm({mode: 'create', type: created.type, item: created, retry: row});

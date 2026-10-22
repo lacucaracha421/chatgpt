@@ -94,3 +94,9 @@
   display: grid;
   gap: var(--space-3);
 }
+
+/* A memo has no picture: its icon box stays icon-sized instead of reserving a cover. */
+.trash-browser__thumbnail--icon {
+  width: var(--space-8);
+  height: var(--space-8);
+}

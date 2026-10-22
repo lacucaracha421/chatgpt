@@ -56,6 +56,8 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
   /** Tablet: a long press anywhere on the row asks for the work's action sheet. */onLongPress?(): void;
 }) {
   const row = useRef<HTMLElement>(null);
+  // Owned next to the volumes on the shelf ("1 / 8권"), once the row's volumes are known and the count fits them.
+  const total = manga && owned !== null && owned <= manga.volumes.length ? manga.volumes.length : null;
   const press = useLongPress({ enabled: Boolean(onLongPress), onLongPress: () => onLongPress?.() });
   const near = useRef(onNear); near.current = onNear;
   useEffect(() => {
@@ -78,7 +80,7 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}>
     <div className="manga-shelf-row__label">
       <button type="button" className="manga-shelf-row__title" data-collection-id={id} onClick={() => onOpen(null)}>{title}</button>
-      {owned !== null && <span className="manga-shelf-row__count numeric" aria-label={`보유 ${owned.toLocaleString()}권`}>{owned.toLocaleString()}권</span>}
+      {owned !== null && <span className="manga-shelf-row__count numeric" aria-label={total ? `보유 ${owned.toLocaleString()}권 / 전체 ${total.toLocaleString()}권` : `보유 ${owned.toLocaleString()}권`}>{total ? `${owned.toLocaleString()} / ${total.toLocaleString()}권` : `${owned.toLocaleString()}권`}</span>}
     </div>
     <div className="manga-shelf-row__shelf" onKeyDown={keyDown}>
       {manga

@@ -81,13 +81,13 @@ it("renders persistent progress counts and percentage", async () => {
 
 it("renders active transfer stages and worker count", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 4, preparing: 1, uploading: 2, committing: 1, activeWorkers: 4 }) });
-  expect(await screen.findByText("복제 대기·진행 중")).toBeInTheDocument();
+  expect(await screen.findByText("복제 중")).toBeInTheDocument();
   expect(screen.getByText(/대기 4 · 전송 중 4/)).toBeInTheDocument();
 });
 
 it("does not expose pause or resume and preserves disabled replication", async () => {
   const gateway = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, replicationEnabled: false, queued: 2 }) });
-  await screen.findByText("자동 복제 꺼짐");
+  await screen.findByText("복제 꺼짐");
   expect(screen.queryByRole("button", { name: "일시정지" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "계속" })).not.toBeInTheDocument();
   expect(gateway.cloudBackfillSetControlState).not.toHaveBeenCalled();
@@ -105,15 +105,15 @@ it("retries failed items without reseeding and restarts idle orchestration", asy
 
 it("keeps failed count and recent diagnostic visible", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, completed: 8, failed: 2, lastError: "CloudThumbnailUnavailable: poster missing" }) });
-  expect(await screen.findByText("확인 필요 2개")).toBeInTheDocument();
+  expect(await screen.findByText("실패 항목 2개")).toBeInTheDocument();
   expect(screen.getByText(/CloudThumbnailUnavailable: poster missing/)).toBeInTheDocument();
 });
 
 it("distinguishes clean completion from completion with problems", async () => {
   const { rerender } = render(<LibraryProvider gateway={{ ...libraryGateway, cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, totalAssets: 8, completed: 8 }) } as typeof libraryGateway}><CloudBackfillSettings /></LibraryProvider>);
-  expect(await screen.findByText("복제 완료 — 8개 완료")).toBeInTheDocument();
+  expect(await screen.findByText("복제 완료")).toBeInTheDocument();
   rerender(<LibraryProvider gateway={{ ...libraryGateway, cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, totalAssets: 10, completed: 8, failed: 2 }) } as typeof libraryGateway}><CloudBackfillSettings /></LibraryProvider>);
-  expect(await screen.findByText("복제 완료 — 8개 완료, 2개 확인 필요")).toBeInTheDocument();
+  expect(await screen.findByText("복제 완료 · 일부 실패")).toBeInTheDocument();
 });
 
 it("reports both interrupted and missing-queue recovery", async () => {
@@ -131,15 +131,15 @@ it("refreshes persistent counts immediately after an operator action", async () 
   renderSection({ cloudBackfillProgress: progress, cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0, seededMissing: 0 }) }, CloudBackfillMaintenance);
   expect(await screen.findByText("0 / 5개 (0%)")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "동기화 상태 복구" }));
-  expect(await screen.findByText("5 / 5개 (100%)")).toBeInTheDocument();
+  expect(await screen.findByText("5개")).toBeInTheDocument();
 });
 
 it("never creates a worker cycle when the Settings section is reopened", async () => {
   const first = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 2 }) });
-  await screen.findByText("복제 대기·진행 중");
+  await screen.findByText("복제 중");
   cleanup();
   const second = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 2 }) });
-  await screen.findByText("복제 대기·진행 중");
+  await screen.findByText("복제 중");
   expect(first.cloudBackfillRunCycle).not.toHaveBeenCalled();
   expect(second.cloudBackfillRunCycle).not.toHaveBeenCalled();
 });
@@ -157,7 +157,7 @@ it("adds no polling timer while waiting for supervisor progress", async () => {
 
 it("resumes an enabled paused queue without reseeding", async () => {
   const gateway = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, replicationEnabled: true, controlState: "paused", queued: 8 }) });
-  await screen.findByText("동기화 일시정지");
+  await screen.findByText("일시 정지");
   await userEvent.click(screen.getByRole("button", { name: "동기화 계속" }));
   expect(gateway.cloudBackfillSetControlState).toHaveBeenCalledWith("running");
   expect(gateway.cloudBackfillSeed).not.toHaveBeenCalled();
@@ -165,7 +165,7 @@ it("resumes an enabled paused queue without reseeding", async () => {
 
 it("keeps maintenance tools out of the everyday status and leads with a one-line conclusion", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, completed: 10 }) });
-  const conclusion = await screen.findByText("동기화됨 · 문제 없음");
+  const conclusion = await screen.findByText("동기화됨");
   expect(document.body.querySelector("p")).toContainElement(conclusion);
   for (const name of ["사전 점검", "전체 라이브러리 업로드 준비", "동기화 상태 복구"]) {
     expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
@@ -182,17 +182,17 @@ it("shows receive-only hold instead of completed publication", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, completed: 10 }) });
   expect(await screen.findByText("받기만 · 송신 보류")).toBeVisible();
   expect(screen.getByText("송신 보류")).toBeVisible();
-  expect(screen.queryByText("동기화됨 · 문제 없음")).toBeNull();
+  expect(screen.queryByText("동기화됨")).toBeNull();
 });
 
 it("shows receive authentication failures while held", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, activity: [{ direction: "capture", lastError: "CloudUnauthorized", lastReason: "unauthorized" }] }) });
-  expect(await screen.findByText("동기화 문제 1개 · 아래에서 확인하세요")).toBeInTheDocument();
+  expect(await screen.findByText("동기화 문제 1개")).toBeInTheDocument();
   expect(screen.queryByText("받기만 · 송신 보류")).not.toBeInTheDocument();
 });
 
 it("shows receive materialization failures while held", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, failed: 1, lastError: "materialization failed" }) });
-  expect(await screen.findByText("동기화 문제 1개 · 아래에서 확인하세요")).toBeInTheDocument();
+  expect(await screen.findByText("동기화 문제 1개")).toBeInTheDocument();
   expect(screen.getByText("materialization failed")).toBeInTheDocument();
 });

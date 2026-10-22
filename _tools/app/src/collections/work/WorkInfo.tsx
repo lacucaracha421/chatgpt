@@ -1,4 +1,4 @@
-import {performerName} from "../av/performerName";
+import {distinctCreditName, performerName, performerWorkCount} from "../av/performerName";
 import type { CollectionSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvDetails, AvRelated } from "../avTypes";
 import { displayDate } from "../../shared/displayDate";
@@ -37,7 +37,7 @@ export function WorkInfo({ collection, av, related, tmdb, record = defaultRecord
     </section>
     {collection.type === "movie" && collection.overview?.trim() && <section aria-label="개요"><SectionLabel title="개요" /><p className="work-overview">{collection.overview}</p></section>}
     {collection.type === "movie" && (tmdb?.series ? <SeriesSeasons key={collection.id} series={tmdb.series} /> : tmdb?.mediaType !== "tv" && tmdb?.film ? <FilmDetails key={collection.id} film={tmdb.film} onOpenCollection={onOpenCollection} /> : null)}
-    {av && av.people.length > 0 && <section><SectionLabel title="출연 · 감독" /><div className="work-people">{av.people.map(person => <Button key={`${person.role}/${person.id}`} variant="ghost" onClick={() => onOpenPerson(person.id)} className="work-person"><AvPortrait portrait={person.portrait} name={performerName(person).primary} size={40} /><span><b>{performerName(person).primary}</b>{performerName(person).secondary && <small lang="ja">{performerName(person).secondary}</small>}<small>{person.role === "director" ? "감독" : [`내 라이브러리 ${person.workCount}편`].filter(Boolean).join(" · ")}</small>{person.creditName && <small>{person.creditName}</small>}</span></Button>)}</div></section>}
+    {av && av.people.length > 0 && <section><SectionLabel title="출연 · 감독" /><div className="work-people">{av.people.map(person => <Button key={`${person.role}/${person.id}`} variant="ghost" onClick={() => onOpenPerson(person.id)} className="work-person"><AvPortrait portrait={person.portrait} name={performerName(person).primary} size={40} /><span><b>{performerName(person).primary}</b>{performerName(person).secondary && <small lang="ja">{performerName(person).secondary}</small>}<small>{person.role === "director" ? "감독" : performerWorkCount(person.workCount)}</small>{distinctCreditName(person) && <small>{distinctCreditName(person)}</small>}</span></Button>)}</div></section>}
     {groups.some(group => group.items.length > 0) && <details><summary>관련 작품</summary>{groups.filter(group => group.items.length > 0).map(group => <section key={group.name}><SectionLabel title={group.name} />{group.items.map(item => <Button key={item.collectionId} variant="quiet" onClick={() => onOpenCollection?.(item.collectionId)}>{item.productCode ?? item.name} · {displayDate(item.releaseDate)}</Button>)}</section>)}</details>}
   </div>;
 }

@@ -27,7 +27,6 @@ type PageViewerProps = {
   pageUrls: string[];
   initialPage: number;
   /** 로컬, or the online catalog's name. */
-  sourceLabel: string;
   artist?: string | null;
   /** Online works only: the bookmark toggle in the top bar. */
   bookmark?: ReaderBookmark;
@@ -55,7 +54,7 @@ export function PageViewer(props: PageViewerProps) {
   return privacyMode ? <Skeleton className="privacy-mask manga-reader__mask" label="비공개 모드" /> : <PageViewerContent {...props}/>;
 }
 
-function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
+function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
   const privacyMode = useCatalogMasked();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
@@ -197,7 +196,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
     ...Array.from({ length: 5 }, (_, index) => page + index + 1).filter((value) => value <= pageCount),
   ])].filter((value) => !currentSpread.has(value));
   const position = logicalSpread.length === 2 ? `${logicalSpread[0]}-${logicalSpread[1]}` : `${logicalSpread[0]}`;
-  const subtitle = [artist?.trim(), sourceLabel].filter(Boolean).join(" · ");
+  const subtitle = artist?.trim();
 
   useEffect(() => {
     if (!overviewOpen) return;
@@ -242,15 +241,15 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
     },
     ...(["compact", "normal", "wide"] as const).map((value) => ({
       id: `margin-${value}`,
-      label: `여백: ${MARGIN_LABEL[value]}`,
-      group: "margin",
+      label: MARGIN_LABEL[value],
+      group: "여백",
       selected: margin === value,
       onSelect: () => updatePrefs({ margin: value }),
     })),
     ...(["none", "narrow", "wide"] as const).map((value) => ({
       id: `gap-${value}`,
-      label: `페이지 간격: ${GAP_LABEL[value]}`,
-      group: "gap",
+      label: GAP_LABEL[value],
+      group: "페이지 간격",
       selected: gap === value,
       onSelect: () => updatePrefs({ gap: value }),
     })),
@@ -334,7 +333,6 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
             onPointerUp={event => event.stopPropagation()}
             onPointerCancel={event => event.stopPropagation()}>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ArrowLeftIcon aria-hidden="true" /></Button>
-            <span className="asset-viewer__position"><b>{position}</b> / {pageCount}</span>
             <span className="asset-viewer__title">
               <strong>{title}</strong>
               {subtitle && <small>{subtitle}</small>}
@@ -344,7 +342,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
             <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${spread ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="두 쪽 보기" aria-description="두 쪽 보기 (V)" aria-pressed={spread} onClick={() => updatePrefs({ mode: spread ? "single" : "double" })}><BookOpenIcon aria-hidden="true" /><span>두 쪽</span></Button>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="페이지 목록" aria-description="페이지 목록 (T)" aria-pressed={overviewOpen} onClick={() => setOverviewOpen((value) => !value)} ref={overviewToggleRef}><Squares2X2Icon aria-hidden="true" /></Button>
             {bookmark && <BookmarkToggle className="asset-viewer__vbtn" label="북마크" bookmarked={bookmark.bookmarked} disabled={bookmark.disabled} onClick={bookmark.onToggle} />}
-            <Menu label="읽기 설정" align="end" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} />
+            <Menu label="읽기 설정" align="end" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} groupLabels />
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
           </div>
           {edge("left")}

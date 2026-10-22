@@ -4,7 +4,7 @@ import {useWorkSurfaceReady} from "../src/collections/work/useWorkSurfaceReady";
 import {WorkZoomObject, WorkZoomProvider, WorkZoomStage} from '../src/collections/work/WorkZoom';
 import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
-import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
+import {ViewfinderCircleIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CaseInside, CollectionCase} from '../src/collections/case/CollectionCase';
 import {playCaseSound} from '../src/collections/case/caseSounds';
 import type {StageBox} from '../src/collections/case/fitCaseStage';
@@ -199,7 +199,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
         </WorkZoomObject>
         {!isObject && mode !== 'flat' && art.urls.art && <div className="work-art"><StableImage src={art.urls.art} alt={`${data.title} 아트워크`} draggable={false}/></div>}
         <StageEdges previous={shown.position > 1} next={shown.position < shown.total} onStep={onStep}/>
-        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ArrowPathIcon aria-hidden="true"/></Button>
+        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ViewfinderCircleIcon aria-hidden="true"/></Button>
       </WorkZoomStage>
       <WorkStrip av={work.type === 'av'} mode={picked} frontThumbnailUrl={data.front} artworks={strip} privacy={privacy} thumbnailUrl={id => shown.urls[`thumb:${id}`] ?? null} onReady={() => ready('strip')} onPick={pick}/>
     </div>
@@ -282,7 +282,7 @@ function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, on
         {manga.volumes.length
           ? <MangaStage manga={manga} privacy={privacy} title={item.name} author={item.author ?? null} frontReset={reset} coverUrl={id => id === volume?.coverArtworkId ? shown.book : null} onPick={onPick} onReady={() => ready('object')}/>
           : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook key={shown.book} src={shown.book} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => ready('object')}/></WorkZoomObject></WorkZoomStage>}
-        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ArrowPathIcon aria-hidden="true"/></Button>
+        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ViewfinderCircleIcon aria-hidden="true"/></Button>
       </div>
       <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
         // The cover viewer stays shut in privacy mode, and so does the book sound.

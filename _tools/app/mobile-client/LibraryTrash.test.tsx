@@ -69,10 +69,9 @@ describe('Library Trash browser',()=>{
     } finally {localStorage.clear();}
   });
 
-  it('shows count, size, the PC-only emptying hint and no empty action',async()=>{
+  it('shows count, size and no empty action',async()=>{
     mount();
     expect(await screen.findByText('2개 · 3.0 MB · 이동 대기 1')).toBeTruthy();
-    expect(screen.getByText(/비우기는 PC에서/)).toBeTruthy();
     expect(screen.queryByRole('button',{name:/비우기|영구 삭제/})).toBeNull();
     expect(screen.getByRole('button',{name:/이동 대기/})).toBeTruthy();
     // Trash thumbnails use the trash-scoped ticket batch, and only https URLs are used.

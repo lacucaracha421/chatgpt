@@ -21,6 +21,8 @@
   --selection-echo: 3px 3px 0 -1px var(--color-sidebar), 3px 3px 0 0 var(--color-selection-echo);
   --selection-echo-surface: 3px 3px 0 -1px var(--color-surface), 3px 3px 0 0 var(--color-selection-echo);
   --selection-cursor-size: 5px;
+  /* The current choice in a menu (DESIGN.md section 12). */
+  --menu-mark-size: 5px;
   --selection-cursor-offset: -7px;
   --color-section-mark: rgba(221, 216, 202, 0.6);
   --section-label-rule: linear-gradient(90deg, rgba(221, 216, 202, 0.3), rgba(221, 216, 202, 0.06));

@@ -77,7 +77,7 @@ export function CollectionTrashContent({trash, authority, privacy}: {trash: Coll
       : <ul className="collection-trash" aria-label="휴지통 작품">{items.map(item => <li key={item.workId} className="collection-trash-row">
         <span className="bind-thumb collection-trash-thumb"><span className="bind-thumb-placeholder"><RectangleStackIcon aria-hidden="true"/></span></span>
         <span className="collection-trash-text"><strong>{item.name}</strong><small>{KIND_LABEL[item.type]} · <span className="numeric">{trashExpiry(item.purgeAt)}</span></small></span>
-        <Button aria-label={`${item.name} 되살리기`} onClick={() => restore(item)}>되살리기</Button>
+        <Button aria-label={`${item.name} 복원`} onClick={() => restore(item)}>복원</Button>
       </li>)}</ul>}
   </>;
 }

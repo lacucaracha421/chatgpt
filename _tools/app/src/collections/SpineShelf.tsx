@@ -6,7 +6,7 @@ import { CASE_PLASTIC, CollectionCase, CaseSpine, spineInsertClass, type CaseDat
 import { handOffCaseAngle } from "./case/caseHandoff";
 import { playShelfSound, preloadShelfSounds } from "./case/caseSounds";
 import { stageForCaseHeight } from "./case/fitCaseStage";
-import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
+import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, spineScaleForView, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
 import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
 
@@ -109,10 +109,12 @@ type Props<W extends SpineWork> = {
   controlRef?: { current: SpineShelfControl | null };
 };
 
-export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, restorePick = false, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
+export function SpineShelf<W extends SpineWork>({ groups, scale: chosenScale, label, pickedId, onPick, onOpen, privacy = false, touchTargets = false, gutter = 24, restoredFocusId, restorePick = false, menu, onLongPress, art, onWindow, entrance = false, controlRef, prepare }: Props<W>) {
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(preloadShelfSounds, []);
   const [width, setWidth] = useState(960);
+  const [viewHeight, setViewHeight] = useState(0);
+  const scale = spineScaleForView(chosenScale, viewHeight, { grow: PULL_GROW, lift: PULL_LIFT });
   const [focusId, setFocusId] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null);
   const available = Math.max(1, width - gutter * 2);
@@ -146,11 +148,13 @@ export function SpineShelf<W extends SpineWork>({ groups, scale, label, pickedId
   const measure = useCallback(() => {
     const host = hostRef.current;
     if (host && host.clientWidth > 0) setWidth(current => current === host.clientWidth ? current : host.clientWidth);
+    const rootHeight = rootOf()?.clientHeight ?? 0;
+    if (rootHeight > 0) setViewHeight(current => current === rootHeight ? current : rootHeight);
     const { top, height } = viewport();
     const next = windowRange(entries, top, height), far = windowRange(entries, top, height, AHEAD_VIEWPORTS);
     setRange(current => current[0] === next[0] && current[1] === next[1] ? current : next);
     setAhead(current => current[0] === far[0] && current[1] === far[1] ? current : far);
-  }, [entries, viewport]);
+  }, [entries, viewport, rootOf]);
   const measureRef = useRef(measure); measureRef.current = measure;
   // Another 책등 크기 repacks every row: the row that was at the top of the view stays there, at the same share of its
   // height, so the size changes in one step around what was being looked at instead of jumping elsewhere.

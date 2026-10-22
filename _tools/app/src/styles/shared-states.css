@@ -90,10 +90,13 @@
 .game-case > canvas { display: block; width: 100%; height: 100%; }
 .game-case[data-ready="true"] > img { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .game-case[data-ready="true"] > canvas { display: block; }
+/* DESIGN.md section 12: a menu's current choice is weight 600 with a 5px accent square at the right; no slab inside menus. */
 .ui-menu__item[role="menuitemradio"][data-state="checked"],
-.ui-menu__item[data-selected="true"] { color: var(--color-on-accent); background: var(--color-accent); }
+.ui-menu__item[data-selected="true"] { font-weight: 600; }
 .ui-menu__item[role="menuitemcheckbox"][data-state="checked"] { color: var(--color-filter-text); background: var(--color-filter-selected); }
-.ui-menu__item[data-selected="true"] > .ui-menu__item-check { width: var(--selection-mark-size); height: var(--selection-mark-size); background: currentColor; }
+.ui-menu__item[role="menuitemradio"][data-state="checked"] > .ui-menu__item-check,
+.ui-menu__item[data-selected="true"] > .ui-menu__item-check { width: var(--menu-mark-size); height: var(--menu-mark-size); margin-right: calc((16px - var(--menu-mark-size)) / 2); border-radius: var(--radius-mark); background: var(--color-accent); }
+.ui-menu__item[role="menuitemradio"][data-state="checked"] > .ui-menu__item-check svg,
 .ui-menu__item[data-selected="true"] > .ui-menu__item-check path { display: none; }
 .view-toolbar__content { flex-wrap: wrap; row-gap: var(--space-2); }
 @media (max-width: 1000px) {

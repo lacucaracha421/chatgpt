@@ -855,7 +855,6 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
     expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(await findReaderPosition("1 / 3")).toBeVisible();
-    expect(within(screen.getByRole("dialog")).getByText(/카탈로그$/)).toBeVisible();
     await userEvent.keyboard("{ArrowLeft}");
     await findReaderPosition("2 / 3");
     expect(gateway.saveRemoteReadingProgress).not.toHaveBeenCalled();
@@ -960,7 +959,7 @@ async function catalogMenuItem(name: string, role: "menuitem" | "menuitemcheckbo
 }
 
 function readerPosition(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".asset-viewer__position");
+  return document.querySelector<HTMLElement>(".reader-control-bar__jump .numeric");
 }
 
 async function findReaderPosition(text: string): Promise<HTMLElement> {

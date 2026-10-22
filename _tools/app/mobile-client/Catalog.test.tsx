@@ -224,7 +224,7 @@ describe('mobile catalog reads',()=>{
     await screen.findByRole('img',{name:'1페이지'});await waitFor(()=>expect(pending.size).toBeGreaterThan(0));
     const preloaded=document.querySelector('[data-page="1"]');
     expect((document.querySelector('.catalog-reader-leaf') as HTMLElement).style.flexBasis).toBe('100%');
-    fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));expect(screen.getByRole('img',{name:'1페이지'})).toBeTruthy();expect(screen.getAllByText('2 / 5')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));expect(screen.getByRole('img',{name:'1페이지'})).toBeTruthy();expect(screen.getAllByText('2 / 5')).toHaveLength(1);
     await act(async()=>pending.get('https://app.lakomics.local/media-cache/page-1')?.());
     await screen.findByRole('img',{name:'2페이지'});expect(document.querySelector('[data-page="1"]')).toBe(preloaded);
     expect(mocks.native.mock.calls.filter(([op,payload])=>op==='catalogImage'&&payload.index===1)).toHaveLength(1);
@@ -237,7 +237,7 @@ describe('mobile catalog reads',()=>{
     expect((document.querySelector('.catalog-reader-leaf') as HTMLElement).style.flexBasis).toBe('50%');
     expect(document.querySelector('.catalog-reader-blank')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));await screen.findByRole('img',{name:'3페이지'});
-    expect(screen.getAllByText('2–3 / 5')).toHaveLength(2);expect(document.querySelector('.catalog-reader-blank')).toBeNull();
+    expect(screen.getAllByText('2–3 / 5')).toHaveLength(1);expect(document.querySelector('.catalog-reader-blank')).toBeNull();
     const visible=[...document.querySelectorAll<HTMLElement>('.catalog-reader-leaf')].filter(e=>e.style.display!=='none');
     expect(visible).toHaveLength(2);expect(visible.map(e=>e.style.flexBasis)).toEqual(['50%','50%']);
   });

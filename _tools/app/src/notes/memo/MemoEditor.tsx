@@ -172,8 +172,13 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   useLayoutEffect(() => {
     if (opened.current !== noteId) {
       opened.current = noteId;
-      const last = [...visible].reverse().find(item => mode !== 'todo' || !item.done);
-      focus(mode === 'text' ? shown[shown.length - 1]?.id ?? '' : last?.id ?? '');
+      // PC puts the caret at the end on open. On the tablet the soft keyboard would cover half
+      // the note, so a note with text waits for the first tap; a new empty note still focuses.
+      const empty = !named.length && visible.every(item => !item.text);
+      if (!touch || empty) {
+        const last = [...visible].reverse().find(item => mode !== 'todo' || !item.done);
+        focus(mode === 'text' ? shown[shown.length - 1]?.id ?? '' : last?.id ?? '');
+      }
     }
     const target = focusTarget.current; if (!target) return;
     if (!target.id) { focusTarget.current = null; (root.current?.querySelector<HTMLButtonElement>('.memo-add') ?? root.current)?.focus(); return; }

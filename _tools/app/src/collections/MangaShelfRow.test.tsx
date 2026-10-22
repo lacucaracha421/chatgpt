@@ -43,7 +43,7 @@ describe("manga shelf row", () => {
     expect(onPick).toHaveBeenLastCalledWith("a");
     fireEvent.click(screen.getByRole("button", { name: "다이의 대모험" }));
     expect(onOpen).toHaveBeenLastCalledWith(null);
-    expect(screen.getByLabelText("보유 2권")).toHaveTextContent("2권");
+    expect(screen.getByLabelText("보유 2권 / 전체 2권")).toHaveTextContent("2 / 2권");
   });
   it("asks for the work's action sheet on a long press of its row and swallows the click that follows", () => {
     vi.useFakeTimers();

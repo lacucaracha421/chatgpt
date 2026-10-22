@@ -45,8 +45,7 @@ it("shows the recognition in use, the judgment numbers and the overall accuracy,
   expect(within(accuracy).getByRole("row", { name: /자동 후보/ })).toHaveTextContent("30229096%");
   expect(within(accuracy).getByRole("row", { name: /추천 후보/ })).toHaveTextContent("825972%");
   expect(within(accuracy).getByRole("row", { name: /학습 인식이 넣은 것 다시 봄/ })).toHaveTextContent("716997%");
-  expect(screen.getByText(/PixAI/)).toBeInTheDocument();
-  expect(screen.getByText(/B36/)).toBeInTheDocument();
+  expect(screen.queryByText(/PixAI|canary|B36|S36/)).toBeNull();
 });
 
 it("offers the preparation controls of 학습 인식 준비: start for existing images, and stop while it runs", async () => {
@@ -85,9 +84,8 @@ it("offers to undo what 학습 인식 placed in a series that has such character
   expect(await screen.findByText("학습 인식이 넣은 것 4건을 되돌렸습니다.")).toBeInTheDocument();
 });
 
-it("has no recognition selector, only the rule", async () => {
+it("has no recognition selector", async () => {
   mount();
   await screen.findByRole("table", { name: "젠레스 캐릭터 인식 상태" });
   expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-  expect(screen.getByText(/인식은 캐릭터마다 저절로 바뀌고 고르는 메뉴는 없습니다/)).toBeInTheDocument();
 });

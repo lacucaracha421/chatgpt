@@ -2,7 +2,7 @@ import {performerName} from "../av/performerName";
 import {useWorkSurfaceReady} from "./useWorkSurfaceReady";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
-import { ArrowLeftIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, SparklesIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, SparklesIcon, ViewfinderCircleIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon as SparklesSolidIcon } from "@heroicons/react/24/solid";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AreaVisible } from "../../shared/motion/AreaSwitch";
@@ -78,9 +78,8 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <IconButton className="asset-viewer__vbtn asset-viewer__favorite" pop label="쇼케이스" icon={SparklesIcon} activeIcon={SparklesSolidIcon} active={visible.collection.showcase} data-toggle-key={visible.collection.id} disabled={waiting} onClick={() => actions.onShowcase(visible.collection)} />
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="편집" disabled={waiting} onClick={() => actions.onEdit(visible.collection)}><PencilIcon /></Button>
       <Menu label="작품 관리" disabled={waiting} trigger={<EllipsisHorizontalIcon />} items={actions.onManage(visible)} />
-      <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon /></Button>
+      <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ViewfinderCircleIcon aria-hidden="true" /></Button>
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보" aria-pressed={info} onClick={() => setInfo(value => !value)}><InformationCircleIcon /></Button>
-      <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="닫기" onClick={actions.onClose}><XMarkIcon /></Button>
     </header>
     {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
       <WorkSurface data={index === active ? visible : slot} active={index === active} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => {

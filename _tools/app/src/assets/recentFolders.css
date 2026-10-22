@@ -17,10 +17,8 @@
 .recent-folders__menu .ui-menu__item { min-width: 0; }
 .recent-folders__menu .ui-menu__item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 .recent-folders__path { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: right; color: var(--color-faint); font-size: var(--type-meta); }
-.recent-folders__menu .ui-menu__item[data-selected="true"] { font-weight: 600; }
 .recent-folders__menu .ui-menu__item svg { color: var(--folder-color, var(--color-muted)); }
-.recent-folders__menu .ui-menu__item[data-selected="true"] :is(svg, .recent-folders__path) { color: inherit; }
-.recent-folders__menu .ui-menu__item[data-selected="true"] .recent-folders__path { opacity: .7; font-weight: 400; }
+.recent-folders__menu .ui-menu__item[data-selected="true"] .recent-folders__path { font-weight: 400; }
 .recent-folders__sep { height: 1px; margin: var(--space-1) 0; background: var(--color-border); }
 .recent-folders [hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .recent-folders__chip { animation: none !important; transition: none !important; } }

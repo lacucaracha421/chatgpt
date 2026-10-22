@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); openUrl.mockClear(); progressApi.get.mockReset(); progressApi.save.mockReset(); localStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 function position(): string {
-  return document.querySelector(".asset-viewer__position")?.textContent ?? "";
+  return document.querySelector(".reader-control-bar__jump .numeric")?.textContent ?? "";
 }
 
 describe("MangaViewer", () => {
@@ -59,7 +59,7 @@ describe("MangaViewer", () => {
   it("uses the shared reader chrome with 로컬 as the source and no bookmark", () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" artist="tatsuwaipu" pageCount={60} onClose={vi.fn()} />);
     expect(document.querySelector(".manga-reader.asset-viewer")).not.toBeNull();
-    expect(screen.getByText("tatsuwaipu · 로컬")).toBeVisible();
+    expect(screen.getByText("tatsuwaipu")).toBeVisible();
     for (const name of ["뒤로", "두 쪽 보기", "페이지 목록", "읽기 설정", "망가 뷰어 닫기"]) expect(screen.getByRole("button", { name })).toBeVisible();
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("1");
     expect(screen.queryByRole("button", { name: "북마크" })).not.toBeInTheDocument();

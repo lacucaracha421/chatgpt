@@ -97,7 +97,7 @@ describe("AvLinkInbox on the server inbox", () => {
     expect(within(writing).getByRole("button", { name: "CODE-a 버리기" })).toBeDisabled();
     const stopped = screen.getByText("CODE-b").closest(".av-link-row") as HTMLElement;
     expect(within(stopped).getByText("멈춤")).toBeInTheDocument();
-    expect(within(stopped).getByText(/서버에서 막힌 변경/)).toBeInTheDocument();
+    expect(within(stopped).getByText(/서버가 거절해 멈춘 변경/)).toBeInTheDocument();
     expect(within(stopped).queryByRole("button", { name: "후보 보기" })).not.toBeInTheDocument();
     // A refused earlier attempt can be looked at again.
     const refused = screen.getByText("CODE-c").closest(".av-link-row") as HTMLElement;

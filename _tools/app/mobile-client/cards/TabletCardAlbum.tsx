@@ -144,7 +144,6 @@ function Album({api, backRef, onClose, onOpenAsset, onCharacter}: Required<Pick<
             <AlbumTileCard card={best} api={api}/>
             <b>{best.characterName}</b>
             <small>{best.tier.toUpperCase()} · ×{best.count} · Lv.{best.level}</small>
-            <span className="tablet-card-album__tiers" aria-label="보유 등급">{cardTiers.map(value => <i key={value} data-owned={owned.some(card => card.tier === value)}>{value.toUpperCase()}</i>)}</span>
           </button>;
         })}</div>
       </section>)}

@@ -56,24 +56,35 @@ export function ProfileRows({ profile, today = new Date() }: { profile: Profile;
     {career && <div className="av-profile__career"><dt>활동</dt><dd>{career}</dd></div>}
   </dl>;
 }
+/** A second link of the same platform reads by its account (`X @name`) or, failing that, its host. */
+function distinctLabel(label: string, url: string) {
+  const parsed = new URL(url);
+  const account = parsed.pathname.split("/").filter(Boolean)[0];
+  return ["X", "Instagram"].includes(label) && account ? `${label} @${account.replace(/^@/, "")}` : `${label} ${parsed.hostname.replace(/^www\./, "")}`;
+}
 function profileDisplayLinks(profile: Pick<Profile, "urls">) {
   const seen = new Set<string>();
-  return profile.urls.filter(link => {
+  const links = profile.urls.filter(link => {
     if (!safeProfileUrl(link.url)) return false;
     const normalized = new URL(link.url).href;
     if (seen.has(normalized)) return false;
     seen.add(normalized); return true;
   }).map(link => ({ ...link, ...linkInfo(link) })).sort((a, b) => a.priority - b.priority);
+  const repeated = new Set(links.filter((link, index) => links.findIndex(other => other.label === link.label) !== index).map(link => link.label));
+  return links.map(link => ({ ...link, primary: links.find(other => other.label === link.label) === link, fullLabel: repeated.has(link.label) ? distinctLabel(link.label, link.url) : link.label }));
 }
 export function ProfileLinks({ profile, openLink = openUrl, disabled = false }: { profile: Pick<Profile, "urls">; openLink?: (url: string) => Promise<void>; disabled?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);
   const links = profileDisplayLinks(profile);
   if (!links.length) return null;
+  // Collapsed: one link per platform (up to five); further accounts and sites wait under +N.
+  const collapsed = links.filter(link => link.primary).slice(0, 5);
+  const more = links.length - collapsed.length;
   return <><div className="av-profile__links" aria-label="배우 링크">
-    {(expanded ? links : links.slice(0, 5)).map(link => <Button key={link.url} size="sm" variant="quiet" disabled={disabled} onClick={() => { void openLink(link.url).catch(() => setError(true)); }}>{link.label}</Button>)}
+    {(expanded ? links : collapsed).map(link => <Button key={link.url} size="sm" variant="quiet" disabled={disabled} onClick={() => { void openLink(link.url).catch(() => setError(true)); }}>{expanded ? link.fullLabel : link.label}</Button>)}
     {expanded && <Button size="sm" variant="quiet" disabled={disabled} aria-expanded={true} onClick={() => setExpanded(false)}>접기</Button>}
-    {!expanded && links.length > 5 && <Button size="sm" variant="quiet" disabled={disabled} aria-expanded={false} aria-label={`링크 ${links.length - 5}개 더 보기`} onClick={() => setExpanded(true)}>+{links.length - 5}</Button>}
+    {!expanded && more > 0 && <Button size="sm" variant="quiet" disabled={disabled} aria-expanded={false} aria-label={`링크 ${more}개 더 보기`} onClick={() => setExpanded(true)}>+{more}</Button>}
   </div>{error && <p className="av-profile__quiet" role="status">링크를 열지 못했습니다.</p>}</>;
 }
 

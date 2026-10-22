@@ -29,11 +29,12 @@ async function openNote(title:string){fireEvent.click(await screen.findByText(ti
 const rows=()=>screen.getAllByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement[];
 async function editBody(){return await screen.findByRole('textbox',{name:'메모 본문'});}
 
-it('opens text as a shared plain body with the caret at the end and switches modes beside the title',async()=>{
+it('opens text as a shared plain body without raising the keyboard and switches modes beside the title',async()=>{
  mock.native.mockImplementation(state([{...note,body:'## 장보기\n우유\n빵'}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  expect(rows().map(row=>row.value)).toEqual(['우유\n빵']);
- expect(document.activeElement).toBe(rows()[0]);expect(rows()[0]!.selectionStart).toBe(4);
+ // A note with text waits for the first tap before the soft keyboard opens.
+ expect(document.activeElement).not.toBe(rows()[0]);
  expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();
  expect(document.querySelector('.memo-editor--touch')).toBeTruthy();
  expect(screen.queryByRole('button',{name:'마크다운 도움말'})).toBeNull();
@@ -369,11 +370,10 @@ it('returns a note opened from Home to Home, closing a deeper sheet first',async
 });
 
 
-it('opens a text editor at the end so native Backspace can delete immediately',async()=>{
+it('lets native Backspace delete right after the first tap at the end',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('textbox',{name:'메모 본문'})));
- const area=document.activeElement as HTMLTextAreaElement;
- expect(area.selectionStart).toBe(area.value.length);
+ const area=await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement;
+ act(()=>{area.focus();area.setSelectionRange(area.value.length,area.value.length);});
  // jsdom has no native editing default action: apply the deletion at the actual selection.
  fireEvent.keyDown(area,{key:'Backspace'});
  fireEvent.input(area,{target:{value:area.value.slice(0,area.selectionStart!-1)}});
@@ -507,9 +507,8 @@ it('adds a tablet section under a chip filter and has no bottom quick-add field'
  mock.native.mockImplementation(state([{...note,body:'## 하나\nfirst\n## 둘\nlast'}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();expect(screen.queryByRole('combobox',{name:'넣을 섹션'})).toBeNull();
- // Sections are added from the head's ＋ (no separate button); the character count is the editor's last line.
- const footer=document.querySelector('.notes-editor__inner > .notes-memo-footer')!;
- expect(footer.textContent).toMatch(/자$/);expect(footer.parentElement!.lastElementChild).toBe(footer);
+ // Sections are added from the head's ＋ (no separate button); a text memo shows no character count.
+ expect(document.querySelector('.notes-memo-footer')).toBeNull();
  expect(screen.queryByRole('button',{name:'섹션 추가'})).toBeNull();
  fireEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button',{name:'하나'}));
  fireEvent.click(screen.getByRole('button',{name:'아래에 섹션 추가'}));

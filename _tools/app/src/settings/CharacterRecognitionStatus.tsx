@@ -38,12 +38,20 @@ async function readStatus(listClassifications: () => Promise<ClassificationEntry
   return { data: { targets, readiness, publication, candidates, doubtful, classifications }, problems: [...new Set(problems)] };
 }
 
+/** The ⓘ text of 설정 › 고급 › 캐릭터 인식 상태; the screen itself shows only names and numbers. */
+export const RECOGNITION_HELP = [
+  "캐릭터마다 어떤 인식이 이미지를 넣는지, 확인 판단이 얼마나 쌓였는지 읽기만 합니다. 학습 인식이 쓸 점수를 미리 계산하는 작업도 여기서 다룹니다.",
+  `인식은 기본 인식과 학습 인식 두 가지이며, 캐릭터마다 저절로 바뀌고 고르는 메뉴는 없습니다. 학습 인식으로 넘어가려면 확인 판단 ${READY_REVIEWED}건 · 맞음 예시 ${READY_EXAMPLES}장이 필요하고, 틀림이 허용치(판단의 5%, 최소 1건) 안이어야 합니다. 틀림이 허용치를 넘으면 기본 인식으로 돌아가고, 다시 허용치 안이 되면 학습 인식이 됩니다. 새로 넣는 이미지부터 바뀌며, 이미 들어간 이미지는 그대로입니다.`,
+  "확인 판단에는 사람이 누른 맞음 · 아님에 더해, 자동 태그 두 가지가 둘 다 확실하게(85% 이상) 같은 캐릭터로 읽은 것은 맞음, 같은 시리즈의 다른 캐릭터로만 읽은 것은 아님으로 자동으로 들어갑니다 (자동). 맞음 예시는 직접 누른 것만 셉니다.",
+  "정확도 표는 오늘까지의 판단입니다. 앞으로의 정확도를 보장하지는 않습니다.",
+] as const;
+
 const percent = (value: number | null) => value === null ? "—" : `${value}%`;
 
 /**
  * 설정 › 고급 › 캐릭터 인식 상태: read-only numbers per character (which recognition is in use, 확인 판단,
- * 맞음 예시, 틀림 / 허용) and the overall accuracy, plus the controls of the 학습 인식 준비 work. The original
- * model names appear only here, in parentheses.
+ * 맞음 예시, 틀림 / 허용) and the overall accuracy, plus the controls of the 학습 인식 준비 work. Model code names
+ * (PixAI, canary, B36, S36) stay out of the screen; the explanations live behind the group's ⓘ (RECOGNITION_HELP).
  */
 export function CharacterRecognitionStatus({ disabled = false }: { disabled?: boolean }) {
   const { gateway } = useLibrary();
@@ -113,8 +121,8 @@ export function CharacterRecognitionStatus({ disabled = false }: { disabled?: bo
   const working = Boolean(starting || backfill?.running);
 
   return <div className="recognition-status">
-    <SettingsRow name="자동 태그 (PixAI · canary)" status="새 이미지마다 자동으로 읽습니다" />
-    <SettingsRow name="학습 인식 준비 (S36 채점)"
+    <SettingsRow name="자동 태그" status="새 이미지마다 자동으로 읽습니다" />
+    <SettingsRow name="학습 인식 준비"
       status={scoring === undefined ? undefined : scoring ? "새 이미지마다 자동으로 준비합니다" : "꺼져 있어 학습 인식 후보가 늘지 않습니다"}
       control={<span className="settings-view__control-pair">
         {scoring === false && <Button size="sm" variant="secondary" disabled={disabled} onClick={() => void enableScoring()}>켜기</Button>}
@@ -132,10 +140,6 @@ export function CharacterRecognitionStatus({ disabled = false }: { disabled?: bo
       <thead><tr><th scope="col">종류</th><th scope="col">판단</th><th scope="col">맞음</th><th scope="col">비율</th></tr></thead>
       <tbody>{accuracy.map(row => <tr key={row.label}><th scope="row">{row.label}</th><td className="numeric">{row.judged.toLocaleString()}</td><td className="numeric">{row.accepted.toLocaleString()}</td><td className="numeric">{percent(row.percent)}</td></tr>)}</tbody>
     </table>
-    <p className="recognition-status__note">오늘까지의 판단입니다. 앞으로의 정확도를 보장하지는 않습니다.</p>
-
-    <p className="recognition-status__note">기본 인식 (B36) · 학습 인식 (S36). 인식은 캐릭터마다 저절로 바뀌고 고르는 메뉴는 없습니다. 학습 인식으로 넘어가려면 확인 판단 {READY_REVIEWED}건 · 맞음 예시 {READY_EXAMPLES}장이 필요하고, 틀림이 허용치(판단의 5%, 최소 1건) 안이어야 합니다. 틀림이 허용치를 넘으면 기본 인식으로 돌아가고, 다시 허용치 안이 되면 학습 인식이 됩니다. 새로 넣는 이미지부터 바뀌며, 이미 들어간 이미지는 그대로입니다.</p>
-    <p className="recognition-status__note">확인 판단에는 사람이 누른 맞음 · 아님에 더해, 자동 태그 두 가지가 둘 다 확실하게(85% 이상) 같은 캐릭터로 읽은 것은 맞음, 같은 시리즈의 다른 캐릭터로만 읽은 것은 아님으로 자동으로 들어갑니다 (자동). 맞음 예시는 직접 누른 것만 셉니다.</p>
     {!data ? <p className="recognition-status__note" role="status"><BusyLabel busy>불러오는 중…</BusyLabel></p>
       : series.length === 0 ? <p className="recognition-status__note">등록한 캐릭터가 없습니다.</p>
         : series.map(group => <details key={group.seriesId} className="recognition-status__series" open={group.learning > 0 || group.rows.some(row => row.judged > 0)}>

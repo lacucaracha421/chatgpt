@@ -3,7 +3,7 @@ import {assetMasked} from '../src/shared/privacy/contentMask';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon} from '@heroicons/react/24/outline';
-import {Button, EmptyState, IconButton, Skeleton} from './ui';
+import {Badge, Button, EmptyState, IconButton, Skeleton} from './ui';
 import {TRASH_EMPTY} from '../src/safety/trashSections';
 import {errorText} from './transport';
 import {mediaTicket} from './media';
@@ -159,7 +159,6 @@ export function LibraryTrash({onClose, backRef, known, onRestored, embedded = fa
       </div>
       {tiles.length > 0 && <Button size="sm" variant="ghost" onClick={() => setSelected(allSelected ? new Set() : new Set(selectable.map(tile => tile.id)))}>{allSelected ? '선택 해제' : '전체 선택'}</Button>}
     </header>
-    <p className="hint trash-hint">비우기는 PC에서 할 수 있습니다. 보존 기간이 지나면 PC가 영구 삭제합니다.</p>
     {(notice || deferred) && <p className="error-message trash-notice" role="alert">{notice || deferred}</p>}
     {phase === 'loading' && <div className="trash-grid trash-first-load" aria-label="휴지통을 불러오는 중">{[0,1,2].map(index => <Skeleton key={index} className="trash-tile" label={null}/>)}</div>}
     {error && <p className="trash-notice" role="alert">{error}<Button onClick={() => { void reload(); }}>다시 시도</Button></p>}
@@ -173,7 +172,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored, embedded = fa
             aria-label={`${tile.asset.creator_name || tile.asset.creator_handle || '자산'}${label ? `, ${label}` : ''}${tile.trashedAt ? `, ${trashDate(tile.trashedAt)}` : ''}`}
             onClick={() => toggle(tile)}>
             {assetMasked(privacy,filter,tile.asset) ? <span className="privacy-mask" aria-label="비공개 모드"/> : thumbs[tile.id] ? <img src={thumbs[tile.id]} alt="" draggable={false}/> : <span className="trash-missing"><PhotoIcon aria-hidden="true"/></span>}
-            {label && <span className="trash-badge">{label}</span>}
+            {label && <Badge className="trash-badge" variant={tile.status === 'conflict' || tile.status === 'deleted' ? 'danger' : 'scrim'}>{label}</Badge>}
             {on && <CheckCircleIcon className="trash-check" aria-hidden="true"/>}
             <span className="trash-date numeric">{trashDate(tile.trashedAt)}</span>
           </button>;

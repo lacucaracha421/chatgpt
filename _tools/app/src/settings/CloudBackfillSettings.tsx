@@ -9,6 +9,7 @@ import { cloudProblemCount } from "../app/useCloudProblems";
 import { Toast } from "../shared/ui/Toast";
 import { readCloudProgress } from "../app/cloudProgressRead";
 import { afterLaunchSettled, launchSplashPresent } from "../shared/launch/LaunchSplash";
+import { displayCount } from "../shared/displayDate";
 
 
 function useCloudBackfill() {
@@ -90,11 +91,11 @@ export function CloudBackfillSettings({ connectionReady = null, children, embedd
         <div className="cloud-backfill__status">
           <div className="cloud-backfill__headline">
             <strong><BusyLabel busy={!progress && !error} idle={progress ? stateLabel(progress, settled) : null}>상태 확인 중…</BusyLabel></strong>
-            {progress && <span>{progress.completed.toLocaleString()} / {total.toLocaleString()}개 ({percent}%)</span>}
+            {progress && <span>{progressCount(progress, total, percent)}</span>}
           </div>
           <progress aria-label="모바일 라이브러리 동기화 진행률" aria-valuenow={percent} max={100} value={percent} />
           {progress && <p>대기 {progress.queued} · 전송 중 {active}</p>}
-          {progress && progress.failed > 0 && <p className="cloud-backfill__problem">확인 필요 {progress.failed.toLocaleString()}개</p>}
+          {progress && progress.failed > 0 && <p className="cloud-backfill__problem">실패 항목 {displayCount(progress.failed, "개")}</p>}
           {progress && cloudProblemCount(progress) > 0 && <p className="cloud-backfill__problem">문제 {cloudProblemCount(progress).toLocaleString()}개</p>}
           {progress?.lastError && <p className="cloud-backfill__error">{progress.lastError}</p>}
         </div>
@@ -140,7 +141,7 @@ export function CloudBackfillMaintenance() {
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <dl className="settings-view__property">
         <dt>현재 동기화</dt>
-        <dd>{stateLabel(progress, settled)}{progress && <> · <span>{progress.completed.toLocaleString()} / {total.toLocaleString()}개 ({percent}%)</span></>}</dd>
+        <dd>{stateLabel(progress, settled)}{progress && <> · <span>{progressCount(progress, total, percent)}</span></>}</dd>
       </dl>
       {preflight && <div className="cloud-backfill__summary" aria-label="모바일 동기화 사전 점검 결과">
         <span>전체 {preflight.totalAssets.toLocaleString()}개</span>
@@ -164,26 +165,31 @@ export function CloudBackfillMaintenance() {
 }
 
 function conclusion(progress: CloudBackfillProgress | null, error: string | null, connectionReady: boolean | null): string {
-  if (connectionReady === false) return "서버 연결 정보가 필요합니다 · 아래 서버 연결 설정을 확인하세요";
-  if (error && progress?.syncHeld) return "동기화 상태를 확인하지 못했습니다";
-  if (!progress) return error ? "동기화 상태를 확인하지 못했습니다" : "동기화 상태 확인 중…";
+  if (connectionReady === false) return "서버 주소와 연결 키 필요";
+  if (error && progress?.syncHeld) return "동기화 상태를 확인하지 못함";
+  if (!progress) return error ? "동기화 상태를 확인하지 못함" : "동기화 상태 확인 중…";
   const problems = cloudProblemCount(progress);
-  if (problems > 0) return `동기화 문제 ${problems.toLocaleString()}개 · 아래에서 확인하세요`;
+  if (problems > 0) return `동기화 문제 ${displayCount(problems, "개")}`;
   if (progress?.syncHeld) return "받기만 · 송신 보류";
-  if (progress.replicationEnabled === false) return "PC → 클라우드 자동 복제가 꺼져 있습니다";
-  if (progress.controlState === "paused") return "동기화가 일시정지되어 있습니다";
-  if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "동기화 중 · 문제 없음";
-  return "동기화됨 · 문제 없음";
+  if (progress.replicationEnabled === false) return "클라우드로 복제 꺼짐";
+  if (progress.controlState === "paused") return "동기화 일시 정지됨";
+  if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "동기화 중";
+  return "동기화됨";
+}
+
+/** The count beside the state: `8 / 10개 (80%)` while it moves, just `10개` once everything is copied. */
+function progressCount(progress: CloudBackfillProgress, total: number, percent: number): string {
+  return progress.completed >= total && total > 0 ? `${progress.completed.toLocaleString()}개` : `${progress.completed.toLocaleString()} / ${total.toLocaleString()}개 (${percent}%)`;
 }
 
 function stateLabel(progress: CloudBackfillProgress | null, settled: boolean): string {
   if (!progress) return "상태 확인 중…";
   if (progress.syncHeld) return "송신 보류";
-  if (progress.replicationEnabled === false) return "자동 복제 꺼짐";
-  if (progress.controlState === "paused") return "동기화 일시정지";
-  if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 대기·진행 중";
-  if (progress.controlState === "running") return "업로드 중";
-  if (settled && progress.failed > 0) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료, ${progress.failed.toLocaleString()}개 확인 필요`;
-  if (settled) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료`;
+  if (progress.replicationEnabled === false) return "복제 꺼짐";
+  if (progress.controlState === "paused") return "일시 정지";
+  if (progress.controlState === "running" || progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 중";
+  // The count sits beside this label (progressCount) and failures have their own line, so the label repeats neither.
+  if (settled && progress.failed > 0) return "복제 완료 · 일부 실패";
+  if (settled) return "복제 완료";
   return "최신 상태";
 }

@@ -21,7 +21,6 @@ export function MangaViewer({ seriesId, title, pageCount, galleryId, artist, onC
     title={title}
     pageUrls={pageUrls}
     initialPage={1}
-    sourceLabel="로컬"
     artist={artist}
     onClose={onClose}
     actions={galleryId ? <Button

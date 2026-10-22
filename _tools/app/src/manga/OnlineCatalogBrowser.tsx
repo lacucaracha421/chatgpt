@@ -821,7 +821,6 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       title={viewer.title}
       pageUrls={viewer.pageUrls}
       initialPage={viewer.initialPage}
-      sourceLabel="카탈로그"
       artist={viewer.artist}
       bookmark={viewerBookmark}
       onRetryPage={async () => {

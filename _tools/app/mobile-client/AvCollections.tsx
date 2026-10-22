@@ -1,5 +1,5 @@
 import {PerformerName, usePerformerNames} from "./PerformerName";
-import {performerName} from "../src/collections/av/performerName";
+import {distinctCreditName, performerName, performerWorkCount} from "../src/collections/av/performerName";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useMemo, useRef, useState, type CSSProperties} from 'react';
 import {ChevronDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
@@ -179,7 +179,7 @@ export function AvCast({item,items,complete,revision,onPerson}:{item:CollectionD
   return <section className="work-info" aria-label="출연 · 감독"><SectionLabel title="출연 · 감독"/><div className="tablet-work-people">
     {people.map(person=><Button key={`${person.role}/${person.id}`} variant="ghost" className="tablet-work-person" disabled={person.role!=='performer'} onClick={()=>onPerson(person.id)}>
       <PersonPortrait person={person} current={item} items={items} revision={revision}/>
-      <span><PerformerName person={person}/><small>{person.role==='director'?'감독':[complete?`내 라이브러리 ${count(person).toLocaleString()}편`:null].filter(Boolean).join(' · ')}</small>{person.creditName && person.creditName !== performerName(person).primary && person.creditName !== performerName(person).secondary && <small>{person.creditName}</small>}</span>
+      <span><PerformerName person={person}/><small>{person.role==='director'?'감독':complete?performerWorkCount(count(person)):''}</small>{distinctCreditName(person) && <small>{distinctCreditName(person)}</small>}</span>
     </Button>)}
   </div></section>;
 }

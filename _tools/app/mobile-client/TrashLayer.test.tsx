@@ -66,7 +66,7 @@ it('restores assets through their existing revision-aware path and Back returns 
 });
 it('restores deleted notes with the shared NotesStore and updates the tab count',async()=>{
   localStorage.setItem(TRASH_SECTION_STORAGE_KEY,'notes');mount();
-  fireEvent.click(await screen.findByRole('button',{name:'지운 메모 되살리기'}));
+  fireEvent.click(await screen.findByRole('button',{name:'지운 메모 복원'}));
   await waitFor(()=>expect(mocks.native.mock.calls.some(([op,input])=>op==='notesSave'&&input.id===deleted.id&&input.deleted===false)).toBe(true));
   expect(await screen.findByText(TRASH_EMPTY)).toBeTruthy();
   expect(screen.getByRole('tab',{name:'메모'})).toBeTruthy();

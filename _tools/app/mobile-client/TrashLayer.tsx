@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, DocumentTextIcon} from '@heroicons/react/24/outline';
-import {deletedTrashNotes, rememberedTrashSection, rememberTrashSection, trashTabs, TRASH_EMPTY, type TrashSection} from '../src/safety/trashSections';
+import {deletedTrashNotes, rememberedTrashSection, rememberTrashSection, trashNotesNewestFirst, trashTabs, TRASH_EMPTY, type TrashSection} from '../src/safety/trashSections';
 import {displayDate} from '../src/shared/displayDate';
 import type {NotesStore} from '../src/notes/store';
 import type {Asset} from './types';
@@ -15,7 +15,7 @@ import './libraryTrash.css';
 
 export function NotesTrashContent({store}: {store: NotesStore}) {
   const state = useSyncExternalStore(store.subscribe, store.snapshot);
-  const notes = deletedTrashNotes(state.notes);
+  const notes = trashNotesNewestFirst(state.notes);
   const error = state.error ?? (state.ready && !state.unlocked ? '메모를 먼저 열어 주세요.' : null);
   return <>
     {error && <p role="alert" className="trash-notice">{error}<Button onClick={() => void (state.unlocked ? store.sync() : store.refresh())}>다시 시도</Button></p>}
@@ -24,7 +24,7 @@ export function NotesTrashContent({store}: {store: NotesStore}) {
       : <ul className="collection-trash" aria-label="휴지통 메모">{notes.map(note => <li className="collection-trash-row" key={note.id}>
         <DocumentTextIcon aria-hidden="true"/>
         <span className="collection-trash-text"><strong>{note.title || '제목 없는 메모'}</strong><small>옮긴 날 {displayDate(note.updatedAt)}</small></span>
-        <Button aria-label={`${note.title || '제목 없는 메모'} 되살리기`} disabled={state.saving} onClick={() => {store.edit({...note, deleted:false}); void store.finish();}}>되살리기</Button>
+        <Button aria-label={`${note.title || '제목 없는 메모'} 복원`} disabled={state.saving} onClick={() => {store.edit({...note, deleted:false}); void store.finish();}}>복원</Button>
       </li>)}</ul>}
   </>;
 }

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_UI_PREFERENCES, saveUiPreferences, UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
@@ -34,7 +34,6 @@ function viewerProps(overrides: object = {}) {
     title: "Remote",
     pageUrls: ["page-1", "page-2", "page-3", "page-4", "page-5", "page-6"],
     initialPage: 1,
-    sourceLabel: "K-Hentai",
     onPageChange: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
@@ -49,7 +48,7 @@ function shownImages(): string[] {
 }
 
 function position(): string {
-  return document.querySelector(".asset-viewer__position")?.textContent ?? "";
+  return document.querySelector(".reader-control-bar__jump .numeric")?.textContent ?? "";
 }
 
 describe("PageViewer", () => {
@@ -213,7 +212,6 @@ describe("PageViewer", () => {
       fireEvent.change(slider, { target: { value: "5" } });
       expect(bottom).toHaveTextContent("5 / 6");
       expect(slider).toHaveAttribute("aria-valuetext", "5 / 6페이지");
-      expect(position()).toBe("1 / 6");
       expect(props.onPageChange).not.toHaveBeenCalled();
       fireEvent.pointerLeave(bottom);
       act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2); });
@@ -261,17 +259,15 @@ describe("PageViewer", () => {
       .toHaveAttribute("src", "page-2");
   });
 
-  it("starts at the restored page and identifies the source", () => {
+  it("starts at the restored page", () => {
     render(<PageViewer
       title="Remote"
       pageUrls={["page-1", "page-2", "page-3"]}
       initialPage={2}
-      sourceLabel="K-Hentai"
       onPageChange={vi.fn()}
       onClose={vi.fn()}
     />);
     expect(position()).toBe("2 / 3");
-    expect(screen.getByText("K-Hentai")).toBeVisible();
     expect(screen.getByRole("img", { name: "Remote 2페이지" })).toHaveAttribute("src", "page-2");
   });
 
@@ -281,7 +277,6 @@ describe("PageViewer", () => {
       title="Remote"
       pageUrls={["page-1", "page-2"]}
       initialPage={1}
-      sourceLabel="K-Hentai"
       onPageChange={onPageChange}
       onClose={vi.fn()}
     />);
@@ -310,7 +305,6 @@ describe("PageViewer", () => {
       title="Remote"
       pageUrls={Array.from({ length: 10 }, (_, index) => `page-${index + 1}`)}
       initialPage={3}
-      sourceLabel="K-Hentai"
       onPageChange={vi.fn()}
       onClose={vi.fn()}
     />);
@@ -325,7 +319,6 @@ describe("PageViewer", () => {
       title="Remote"
       pageUrls={["page-1", "page-2"]}
       initialPage={1}
-      sourceLabel="K-Hentai"
       onPageChange={vi.fn()}
       onClose={vi.fn()}
     />);
@@ -343,7 +336,6 @@ describe("PageViewer", () => {
         title="Remote"
         pageUrls={Array.from({ length: 10 }, (_, index) => `page-${index + 1}`)}
         initialPage={3}
-        sourceLabel="K-Hentai"
         onPageChange={vi.fn()}
         onClose={vi.fn()}
       />
@@ -543,9 +535,9 @@ describe("PageViewer", () => {
     render(<PageViewer {...viewerProps()} />);
 
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "여백: 넓게" }));
+    await user.click(within(screen.getByRole("group", { name: "여백" })).getByRole("menuitemradio", { name: "넓게" }));
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "페이지 간격: 넓게" }));
+    await user.click(within(screen.getByRole("group", { name: "페이지 간격" })).getByRole("menuitemradio", { name: "넓게" }));
 
     const spread = document.querySelector('[data-reader-buffer="active"] .manga-reader__spread') as HTMLElement;
     expect(spread.style.padding).toBe("48px");
@@ -585,7 +577,7 @@ describe("PageViewer", () => {
     await user.click(screen.getByRole("menuitemcheckbox", { name: "오른쪽에서 왼쪽으로 읽기" }));
     expect(onPageChange).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "여백: 넓게" }));
+    await user.click(within(screen.getByRole("group", { name: "여백" })).getByRole("menuitemradio", { name: "넓게" }));
     expect(onPageChange).not.toHaveBeenCalled();
 
     await user.keyboard("{ArrowRight}");
@@ -616,14 +608,15 @@ describe("PageViewer", () => {
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
   });
 
-  it("shows the immersive chrome: position, title, artist · source, and the bookmark only when given", async () => {
+  it("shows the immersive chrome: one position, title, artist without a source caption, and the bookmark only when given", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
     const { unmount } = render(<PageViewer {...viewerProps({ initialPage: 4, artist: "tatsuwaipu", bookmark: { bookmarked: false, onToggle } })} />);
 
     expect(position()).toBe("4 / 6");
     expect(document.querySelector(".asset-viewer__title strong")).toHaveTextContent("Remote");
-    expect(screen.getByText("tatsuwaipu · K-Hentai")).toBeVisible();
+    expect(document.querySelector(".asset-viewer__title small")).toHaveTextContent(/^tatsuwaipu$/);
+    expect(screen.getAllByText("4 / 6")).toHaveLength(1);
     for (const name of ["뒤로", "두 쪽 보기", "페이지 목록", "읽기 설정", "망가 뷰어 닫기"]) expect(screen.getByRole("button", { name })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "북마크" }));
     expect(onToggle).toHaveBeenCalledOnce();
@@ -631,7 +624,7 @@ describe("PageViewer", () => {
 
     render(<PageViewer {...viewerProps()} />);
     expect(screen.queryByRole("button", { name: "북마크" })).not.toBeInTheDocument();
-    expect(screen.getByText("K-Hentai")).toBeVisible();
+    expect(document.querySelector(".asset-viewer__title small")).toBeNull();
   });
 
   it("keeps page progress and navigation without a bottom thumbnail strip", async () => {

@@ -336,7 +336,7 @@ it("shows Collection authority conflicts as a non-blocking server-state note", (
     collections: { ...domain, droppedCount: 1, lastDropReason: "revisionConflict", lastDroppedAt: "2026-10-06T00:00:00Z" },
   });
   expect(summary.problemCount).toBe(0);
-  expect(summary.notes).toContain("서버가 받지 않은 변경 1개 · 최근: 서버 상태가 우선함");
+  expect(summary.notes).toContain("취소된 변경 1개 · 다른 기기에서 먼저 바뀜");
 });
 const healthy: AuthoritySyncHealth = {
   albums: domain, classifications: domain,
@@ -362,8 +362,8 @@ it("identifies rejected lifecycle assets and pending download failures in the ex
   }} />);
   await user.click(screen.getByRole("button", { name: "상태 · 문제 2개" }));
   const block = screen.getByRole("region", { name: "서버 동기화" });
-  expect(block).toHaveTextContent("휴지통·복원 미적용 · photo.jpg · 서버가 상태 변경을 거절함");
-  expect(block).toHaveTextContent("파일 다운로드 미적용 2개");
+  expect(block).toHaveTextContent("휴지통·복원 취소됨 · photo.jpg · 서버에서 허용하지 않는 변경");
+  expect(block).toHaveTextContent("서버에서 받지 못한 파일 2개");
 });
 
 it("shows waiting and dropped changes as information without a problem count", async () => {
@@ -378,9 +378,9 @@ it("shows waiting and dropped changes as information without a problem count", a
   expect(trigger).toHaveAttribute("data-state-tone", "idle");
   await user.click(trigger);
   const block = screen.getByRole("region", { name: "서버 동기화" });
-  expect(block).toHaveTextContent("업로드를 기다리는 변경 3개");
-  expect(block).toHaveTextContent("서버가 받지 않은 변경 4개 · 최근: 삭제된 앨범");
-  expect(within(block).queryByText(/막힌|실패|멈춤/)).not.toBeInTheDocument();
+  expect(block).toHaveTextContent("업로드가 끝나면 보낼 변경 3개");
+  expect(block).toHaveTextContent("취소된 변경 4개 · 앨범이 삭제됨");
+  expect(within(block).queryByText(/멈춘|못함/)).not.toBeInTheDocument();
 });
 
 it("counts blocked changes, a stopped Asset queue and a failing lane as problems", async () => {
@@ -397,9 +397,9 @@ it("counts blocked changes, a stopped Asset queue and a failing lane as problems
   expect(trigger).toHaveAttribute("data-state-tone", "attention");
   await user.click(trigger);
   const block = screen.getByRole("region", { name: "서버 동기화" });
-  expect(block).toHaveTextContent("서버에서 막힌 변경 3개");
-  expect(block).toHaveTextContent("휴지통·복원 변경 전송이 멈춤");
-  expect(within(block).getAllByText("서버 동기화 실패 · 비밀번호 보관함이 잠겨 있음")).toHaveLength(1);
+  expect(block).toHaveTextContent("서버가 거절해 멈춘 변경 3개");
+  expect(block).toHaveTextContent("휴지통·복원 변경을 보내지 못함 · 자동 재시도");
+  expect(within(block).getAllByText("비밀번호 보관함이 잠겨 동기화하지 못함")).toHaveLength(1);
 });
 
 it("names a network failure and an unknown drop reason plainly", () => {
@@ -409,8 +409,8 @@ it("names a network failure and an unknown drop reason plainly", () => {
     assetLaneFailure: { code: "network", at: "2026-09-25T00:00:00Z" },
   });
   expect(summary.problemCount).toBe(1);
-  expect(summary.problems).toEqual(["서버 동기화 실패 · 연결 실패"]);
-  expect(summary.notes).toEqual(["서버가 받지 않은 변경 1개 · 최근: 서버 상태가 우선함"]);
+  expect(summary.problems).toEqual(["서버에 연결할 수 없음 · 자동 재시도"]);
+  expect(summary.notes).toEqual(["취소된 변경 1개 · 서버 내용을 따름"]);
 });
 
 it("reports skipped mobile character exclusions as information", () => {
@@ -419,7 +419,7 @@ it("reports skipped mobile character exclusions as information", () => {
     characterExclusions: { skippedCount: 2, lastSkipReason: "targetMissing", lastSkippedAt: "2026-09-26T00:00:00Z" },
   });
   expect(summary.problemCount).toBe(0);
-  expect(summary.notes).toEqual(["적용하지 못한 모바일 캐릭터 제외 2개 · 최근: 삭제된 캐릭터"]);
+  expect(summary.notes).toEqual(["태블릿의 캐릭터 제외 2개 적용 안 됨 · 캐릭터가 삭제됨"]);
 });
 
 it("reports held lanes and missing tablet targets as waiting, retaining receive failures", () => {
@@ -429,6 +429,6 @@ it("reports held lanes and missing tablet targets as waiting, retaining receive 
     assetLaneFailure: { code: "unauthorized", at: "2026-10-04" },
   });
   expect(summary.problemCount).toBe(1);
-  expect(summary.problems).toEqual(["서버 동기화 실패 · 서버가 인증을 거부함"]);
-  expect(summary.notes).toEqual(["휴지통·복원 변경 · 송신 보류", "앨범·분류 변경 · 송신 보류로 대기", "태블릿 변경 2개가 누락된 항목을 기다립니다 · asset-a, collection-b"]);
+  expect(summary.problems).toEqual(["서버가 연결 키를 거부함 · 설정에서 키 확인"]);
+  expect(summary.notes).toEqual(["송신 보류 중 · 이 PC의 변경은 보류를 풀면 보냄", "태블릿 변경 2개 · 이 PC에 아직 없는 항목을 기다림"]);
 });

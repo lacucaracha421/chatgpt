@@ -54,7 +54,7 @@ export function useConnectionRows({ gateway, cloud, authorityHealth, active = tr
   const needsToken = transfer.availability.needsToken;
   if (transfer.availability.state !== "unavailable" || needsToken) {
     const tone: Tone = needsToken ? "idle" : transfer.availability.state === "ready" ? "ok" : transfer.availability.state === "starting" ? "busy" : outage ? "idle" : "off";
-    rows.push({ key: "tablet", label: "태블릿 전송", value: needsToken ? "토큰 미발급" : transfer.devices[0]?.name ?? "등록된 기기 없음", time: transfer.availability.state === "offline" ? "연결 안 됨" : undefined, tone, view: { kind: "exchange" } });
+    rows.push({ key: "tablet", label: "태블릿 전송", value: needsToken ? "토큰 입력 필요" : transfer.devices[0]?.name ?? "등록된 기기 없음", time: transfer.availability.state === "offline" ? "연결 안 됨" : undefined, tone, view: { kind: "exchange" } });
   }
   const cloudState = cloudLine(cloud?.progress ?? null, cloud?.problemCount ?? 0);
   if (cloudState) rows.push({ key: "cloud", label: "클라우드", value: cloudState.text, tone: outage && cloudState.tone !== "ok" ? "idle" : cloudState.tone, view: { kind: "settings", section: "connection" } });

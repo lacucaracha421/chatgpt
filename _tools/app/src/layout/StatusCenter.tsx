@@ -4,7 +4,8 @@ import * as RadixDialog from "@radix-ui/react-dialog";
 import { ChartBarIcon, ChevronRightIcon, InboxIcon, Square2StackIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState, type ReactNode } from "react";
 import type { AssetBrowserStatus } from "../assets/AssetBrowser";
-import type { CloudSyncStatus } from "../app/useCloudProblems";
+import { tabletWaitText, type CloudSyncStatus } from "../app/useCloudProblems";
+import { displayCount } from "../shared/displayDate";
 import { LightweightModeToggle } from "../app/WorkloadControls";
 import { nativeWorkload } from "../app/workloadProfile";
 import type { QuietCharacterAutomationState } from "../characters/useCharacterAutomation";
@@ -198,37 +199,46 @@ function SyncBlock({ cloud, onOpenSettings }: { cloud: CloudSyncStatus; onOpenSe
   </StatusBlock>;
 }
 
+// Each line says what happened from the user's side and, when there is something to do, what to do.
 const LANE_FAILURE_TEXT: Record<string, string> = {
-  credential_store_locked: "비밀번호 보관함이 잠겨 있음",
-  credential_store_unavailable: "비밀번호 보관함을 쓸 수 없음",
-  credential_store_failed: "비밀번호 보관함 오류",
-  credential_not_configured: "연결 정보가 설정되지 않음",
-  unauthorized: "서버가 인증을 거부함",
-  network: "연결 실패",
-  timeout: "응답 시간 초과",
-  server: "서버 오류",
+  credential_store_locked: "비밀번호 보관함이 잠겨 동기화하지 못함",
+  credential_store_unavailable: "비밀번호 보관함을 쓸 수 없어 동기화하지 못함",
+  credential_store_failed: "비밀번호 보관함 오류로 동기화하지 못함",
+  credential_not_configured: "서버 연결 키 없음 · 설정에서 입력",
+  unauthorized: "서버가 연결 키를 거부함 · 설정에서 키 확인",
+  network: "서버에 연결할 수 없음 · 자동 재시도",
+  timeout: "서버 응답 없음 · 자동 재시도",
+  server: "서버 오류로 동기화하지 못함 · 자동 재시도",
+  identity_or_integrity_conflict: "서버 파일이 이 PC 파일과 맞지 않아 받지 못함",
 };
 
+/** Why a change from this PC was cancelled; the server's state stays. */
 const DROP_REASON_TEXT: Record<string, string> = {
-  assetTrashedBeforeUpload: "업로드 전에 휴지통으로 옮긴 파일",
-  assetDeleted: "이 PC에서 삭제된 파일",
-  assetPurged: "영구 삭제된 파일",
-  assetTombstoned: "서버에서 삭제된 파일",
-  assetNotFound: "서버에 없는 파일",
-  albumDeleted: "삭제된 앨범",
-  invalidAlbumMembership: "서버에 없는 파일의 앨범 변경",
-  invalidClassificationAssignment: "서버에 없는 파일의 분류 변경",
-  lifecycleTransitionRefused: "서버가 상태 변경을 거절함",
-  operationConflict: "다른 기기의 변경과 충돌",
-  similarityKeptByTabletDecision: "태블릿에서 유지하기로 한 파일",
-  epochChanged: "서버 라이브러리가 다시 설정됨",
+  assetTrashedBeforeUpload: "업로드 전에 휴지통으로 옮김",
+  assetDeleted: "이 PC에서 파일이 삭제됨",
+  assetPurged: "파일을 영구 삭제함",
+  assetTombstoned: "서버에서 영구 삭제됨",
+  assetNotFound: "파일이 서버에 없음",
+  albumDeleted: "앨범이 삭제됨",
+  albumNotFound: "앨범이 삭제됨",
+  classificationNotFound: "분류가 삭제됨",
+  invalidAlbumMembership: "앨범에 넣을 파일이 서버에 없음",
+  invalidClassificationAssignment: "분류할 파일이 서버에 없음",
+  lifecycleTransitionRefused: "서버에서 허용하지 않는 변경",
+  operationConflict: "서버에서 처리하지 못함",
+  revisionConflict: "다른 기기에서 먼저 바뀜",
+  dependencyDropped: "앞선 변경이 취소됨",
+  workTrashed: "작품이 휴지통에 있음",
+  similarityKeptByTabletDecision: "태블릿 유사 이미지 검토에서 남기기로 함",
+  epochChanged: "서버 라이브러리가 새로 설정됨",
 };
+const DROP_REASON_FALLBACK = "서버 내용을 따름";
 
 const EXCLUSION_SKIP_TEXT: Record<string, string> = {
-  targetMissing: "삭제된 캐릭터",
-  assetMissing: "휴지통에 있거나 삭제된 이미지",
-  assetChanged: "내용이 바뀐 이미지",
-  protectedReference: "캐릭터의 레퍼런스",
+  targetMissing: "캐릭터가 삭제됨",
+  assetMissing: "이미지가 휴지통에 있거나 삭제됨",
+  assetChanged: "이미지 내용이 바뀜",
+  protectedReference: "캐릭터의 레퍼런스 이미지",
 };
 
 export type AuthoritySyncSummary = {
@@ -248,46 +258,45 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   const blocked = health.albums.blockedCount + health.classifications.blockedCount + (health.collections?.blockedCount ?? 0);
   if (blocked > 0) {
     problemCount += blocked;
-    problems.push(`서버에서 막힌 변경 ${blocked.toLocaleString()}개`);
+    problems.push(`서버가 거절해 멈춘 변경 ${displayCount(blocked, "개")}`);
   }
   if (health.assets.stopped) {
     problemCount += 1;
-    problems.push("휴지통·복원 변경 전송이 멈춤");
+    problems.push("휴지통·복원 변경을 보내지 못함 · 자동 재시도");
   }
   const materializationFailures = health.assets.materializationFailures ?? 0;
   if (materializationFailures > 0) {
     problemCount += materializationFailures;
-    problems.push(`파일 다운로드 미적용 ${materializationFailures.toLocaleString()}개`);
+    problems.push(`서버에서 받지 못한 파일 ${displayCount(materializationFailures, "개")}`);
   }
   // Both lanes share one credential and connection, so one cause is reported once.
   const failures = new Set([health.authorityPassFailure?.code, health.assetLaneFailure?.code].filter((code): code is string => Boolean(code)));
-  failures.forEach((code) => problems.push(`서버 동기화 실패 · ${LANE_FAILURE_TEXT[code] ?? "알 수 없는 오류"}`));
+  failures.forEach((code) => problems.push(LANE_FAILURE_TEXT[code] ?? "서버와 동기화하지 못함"));
   problemCount += failures.size;
 
   const notes: string[] = [];
-  if (health.assets.held) notes.push("휴지통·복원 변경 · 송신 보류");
-  if (health.authorityHeld) notes.push("앨범·분류 변경 · 송신 보류로 대기");
+  if (health.assets.held || health.authorityHeld) notes.push("송신 보류 중 · 이 PC의 변경은 보류를 풀면 보냄");
   const tabletWait = health.syncHold?.held ? health.syncHold.tabletWait : null;
-  if (tabletWait && tabletWait.count > 0) notes.push(`태블릿 변경 ${tabletWait.count.toLocaleString()}개가 누락된 항목을 기다립니다 · ${tabletWait.targetIds.join(", ")}`);
+  if (tabletWait && tabletWait.count > 0) notes.push(tabletWaitText(tabletWait.count));
   const waiting = health.albums.waitingCount + health.classifications.waitingCount;
-  if (waiting > 0) notes.push(`업로드를 기다리는 변경 ${waiting.toLocaleString()}개`);
+  if (waiting > 0) notes.push(`업로드가 끝나면 보낼 변경 ${displayCount(waiting, "개")}`);
   const dropped = health.albums.droppedCount + health.classifications.droppedCount + health.assets.rejectedCount + (health.collections?.droppedCount ?? 0);
   if (dropped > 0) {
     const latest = [health.albums, health.classifications, ...(health.collections ? [health.collections] : [])]
       .filter((domain) => domain.droppedCount > 0 && domain.lastDropReason)
       .sort((a, b) => (b.lastDroppedAt ?? "").localeCompare(a.lastDroppedAt ?? ""))[0]?.lastDropReason
       ?? health.assets.rejectedReason;
-    const reason = latest ? DROP_REASON_TEXT[latest] ?? "서버 상태가 우선함" : null;
-    notes.push(`서버가 받지 않은 변경 ${dropped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
+    const reason = latest ? DROP_REASON_TEXT[latest] ?? DROP_REASON_FALLBACK : null;
+    notes.push(`취소된 변경 ${displayCount(dropped, "개")}${reason ? ` · ${reason}` : ""}`);
   }
   for (const asset of health.assets.rejectedAssets ?? []) {
-    notes.push(`휴지통·복원 미적용 · ${asset.name} · ${DROP_REASON_TEXT[asset.reason] ?? "서버 상태가 우선함"}`);
+    notes.push(`휴지통·복원 취소됨 · ${asset.name} · ${DROP_REASON_TEXT[asset.reason] ?? DROP_REASON_FALLBACK}`);
   }
   const skipped = health.characterExclusions?.skippedCount ?? 0;
   if (skipped > 0) {
     const code = health.characterExclusions.lastSkipReason;
-    const reason = code ? EXCLUSION_SKIP_TEXT[code] ?? "적용할 수 없는 상태" : null;
-    notes.push(`적용하지 못한 모바일 캐릭터 제외 ${skipped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
+    const reason = code ? EXCLUSION_SKIP_TEXT[code] : undefined;
+    notes.push(`태블릿의 캐릭터 제외 ${displayCount(skipped, "개")} 적용 안 됨${reason ? ` · ${reason}` : ""}`);
   }
   return { problemCount, problems, notes };
 }

@@ -1,5 +1,5 @@
 import type { CasePlatform } from "./case/CollectionCase";
-import { casePixels } from "./case/caseDimensions";
+import { CASE_MM, casePixels } from "./case/caseDimensions";
 
 /** What the packing needs from a work; the shelf component adds the rest. */
 export type PackedWork = { id: string; platform: CasePlatform };
@@ -59,6 +59,20 @@ export function packSpineShelf<W extends PackedWork>(groups: ShelfGroup<W>[], av
     }
   }
   return { entries, rows, order, cells, height: top + SPINE_SHELF.bottom };
+}
+
+const TALLEST_CASE_MM = Math.max(...Object.values(CASE_MM).map(size => size.height));
+
+/**
+ * The 책장 scale actually drawn: the chosen size, made smaller only when the tallest case, pulled out of its row
+ * (`grow` times its spine height, `lift` px off the plank), would not fit the visible list height. A large size on a
+ * short window (AV 아주 크게 at 960×640) would otherwise cut the picked case off.
+ */
+export function spineScaleForView(scale: number, viewHeight: number, pull: { grow: number; lift: number }): number {
+  if (!(viewHeight > 0)) return scale;
+  const room = viewHeight - SPINE_SHELF.plank - SPINE_SHELF.rowGap - pull.lift;
+  const fit = Math.floor(room / (TALLEST_CASE_MM * pull.grow) * 100) / 100;
+  return Math.min(scale, Math.max(.8, fit));
 }
 
 /** Hit slop between two neighbouring spines, in px; there is none past the first and last spine. */

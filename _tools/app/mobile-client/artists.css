@@ -55,8 +55,8 @@
 .artist-grid-search svg { width:20px; flex:none; }
 .artist-grid-search input { min-width:0; flex:1; min-height:44px; border:0; outline:0; background:transparent; color:inherit; font:var(--type-body)/1.2 var(--font-ui); }
 .artist-grid-search input::placeholder { color:var(--color-muted); }
-.artist-grid-sort { display:inline-flex; align-items:center; gap:var(--space-2); min-height:36px; flex:none; padding:0 var(--space-2); border:1px solid var(--color-border); border-radius:var(--radius-control); background:transparent; color:var(--color-muted); font-size:var(--type-meta); white-space:nowrap; }
-.artist-grid-sort svg { width:16px; }
+/* One sort control on the artist list and the artist page: the shared compact button with ↑↓ and a chevron. */
+.artist-sort-button { flex:none; white-space:nowrap; }
 .artist-grid-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr)); gap:var(--space-6) var(--space-4); }
 .artist-grid-card { display:flex; flex-direction:column; min-width:0; padding:0; border:0; background:transparent; color:inherit; text-align:left; }
 .artist-grid-card:active .artist-grid-mosaic { opacity:.8; }
@@ -68,7 +68,7 @@
 .artist-grid-caption { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-2); min-width:0; padding-top:var(--space-2); }
 .artist-grid-name { min-width:0; overflow:hidden; font-size:17px; font-weight:700; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .artist-grid-count { flex:none; font-size:13px; }
-.artist-grid-search input:focus-visible,.artist-grid-sort:focus-visible,.artist-grid-card:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
+.artist-grid-search input:focus-visible,.artist-grid-card:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
 .artist-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:260px; padding:32px; text-align:center; }
 .artist-empty > .artist-empty__skeleton { align-self:stretch; flex:1; }
 .artist-detail-scroll { flex:1; min-height:0; display:flex; flex-direction:column; }
@@ -87,8 +87,8 @@
 .artist-detail-identity-text h2 { overflow:hidden; font-size:24px; font-weight:600; line-height:1.2; white-space:nowrap; text-overflow:ellipsis; }
 .artist-detail-identity-text .artist-handle { font-size:12px; }
 .artist-detail-stats { display:flex; flex-wrap:wrap; gap:16px 22px; padding-bottom:2px; }
-.artist-pc-note { display:flex; align-items:center; gap:7px; min-height:44px; padding:0 12px; border:1px dashed var(--color-border-strong); color:var(--color-muted); font-size:12px; }
-.artist-pc-note svg { width:18px; height:18px; flex:none; }
+.artist-pc-note { display:flex; align-items:center; gap:var(--space-1); color:var(--color-faint); font-size:var(--type-meta); }
+.artist-pc-note svg { width:16px; height:16px; flex:none; }
 .artist-filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
 .artist-detail-empty { padding:20px 0 8px; color:var(--color-muted); font-size:13px; }
 .artist-detail-scroll > .gallery-scroll { flex:1; min-height:0; }

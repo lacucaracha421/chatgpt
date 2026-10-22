@@ -34,7 +34,8 @@ export function HiddenArtists({endpoint, artists, onOpen, pending = 0, syncError
   const [error, setError] = useState('');
   const hidden = artists.filter(artist => artist.hidden);
   return <>
-    <div className="artist-hidden-entry"><Button variant="quiet" onClick={() => { setError(''); setOpen(true); }}>숨긴 작가 · {hidden.length}명</Button></div>
+    {/* Nothing hidden, nothing to open: the entry appears only when it leads somewhere (or a sync error waits there). */}
+    {(hidden.length > 0 || !!syncError) && <div className="artist-hidden-entry"><Button variant="quiet" onClick={() => { setError(''); setOpen(true); }}>숨긴 작가 · {hidden.length}명</Button></div>}
     {open && <BottomSheet title="숨긴 작가" onClose={() => setOpen(false)}>
       {pending > 0 && <p className="hint" role="status">작가 변경 전송 대기 중 · {pending}건</p>}
       {!hidden.length && <p className="hint">숨긴 작가가 없습니다.</p>}
@@ -171,7 +172,7 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
     <div className="artist-detail-identity"><span className="artist-avatar"><ArtistImage asset={avatar} privateMode={privateMode} /></span><span className="artist-detail-identity-text"><h2>{artistName(artist)}</h2><Handles artist={artist} /></span></div>
     <ArtistStats artist={artist} detail />
     <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />합치기는 PC 앱에서</div>
-    <div className="artist-filter-row"><Button size="sm" variant="quiet" aria-pressed={sort === 'newest'} onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></Button><FilterChip aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</FilterChip><FilterChip aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</FilterChip></div>
+    <div className="artist-filter-row"><Button size="sm" variant="quiet" className="artist-sort-button" onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></Button><FilterChip aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</FilterChip><FilterChip aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</FilterChip></div>
   </div>;
 }
 

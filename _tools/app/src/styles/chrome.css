@@ -149,7 +149,6 @@
 .chrome-search-trigger__active { position: absolute; right: 3px; top: 3px; width: 4px; height: 4px; background: var(--color-accent); }
 body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-radius); }
 .ui-menu .ui-menu__item { border-radius: var(--radius-selection); }
-.ui-menu .ui-menu__item[data-state=checked] { background: var(--color-filter-selected); color: var(--color-filter-text); }
 .ui-dialog:not(.ui-dialog--fullscreen) { border-color: var(--chrome-border); border-radius: var(--chrome-radius); }
 .ui-anchored-panel :focus-visible { outline-offset: 2px; }
 /* Panels move focus by script on open and close; after a pointer open that must not paint a keyboard ring (inputs keep theirs). */

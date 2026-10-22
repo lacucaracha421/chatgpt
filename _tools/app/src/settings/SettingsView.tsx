@@ -6,7 +6,7 @@ import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
@@ -35,7 +35,7 @@ import { useAutoTagInbox } from "../autotags/AutoTagInboxSettings";
 import { TaggerReviewSettings } from "../autotags/TaggerReviewSettings";
 import { autoTagInboxResult } from "../autotags/autoTagInbox";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
-import { CharacterRecognitionStatus } from "./CharacterRecognitionStatus";
+import { CharacterRecognitionStatus, RECOGNITION_HELP } from "./CharacterRecognitionStatus";
 import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
 import { ExtensionPairingQr } from "./ExtensionPairingQr";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
@@ -80,10 +80,12 @@ const SECTIONS: { id: SettingsSection; label: string; Icon: ComponentType<{ clas
   { id: "advanced", label: "고급", Icon: WrenchIcon },
 ];
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
+/** A backup list that has not answered by then shows its error and 다시 시도 instead of a skeleton that never ends. */
+const BACKUP_LIST_TIMEOUT_MS = 15_000;
 const SOURCE_LABEL = { igdb: "게임 IGDB", tmdb: "영화 TMDB", tmdb_tv: "애니 TMDB" } as const;
 
 const SHORTCUTS = [
-  ["Ctrl/Cmd + K", "찾기"], ["Ctrl/Cmd + F", "화면 안에서 찾기"], ["Esc", "메뉴·창 닫기"],
+  ["Ctrl + Q", "찾기"], ["Esc", "메뉴·창 닫기"],
   ["Enter", "선택·적용"], ["Shift + 클릭", "반대 선택"], ["← / →", "이전·다음"],
 ] as const;
 
@@ -101,6 +103,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingBackup, setConfirmingBackup] = useState<string | null>(null);
   const [backupRetry, setBackupRetry] = useState(0);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const backupsRef = useRef(backups); backupsRef.current = backups;
   const [submitting, setSubmitting] = useState(false);
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [otherMachineMangaRoot, setOtherMachineMangaRoot] = useState<string | null>(null);
@@ -246,8 +250,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   useEffect(() => {
     if (section !== "advanced") return;
     let active = true;
-    const timer = window.setTimeout(() => void gateway.listMetadataBackups().then(next => { if (active) { setBackups(next); setError(null); } }).catch(cause => { if (active) setError(commandErrorMessage(cause, "백업 목록을 불러오지 못했습니다.")); }), 0);
-    return () => { active = false; window.clearTimeout(timer); };
+    // A late answer still replaces the error with the list.
+    const slow = window.setTimeout(() => { if (active && !backupsRef.current) setBackupError("백업 목록을 불러오지 못했습니다."); }, BACKUP_LIST_TIMEOUT_MS);
+    const timer = window.setTimeout(() => void gateway.listMetadataBackups().then(next => { if (active) { window.clearTimeout(slow); setBackups(next); setBackupError(null); } }).catch(cause => { if (active) { window.clearTimeout(slow); setBackupError(commandErrorMessage(cause, "백업 목록을 불러오지 못했습니다.")); } }), 0);
+    return () => { active = false; window.clearTimeout(timer); window.clearTimeout(slow); };
   }, [backupRetry, gateway, section]);
 
   useEffect(() => {
@@ -500,7 +506,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <LightweightModeRow />
           </SettingsGroup>
           <SettingsGroup title="동기화">
-            <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && <ServerStatus row={serverRow} />}>확인 중…</BusyLabel>} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
+            <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && <ServerStatus row={serverRow} />}>확인 중…</BusyLabel>} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 동기화</Button>} />
             <SimpleRow name="태블릿" status={tabletRow ? `전송 · ${tabletRow.value}` : "전송 사용 불가"} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("qr")}>QR 연결</Button>} />
             <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection && (extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가")}>확인 중…</BusyLabel>} tone={extensionConnection?.status === "ready" ? "ok" : extensionConnection ? "off" : undefined} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("pc")}>PC 연결</Button>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
@@ -610,7 +616,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         </div>}
         {section === "advanced" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>고급</h2></header>
-          <SettingsGroup title="캐릭터 인식 상태" help="캐릭터마다 어떤 인식이 이미지를 넣는지, 확인 판단이 얼마나 쌓였는지 읽기만 합니다. 학습 인식이 쓸 점수를 미리 계산하는 작업도 여기서 다룹니다.">
+          <SettingsGroup title="캐릭터 인식 상태" help={RECOGNITION_HELP}>
             <SimpleRow name="캐릭터별 상태" status="인식 · 확인 판단 · 맞음 예시 · 틀림 / 허용" control={<Button size="sm" variant="secondary" aria-expanded={recognitionStatusOpen} onClick={() => setRecognitionStatusOpen(open => !open)}>{recognitionStatusOpen ? "닫기" : "보기"}</Button>} />
             {recognitionStatusOpen && <CharacterRecognitionStatus disabled={pending} />}
           </SettingsGroup>
@@ -622,7 +628,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {cloudError && <p className="settings-view__row-message" role="alert">{cloudError}</p>}
           </SettingsGroup>
           <SettingsGroup title="로컬 백업 복구">
-            {confirmingBackup ? <ConfirmLine text="현재 상태를 보존한 뒤 선택한 시점으로 복구합니다." onCancel={() => setConfirmingBackup(null)} onConfirm={() => void restoreBackup()} busy={pending} confirmLabel="복구 시작" /> : error ? <div className="settings-view__control-pair"><Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast><Button size="sm" onClick={() => { setBackups(null); setBackupRetry(value => value + 1); }}>다시 시도</Button></div> : !backups ? <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" /> : backups.length === 0 ? <p className="settings-view__status">사용할 수 있는 백업이 없습니다.</p> : <ul className="settings-view__safety-list">{backups.map(backup => <li key={backup.id} className="settings-view__safety-item"><span><strong>{localDate(backup.createdAt)}</strong><small>{kindLabel(backup.kind)} · {backup.byteSize.toLocaleString("ko-KR")} B</small></span><Button size="sm" variant="secondary" disabled={pending} onClick={() => setConfirmingBackup(backup.id)}>이 시점으로 복구</Button></li>)}</ul>}
+            {confirmingBackup ? <ConfirmLine text="현재 상태를 보존한 뒤 선택한 시점으로 복구합니다." onCancel={() => setConfirmingBackup(null)} onConfirm={() => void restoreBackup()} busy={pending} confirmLabel="복구 시작" /> : backupError ? <div className="settings-view__control-pair"><span className="settings-view__state" data-tone="danger" role="alert">{backupError}</span><Button size="sm" onClick={() => { setBackups(null); setBackupError(null); setBackupRetry(value => value + 1); }}>다시 시도</Button></div> : error ? <div className="settings-view__control-pair"><Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast><Button size="sm" onClick={() => { setBackups(null); setBackupRetry(value => value + 1); }}>다시 시도</Button></div> : !backups ? <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" /> : backups.length === 0 ? <p className="settings-view__status">사용할 수 있는 백업이 없습니다.</p> : <ul className="settings-view__safety-list">{backups.map(backup => <li key={backup.id} className="settings-view__safety-item"><span><strong>{localDate(backup.createdAt)}</strong><small>{kindLabel(backup.kind)} · {backup.byteSize.toLocaleString("ko-KR")} B</small></span><Button size="sm" variant="secondary" disabled={pending} onClick={() => setConfirmingBackup(backup.id)}>이 시점으로 복구</Button></li>)}</ul>}
           </SettingsGroup>
           <SettingsGroup title="모바일 게시">
             <MobilePublishRow name="모바일 캐릭터" job={characterPublication} action="모바일 캐릭터 업데이트" disabled={cloudBusy || characterPublication?.running || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)} />

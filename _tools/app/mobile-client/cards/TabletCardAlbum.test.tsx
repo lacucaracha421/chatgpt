@@ -41,13 +41,12 @@ it('groups the album by series, then character, best tier first, and filters by 
   expect(groupAlbum([...cards, other], 'lr')).toEqual([]);
 });
 
-it('shows one tile per character with the best tier and the owned tiers, and keeps touch targets in the chip rows', async () => {
+it('shows one tile per character with its best tier, and keeps touch targets in the chip rows', async () => {
   const api = apiFixture([page([luna('n'), luna('ssr', 3), mika])]);
   render(<TabletCardAlbum api={api} onClose={vi.fn()}/>); await settle(500);
   expect(api.album).toHaveBeenCalledWith(null, expect.anything(), false);
   const tile = screen.getByRole('button', {name: '루나 · SSR'});
   expect(tile.textContent).toContain('×3');
-  expect(within(tile).getByLabelText('보유 등급').querySelectorAll('[data-owned="true"]')).toHaveLength(2);
   expect(screen.getByRole('button', {name: '미카 · N'})).toBeTruthy();
   expect(screen.getByRole('heading', {name: /별자리/})).toBeTruthy();
   expect(screen.getByRole('group', {name: '시리즈'})).toBeTruthy();

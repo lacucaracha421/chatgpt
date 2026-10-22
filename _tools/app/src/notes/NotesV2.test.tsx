@@ -299,7 +299,7 @@ it("hides a note's content on the board from the 더보기 menu and shows it aga
   expect(last(fake.saves())).toMatchObject({ id: "API", concealed: false });
 });
 
-it("switches memo modes with body undo and keeps colour and sync controls", async () => {
+it("switches memo modes with body undo and keeps the colour control", async () => {
   const fake=backend([base("할 일",{body:"- [ ] 우유\n- [x] 빵\n달걀",color:"blue"})]);
   const store=new NotesStore(fake.request);surface(store);
   await userEvent.click(await screen.findByRole("button",{name:/할 일/}));
@@ -313,7 +313,6 @@ it("switches memo modes with body undo and keeps colour and sync controls", asyn
   expect(store.snapshot().notes[0]!.body).toBe("- [ ] 우유\n- [x] 빵\n- [ ] 달걀");
   fireEvent.keyDown(screen.getAllByRole("textbox",{name:"메모 본문"})[0]!,{key:"y",ctrlKey:true});
   expect(store.snapshot().notes[0]!.body).toBe("우유\n빵\n달걀");
-  expect(screen.getByRole("button",{name:"동기화"})).toBeInTheDocument();
 });
 
 it("opens a legacy checklist without writing and converts on its first edit",async()=>{
@@ -328,15 +327,13 @@ it("opens a legacy checklist without writing and converts on its first edit",asy
   expect(store.snapshot().notes[0]!.body).toBe("- [ ] open\n- [x] done");
 });
 
-it('has no separate 섹션 추가 button once a section exists and keeps the character count as the editor\'s last line', async () => {
+it('has no separate 섹션 추가 button once a section exists and shows no character count', async () => {
   const fake = backend([base('note', { title: 'Sections', body: 'top\n## A\na' })]);
   surface(new NotesStore(fake.request));
   await userEvent.click(await screen.findByRole('button', { name: /Sections/ }));
   expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
   const add = screen.getByRole('button', { name: '아래에 섹션 추가' });
-  const footer = document.querySelector('.notes-editor > .notes-editor-footer')!;
-  expect(footer.textContent).toContain('10자');
-  expect(footer.parentElement!.lastElementChild).toBe(footer);
+  expect(document.querySelector('.notes-editor-footer')).toBeNull();
   expect(add.closest('.memo-section-head')).not.toBeNull();
 });
 

@@ -50,7 +50,7 @@ it("labels the tablet row as 파일 전송 and says when the transfer token is m
   const gateway = { getOnlineCatalogStatus: vi.fn().mockResolvedValue(null) } as unknown as LibraryGateway;
   transfer.snapshot = { ...EMPTY_EXCHANGE, availability: { state: "unavailable", message: "토큰", needsToken: true } };
   const view = render(<ConnectionStatusBlock gateway={gateway} authorityHealth={null} onNavigate={vi.fn()} />);
-  expect(screen.getByRole("button", { name: "태블릿 전송 토큰 미발급" })).toHaveAttribute("data-tone", "idle");
+  expect(screen.getByRole("button", { name: "태블릿 전송 토큰 입력 필요" })).toHaveAttribute("data-tone", "idle");
   transfer.snapshot = { ...EMPTY_EXCHANGE, availability: { state: "ready", message: null, needsToken: false }, tokenConfigured: true };
   view.rerender(<ConnectionStatusBlock gateway={gateway} authorityHealth={null} onNavigate={vi.fn()} />);
   expect(screen.getByRole("button", { name: "태블릿 전송 등록된 기기 없음" })).toBeInTheDocument();

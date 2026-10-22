@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>영화 책장 시안</title>
+<!-- 앱의 실제 폰트·토큰·공용 컨트롤과 책장(SpineShelf.css), 케이스 책등 인쇄(CollectionCase.css)를 읽는다.
+     movie-spines.css = 새로 제안하는 영화 책등 인쇄, page.css = 시안 틀·임시 포스터·꺼내기 시늉, shelf.js = 시안 동작과 예시 데이터. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CaseMaterials.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/case/CollectionCase.css">
+<link rel="stylesheet" href="../../../_tools/app/src/collections/SpineShelf.css">
+<link rel="stylesheet" href="movie-spines.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>영화 책장 · 책등 시안 세 가지</h1>
+  <p class="lead">컬렉션 › 영화에 게임·만화·AV와 같은 <b>책장</b> 보기를 더한다. 영화는 TMDB가 책등 그림을 주지 않으므로, 책등은 <b>작품에 이미 있는 정보(포스터, 제목, 연도, 감독, 제작사)로 만들어</b> 그린다. 꽂기·꺼내기·크기·묶기는 게임/AV 책장과 같은 부품(SpineShelf)을 그대로 쓰고, 세 시안은 <b>무엇이 꽂혀 있는가</b>만 다르다.</p>
+  <p class="lead">A <b>킵 케이스</b>(블루레이 케이스에 만든 인쇄) · B <b>포스터 책등</b>(포스터 조각 + 제목, 두꺼운 포스터 판) · C <b>번호 전집</b>(한 가지 모양에 번호와 대표색). 책등을 클릭하면 꺼내 앞면(포스터)이 보이게 돌리고, 한 번 더 클릭하면 작품 화면이 열린다(여기서는 아래 줄에 적기만 한다). 빈 곳을 클릭하면 제자리에 꽂는다. 포스터는 모두 <b>임시 그림</b>이고, 작품 목록은 지금 라이브러리의 14편에 예시 작품을 더한 41편이다.</p>
+</header>
+
+<section class="variant" id="opt-A">
+  <h2>A. 킵 케이스 <small>블루레이 크기 케이스 · 연도 · 제목 · 제작사를 인쇄</small></h2>
+  <p class="note">지금 영화 선반과 작품 화면에 있는 영화 케이스(<code>film</code>)를 그대로 책장에 세운다. 책등은 흰 머리에 <b>개봉 연도</b>, 검정 띠에 <b>제목</b>, 아래에 <b>제작사</b>를 찍은 인쇄로 만든다. 플라스틱은 블루레이처럼 파랗게 하되 로고는 넣지 않는다. 모든 작품이 같은 모양이라 차분하지만, 포스터 그림은 꺼내야만 보인다.</p>
+  <div class="demo-keys" data-opt="A"></div>
+  <div class="pair"><figure><div class="js-pc"></div><figcaption class="cap js-pc-cap"></figcaption></figure><figure><div class="js-tab"></div><figcaption class="cap js-tab-cap"></figcaption></figure></div>
+  <figure style="margin:0;display:grid;gap:8px"><div class="js-wide"></div><figcaption class="cap js-wide-cap"></figcaption></figure>
+  <div class="anat spine-shelf js-anat" style="--spine-scale:1.3"></div>
+</section>
+
+<section class="variant is-pick" id="opt-B">
+  <h2>B. 포스터 책등 <small>포스터를 세로로 자른 그림 창 + 제목 띠 · 두꺼운 포스터 판</small></h2>
+  <p class="note">책등 위쪽 41%에 그 작품의 <b>포스터 자체</b>를 판 크기로 깔고 초점 위치에서 책등 폭만큼 잘라 보인다(만화 책장의 표지 조각과 같은 방식). 아래는 검정 띠에 <b>제목</b>과 <b>연도</b>. 플라스틱 케이스가 아니라 <b>두께 있는 포스터 판</b>이라 판 높이가 포스터 비율을 따른다: 2:3 포스터가 가장 크고 일본 B2 포스터는 조금 낮아 줄에 자연스러운 높낮이가 생긴다. 꺼내면 같은 판이 돌아 포스터가 보인다.</p>
+  <div class="demo-keys" data-opt="B"></div>
+  <div class="pair"><figure><div class="js-pc"></div><figcaption class="cap js-pc-cap"></figcaption></figure><figure><div class="js-tab"></div><figcaption class="cap js-tab-cap"></figcaption></figure></div>
+  <figure style="margin:0;display:grid;gap:8px"><div class="js-wide"></div><figcaption class="cap js-wide-cap"></figcaption></figure>
+  <div class="anat spine-shelf js-anat" style="--spine-scale:1.3"></div>
+</section>
+
+<section class="variant" id="opt-C">
+  <h2>C. 번호 전집 <small>한 가지 크기 · 포스터 대표색 · 수집 번호 · 감독</small></h2>
+  <p class="note">모든 영화를 <b>같은 크기의 한 질</b>로 꽂는다. 책등 색은 포스터의 대표색을 어둡고 차분한 범위로 맞춘 한 가지 색, 머리에는 컬렉션에 넣은 순서대로 매긴 <b>번호</b>, 띠에 제목, 아래에 <b>감독</b>. 줄 전체가 색의 띠처럼 보이는 수집가 서가다. 번호가 생긴다는 새 의미가 붙고, 대표색을 한 번 계산해 저장해야 한다.</p>
+  <div class="demo-keys" data-opt="C"></div>
+  <div class="pair"><figure><div class="js-pc"></div><figcaption class="cap js-pc-cap"></figcaption></figure><figure><div class="js-tab"></div><figcaption class="cap js-tab-cap"></figcaption></figure></div>
+  <figure style="margin:0;display:grid;gap:8px"><div class="js-wide"></div><figcaption class="cap js-wide-cap"></figcaption></figure>
+  <div class="anat spine-shelf js-anat" style="--spine-scale:1.3"></div>
+</section>
+
+<section class="variant" id="view">
+  <h2>D. 보기 메뉴 · 크기 · 묶기 <small>세 시안 공통</small></h2>
+  <div class="menu-demo">
+    <div class="ui-menu ui-view-options" role="dialog" aria-label="보기" id="menu"></div>
+    <ul class="plain" style="flex:1 1 420px">
+      <li><b>배치</b>: 영화에 <b>책장</b>이 셋째 선택지로 붙는다(격자 · 선반 · 책장). 기본값은 지금처럼 선반이고, 고른 값은 영화 탭에 따로 저장된다.</li>
+      <li><b>책등 크기</b>: AV와 같은 네 단계(작게 · 보통 · 크게 · 아주 크게)와 AV 배율표를 쓴다(PC 1 / 1.3 / 1.8 / 3.15 px/mm, 태블릿 1.15 / 1.5 / 2.05 / 2.8). 영화는 14편 남짓이라 책장이 한두 줄이므로 게임보다 크게 세워 제목과 그림을 읽히게 한다. 창이 작으면 지금처럼 꺼낸 케이스가 잘리지 않을 만큼만 자동으로 줄인다(960×640에서 아주 크게는 약 2배).</li>
+      <li><b>묶기</b>: 안 묶음(기본) · <b>연대</b>(2020년대, 2010년대…) · <b>감독</b>(두 편 이상인 감독마다 한 묶음, 나머지는 "그 밖의 감독"). 게임의 "발매 연도"처럼 해마다 나누면 영화는 한두 편짜리 묶음이 줄줄이 생겨 연대로 묶는다. 묶음 이름은 지금 책장의 구역 이름(■ 이름 · 개수 · 가는 선)이다.</li>
+      <li><b>시리즈 묶기</b>(에반게리온 · 마크로스 · 체인소 맨처럼)는 TMDB가 주는 "컬렉션" 정보를 작품에 저장해야 가능해 이번 범위에서 뺐다. 원하면 다음 단계로 붙일 수 있다.</li>
+      <li><b>정렬</b>: 지금 영화 정렬(개봉일 · 추가일 · 제목, 최신순/오래된순)을 그대로 쓴다. 묶기는 정렬 안에서 나눈다.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="variant" id="motion">
+  <h2>E. 꺼내기와 상태 <small>게임 · AV 책장과 같은 동작</small></h2>
+  <ul class="plain">
+    <li><b>꺼내기</b>: 첫 클릭(태블릿은 줄 안 아무 곳 탭 → 가장 가까운 책등)에 케이스나 판이 제자리에서 앞으로 나오며 1.28배 크기로 12px 떠오르고, 옆에서 앞면으로 돈다(520ms, 회전은 60ms 늦게). 빈 자리는 그대로 남아 옆 책등이 움직이지 않는다. 꺼낸 것은 작품 화면의 3D 모델이라 끌어서 돌릴 수 있고, 클릭하면 작품 화면이 지금의 영웅 이동으로 열린다. 돌아오면 같은 작품이 꺼내진 채로 초점을 받는다.</li>
+    <li><b>꽂기</b>: 빈 곳 클릭 · Esc · 다른 책등 고르기. 옆면으로 돌며 제자리로 들어가고(440ms), 책등이 그려진 다음에 꺼낸 모델이 사라져 빈 칸이 번쩍이지 않는다.</li>
+    <li><b>읽는 중</b>: A·C는 플라스틱만, B는 그림 창만 무채색으로 최종 크기에 먼저 선다. 인쇄는 한 번에, 포스터 조각은 140ms 페이드로 들어온다. 처음 열 때만 줄이 8px 떠오르며 나타나고(줄마다 24ms 차이), 정렬·묶기·크기 바꾸기는 새 첫 화면이 준비될 때까지 지금 책장을 둔 채 한 번에 바꾼다.</li>
+    <li><b>이름표·말풍선 없음</b>: 다른 책장처럼 책등 아래 이름이나 마우스 말풍선은 없다. 화면 읽기 이름은 "제목 · 연도".</li>
+    <li><b>키보드</b>: ←/→ 한 편씩, ↑/↓ 위아래 줄의 가장 가까운 책등, Home/End, Enter 꺼내기/열기, Space 꺼내기/꽂기, Esc 꽂기. 초점은 책등 전체를 두르는 파란 테두리(가장자리 띠가 아니다).</li>
+    <li><b>비공개 모드</b>: 책등과 앞면이 회색 면으로 가려지고 크기는 그대로다.</li>
+  </ul>
+</section>
+
+<section class="variant" id="compare">
+  <h2>F. 비교와 추천</h2>
+  <table class="cmp">
+    <thead><tr><th></th><th>무엇이 보이나</th><th>장점</th><th>약점</th><th>새로 필요한 것</th></tr></thead>
+    <tbody>
+      <tr><td>A 킵 케이스</td><td>연도 · 제목 · 제작사 인쇄, 파란 립</td><td>지금 영화 케이스를 그대로 쓴다. 가장 작은 변경. 정돈되어 보인다.</td><td>41편이 모두 같은 검정 띠라 줄이 단조롭다. 포스터는 꺼내야 보인다. 영화를 실제 디스크로 갖고 있다는 뜻으로 읽힐 수 있다.</td><td>책등 템플릿 <code>film</code> 하나, 케이스 크기 한 줄</td></tr>
+      <tr><td>B 포스터 책등</td><td>포스터 조각 + 제목 + 연도</td><td>책장만 봐도 어떤 작품인지 그림으로 알아본다. 이미 고른 포스터만 쓰므로 새 자료가 필요 없다. 만화 책장의 표지 조각과 같은 문법이고, "영화는 포스터 보관함"이라는 원칙(DESIGN §8)과 맞는다.</td><td>포스터 구도에 따라 조각이 배경만 잡힐 수 있다(초점 조절로 해결). 높이가 조금씩 달라 A·C보다 덜 정돈되어 보인다.</td><td>포스터 판 모델(얇은 상자 하나), 판 높이를 포스터 비율에서 계산, 책등 초점(기본 가운데)</td></tr>
+      <tr><td>C 번호 전집</td><td>번호 · 대표색 · 제목 · 감독</td><td>색의 띠가 가장 보기 좋은 서가가 된다. 번호가 모으는 재미를 준다.</td><td>번호라는 새 의미를 만들어야 한다(지운 번호, 순서 바꾸기). 대표색 계산과 저장이 필요하다. 그림은 꺼내야 보인다.</td><td>대표색 추출·저장, 번호 저장, 책등 템플릿 하나</td></tr>
+    </tbody>
+  </table>
+  <ul class="plain">
+    <li><b>추천: B 포스터 책등.</b> 영화에는 책등 그림이 없지만 <b>포스터는 늘 있다</b>. B는 그 포스터로 책등을 만들어 게임(LaunchBox 책등)·AV(재킷 책등)·만화(표지 조각)처럼 책장 자체가 그림으로 읽히게 한다. A·C는 깔끔하지만 41편이 글자 띠로만 보여 "어떤 영화였지"를 꺼내 봐야 안다.</li>
+    <li>B를 고르면 포스터가 아직 없거나 읽지 못한 작품은 <b>그림 창 자리가 무채색 면</b>으로 남고 제목 띠와 연도는 그대로 찍힌다. 판 높이는 2:3으로 둔다. 나중에 포스터가 생기면 그림만 140ms에 들어오고 제목은 움직이지 않는다.</li>
+    <li>조각이 배경만 잡힌 작품을 위해 작품 메뉴에 <b>책등 위치</b>(포스터 위에서 좌우로 끌어 고르기)를 다음 단계로 두기를 권한다. 처음에는 가운데로 시작하며 대부분의 포스터는 인물이 가운데 있다.</li>
+  </ul>
+</section>
+</div>
+
+<script src="shelf.js"></script>
+<script>
+const M = window.MovieSpines;
+const SIZES = ["small", "normal", "large", "huge"];
+const GROUPS = [["none", "안 묶음"], ["decade", "연대"], ["director", "감독"]];
+const PICKS = { A: ["조커", "센과 치히로의 행방불명", "라라랜드"], B: ["너의 이름은.", "날씨의 아이", "라라랜드"], C: ["기생충", "아키라", "라라랜드"] };
+const state = { A: { size: "normal", grouping: "none", tabGrouping: "decade" }, B: { size: "normal", grouping: "none", tabGrouping: "decade" }, C: { size: "normal", grouping: "none", tabGrouping: "decade" } };
+
+function render(opt, first) {
+  const sec = document.getElementById(`opt-${opt}`), s = state[opt];
+  const keys = sec.querySelector(".demo-keys");
+  keys.innerHTML = `<div>시안 조작 · 책등 크기 ${SIZES.map(k => `<button type="button" data-size="${k}" aria-pressed="${s.size === k}">${M.SIZE_LABEL[k]}</button>`).join("")}</div>
+    <div>묶기 ${GROUPS.map(([k, t]) => `<button type="button" data-group="${k}" aria-pressed="${s.grouping === k}">${t}</button>`).join("")}</div><div>(위 두 화면에 적용 · 처음에는 태블릿만 연대로 묶음 · 아래 넓은 화면은 크게)</div>`;
+  const pcHost = sec.querySelector(".js-pc"), tabHost = sec.querySelector(".js-tab"), wideHost = sec.querySelector(".js-wide");
+  const cap = (el, text) => { el.textContent = text; el.dataset.base = text; };
+  const reader = el => msg => { el.textContent = el.dataset.base + (msg ? `  ·  ${msg}` : ""); };
+  pcHost._onRead = reader(sec.querySelector(".js-pc-cap"));
+  tabHost._onRead = reader(sec.querySelector(".js-tab-cap"));
+  wideHost._onRead = reader(sec.querySelector(".js-wide-cap"));
+  const pc = M.pcFrame(pcHost, { opt, w: 960, h: 640, size: s.size, grouping: s.grouping, picked: PICKS[opt][0] });
+  cap(sec.querySelector(".js-pc-cap"), `PC 960 × 640 (1:1) · ${M.SIZE_LABEL[s.size]} ${pc.scale} px/mm${pc.scale < M.SCALE.pc[s.size] ? " (창에 맞춰 줄임)" : ""} · 묶기 ${GROUPS.find(g => g[0] === s.grouping)[1]} · 첫 줄 ${pc.info.perRow}편`);
+  const tab = M.tabletFrame(tabHost, { opt, size: s.size, grouping: s.tabGrouping, picked: PICKS[opt][1], fitTo: 384 });
+  cap(sec.querySelector(".js-tab-cap"), `태블릿 세로 800 × 1280 CSS px (48%로 축소) · ${M.SIZE_LABEL[s.size]} ${tab.scale} px/mm · 묶기 ${GROUPS.find(g => g[0] === s.tabGrouping)[1]} · 첫 줄 ${tab.info.perRow}편`);
+  if (first) {
+    const wide = M.pcFrame(wideHost, { opt, w: 1700, h: 920, size: "large", grouping: "none", picked: PICKS[opt][2], fitTo: 1376 });
+    cap(sec.querySelector(".js-wide-cap"), `PC 1700 × 920 (81%로 축소) · 크게 ${wide.scale} px/mm · 안 묶음 · 첫 줄 ${wide.info.perRow}편`);
+    M.anatomy(sec.querySelector(".js-anat"), opt);
+    keys.addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.size) s.size = b.dataset.size; if (b.dataset.group) s.grouping = s.tabGrouping = b.dataset.group;
+      render(opt, false);
+    });
+  }
+}
+["A", "B", "C"].forEach(o => render(o, true));
+
+// Static 보기 menu (책장 chosen).
+const label = t => `<div class="ui-section-label"><span class="ui-section-label__title">${t}</span><span class="ui-section-label__rule" aria-hidden="true"></span></div>`;
+document.getElementById("menu").innerHTML = `<div class="ui-view-options__content">
+  <section class="ui-view-options__section">${label("배치")}${M.segmented([["grid", "격자"], ["shelf", "선반"], ["bookcase", "책장"]], "bookcase", "ui-segmented--full-width")}
+    <div class="sub"><span>책등 크기</span>${M.segmented([["small", "작게"], ["normal", "보통"], ["large", "크게"], ["huge", "아주 크게"]], "normal", "ui-segmented--full-width")}</div></section>
+  <section class="ui-view-options__section">${label("정렬")}
+    <div class="sub"><span>묶기</span>${M.segmented(GROUPS, "none", "ui-segmented--full-width")}</div>
+    <div class="sub"><span>기준</span>${M.segmented([["date", "개봉일"], ["added", "추가일"], ["name", "제목"]], "date", "ui-segmented--full-width")}</div>
+    <div class="sub"><span>순서</span>${M.segmented([["desc", "최신순"], ["asc", "오래된순"]], "desc", "ui-segmented--full-width")}</div></section>
+</div>`;
+M.placeThumbs(document.getElementById("menu"));
+// index.html#only=opt-B shows one section (for screenshots of a single option).
+const only = /only=([\w-]+)/.exec(location.hash)?.[1];
+if (only) document.querySelectorAll(".doc > header, .doc > section").forEach(el => { if (el.id !== only) el.style.display = "none"; });
+</script>
+</body>
+</html>

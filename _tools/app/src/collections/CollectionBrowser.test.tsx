@@ -1164,7 +1164,7 @@ describe("CollectionBrowser manga shelf", () => {
     expect(spines.map(spine => spine.getAttribute("aria-label"))).toEqual(["1권 보기", "2권 보기"]);
     expect(spines[1]).toHaveClass("manga-spine--missing");
     expect(spines[0].querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-v1");
-    expect(within(list).getByLabelText("보유 1권")).toHaveTextContent("1권");
+    expect(within(list).getByLabelText("보유 1권 / 전체 2권")).toHaveTextContent("1 / 2권");
     // The detector runs only on the work screen; the list reads the stored focus.
     expect(gateway.startCollectionCoverFocus).not.toHaveBeenCalled();
     fireEvent.click(spines[1]);

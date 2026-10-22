@@ -3,7 +3,7 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { displayDateTime, displayTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { ArrowLeftIcon, ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, EllipsisHorizontalIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, EllipsisHorizontalIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
@@ -110,12 +110,6 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const editTimer=useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(()=>()=>clearTimeout(editTimer.current),[]);
   const [backupBusy,setBackupBusy]=useState(false);
-  const [syncDelayed,setSyncDelayed]=useState(false);
-  useEffect(()=>{
-    if(!state.syncing){setSyncDelayed(false);return;}
-    const timer=setTimeout(()=>setSyncDelayed(true),300);
-    return()=>clearTimeout(timer);
-  },[state.syncing]);
   useEffect(()=>{void store.load();},[store]);
   useEffect(()=>{if(!state.unlocked)return;const refresh=()=>{if(!document.hidden)void store.sync(false);};refresh();window.addEventListener("focus",refresh);const timer=setInterval(refresh,NOTES_REFRESH_INTERVAL);return()=>{window.removeEventListener("focus",refresh);clearInterval(timer);};},[store,state.unlocked]);
   // Leaving the window or the Notes screen finishes the work: one sync of what was edited.
@@ -210,6 +204,8 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
     ...((kind==="text"||kind==="checklist")&&!note.readOnly?[{id:"conceal",label:note.concealed?"목록에서 내용 보이기":"목록에서 내용 숨기기",onSelect:()=>edit({concealed:!note.concealed})}]:[]),
     {id:"archive",label:note.archived?"보관 해제":"보관함으로 보내기",onSelect:()=>edit({archived:!note.archived})},syncItem]:note?[syncItem]:[];
   const colorValue=note?noteColorValue(note.color):null;
+  // While a note is open the top bar names it rather than the list it came from.
+  const editorTitle=creatingSecret?"암호 메모":selected&&note?(note.title.trim()||(isSecret(note)?"암호 메모":"메모")):undefined;
   const notesSectionTitle=query.trim()?"검색 결과":label??({all:"모든 메모",pinned:"고정",archive:"보관함",trash:"휴지통"} as const)[scope];
   const kindOptions:SegmentedOption<NoteKindFilter>[]=[{value:"all",label:"전체"},...NOTE_KIND_DEFINITIONS.filter(([value])=>value!=="checklist").map(([value,label])=>({value,label}))];
   const scopeCounts={
@@ -243,7 +239,8 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       return saved;
     }}/>;
   const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
-  const footer=!note?null:isSecret(note)?"암호 메모 · 이 PC의 PIN으로 잠김":memoEditingMode==="todo"?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${note.body.length.toLocaleString()}자`;
+  // A text memo has no length limit worth counting, so only to-do progress and the secret lock earn a footer.
+  const footer=!note?null:isSecret(note)?"암호 메모 · 이 PC의 PIN으로 잠김":memoEditingMode==="todo"?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:null;
   const pinnedNotes=scope==="all"?notes.filter(n=>n.pinned):[];
   const otherNotes=pinnedNotes.length?notes.filter(n=>!n.pinned):notes;
   const sectionDrop=useSectionDrop({label:"메모 종류", options:kindOptions, value:kindFilter, onChange:setKindFilter, trailing:<>
@@ -285,8 +282,8 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       </div>
       {!note.redacted&&(editable||(note.labels??[]).length>0)&&<LabelEditor key={note.id} labels={note.labels??[]} suggestions={allLabels.map(l=>l.label)} onChange={labels=>editable&&edit({labels})}/>}
       {body}
-      <footer className="notes-editor-footer"><span>{footer}</span>
-        <Button size="icon" variant="ghost" className={`notes-sync${syncDelayed?" is-syncing":""}${state.error?" is-error":""}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing||state.saving} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button></footer>
+      {/* Sync stays quiet: the top-bar progress line, 지금 동기화 in ⋯, and the error line with 다시 시도. */}
+      {footer&&<footer className="notes-editor-footer"><span>{footer}</span></footer>}
     </article>;
   const secretCreation=creatingSecret?<article className="notes-editor notes-editor--gate"><div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button></div></div><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={close}/></article>:null;
   const main=!state.ready?<div className="notes-empty notes-loading" aria-busy="true"><DocumentTextIcon className="notes-empty__icon" aria-hidden="true"/></div>
@@ -312,7 +309,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       if(mod&&!e.shiftKey&&key==="n"&&state.unlocked){e.preventDefault();newNote();}
       if(mod&&key==="s"){e.preventDefault();void store.sync();}
 }}>
-    <ViewToolbar sectionDrop={sectionDrop} title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:showProgress?<span className="notes-sync-progress" role="status" aria-label={state.saving?"PC에 저장 중…":"동기화 중…"}/>:undefined}}/>
+    <ViewToolbar sectionDrop={sectionDrop} title="메모" titleContent={editorTitle??notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:showProgress?<span className="notes-sync-progress" role="status" aria-label={state.saving?"PC에 저장 중…":"동기화 중…"}/>:undefined}}/>
     {state.error&&<div className="notes-error" role="alert"><span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.syncing} onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
     {main}
     {recoverySurface}

@@ -16,6 +16,11 @@ export function deletedTrashNotes<T extends { id: string; deleted: boolean; type
   return notes.filter(note => note.deleted && !hidden.has(note.id));
 }
 
+/** Trashed notes as both clients list them: the most recently changed first. */
+export function trashNotesNewestFirst<T extends { id: string; deleted: boolean; type?: string; ledger?: string; updatedAt: string }>(notes: readonly T[]): T[] {
+  return deletedTrashNotes(notes).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.updatedAt.localeCompare(a.updatedAt));
+}
+
 export function trashTabs(counts: Partial<Record<TrashSection, number>>, hasMore: Partial<Record<TrashSection, boolean>> = {}) {
   return TRASH_SECTIONS.map(tab => ({ ...tab, count: (counts[tab.value] ?? 0) > 0 ? `${displayCount(counts[tab.value]!)}${hasMore[tab.value] ? "+" : ""}` : undefined }));
 }
