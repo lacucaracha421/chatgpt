@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { spineScale } from "./case/caseDimensions";
 import { useMemo } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -22,6 +22,24 @@ function AvShelf({ items, picked = null, scale = 1.1 }: { items: CollectionSumma
 }
 const titles = () => screen.queryAllByRole("button").map(button => button.getAttribute("aria-label")!.split(" ·")[0]);
 const inserts = () => document.querySelectorAll(".spine .ins").length;
+
+it("makes movie boards from existing posters and their decoded dimensions without reading game or AV data", async () => {
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(707);
+  vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(1000);
+  const movie = { ...item("movie"), type: "movie" as const, year: 2024, selectedWorkArtworkId: "poster" };
+  const gameRead = vi.fn().mockResolvedValue([]);
+  const gateway = { listCollectionShelfCases: gameRead } as unknown as LibraryGateway;
+  const avRead = vi.spyOn(avGateway, "listCoverSets");
+  const { result } = renderHook(() => useSpineShelfWorks([movie], "movie", {
+    enabled: true, gateway, root: "lib", privacy: false, coverUrl: () => "/poster",
+  }));
+  const work = result.current.toWork(movie);
+  expect(work).toMatchObject({ platform: "film", year: 2024, spine: "/poster", pending: false });
+  const sizes = await result.current.prepare?.([movie.id], [movie.id], new AbortController().signal);
+  expect(sizes?.get(movie.id)?.height).toBeCloseTo(125 / .707);
+  expect(avRead).not.toHaveBeenCalled();
+  expect(gameRead).not.toHaveBeenCalled();
+});
 
 let decodes: string[];
 beforeEach(() => {

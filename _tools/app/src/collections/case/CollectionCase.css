@@ -153,3 +153,26 @@
 .case-spine-art > img { width: 100%; height: 100%; object-fit: fill; }
 
 .case-spine-art .spine-title[data-title]::before { content: attr(data-title); }
+
+/* Movie bookcase: printed poster board, without plastic lips or a disc tray. */
+.spine--board { --spine-rim: 0px; }
+.case-spine-art .pspine { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: #0b0c0e; }
+.case-spine-art .ps-art { position: relative; flex: none; height: 41%; overflow: hidden; background: #1c1d20; }
+.case-spine-art .ps-art > img { position: absolute; top: 0; left: 50%; width: calc(var(--poster-height, var(--ch)) * var(--poster-ratio)); height: var(--poster-height, var(--ch)); max-width: none; object-fit: fill; transform: translateX(calc(var(--poster-focus) * -100%)); opacity: 0; }
+.case-spine-art .ps-art[data-settled="true"] > img { opacity: 1; transition: opacity 140ms var(--ease-standard); }
+.case-spine-art .ps-art::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: linear-gradient(transparent, rgba(11,12,14,.85)); }
+.case-spine-art .ps-band { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; padding: 34% 0 10%; }
+.case-spine-art .ps-band .spine-title { max-height: 100%; }
+.case-spine-art .ps-foot { flex: none; display: flex; justify-content: center; padding: 30% 0 46%; }
+.case-spine-art .ps-foot > span { writing-mode: vertical-rl; text-orientation: sideways; white-space: nowrap; font: 700 calc(var(--cd) * .3) / 1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: .04em; color: rgba(255,255,255,.62); }
+.collection-case--board .kase > span { background: #1c1d20; }
+.collection-case--board .poster-board-front { inset: 0; transform: translateZ(calc(var(--cd) / 2)); }
+.collection-case--board .poster-board-back { inset: 0; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
+.collection-case--board .poster-board-spine { top: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); height: var(--ch); transform: rotateY(-90deg) translateZ(calc(var(--cw) / 2)); }
+.collection-case--board .poster-board-edge { top: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); height: var(--ch); transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); }
+.collection-case--board .poster-board-top, .collection-case--board .poster-board-bottom { top: calc(50% - var(--cd) / 2); left: 0; width: var(--cw); height: var(--cd); }
+.collection-case--board .poster-board-top { transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case--board .poster-board-bottom { transform: rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case--board .ins { inset: 0; border-radius: 0; }
+.collection-case--board .poster-board-front .ins { background: #1c1d20; }
+@media (prefers-reduced-motion: reduce) { .case-spine-art .ps-art[data-settled="true"] > img { transition: none; } }

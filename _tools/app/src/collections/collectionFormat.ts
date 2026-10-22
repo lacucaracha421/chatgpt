@@ -19,6 +19,11 @@ type CollectionCardValue = {
   av?: { maker?: string | null; releaseDate?: string | null } | null;
 };
 
+/** Release year used by movie decade groups and their generated spine print on both clients. */
+export function collectionReleaseYear(collection: { releaseDate?: string | null; year?: number | null }): number | null {
+  return Number(collection.releaseDate?.slice(0, 4)) || collection.year || null;
+}
+
 /** Creator/studio credit used by collection cards on both clients. */
 export function collectionCredit(collection: CollectionCardValue): string {
   const avMaker = collection.av?.maker?.trim();

@@ -1,8 +1,8 @@
 import type { CasePlatform } from "./case/CollectionCase";
-import { CASE_MM, casePixels } from "./case/caseDimensions";
+import { CASE_MM, casePixels, type CaseSizeMm } from "./case/caseDimensions";
 
 /** What the packing needs from a work; the shelf component adds the rest. */
-export type PackedWork = { id: string; platform: CasePlatform };
+export type PackedWork = { id: string; platform: CasePlatform; size?: CaseSizeMm };
 export type ShelfGroup<W extends PackedWork> = { label: string; works: W[] };
 
 /** Vertical rhythm of the spine shelf, in px (spec: docs/prototypes/spine-shelf-20261017). */
@@ -41,7 +41,7 @@ export function packSpineShelf<W extends PackedWork>(groups: ShelfGroup<W>[], av
     const groupRows: PackedRow<W>[] = [];
     let row: PackedRow<W> | null = null, x = 0;
     for (const work of group.works) {
-      const size = casePixels(work.platform, scale);
+      const size = casePixels(work.platform, scale, work.size);
       if (!row || x + size.spine > available) {
         row = { kind: "row", index: rows.length + groupRows.length, top: 0, height: 0, board: 0, cells: [] };
         groupRows.push(row); x = 0;

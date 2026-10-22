@@ -40,7 +40,7 @@ export const SPINE_SCALE_MANGA = { small: .8, normal: 1, large: 1.35, huge: 1.35
 /** The 책장 scale for a client, a type tab and a 책등 크기. */
 export function spineScale(client: keyof typeof SPINE_SCALE, type: string, size: SpineSize) {
   if (type === "manga") return SPINE_SCALE_MANGA[size];
-  return (type === "av" ? SPINE_SCALE_AV : SPINE_SCALE)[client][size];
+  return (type === "av" || type === "movie" ? SPINE_SCALE_AV : SPINE_SCALE)[client][size];
 }
 /** Stored spine thumbnails are this tall (WORK_ARTWORK_THUMBNAIL_BOUND in the library). */
 export const SPINE_THUMBNAIL_PX = 360;
@@ -50,8 +50,14 @@ export function spineNeedsOriginal(platform: CasePlatform, scale: number, device
 }
 export const isSpineSize = (value: unknown): value is SpineSize => value === "small" || value === "normal" || value === "large" || value === "huge";
 
+/** A movie board follows its chosen poster; other media retain their retail package dimensions. */
+export function workCaseSize(platform: CasePlatform, posterRatio = 2 / 3): CaseSizeMm {
+  if (platform !== "film") return CASE_MM[platform];
+  const ratio = Number.isFinite(posterRatio) && posterRatio > 0 ? posterRatio : 2 / 3;
+  return { height: 125 / ratio, spine: 14, width: 125 };
+}
+
 /** One case in whole pixels, so spines never blur: its height, spine thickness and front width. */
-export function casePixels(platform: CasePlatform, scale: number): CaseSizeMm {
-  const mm = CASE_MM[platform];
+export function casePixels(platform: CasePlatform, scale: number, mm = CASE_MM[platform]): CaseSizeMm {
   return { height: Math.round(mm.height * scale), spine: Math.max(1, Math.round(mm.spine * scale)), width: Math.round(mm.width * scale) };
 }

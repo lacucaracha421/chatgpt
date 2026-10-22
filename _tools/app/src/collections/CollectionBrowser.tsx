@@ -211,8 +211,8 @@ export function CollectionBrowser({
   const showcaseItems = useMemo(() => collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)), [collections, typeFilter]);
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
   // 책장 for games and AV: the spine-only shelf. Showcase keeps the turned-case shelf.
-  const spineBookcase = !showcase && (typeFilter === "game" || typeFilter === "av") && viewSettings.layout === "bookcase";
-  const visible = useMemo(() => showcase ? showcaseItems : (viewSettings.layout === "shelf" || spineBookcase) && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
+  const spineBookcase = !showcase && (typeFilter === "game" || typeFilter === "av" || typeFilter === "movie") && viewSettings.layout === "bookcase";
+  const visible = useMemo(() => showcase ? showcaseItems : (viewSettings.layout === "shelf" || spineBookcase) && (typeFilter === "game" || typeFilter === "movie") ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
@@ -308,7 +308,7 @@ export function CollectionBrowser({
   const libraryRoot = library?.root ?? "";
   const { privacyMode } = usePrivacy();
   const shelfScale = spineScale("pc", typeFilter, viewSettings.spineSize ?? "normal");
-  const spineData = useSpineShelfWorks(libraryItems, typeFilter === "av" ? "av" : "game", { enabled: spineBookcase, gateway, root: libraryRoot, privacy: privacyMode, coverUrl: collectionCoverUrl, refreshKey: spineBatch.running, scale: shelfScale });
+  const spineData = useSpineShelfWorks(libraryItems, typeFilter === "av" ? "av" : typeFilter === "movie" ? "movie" : "game", { enabled: spineBookcase, gateway, root: libraryRoot, privacy: privacyMode, coverUrl: collectionCoverUrl, refreshKey: spineBatch.running, scale: shelfScale });
   const spineGroups = useMemo(() => spineBookcase ? shelfGroups(libraryItems, viewSettings.grouping).map(group => ({ label: group.label, works: group.items.map(spineData.toWork) })) : [],
     [spineBookcase, libraryItems, viewSettings.grouping, spineData.toWork]);
   const libraryById = useMemo(() => new Map(libraryItems.map(item => [item.id, item])), [libraryItems]);
@@ -397,10 +397,10 @@ export function CollectionBrowser({
   // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
   const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
     onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
-    sizeControl={spineBookcase || mangaBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} av={typeFilter === "av"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
+    sizeControl={spineBookcase || mangaBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} av={typeFilter === "av" || typeFilter === "movie"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
     leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
     <CollectionSortSection sort={libraryState.sort} direction={libraryState.direction} onSortChange={next => patchLibraryState(next)}
-      grouping={typeFilter === "game" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" ? grouping => patchViewSettings({ grouping }) : undefined} />
+      movie={typeFilter === "movie"} grouping={typeFilter === "game" || typeFilter === "movie" ? viewSettings.grouping : undefined} onGroupingChange={typeFilter === "game" || typeFilter === "movie" ? grouping => patchViewSettings({ grouping }) : undefined} />
     {manageSection}
   </ViewOptionsMenu> : undefined;
   const toolbarControls = libraryView ? <div className="collection-toolbar__controls">

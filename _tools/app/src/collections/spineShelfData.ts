@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../assets/mediaUrl";
-import { spineNeedsOriginal } from "./case/caseDimensions";
+import { workCaseSize, spineNeedsOriginal } from "./case/caseDimensions";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
 import { beginNativePhase } from "../shared/nativePerf";
 import { avGateway } from "./avClient";
 import { workCasePlatform } from "./case/CollectionCase";
 import { readShelfInfo, rememberedShelfInfo, sameShelfInfo, shelfInfoKey, type ShelfInfo } from "./case/shelfCaseInfo";
-import { collectionCredit } from "./collectionFormat";
+import { collectionCredit, collectionReleaseYear } from "./collectionFormat";
 import type { SpineWork } from "./SpineShelf";
-import { decodeSpine, isSpineWarm, warmSpines } from "./spineShelfWarm";
+import { decodeSpine, isSpineWarm, spineImageRatio, warmSpines } from "./spineShelfWarm";
 
 type AvArt = { frontId: string | null; spineId: string | null; backId: string | null; revision: string };
 /** The last read per library and work, so a shelf that mounts again prints its spines at once. The back is the stored
@@ -49,7 +49,7 @@ type Options = {
  * AV cases are all one size, so their artwork is read in one batch per mounted window of rows, and a spine stays
  * plastic until its artwork has arrived.
  */
-export function useSpineShelfWorks(collections: CollectionSummary[], type: "game" | "av", { enabled, gateway, root, privacy, coverUrl, refreshKey, scale = 1 }: Options) {
+export function useSpineShelfWorks(collections: CollectionSummary[], type: "game" | "av" | "movie", { enabled, gateway, root, privacy, coverUrl, refreshKey, scale = 1 }: Options) {
   const originalSpine = type === "av" && spineNeedsOriginal("av", scale, typeof window === "undefined" ? 1 : window.devicePixelRatio);
   const [games, setGames] = useState<Map<string, ShelfInfo>>(() => new Map());
   const [capped, setCapped] = useState(false);
@@ -137,10 +137,11 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
   const spineOf = useCallback((id: string): string | null => {
     const item = byId.current.get(id);
     if (!item) return null;
+    if (type === "movie") return coverUrl(item);
     if (type === "av") { const art = rememberedAvArt.get(avArtKey(root, item)); return art ? avUrls(art, originalSpine).spine : null; }
     const artworkId = infoRef.current(id)?.spineArtworkId;
     return artworkId ? workArtworkThumbnailUrl(artworkId) : null;
-  }, [type, root, originalSpine]);
+  }, [type, root, originalSpine, coverUrl]);
 
   /**
    * The works near the viewport: their spines are decoded a few at a time ahead of scrolling (AV reads its cover
@@ -158,6 +159,11 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
    * when all of that is done already (a list seen before), so the shelf swaps without waiting.
    */
   const prepare = useCallback((ids: string[], visible: string[], signal: AbortSignal) => {
+    if (type === "movie") return Promise.all([...byId.current.values()].map(async item => {
+      const url = coverUrl(item);
+      if (url) await decodeSpine(url);
+      return [item.id, workCaseSize("film", url ? spineImageRatio(url) : undefined)] as const;
+    })).then(entries => new Map(entries));
     const items = type === "av" ? ids.flatMap(id => byId.current.get(id) ?? []) : [];
     const unread = items.some(item => { const key = avArtKey(root, item); return !rememberedAvArt.has(key) && (reading.current.has(key) || !requested.current.has(key)); });
     const cold = () => visible.flatMap(id => spineOf(id) ?? []).filter(url => !isSpineWarm(url));
@@ -166,10 +172,12 @@ export function useSpineShelfWorks(collections: CollectionSummary[], type: "game
       if (unread) await loadCovers(items);
       if (!signal.aborted) await Promise.all(cold().map(decodeSpine));
     })();
-  }, [type, root, loadCovers, spineOf]);
+  }, [type, root, loadCovers, spineOf, coverUrl]);
 
   const toWork = useCallback((item: CollectionSummary): SpineWork => {
     const base = { id: item.id, title: item.name, credit: collectionCredit(item), developer: item.developer ?? null };
+    if (type === "movie") return { ...base, platform: "film", size: workCaseSize("film"), year: collectionReleaseYear(item),
+      front: item.selectedWorkArtworkId ? workArtworkUrl(item.selectedWorkArtworkId) : coverUrl(item), spine: coverUrl(item), pending: false };
     if (type === "av") {
       const key = avArtKey(root, item), stored = avArt.get(key) ?? rememberedAvArt.get(key), art = stored ? avUrls(stored, originalSpine) : null;
       return { ...base, platform: "av", front: art?.front ?? coverUrl(item), spine: art?.spine ?? null, back: art?.back ?? null, pending: !privacy && !stored && !avFailed.has(key) };

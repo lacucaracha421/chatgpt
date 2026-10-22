@@ -62,6 +62,10 @@ Status: `PARTIAL` — 3.5.41 (`a36403e9`) added capture-phase handling, a per-si
 - **Coverage:** the [2026-10-16 code-level inventory](../../extension-list/options/context-menu-coverage.md) records blocker causes, protected native menus, frame limitations and the PDF fallback. A live site-by-site inventory was not recorded; investigate remaining reported sites without overriding intentionally native menus.
 - **Later idea (user 2026-10-13):** save an X post (text + media as one item), a link or a whole page into Lakomics from the same menu. Current-frame saving still needs an image-byte upload API; existing capture accepts remote HTTPS URLs.
 
+## MOVIE-BOOKCASE-001 — Movie bookcase with poster spines (2026-10-22)
+
+Status: `PARTIAL` — user picked option B of `docs/prototypes/movie-spines-20261022/` (poster slice + title band, poster-board height from the poster ratio, decade/director grouping). Implemented PC + tablet 0.9.144; PC capture-checked at 960×640 (bookcase and pull-out). Device check of the tablet bookcase pending. Later idea from the mockup: a per-work "책등 위치" (crop focus) control; series grouping needs stored series data.
+
 ## REVIEW-20261022 — Bug hunt and UI sweep (2026-10-22)
 
 Status: `PARTIAL` — two read-only bug-hunt rounds (server, desktop Rust, PC/tablet React, extension, Android native, cards; reports in `.tmp/bughunt/`, not in the repo) and a PC UI sweep at 960×640 and 1700 px (`.tmp/ui-review-20261022/`). All confirmed findings and all sweep items F1–F18 were fixed (`d2405203` and the follow-up commit); server deployed; PC release rebuilt; tablet 0.9.141 and collector 3.5.65 installed on the tablet. Remaining:

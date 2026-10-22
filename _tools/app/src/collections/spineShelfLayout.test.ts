@@ -1,3 +1,4 @@
+import { workCaseSize, spineScale, SPINE_SCALE_AV } from "./case/caseDimensions";
 import { describe, expect, it } from "vitest";
 import type { CasePlatform } from "./case/CollectionCase";
 import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, spineScaleForView, type PackedWork } from "./spineShelfLayout";
@@ -57,4 +58,24 @@ describe("spineScaleForView", () => {
     expect(190 * short * pull.grow + pull.lift).toBeLessThanOrEqual(520);
     expect(spineScaleForView(3.15, 0, pull)).toBe(3.15);
   });
+});
+
+
+it("packs movie boards at their poster ratio with a shared width and thickness", () => {
+  const tall = workCaseSize("film", 2 / 3), b2 = workCaseSize("film", 1 / Math.SQRT2);
+  expect(tall).toEqual({ height: 187.5, spine: 14, width: 125 });
+  expect(b2.height).toBeCloseTo(125 * Math.SQRT2);
+  expect(b2.height).toBeLessThan(tall.height);
+  expect(workCaseSize("film")).toEqual(tall);
+  const packed = packSpineShelf([{ label: "", works: [
+    { id: "tall", platform: "film", size: tall }, { id: "b2", platform: "film", size: b2 },
+  ] }], 400, 1.3);
+  const [first, second] = packed.rows[0].cells;
+  expect(first.height).toBe(Math.round(tall.height * 1.3));
+  expect(second.height).toBe(Math.round(b2.height * 1.3));
+  expect(first.coverWidth).toBe(second.coverWidth);
+  expect(first.width).toBe(second.width);
+  expect(packed.rows[0].board).toBe(first.height);
+  for (const client of ["pc", "tablet"] as const) for (const size of ["small", "normal", "large", "huge"] as const)
+    expect(spineScale(client, "movie", size)).toBe(SPINE_SCALE_AV[client][size]);
 });

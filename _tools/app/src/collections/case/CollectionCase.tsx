@@ -39,9 +39,9 @@ export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)", ps4: "rgba(30,78,176,.62)",
   pc: "rgba(16,18,22,.9)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
-export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; /** A game spine names its developer (user, 2026-10-05); books, films and AV keep the publisher/maker. */ developer?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
+export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; /** A game spine names its developer (user, 2026-10-05); books, films and AV keep the publisher/maker. */ developer?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string; year?: number | null; posterRatio?: number; /** Poster board used only for the movie bookcase. */ board?: boolean };
 export function spineInsertClass(data: CaseData) {
-  return `ins${data.spine || data.privacy ? "" : SPINE_TEMPLATES.includes(data.platform) ? " full" : " bare"}`;
+  return `ins${data.spine || data.privacy ? "" : SPINE_TEMPLATES.includes(data.platform) || data.board ? " full" : " bare"}`;
 }
 export type Fact = [string, ReactNode];
 export function CaseFacts({ rows }: { rows: Fact[] }) {
@@ -213,8 +213,9 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     }} />;
   }
 
-  const fit = stageBox ? fitCollectionCase(stageBox, ratio, open) : null;
-  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
+  const faceRatio = data.board ? data.posterRatio ?? 2 / 3 : ratio;
+  const fit = stageBox ? fitCollectionCase(stageBox, faceRatio, open) : null;
+  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${data.board ? " collection-case--board" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": faceRatio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className="collection-case-object">
@@ -230,12 +231,19 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
         else return;
         event.preventDefault(); event.stopPropagation();
       }}>
+      {data.board ? <>
+        <span className="poster-board-front"><span className="ins">{face(data.front, "앞면")}</span></span>
+        <span className="poster-board-back">{data.privacy && <span className="case-mask" />}</span>
+        <span className="poster-board-spine"><span className={spineInsertClass(data)}><CaseSpine data={data} onSettled={url => images.failed("spine", url)} /></span></span>
+        <span className="poster-board-edge" /><span className="poster-board-top" /><span className="poster-board-bottom" />
+      </> : <>
       <span className="k-back"><span className="ins">{!data.back && !data.privacy && data.platform !== "book" ? <CaseBack data={data} content={backContent} /> : face(data.back, "뒷면")}</span></span>
       <span className="k-floor"><span className="k-floor-print"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} holdable={holdable} holding={discHolding} />{!data.privacy && note && <div className="note">{note}</div>}</span></span>
       <TrayWalls tray="base" /><span className="k-ridge" aria-hidden="true" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
       </span></span><span className="k-spine-in" /><span ref={lid} className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner"><span className="tray-ledge" aria-hidden="true" />{data.privacy ? <span className="case-mask" aria-label="비공개 모드" /> : inside}</span><TrayWalls tray="lid" /></span></span>
+      </>}
     </div>
     </div>
   </div>;
@@ -262,15 +270,21 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
 
   const template = SPINE_TEMPLATES.includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
-  return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
-    {slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" alt={decorative ? "" : `${data.title} 책등`} draggable={false}
+  const artwork = slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" alt={decorative ? "" : `${data.title} 책등`} draggable={false}
       style={hasPaintedSpine && painted === index ? undefined : { position: "absolute", visibility: "hidden", pointerEvents: "none" }}
       aria-hidden={painted !== index || undefined}
       onLoad={async event => {
         const image = event.currentTarget;
         try { await image.decode?.(); } catch { if (wanted.current === url) setFailed(url); return; }
         if (image.isConnected && wanted.current === url) setPainted(index as 0 | 1);
-      }} onError={() => { if (wanted.current === url) setFailed(url); }} />)}
+      }} onError={() => { if (wanted.current === url) setFailed(url); }} />);
+  if (data.board) return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> :
+    <span className="pspine" style={{ "--poster-ratio": data.posterRatio ?? 2 / 3, "--poster-focus": data.coverFocus ?? .5 } as CSSProperties}>
+      <span className="ps-art" data-settled={hasPaintedSpine}>{artwork}</span>
+      <span className="ps-band">{title}</span><span className="ps-foot"><span>{data.year}</span></span>
+    </span>}</span>;
+  return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
+    {artwork}
     {!hasPaintedSpine && (templatePainted.current || failed === data.spine) && (template ?
     <span className={`tpl ${data.platform}`} data-spine-template={data.platform}>
       {/* Every Switch and Switch 2 spine ends in the Nintendo mark instead of the developer (user, 2026-10-17). */}

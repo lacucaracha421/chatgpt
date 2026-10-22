@@ -68,14 +68,14 @@ it("persists layout and count independently for each collection type", () => {
   const restored = renderHook(() => useCollectionView("movie"));
   expect(restored.result.current[0].perRow).toBe(12);
 });
-it("reads saved layouts: grid and shelf keep working, 책장 is valid for games, AV and manga but not movies, and the spine size defaults to 보통", () => {
+it("reads saved layouts: grid and shelf keep working, 책장 is valid for games, AV, manga and movies, and the spine size defaults to 보통", () => {
   const save = (type: string, value: object) => localStorage.setItem(`lakomics.collections.view.${type}.v1`, JSON.stringify({ perRow: 8, grouping: "device", ...value }));
   save("game", { layout: "grid" }); save("av", { layout: "bookcase", spineSize: "large" }); save("manga", { layout: "bookcase", spineSize: "small" }); save("movie", { layout: "bookcase" });
   const read = (type: CollectionType) => renderHook(() => useCollectionView(type)).result.current[0];
   expect(read("game")).toMatchObject({ layout: "grid", spineSize: "normal" });
   expect(read("av")).toMatchObject({ layout: "bookcase", spineSize: "large" });
   expect(read("manga")).toMatchObject({ layout: "bookcase", spineSize: "small" });
-  expect(read("movie").layout).toBe("shelf");
+  expect(read("movie")).toMatchObject({ layout: "bookcase", grouping: "sort" });
   const { result } = renderHook(() => useCollectionView("game"));
   act(() => result.current[1]({ layout: "bookcase", spineSize: "small" }));
   expect(JSON.parse(localStorage.getItem("lakomics.collections.view.game.v1")!)).toMatchObject({ layout: "bookcase", spineSize: "small" });
@@ -323,4 +323,28 @@ it("uses expanded columns for virtual rows and keyboard navigation on a wide she
   root.scrollTop = 2000; fireEvent.scroll(root);
   expect(container.querySelectorAll("[data-collection-id]").length).toBeLessThan(largeShelf.length);
   expect(container.querySelectorAll(".collection-list__cell")).toHaveLength(largeShelf.length);
+});
+
+
+it("groups movies by decade or repeated director without changing the order inside a group", () => {
+  const movies = [
+    { ...works[0], id: "a", type: "movie" as const, year: 2024, director: "Director A" },
+    { ...works[0], id: "b", type: "movie" as const, year: 2023, director: "Director B" },
+    { ...works[0], id: "c", type: "movie" as const, year: 2019, director: "Director A" },
+    { ...works[0], id: "d", type: "movie" as const, year: null, director: null },
+    { ...works[0], id: "e", type: "movie" as const, year: 1990, releaseDate: "2018-01-01", director: "Director C" },
+  ];
+  const grouped = (by: "sort" | "decade" | "director") => shelfGroups(movies, by).map(group => [group.label, group.items.map(item => item.id)]);
+  expect(grouped("sort")).toEqual([["", ["a", "b", "c", "d", "e"]]]);
+  expect(grouped("decade")).toEqual([["2020년대", ["a", "b"]], ["2010년대", ["c", "e"]], ["개봉일 없음", ["d"]]]);
+  expect(grouped("director")).toEqual([["Director A", ["a", "c"]], ["그 밖의 감독", ["b", "d", "e"]]]);
+});
+
+it("restores movie grouping independently and starts new movie views ungrouped on the shelf", () => {
+  const initial = renderHook(() => useCollectionView("movie"));
+  expect(initial.result.current[0]).toMatchObject({ layout: "shelf", grouping: "sort" });
+  act(() => initial.result.current[1]({ layout: "bookcase", grouping: "director", spineSize: "huge" }));
+  initial.unmount();
+  const restored = renderHook(() => useCollectionView("movie"));
+  expect(restored.result.current[0]).toMatchObject({ layout: "bookcase", grouping: "director", spineSize: "huge" });
 });

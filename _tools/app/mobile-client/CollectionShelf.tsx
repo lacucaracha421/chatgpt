@@ -4,7 +4,7 @@ import {workCasePlatform, type CaseData} from '../src/collections/case/Collectio
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
 import {SpineSizeRow} from '../src/collections/CollectionViewSections';
 import {isSpineSize, type SpineSize} from '../src/collections/case/caseDimensions';
-import {hasBookcase} from '../src/collections/CollectionList';
+import {type CollectionViewSettings, hasBookcase, isCollectionGrouping} from '../src/collections/CollectionList';
 import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 // The shared shelf geometry (rows, planks, the picked case's title) is the PC list's stylesheet.
 import '../src/collections/CollectionBrowser.css';
@@ -17,7 +17,7 @@ import {collectionCover, type CollectionKind, type CollectionSummary} from './co
 import './collectionShelf.css';
 
 export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
-export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: 'device' | 'year' | 'sort'; /** Bookcase spine size, saved per Collection type. */spineSize?: SpineSize};
+export type ShelfView = {layout: ShelfLayout; perRow: number; grouping?: CollectionViewSettings['grouping']; /** Bookcase spine size, saved per Collection type. */spineSize?: SpineSize};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 export const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
@@ -46,7 +46,7 @@ function readView(type: CollectionKind): ShelfView {
     return {
       layout: value.layout === 'grid' || value.layout === 'shelf' || (hasBookcase(type) && value.layout === 'bookcase') ? value.layout : fallback.layout,
       perRow: Number.isInteger(value.perRow) ? Math.max(SHELF_PER_ROW.min, Math.min(SHELF_PER_ROW.max, value.perRow!)) : fallback.perRow,
-      grouping: value.grouping === 'device' || value.grouping === 'year' || value.grouping === 'sort' ? value.grouping : undefined,
+      grouping: isCollectionGrouping(type, value.grouping) ? value.grouping : undefined,
       spineSize: isSpineSize(value.spineSize) ? value.spineSize : undefined,
     };
   } catch { return fallback; }
@@ -109,7 +109,7 @@ export function ShelfViewSection({type, view, onChange}: {type: CollectionKind; 
   const spineBookcase = view.layout === 'bookcase' && hasBookcase(type);
   return <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
-      {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} av={type === 'av'} onChange={spineSize => onChange({spineSize})}/>
+      {spineBookcase ? <SpineSizeRow value={view.spineSize ?? 'normal'} av={type === 'av' || type === 'movie'} onChange={spineSize => onChange({spineSize})}/>
         : <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>}
     </ViewOptionsSection>;
 }

@@ -5,6 +5,7 @@ import { Slider } from "../shared/ui/Slider";
 import { ViewOptionsSection } from "../shared/ui/ViewOptionsSection";
 import { AV_SPINE_SIZES, SPINE_SIZE_LABEL, SPINE_SIZES, type SpineSize } from "./case/caseDimensions";
 import type { CollectionLibraryDirection, CollectionLibrarySort, CollectionRatingFilter } from "./collectionLibrary";
+import type { CollectionViewSettings } from "./CollectionList";
 import "./collectionViewSections.css";
 
 /**
@@ -12,11 +13,11 @@ import "./collectionViewSections.css";
  * 내 별점 first, then 배치 (the shared `ViewOptionsMenu` / `ShelfViewSection`), then 정렬.
  */
 
-export type CollectionGrouping = "device" | "year" | "sort";
+export type CollectionGrouping = CollectionViewSettings["grouping"];
 
 const sizeOptions = (sizes: readonly SpineSize[]) => sizes.map(value => ({ value, label: SPINE_SIZE_LABEL[value] }));
 const SPINE_SIZE_OPTIONS = sizeOptions(SPINE_SIZES), AV_SPINE_SIZE_OPTIONS = sizeOptions(AV_SPINE_SIZES);
-/** Bookcase spine size replaces the per-row control for games, manga and AV. AV adds the huge option. */
+/** Bookcase spine size replaces the per-row control. AV and movies include the huge option. */
 export function SpineSizeRow({ value, av = false, onChange }: { value: SpineSize; av?: boolean; onChange(value: SpineSize): void }) {
   return <div className="collection-view-sort__row"><span className="collection-view-sort__label">책등 크기</span>
     <SegmentedControl label="책등 크기" options={av ? AV_SPINE_SIZE_OPTIONS : SPINE_SIZE_OPTIONS} value={!av && value === "huge" ? "large" : value} fullWidth onChange={onChange} /></div>;
@@ -95,14 +96,14 @@ export function sortAfterCriterion(current: { sort: CollectionLibrarySort; direc
 }
 
 /**
- * 정렬: 묶기 (games only) above 기준 and 순서. 발매 연도 grouping needs the newest-first release order,
- * so choosing it sets that; a later 기준 other than 발매일 drops it back to 안 묶음.
+ * Grouping sits above the sort controls. Only the game's release-year grouping requires release-date
+ * sorting; movie decade/director groups partition whichever order the user chose.
  */
-export function CollectionSortSection({ sort, direction, onSortChange, grouping, onGroupingChange }: {
+export function CollectionSortSection({ sort, direction, onSortChange, grouping, onGroupingChange, movie = false }: {
   sort: CollectionLibrarySort; direction: CollectionLibraryDirection;
   onSortChange(next: { sort: CollectionLibrarySort; direction: CollectionLibraryDirection }): void;
-  /** Games only: omit for the other types, which have no 묶기. */
-  grouping?: CollectionGrouping; onGroupingChange?: (grouping: CollectionGrouping) => void;
+  /** Games and movies only: omit for types without grouping. */
+  grouping?: CollectionGrouping; onGroupingChange?: (grouping: CollectionGrouping) => void; movie?: boolean;
 }) {
   const changeSort = (next: { sort: CollectionLibrarySort; direction: CollectionLibraryDirection }) => {
     onSortChange(next);
@@ -110,10 +111,10 @@ export function CollectionSortSection({ sort, direction, onSortChange, grouping,
   };
   return <ViewOptionsSection title="정렬">
     {onGroupingChange && <div className="collection-view-sort__row"><span className="collection-view-sort__label">묶기</span>
-      <SegmentedControl label="묶기" options={GROUPINGS} value={grouping ?? "sort"} fullWidth
+      <SegmentedControl label="묶기" options={movie ? [{ value: "sort", label: "안 묶음" }, { value: "decade", label: "연대" }, { value: "director", label: "감독" }] : GROUPINGS} value={grouping ?? "sort"} fullWidth
         onChange={next => { onGroupingChange(next); if (next === "year") onSortChange({ sort: "media_date", direction: "desc" }); }} /></div>}
     <div className="collection-view-sort__row"><span className="collection-view-sort__label">기준</span>
-      <SegmentedControl label="정렬 기준" options={CRITERIA} value={sort} fullWidth onChange={next => changeSort(sortAfterCriterion({ sort, direction }, next))} /></div>
+      <SegmentedControl label="정렬 기준" options={movie ? CRITERIA.map(option => option.value === "media_date" ? { ...option, label: "개봉일" } : option) : CRITERIA} value={sort} fullWidth onChange={next => changeSort(sortAfterCriterion({ sort, direction }, next))} /></div>
     <div className="collection-view-sort__row"><span className="collection-view-sort__label">순서</span>
       <SegmentedControl label="정렬 순서" options={directionOptions(sort)} value={direction} fullWidth onChange={next => changeSort({ sort, direction: next })} /></div>
   </ViewOptionsSection>;

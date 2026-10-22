@@ -5,18 +5,22 @@ import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
 import { isSpineSize, type SpineSize } from "./case/caseDimensions";
+import { collectionReleaseYear } from "./collectionFormat";
 
 /** 격자 is flat front covers, 선반 the turned cases on planks, 책장 the bookcase (manga volumes; for games and AV the spine-only shelf). */
-export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort"; /** Bookcase spine size, saved per Collection type. */ spineSize?: SpineSize };
+export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort" | "decade" | "director"; /** Bookcase spine size, saved per Collection type. */ spineSize?: SpineSize };
 /** Which types have a 책장 in their 보기 menu. */
-export const hasBookcase = (type: CollectionType) => type === "manga" || type === "game" || type === "av";
-type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;
+export const hasBookcase = (type: CollectionType) => type === "manga" || type === "game" || type === "av" || type === "movie";
+export function isCollectionGrouping(type: CollectionType, value: unknown): value is CollectionViewSettings["grouping"] {
+  return (type === "movie" ? ["sort", "decade", "director"] : ["device", "year", "sort"]).includes(value as string);
+}
+type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate" | "director">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
-    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: "device", spineSize: "normal" };
+    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: type === "movie" ? "sort" : "device", spineSize: "normal" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
-      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (hasBookcase(type) && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device", spineSize: isSpineSize(value.spineSize) ? value.spineSize : "normal" }];
+      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (hasBookcase(type) && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: isCollectionGrouping(type, value.grouping) ? value.grouping : fallback.grouping, spineSize: isSpineSize(value.spineSize) ? value.spineSize : "normal" }];
     } catch { /* Use the approved start state when storage is unavailable. */ }
     return [type, fallback];
   })) as Record<CollectionType, CollectionViewSettings>;
@@ -31,7 +35,20 @@ export function useCollectionView(type: CollectionType) {
   return [views[type], update] as const;
 }
 export function shelfGroups<T extends ShelfItem>(items: T[], grouping: CollectionViewSettings["grouping"]): { label: string; items: T[] }[] {
-  if (items[0]?.type !== "game" || grouping === "sort") return [{ label: "", items }];
+  if (items[0]?.type === "movie" && (grouping === "decade" || grouping === "director")) {
+    const groups = new Map<string, T[]>();
+    for (const item of items) {
+      const year = collectionReleaseYear(item);
+      const label = grouping === "director" ? item.director?.trim() || "" : year ? `${Math.floor(year / 10) * 10}년대` : "개봉일 없음";
+      const group = groups.get(label) ?? []; group.push(item); groups.set(label, group);
+    }
+    if (grouping === "decade") return [...groups].map(([label, items]) => ({ label, items }));
+    const repeated = [...groups].filter(([label, works]) => label && works.length >= 2);
+    const directors = new Set(repeated.map(([label]) => label));
+    const rest = items.filter(item => !directors.has(item.director?.trim() || ""));
+    return [...repeated.map(([label, items]) => ({ label, items })), ...(rest.length ? [{ label: "그 밖의 감독", items: rest }] : [])];
+  }
+  if (items[0]?.type !== "game" || grouping === "sort" || grouping === "decade" || grouping === "director") return [{ label: "", items }];
   if (grouping === "device") {
     const nintendo = (item: T) => ["sw", "sw2"].includes(casePlatform(item.platforms ?? null)) || /nintendo|닌텐도|wii|gamecube/i.test(item.platforms ?? "");
     return [{ label: "닌텐도", items: items.filter(nintendo) }, { label: "PS · Xbox · PC", items: items.filter(item => !nintendo(item)) }].filter(group => group.items.length);

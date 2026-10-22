@@ -1032,9 +1032,9 @@ describe("CollectionBrowser manga shelf", () => {
     expect(screen.queryByRole("region", { name: "쇼케이스" })).not.toBeInTheDocument();
   });
 
-  it("offers 격자, 선반 and 책장 for games, AV and manga, and only 격자 and 선반 for movies", async () => {
+  it("offers grid, shelf and bookcase for every collection type", async () => {
     const user = userEvent.setup();
-    for (const [type, labels] of [["game", ["격자", "선반", "책장"]], ["av", ["격자", "선반", "책장"]], ["manga", ["격자", "선반", "책장"]], ["movie", ["격자", "선반"]]] as const) {
+    for (const [type, labels] of [["game", ["격자", "선반", "책장"]], ["av", ["격자", "선반", "책장"]], ["manga", ["격자", "선반", "책장"]], ["movie", ["격자", "선반", "책장"]]] as const) {
       renderBrowser({ collections: [{ ...sample, type }], typeFilter: type, showcase: false });
       await user.click(screen.getByRole("button", { name: "보기" }));
       expect(within(screen.getByRole("radiogroup", { name: "배치" })).getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(labels);
@@ -1042,14 +1042,14 @@ describe("CollectionBrowser manga shelf", () => {
     }
   });
 
-  it("keeps stored 격자 and 선반 working for games, and ignores 책장 for movies", () => {
+  it("keeps stored game layouts and restores the movie bookcase", () => {
     localStorage.setItem("lakomics.collections.view.game.v1", JSON.stringify({ layout: "grid", perRow: 7, grouping: "device" }));
     localStorage.setItem("lakomics.collections.view.movie.v1", JSON.stringify({ layout: "bookcase", perRow: 7, grouping: "device" }));
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByRole("group", { name: "게임 작품 목록" })).toHaveClass("collection-list--grid");
     cleanup();
     renderBrowser({ collections: [{ ...sample, type: "movie" }], typeFilter: "movie", showcase: false });
-    expect(screen.getByRole("group", { name: "영화 작품 목록" })).toHaveClass("collection-list--shelf");
+    expect(screen.getByRole("group", { name: "영화 작품 목록" })).toHaveClass("spine-shelf");
   });
 
   it.each(["game", "av", "manga"] as const)("draws the %s 격자 as flat front covers, not 3D cases", async type => {

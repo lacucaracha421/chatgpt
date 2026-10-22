@@ -3,6 +3,8 @@
  * instead of fading in over its plastic, so a list change that prepared its first screen swaps in one step.
  */
 const warm = new Set<string>();
+const ratios = new Map<string, number>();
+export const spineImageRatio = (url: string) => ratios.get(url);
 const WARM_LIMIT = 4096;
 export const isSpineWarm = (url: string | null) => Boolean(url) && warm.has(url!);
 export function markSpineWarm(url: string) {
@@ -10,15 +12,22 @@ export function markSpineWarm(url: string) {
   if (warm.size > WARM_LIMIT) warm.delete(warm.values().next().value!);
 }
 /** Test seam. */
-export function resetSpineWarmForTests() { warm.clear(); queue.length = 0; queued.clear(); }
+export function resetSpineWarmForTests() { warm.clear(); ratios.clear(); queue.length = 0; queued.clear(); }
 
 /** Resolves once `url` is decoded (or cannot be); an image the browser cannot decode never blocks the shelf. */
 export async function decodeSpine(url: string): Promise<void> {
-  if (warm.has(url)) return;
+  if (warm.has(url) && ratios.has(url)) return;
   const image = new Image();
   image.src = url;
   if (typeof image.decode !== "function") return;
-  try { await image.decode(); markSpineWarm(url); } catch { /* the spine's own element reports it */ }
+  try {
+    await image.decode();
+    if (image.naturalWidth && image.naturalHeight) {
+      ratios.set(url, image.naturalWidth / image.naturalHeight);
+      if (ratios.size > WARM_LIMIT) ratios.delete(ratios.keys().next().value!);
+    }
+    markSpineWarm(url);
+  } catch { /* the spine's own element reports it */ }
 }
 
 /** Decodes spines a little ahead of the viewport, a few at a time, so scrolling rarely shows a plastic spine. */

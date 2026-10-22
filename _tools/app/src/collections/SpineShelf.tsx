@@ -7,6 +7,7 @@ import { handOffCaseAngle } from "./case/caseHandoff";
 import { playShelfSound, preloadShelfSounds } from "./case/caseSounds";
 import { stageForCaseHeight } from "./case/fitCaseStage";
 import { cellAtX, nearestCell, packSpineShelf, SPINE_SHELF, spineScaleForView, type PackedCell, type PackedEntry, type PackedRow, type PackedWork, type ShelfGroup } from "./spineShelfLayout";
+import { workCaseSize, type CaseSizeMm } from "./case/caseDimensions";
 import { isSpineWarm } from "./spineShelfWarm";
 import "./SpineShelf.css";
 
@@ -17,6 +18,8 @@ export type SpineWork = PackedWork & {
   front: string | null; spine: string | null;
   /** The stored back cover (AV jacket split); without it the pulled-out case prints a back from the work's own data. */
   back?: string | null;
+  year?: number | null;
+  coverFocus?: number | null;
   /** The owned device or spine artwork is not read yet: the spine stays plastic only, at its final size. */
   pending: boolean;
 };
@@ -101,9 +104,10 @@ type Props<W extends SpineWork> = {
    * showing the old one until this resolves for the new first screen: `ids` are the works of the rows that will be
    * mounted, `visible` those on screen. The wait is bounded; after it the new list is shown whatever has arrived.
    * Aborted when the list changes again before it resolved. Returning nothing means it is ready already: the new
-   * list replaces the old one before the next paint.
+   * list replaces the old one before the next paint. Movies may return board sizes read from the existing posters;
+   * those sizes commit with the incoming list, never after its first paint.
    */
-  prepare?(ids: string[], visible: string[], signal: AbortSignal): Promise<void> | void;
+  prepare?(ids: string[], visible: string[], signal: AbortSignal): Promise<void | ReadonlyMap<string, CaseSizeMm>> | void;
   /** The rows of a first appearance rise in once, staggered by row. */
   entrance?: boolean;
   controlRef?: { current: SpineShelfControl | null };
@@ -126,7 +130,12 @@ export function SpineShelf<W extends SpineWork>({ groups, scale: chosenScale, la
   const lastGroups = useRef<ShelfGroup<W>[]>(prepare ? [] : groups);
   const live = !held || shownKey === key;
   if (live) lastGroups.current = groups;
-  const shownGroups = live ? groups : lastGroups.current;
+  // Poster dimensions arrive with preparation, before the incoming shelf paints. If the wait caps out,
+  // retain the default board size for this list so a late poster cannot move its title band.
+  const [posterSizes, setPosterSizes] = useState<ReadonlyMap<string, CaseSizeMm>>(new Map());
+  const sourceGroups = live ? groups : lastGroups.current;
+  const shownGroups = useMemo(() => sourceGroups.map(group => ({ ...group, works: group.works.map(work =>
+    work.platform === "film" ? { ...work, size: posterSizes.get(work.id) ?? work.size ?? workCaseSize("film") } : work) })), [sourceGroups, posterSizes]);
   const packed = useMemo(() => packSpineShelf(shownGroups, available, scale), [shownGroups, available, scale]);
   const { entries, rows, order, cells } = packed;
   const [range, setRange] = useState<[number, number]>(() => windowRange(entries, 0, FALLBACK_VIEWPORT));
@@ -250,7 +259,7 @@ export function SpineShelf<W extends SpineWork>({ groups, scale: chosenScale, la
     if (!groups.some(group => group.works.length)) { setShownKey(key); return; }
     const controller = new AbortController();
     let finished = false;
-    const done = () => { if (finished) return; finished = true; window.clearTimeout(timer); setShownKey(key); };
+    const done = (sizes?: void | ReadonlyMap<string, CaseSizeMm>) => { if (finished) return; finished = true; window.clearTimeout(timer); if (sizes) setPosterSizes(sizes); setShownKey(key); };
     const timer = window.setTimeout(done, shownKey === null ? FIRST_HOLD_MS : CHANGE_HOLD_MS);
     // The first screen of the new list at the current scroll position and width.
     const host = hostRef.current, inner = Math.max(1, (host?.clientWidth || width) - gutter * 2);
@@ -259,7 +268,7 @@ export function SpineShelf<W extends SpineWork>({ groups, scale: chosenScale, la
     const ask = prepareRef.current;
     if (!ask) { done(); return; }
     const pending = ask(idsOf(windowRange(incoming.entries, top, height)), idsOf(windowRange(incoming.entries, top, height, 0)), controller.signal);
-    if (pending) pending.then(done, done); else done();
+    if (pending) pending.then(done, () => done()); else done();
     return () => { window.clearTimeout(timer); if (!finished) { finished = true; controller.abort(); } };
   }, [key, shownKey, held]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -450,10 +459,10 @@ function SpineView<W extends SpineWork>({ cell, picked, out, tabbable, privacy, 
   const { work } = cell;
   const host = useRef<HTMLButtonElement>(null);
   const { url, pending } = art.useSpine(work, host);
-  const button = <button ref={host} type="button" className="spine" data-collection-id={work.id} tabIndex={tabbable ? 0 : -1}
+  const button = <button ref={host} type="button" className={`spine${work.platform === "film" ? " spine--board" : ""}`} data-collection-id={work.id} tabIndex={tabbable ? 0 : -1}
     aria-label={work.credit ? `${work.title} · ${work.credit}` : work.title} aria-pressed={picked} data-out={out || undefined}
-    style={{ "--w": `${cell.width}px`, "--h": `${cell.height}px`, "--plastic": CASE_PLASTIC[work.platform] } as CSSProperties}>
-    <span className="spine__case">{(privacy || !pending) && <SpineArtView key={url ?? "template"} work={work} url={url} privacy={privacy} />}</span>
+    style={{ "--w": `${cell.width}px`, "--h": `${cell.height}px`, "--poster-height": `${cell.height}px`, "--plastic": CASE_PLASTIC[work.platform] } as CSSProperties}>
+    <span className="spine__case">{(privacy || !pending || work.platform === "film") && <SpineArtView key={work.platform === "film" ? "poster" : url ?? "template"} work={work} url={url} privacy={privacy} ratio={cell.coverWidth / cell.height} />}</span>
   </button>;
   return menu ? <ContextMenu items={menu(work.id)}>{button}</ContextMenu> : button;
 }
@@ -463,7 +472,7 @@ const Spine = memo(SpineView) as typeof SpineView;
  * The printed insert. A template appears in one step. Spine artwork that is not decoded yet stands in as the drawn
  * template, so it shows with its neighbours, and the artwork fades in over it once decoded.
  */
-function SpineArtView({ work, url, privacy }: { work: SpineWork; url: string | null; privacy: boolean }) {
+function SpineArtView({ work, url, privacy, ratio }: { work: SpineWork; url: string | null; privacy: boolean; ratio: number }) {
   const [settled, setSettled] = useState(!url || privacy || isSpineWarm(url));
   const [standIn, setStandIn] = useState(!settled);
   useEffect(() => {
@@ -471,10 +480,10 @@ function SpineArtView({ work, url, privacy }: { work: SpineWork; url: string | n
     const timer = window.setTimeout(() => setStandIn(false), SPINE_FADE_MS + 20);
     return () => window.clearTimeout(timer);
   }, [settled, standIn]);
-  const data: CaseData = { title: work.title, platform: work.platform, developer: work.developer, front: null, spine: url, privacy };
+  const data: CaseData = { title: work.title, platform: work.platform, developer: work.developer, front: null, spine: url, privacy, year: work.year, coverFocus: work.coverFocus, posterRatio: ratio, board: work.platform === "film" };
   const settle = useCallback(() => setSettled(true), []);
-  return <span className={spineInsertClass(data)} data-settled={settled}>
-    {standIn && <span className="spine__stand-in" aria-hidden="true"><CaseSpine decorative data={{ ...data, spine: null }} /></span>}
+  return <span className={spineInsertClass(data)} data-settled={work.platform === "film" || settled}>
+    {work.platform !== "film" && standIn && <span className="spine__stand-in" aria-hidden="true"><CaseSpine decorative data={{ ...data, spine: null }} /></span>}
     <CaseSpine decorative data={data} onSettled={settle} />
   </span>;
 }
@@ -534,7 +543,7 @@ function PulledOutView<W extends SpineWork>({ cell, row, available, leaving, sti
   // 빼기 as the pull starts, 넣기 as the put-back starts; a case put back before it painted never left, so it is silent.
   const sounding = !painted ? null : leaving ? "in" : pulled ? null : "out";
   useEffect(() => { if (sounding) playShelfSound(sounding); }, [sounding]);
-  const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back, privacy };
+  const data: CaseData = { title: cell.work.title, platform: cell.work.platform, developer: cell.work.developer, front, spine, back, privacy, year: cell.work.year, coverFocus: cell.work.coverFocus, posterRatio: cell.coverWidth / cell.height, board: cell.work.platform === "film" };
   if (leaving && !painted) return null;
   return <div ref={host} className={`spine-shelf__out${!painted ? " is-preparing" : leaving ? " is-leaving" : pulled ? "" : " is-pulling"}`} data-id={id}
     onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "spine-out-pull") setPulled(true); }}

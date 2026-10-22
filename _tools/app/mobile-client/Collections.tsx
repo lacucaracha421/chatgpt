@@ -696,10 +696,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     const items=deletedWorks.size?listed.filter(work=>!deletedWorks.has(work.id)):listed;
     // 쇼케이스 stays on the turned-case shelf; the spine 책장 is the library's view of games and AV.
     const own=viewOf(kind),order=items.map(work=>work.id);
-    const settings=inShowcase&&own.layout==='bookcase'&&(kind==='game'||kind==='av')?{...own,layout:'shelf' as const}:own;
+    const settings=inShowcase&&own.layout==='bookcase'&&(kind==='game'||kind==='av'||kind==='movie')?{...own,layout:'shelf' as const}:own;
     if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:columns(settings.perRow,16),grouping:showcaseAll?'sort':settings.grouping??'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)} onActions={()=>workActions(work,workRevision)}/>}/>;
-    if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
+    if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'||kind==='movie'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)} onActions={id=>{const work=items.find(entry=>entry.id===id);if(work)workActions(work,workRevision);}}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} size={settings.spineSize??'normal'} revision={workRevision} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)} onActions={work=>workActions(work,workRevision)}/>;
@@ -815,7 +815,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <CollectionRatingSection rating={filters.rating} onChange={rating=>changeFilters({...filters,rating})} settleMs={250}/>
       <ShelfViewSection type={type} view={viewOf(type)} onChange={patch=>patchView(type,patch)}/>
       <CollectionSortSection sort={filters.sort} direction={filters.direction} onSortChange={next=>changeFilters({...filters,...next})}
-        grouping={type==='game'?viewOf(type).grouping??'sort':undefined} onGroupingChange={type==='game'?grouping=>patchView(type,{grouping}):undefined}/>
+        movie={type==='movie'} grouping={type==='game'||type==='movie'?viewOf(type).grouping??'sort':undefined} onGroupingChange={type==='game'||type==='movie'?grouping=>patchView(type,{grouping}):undefined}/>
     </div></BottomSheet>)}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>

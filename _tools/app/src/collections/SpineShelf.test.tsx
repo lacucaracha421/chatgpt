@@ -310,3 +310,22 @@ it("drops a pending preparation when the list changes again, and aborts it", () 
   expect(signals[1].aborted).toBe(false);
   expect(shown()).toEqual(["작품 0"]);
 });
+
+
+it("keeps a movie's title and year present while its poster ticket loads, then pulls out a board", () => {
+  render(<Shelf works={[work(0, "film", {year: 2024, pending: true})]} />);
+  const button = spine("작품 0");
+  expect(within(button).getByText("2024")).toBeTruthy();
+  expect(button.querySelector(".spine-title")).toHaveAttribute("data-title", "작품 0");
+  fireEvent.click(button);
+  const out = document.querySelector(".spine-shelf__out")!;
+  expect(out.querySelector(".poster-board-front img")).toHaveAttribute("src", "/front-0");
+  expect(out.querySelector(".tray-media, .k-hinge")).toBeNull();
+});
+
+it("uses prepared poster dimensions before displaying a movie shelf", async () => {
+  const movie = work(0, "film");
+  render(<SpineShelf groups={[{label: "", works: [movie]}]} scale={1} label="영화" pickedId={null} onPick={() => undefined} onOpen={() => undefined}
+    prepare={async () => new Map([[movie.id, {height: 177, width: 125, spine: 14}]])} />);
+  await waitFor(() => expect(spine("작품 0").style.getPropertyValue("--h")).toBe("177px"));
+});

@@ -1542,3 +1542,23 @@ it('switches types inside the retained Showcase overlay including AV and returns
   expect(screen.queryByRole('dialog',{name:'쇼케이스'})).toBeNull();
   expect(screen.getByRole('radio',{name:'게임'}).getAttribute('aria-checked')).toBe('true');
 });
+
+
+it('offers the movie poster bookcase, four spine sizes and decade/director grouping',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.movie.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  const movie={...item,type:'movie' as const,year:2024,director:'Director A'};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=movie')?[movie]:[]}:{revision:'r1',item:movie});
+  render(<Collections active paused={false} backRef={{current:null}}/>);pressTab('영화');
+  await screen.findByRole('group',{name:'영화 작품 목록'});
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const sheet=await screen.findByRole('dialog',{name:'보기'});
+  fireEvent.click(within(sheet).getByRole('radio',{name:'책장'}));
+  expect(within(sheet).getByRole('radio',{name:'아주 크게'})).toBeTruthy();
+  expect(within(sheet).queryByRole('radio',{name:'기기'})).toBeNull();
+  fireEvent.click(within(sheet).getByRole('radio',{name:'연대'}));
+  expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.movie.v1')!).grouping).toBe('decade');
+  fireEvent.click(within(sheet).getByRole('radio',{name:'감독'}));
+  expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.movie.v1')!).grouping).toBe('director');
+  fireEvent.click(within(sheet).getByRole('button',{name:'닫기'}));
+  expect((await screen.findByRole('group',{name:'영화 작품 목록'})).classList.contains('spine-shelf')).toBe(true);
+});
