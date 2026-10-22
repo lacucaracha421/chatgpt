@@ -16,7 +16,7 @@ impl Library {
         let connection = self.connection()?;
         let source_url = connection
             .query_row(
-                "SELECT source_url FROM assets WHERE id = ?1 AND status = 'normal'",
+                "SELECT source_url FROM assets WHERE id = ?1 AND status = 'normal' AND import_source IS NOT 'favorite_cover'",
                 [asset_id],
                 |row| row.get::<_, Option<String>>(0),
             )
@@ -35,7 +35,7 @@ impl Library {
              asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
              asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
              asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-             WHERE asset.status = 'normal' AND asset.source_url LIKE ?1
+             WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND asset.source_url LIKE ?1
              ORDER BY asset.collected_at ASC, asset.id ASC"),
         )?;
         let rows = statement.query_map(params![candidate_pattern], asset_summary_from_row)?;

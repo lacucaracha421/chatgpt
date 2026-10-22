@@ -235,8 +235,11 @@ impl Library {
         }
         run_after_duplicate_hook(self.root());
         drop(ingestion_guard);
-        let skip_similarity =
-            identity.is_some() || request.import_source == ImportSource::LegacyLakomics;
+        let skip_similarity = identity.is_some()
+            || matches!(
+                request.import_source,
+                ImportSource::LegacyLakomics | ImportSource::FavoriteCover
+            );
         let (image, perceptual_hash) = if skip_similarity {
             (
                 decode_staging_image(staging_image_reader(pending.owned_file(&staging_path)?)?)?,

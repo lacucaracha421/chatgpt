@@ -31,6 +31,18 @@ KEYS = {"total", "images", "videos", "collections", "addedToday", "addedThisWeek
 
 
 class MobileLibrarySummaryTests(AssetAuthorityFixture):
+    def test_favorite_cover_is_excluded_from_library_list_and_counts(self):
+        self.publish("cover", "2026-09-24T20:00:00Z")
+        self.publish("ordinary", "2026-09-24T20:00:00Z")
+        with api_app.get_db() as db:
+            db.execute("UPDATE assets SET import_source='favorite_cover' WHERE id='cover'")
+            db.commit()
+        body = self.summary()
+        self.assertEqual((body["total"], body["images"], body["unclassified"], body["addedToday"]), (1, 1, 1, 1))
+        response = self.client.get("/v1/library/assets", headers=self.admin)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([row["id"] for row in response.json()["items"]], ["ordinary"])
+
     def setUp(self):
         super().setUp()
         api_app.startup_classifications()

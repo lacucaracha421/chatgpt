@@ -271,7 +271,8 @@ def replication_commit(
                 source_url = COALESCE(excluded.source_url, assets.source_url),
                 creator_name = COALESCE(excluded.creator_name, assets.creator_name),
                 creator_handle = COALESCE(excluded.creator_handle, assets.creator_handle),
-                import_source = COALESCE(excluded.import_source, assets.import_source),
+                import_source = CASE WHEN assets.import_source='favorite_cover' THEN assets.import_source
+                                     ELSE COALESCE(excluded.import_source, assets.import_source) END,
                 -- Same rule as the other optional projections: omitting a value keeps what is
                 -- already known, so a legacy client cannot erase it and NULL can be filled in.
                 width = COALESCE(excluded.width, assets.width),

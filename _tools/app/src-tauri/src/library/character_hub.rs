@@ -84,7 +84,7 @@ pub struct BrowsePage {
 pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
               nested_series_scope(id) AS (SELECT s.classification_id FROM character_series s JOIN scope p ON p.id=s.classification_id WHERE s.classification_id<>?1 UNION SELECT c.id FROM classification_entries c JOIN nested_series_scope s ON c.parent_id=s.id),
               ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover'
               AND (?2 IS NOT NULL OR ?3 OR ?4='all' OR NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id))
               AND (?2 IS NOT NULL OR ?3 OR ?4='all' OR NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id))
               AND ((?2 IS NULL AND (?4 IS NULL OR ?4='needs_review') AND EXISTS(SELECT 1 FROM character_tagger_pending q WHERE q.asset_id=a.id AND q.series_id=?1)) OR EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR (?2 IS NOT NULL AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)) AND EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)))
@@ -115,7 +115,7 @@ pub(crate) const GROUP_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELEC
                 SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_relations r ON r.target_id=gm.target_id WHERE gm.group_id=?2
                 UNION SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_references r ON r.target_id=gm.target_id WHERE gm.group_id=?2
                 UNION SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_learned_references r ON r.target_id=gm.target_id WHERE gm.group_id=?2
-              ) AS member CROSS JOIN assets a ON a.id=member.asset_id WHERE a.status='normal'
+              ) AS member CROSS JOIN assets a ON a.id=member.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover'
               AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
                 OR (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors))
                   AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))";
@@ -148,7 +148,7 @@ WITH RECURSIVE scope(id) AS (
 ), eligible(id,collected_at) AS (
     SELECT a.id,a.collected_at
     FROM dedup d CROSS JOIN assets a ON a.id=d.asset_id
-    WHERE a.status='normal' AND (
+    WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND (
         EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
         OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)))
     )
@@ -180,7 +180,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT asset_id,MAX(accepted) FROM target_assets GROUP BY asset_id
 )
 SELECT COUNT(*) FROM dedup d CROSS JOIN assets a ON a.id=d.asset_id
-WHERE a.status='normal' AND (
+WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND (
     EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
     OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)))
 )
@@ -198,7 +198,7 @@ static TARGET_SCOPE_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(
 });
 
 pub(super) fn validate_art(connection: &Connection, id: &str) -> Result<()> {
-    if !connection.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND media_kind='image')", [id], |r| r.get::<_, bool>(0))? {
+    if !connection.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND import_source IS NOT 'favorite_cover' AND media_kind='image')", [id], |r| r.get::<_, bool>(0))? {
         return Err(Error::Invalid("정상 이미지에서 대표 이미지를 선택해 주세요."));
     }
     Ok(())
@@ -224,7 +224,7 @@ WITH RECURSIVE roots(id) AS (
  SELECT d.target_id,COUNT(*) AS n FROM dedup d
  CROSS JOIN character_targets t ON t.id=d.target_id
  CROSS JOIN assets a ON a.id=d.asset_id
- WHERE a.status='normal' AND (
+ WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND (
  EXISTS(SELECT 1 FROM asset_classifications ac JOIN scope s ON s.id=ac.classification_id
    WHERE ac.asset_id=a.id AND s.series_id=t.series_classification_id)
  OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN ancestors s ON s.id=ac.classification_id
@@ -238,7 +238,7 @@ WITH RECURSIVE roots(id) AS (
  SELECT m.group_id,COUNT(*) AS n FROM group_assets m
  CROSS JOIN character_groups g ON g.id=m.group_id
  CROSS JOIN assets a ON a.id=m.asset_id
- WHERE a.status='normal' AND (
+ WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND (
  EXISTS(SELECT 1 FROM asset_classifications ac JOIN scope s ON s.id=ac.classification_id
    WHERE ac.asset_id=a.id AND s.series_id=g.series_id)
  OR (m.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN ancestors s ON s.id=ac.classification_id
@@ -279,7 +279,7 @@ impl Library {
     }
     pub fn character_series(&self) -> Result<Vec<Series>> {
         let connection = self.connection()?;
-        let mut query = connection.prepare("SELECT classification_id,(SELECT a.id FROM assets a WHERE a.id=hero_asset_id AND a.status='normal'),auto_classify FROM character_series ORDER BY classification_id")?;
+        let mut query = connection.prepare("SELECT classification_id,(SELECT a.id FROM assets a WHERE a.id=hero_asset_id AND a.status='normal' AND a.import_source IS NOT 'favorite_cover'),auto_classify FROM character_series ORDER BY classification_id")?;
         let result = query
             .query_map([], |r| {
                 Ok(Series {
@@ -382,7 +382,7 @@ impl Library {
             let gallery_scope = SERIES_GALLERY_SCOPE;
             let group_scope = GROUP_GALLERY_SCOPE;
             let reference_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
-              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal' AND a.media_kind='image'
+              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND a.media_kind='image'
               AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)
               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))

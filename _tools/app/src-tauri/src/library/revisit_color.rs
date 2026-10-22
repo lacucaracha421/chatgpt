@@ -103,7 +103,7 @@ impl ColorSource {
 
     pub(super) fn is_current(&self, connection: &Connection) -> Result<bool, LibraryError> {
         Ok(connection.query_row(
-            "SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND content_hash=?2 AND thumbnail_relative_path IS ?3",
+            "SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND import_source IS NOT 'favorite_cover' AND content_hash=?2 AND thumbnail_relative_path IS ?3",
             params![self.id, self.hash, self.thumbnail], |_| Ok(())
         ).optional()?.is_some())
     }
@@ -182,7 +182,7 @@ fn candidate_page(
     } else {
         String::new()
     };
-    let sql = format!("SELECT id,content_hash,thumbnail_relative_path,collected_at FROM assets WHERE status='normal' {keyset} ORDER BY collected_at {direction},id {direction} LIMIT {PAGE_SIZE}");
+    let sql = format!("SELECT id,content_hash,thumbnail_relative_path,collected_at FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover' {keyset} ORDER BY collected_at {direction},id {direction} LIMIT {PAGE_SIZE}");
     let mut statement = connection.prepare(&sql)?;
     let values: Vec<&dyn rusqlite::ToSql> = cursor
         .map(|(date, id)| vec![date as &dyn rusqlite::ToSql, id as &dyn rusqlite::ToSql])

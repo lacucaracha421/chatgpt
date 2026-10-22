@@ -89,16 +89,16 @@ const DERIVATIVE_SCAN_LIMIT: usize = 10_000;
 
 fn derivative_paths(connection: &Connection) -> Result<(Vec<String>, bool), LibraryError> {
     let mut paths = HashSet::new();
-    let mut statement = connection.prepare("SELECT thumbnail_relative_path FROM assets WHERE status = 'normal' AND thumbnail_relative_path IS NOT NULL
-        UNION SELECT poster_relative_path FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND poster_relative_path IS NOT NULL
-        UNION SELECT proxy_relative_path FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND proxy_relative_path IS NOT NULL LIMIT ?1")?;
+    let mut statement = connection.prepare("SELECT thumbnail_relative_path FROM assets WHERE status = 'normal' AND import_source IS NOT 'favorite_cover' AND thumbnail_relative_path IS NOT NULL
+        UNION SELECT poster_relative_path FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND poster_relative_path IS NOT NULL
+        UNION SELECT proxy_relative_path FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND proxy_relative_path IS NOT NULL LIMIT ?1")?;
     for path in statement.query_map([DERIVATIVE_SCAN_LIMIT as i64 + 1], |row| {
         row.get::<_, String>(0)
     })? {
         paths.insert(path?);
     }
     if paths.len() <= DERIVATIVE_SCAN_LIMIT {
-        let mut statement = connection.prepare("SELECT scrub_relative_dir, scrub_frame_count FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND scrub_relative_dir IS NOT NULL ORDER BY v.asset_id")?;
+        let mut statement = connection.prepare("SELECT scrub_relative_dir, scrub_frame_count FROM video_assets v JOIN assets a ON a.id=v.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND scrub_relative_dir IS NOT NULL ORDER BY v.asset_id")?;
         'videos: for row in statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })? {
@@ -155,22 +155,22 @@ fn measure_derivatives(
 
 fn inventory(connection: &Connection) -> Result<LibraryStatistics, LibraryError> {
     let (assets, favorites, original_recorded_bytes) = connection.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(favorite),0), COALESCE(SUM(byte_size),0) FROM assets WHERE status='normal'", [],
+        "SELECT COUNT(*), COALESCE(SUM(favorite),0), COALESCE(SUM(byte_size),0) FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover'", [],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
     Ok(LibraryStatistics {
         assets, favorites, original_recorded_bytes,
         collections: connection.query_row("SELECT COUNT(*) FROM collections", [], |row| row.get(0))?,
-        unclassified: connection.query_row("SELECT COUNT(*) FROM assets a WHERE status='normal' AND NOT EXISTS (SELECT 1 FROM asset_classifications c WHERE c.asset_id=a.id)", [], |row| row.get(0))?,
-        media_kinds: counts(connection, "SELECT media_kind, COUNT(*) FROM assets WHERE status='normal' GROUP BY media_kind ORDER BY COUNT(*) DESC, media_kind")?,
-        collected_months: counts(connection, "SELECT strftime('%Y-%m', collected_at, 'localtime') AS month, COUNT(*) FROM assets WHERE status='normal' AND month IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 24")?,
+        unclassified: connection.query_row("SELECT COUNT(*) FROM assets a WHERE status='normal' AND import_source IS NOT 'favorite_cover' AND NOT EXISTS (SELECT 1 FROM asset_classifications c WHERE c.asset_id=a.id)", [], |row| row.get(0))?,
+        media_kinds: counts(connection, "SELECT media_kind, COUNT(*) FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover' GROUP BY media_kind ORDER BY COUNT(*) DESC, media_kind")?,
+        collected_months: counts(connection, "SELECT strftime('%Y-%m', collected_at, 'localtime') AS month, COUNT(*) FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover' AND month IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 24")?,
         // Top artists resolve through the artist hub: merged keys count together and a
         // user-defined name wins over the source name.
-        creators: counts(connection, "SELECT COALESCE(MAX(artist.display_name), NULLIF(MAX(asset.creator_name),''), NULLIF(MAX(asset.creator_handle),''), MAX(asset.creator_url), MAX(assignment.source_handle)), COUNT(*) FROM assets AS asset JOIN asset_artist_scope AS scope ON scope.asset_id = asset.id LEFT JOIN artists AS artist ON scope.scope_ref LIKE 'artist:%' AND artist.id = substr(scope.scope_ref, 8) LEFT JOIN asset_artist_assignments AS assignment ON assignment.asset_id = asset.id WHERE asset.status='normal' AND scope.scope_ref NOT LIKE 'unknown:%' AND scope.scope_ref <> '' GROUP BY scope.scope_ref ORDER BY COUNT(*) DESC, 1 LIMIT 10")?,
-        classifications: counts(connection, "SELECT c.name, COUNT(*) FROM asset_classifications l JOIN classification_entries c ON c.id=l.classification_id JOIN assets a ON a.id=l.asset_id WHERE a.status='normal' GROUP BY c.id ORDER BY COUNT(*) DESC, c.name, c.id LIMIT 10")?,
+        creators: counts(connection, "SELECT COALESCE(MAX(artist.display_name), NULLIF(MAX(asset.creator_name),''), NULLIF(MAX(asset.creator_handle),''), MAX(asset.creator_url), MAX(assignment.source_handle)), COUNT(*) FROM assets AS asset JOIN asset_artist_scope AS scope ON scope.asset_id = asset.id LEFT JOIN artists AS artist ON scope.scope_ref LIKE 'artist:%' AND artist.id = substr(scope.scope_ref, 8) LEFT JOIN asset_artist_assignments AS assignment ON assignment.asset_id = asset.id WHERE asset.status='normal' AND asset.import_source IS NOT 'favorite_cover' AND scope.scope_ref NOT LIKE 'unknown:%' AND scope.scope_ref <> '' GROUP BY scope.scope_ref ORDER BY COUNT(*) DESC, 1 LIMIT 10")?,
+        classifications: counts(connection, "SELECT c.name, COUNT(*) FROM asset_classifications l JOIN classification_entries c ON c.id=l.classification_id JOIN assets a ON a.id=l.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' GROUP BY c.id ORDER BY COUNT(*) DESC, c.name, c.id LIMIT 10")?,
         collection_and_daily_started_at: connection.query_row("SELECT started_at FROM activity_telemetry WHERE singleton=1", [], |row| row.get(0))?,
-        most_opened_assets: activity(connection, "SELECT a.id, COALESCE(NULLIF(a.title,''), a.original_name), h.open_count, h.last_opened_at FROM asset_activity h JOIN assets a ON a.id=h.asset_id WHERE a.status='normal' AND h.open_count>0 AND h.last_opened_at IS NOT NULL ORDER BY h.open_count DESC, h.last_opened_at DESC, a.id LIMIT 10")?,
+        most_opened_assets: activity(connection, "SELECT a.id, COALESCE(NULLIF(a.title,''), a.original_name), h.open_count, h.last_opened_at FROM asset_activity h JOIN assets a ON a.id=h.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND h.open_count>0 AND h.last_opened_at IS NOT NULL ORDER BY h.open_count DESC, h.last_opened_at DESC, a.id LIMIT 10")?,
         most_opened_collections: activity(connection, "SELECT c.id, c.name, h.open_count, h.last_opened_at FROM collection_activity h JOIN collections c ON c.id=h.collection_id ORDER BY h.open_count DESC, h.last_opened_at DESC, c.id LIMIT 10")?,
-        long_unseen_assets: activity(connection, "SELECT a.id, COALESCE(NULLIF(a.title,''), a.original_name), h.open_count, h.last_opened_at FROM asset_activity h JOIN assets a ON a.id=h.asset_id WHERE a.status='normal' AND h.open_count>0 AND julianday(h.last_opened_at) < julianday('now', '-30 days') ORDER BY julianday(h.last_opened_at), a.id LIMIT 10")?,
+        long_unseen_assets: activity(connection, "SELECT a.id, COALESCE(NULLIF(a.title,''), a.original_name), h.open_count, h.last_opened_at FROM asset_activity h JOIN assets a ON a.id=h.asset_id WHERE a.status='normal' AND a.import_source IS NOT 'favorite_cover' AND h.open_count>0 AND julianday(h.last_opened_at) < julianday('now', '-30 days') ORDER BY julianday(h.last_opened_at), a.id LIMIT 10")?,
         daily: connection.prepare("SELECT local_date, SUM(CASE WHEN entity_kind='asset' THEN open_count ELSE 0 END), SUM(CASE WHEN entity_kind='collection' THEN open_count ELSE 0 END) FROM activity_daily WHERE local_date >= date('now','localtime','-29 days') GROUP BY local_date ORDER BY local_date DESC LIMIT 30")?
             .query_map([], |row| Ok(DailyStatistic { local_date: row.get(0)?, asset_opens: row.get(1)?, collection_opens: row.get(2)? }))?.collect::<Result<_, _>>()?,
     })

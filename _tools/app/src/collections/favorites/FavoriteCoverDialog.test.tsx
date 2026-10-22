@@ -42,14 +42,14 @@ it.each([false, true])("removes a pasted image's temporary file after import (fa
   }
 });
 
-it("imports a selected image into unclassified and saves its cover after crop selection", async () => {
+it("imports a selected image as a character cover and saves its cover after crop selection", async () => {
   mocks.open.mockResolvedValue("C:\\images\\new.png");
   mocks.ingestMedia.mockResolvedValue({ status: "added", asset: { id: "imported", media: { kind: "image" } } });
   const save = vi.fn().mockResolvedValue(true), close = vi.fn();
   render(<FavoriteCoverDialog target={favoriteTargets([entry], [])[0]} entry={entry} initialPage={page} busy={false} onSave={save} onClose={close} />);
   expect(screen.getByText("名前")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "파일 선택" }));
-  await waitFor(() => expect(mocks.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\images\\new.png", classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: expect.any(String) }));
+  await waitFor(() => expect(mocks.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\images\\new.png", classificationId: null, sourceUrl: null, importSource: "favorite_cover", importBatchId: expect.any(String) }));
   await waitFor(() => expect(screen.getByRole("button", { name: "바꾸기" })).toBeEnabled());
   expect(screen.getByText("名前")).toBeInTheDocument(); // Keep the name card until the imported thumbnail decodes.
   fireEvent.change(screen.getByRole("slider"), { target: { value: "32" } });

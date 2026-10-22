@@ -544,7 +544,7 @@ const ASSET_CLASSIFICATIONS_SQL: &str =
         (SELECT COUNT(*) FROM asset_classifications AS count_link
          CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
          WHERE count_link.classification_id = entry.id
-           AND count_asset.status = 'normal') AS asset_count
+           AND count_asset.status = 'normal' AND count_asset.import_source IS NOT 'favorite_cover') AS asset_count
      FROM classification_entries AS entry
      JOIN asset_classifications AS link ON link.classification_id = entry.id
      WHERE link.asset_id = ?1
@@ -563,7 +563,7 @@ const MULTI_LINKED_ASSETS_SQL: &str = "SELECT link.asset_id, link.classification
      ) AS multi
      CROSS JOIN asset_classifications AS link ON link.asset_id = multi.asset_id
      CROSS JOIN assets AS asset ON asset.id = link.asset_id
-     WHERE asset.status = 'normal'
+     WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
      ORDER BY link.asset_id";
 
 pub(crate) fn classifications_for_asset(
@@ -645,7 +645,7 @@ pub(crate) fn list_classifications_in(
              SELECT link.classification_id, COUNT(*) AS asset_count
              FROM asset_classifications AS link
              JOIN assets AS asset ON asset.id = link.asset_id
-             WHERE asset.status = 'normal'
+             WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
              GROUP BY link.classification_id
          ) AS counts ON counts.classification_id = entry.id
          ORDER BY entry.parent_id, entry.name COLLATE NOCASE, entry.id",
@@ -740,7 +740,7 @@ fn find_classification(
                 (SELECT COUNT(*) FROM asset_classifications AS count_link
                  CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
                  WHERE count_link.classification_id = classification_entries.id
-                   AND count_asset.status = 'normal') AS asset_count
+                   AND count_asset.status = 'normal' AND count_asset.import_source IS NOT 'favorite_cover') AS asset_count
              FROM classification_entries WHERE id = ?1",
             [id],
             |row| {

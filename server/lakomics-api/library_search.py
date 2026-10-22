@@ -57,7 +57,9 @@ def startup_db(db):
     # A date-order index otherwise tempts SQLite to scan every committed Asset.
     db.execute("CREATE INDEX IF NOT EXISTS idx_assets_committed_id ON assets(committed,id)")
     predicate = (asset_visibility.visibility_clause("a")
-                 if {"authority_domains", "asset_authority_state"} <= tables else "1")
+                 if {"authority_domains", "asset_authority_state"} <= tables
+                 else "1")
+    predicate += " AND " + asset_visibility.cover_filter(db, "a")
     visible = f"EXISTS(SELECT 1 FROM assets a WHERE a.id=library_tag_visibility.asset_id AND a.committed=1 AND {predicate})"
     db.execute("BEGIN IMMEDIATE")
     try:
@@ -121,7 +123,7 @@ def install_count_triggers(db, predicate, visible, tables):
         return f"UPDATE library_tag_visibility SET visible={visible} WHERE {condition};"
 
     trigger("tag_asset_insert", "AFTER INSERT", "assets", refresh("asset_id=NEW.id"))
-    trigger("tag_asset_update", "AFTER UPDATE OF id,committed", "assets",
+    trigger("tag_asset_update", "AFTER UPDATE OF id,committed,import_source", "assets",
             refresh("asset_id IN (OLD.id,NEW.id)"))
     trigger("tag_asset_delete", "AFTER DELETE", "assets", refresh("asset_id=OLD.id"))
     if {"authority_domains", "asset_authority_state"} <= tables:

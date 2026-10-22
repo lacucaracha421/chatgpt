@@ -32,7 +32,7 @@ Status: `PARTIAL` — user request 2026-10-22; user picked card A + detail A. Se
 
 - Grid of user-chosen representative images in a user-set order; opening one shows a profile (birthday, height, appearing works and similar basics), links to the related Collection works, and the character's assets gathered automatically from the asset character folders.
 - First pass: only characters that already exist in 에셋. Characters without assets come later.
-- **FAV-CHAR-002 (user, 2026-10-22, in progress):** add characters that are not in 에셋 by name (manual entries). They show a name card until the user drops or pastes an image on the PC, which is imported into the library (미분류) and becomes the cover; 에셋 캐릭터와 연결 later turns the entry into a normal one. Server deployed 2026-10-22; PC build with hero open and Ctrl+V paste running; tablet 0.9.140 installed (name cards, 이름으로 추가, link, hero). Uncommitted; device checks pending.
+- **FAV-CHAR-002 (user, 2026-10-22, in progress):** add characters that are not in 에셋 by name (manual entries). They show a name card until the user drops or pastes an image on the PC, which is imported as a cover-only image (excluded from Asset lists/counts/search/Home; manual covers imported before this are marked on favourite reads) and becomes the cover; 에셋 캐릭터와 연결 later turns the entry into a normal one. Server deployed 2026-10-22; PC build with hero open and Ctrl+V paste running; tablet 0.9.140 installed (name cards, 이름으로 추가, link, hero). Cover-only exclusion (2026-10-22): PC build running and server deployed; a pasted image that already exists as an asset stays a normal asset.
 - PC first, tablet in the same round. HTML mockup first (`docs/prototypes/fav-characters-20261022/`).
 
 

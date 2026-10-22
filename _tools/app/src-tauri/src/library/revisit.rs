@@ -74,7 +74,7 @@ pub(crate) fn save_daily_slate(
     }
     let transaction = connection.unchecked_transaction()?;
     for asset_id in &seen {
-        let normal = transaction.query_row("SELECT 1 FROM assets WHERE id=?1 AND status='normal'", [asset_id], |_| Ok(())).optional()?.is_some();
+        let normal = transaction.query_row("SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND import_source IS NOT 'favorite_cover'", [asset_id], |_| Ok(())).optional()?.is_some();
         if !normal { return Err(LibraryError::AssetNotFound); }
     }
     transaction.execute(
@@ -125,7 +125,7 @@ pub(crate) fn load_daily_slate(
     for row in bundle_rows {
         let (id, kind, title, reason) = row?;
         let mut assets_statement = connection.prepare(
-            "SELECT asset_id FROM revisit_bundle_assets WHERE bundle_id = ?1 ORDER BY position ASC",
+            "SELECT link.asset_id FROM revisit_bundle_assets AS link JOIN assets AS asset ON asset.id=link.asset_id WHERE link.bundle_id = ?1 AND asset.status='normal' AND asset.import_source IS NOT 'favorite_cover' ORDER BY link.position ASC",
         )?;
         let asset_ids = assets_statement
             .query_map(params![id], |row| row.get::<_, String>(0))?
@@ -319,7 +319,7 @@ fn load_recommendation_assets(connection: &Connection, ids: Option<&[String]>) -
          asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, \
          asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, \
          asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id \
-         WHERE asset.status = 'normal'{restriction}"
+         WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'{restriction}"
     ))?;
     let rows = statement.query_map(rusqlite::params_from_iter(ids.unwrap_or_default().iter()), asset_summary_from_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(LibraryError::from)
@@ -1057,7 +1057,7 @@ impl super::Library {
         parse_local_date(day)?;
         parse_utc_timestamp(now_utc)?;
         let sql = format!(
-            "WITH revisit_assets AS (SELECT id, collected_at FROM assets WHERE status = 'normal' AND media_kind IN ('image', 'gif', 'animated_gif'))\n{}",
+            "WITH revisit_assets AS (SELECT id, collected_at FROM assets WHERE status = 'normal' AND import_source IS NOT 'favorite_cover' AND media_kind IN ('image', 'gif', 'animated_gif'))\n{}",
             include_str!("../../../../../server/lakomics-api/home_revisit.sql")
         );
         self.connection()?.with_lock(|connection| {

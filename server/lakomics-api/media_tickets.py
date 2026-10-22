@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 import library_thumbnails
 import asset_authority
+import asset_visibility
 import head_cache
 import original_cache
 
@@ -217,7 +218,7 @@ def create_mobile_media_ticket(
             asset = asset_authority.trash_ticket_assets(db, [asset_id]).get(asset_id)
         else:
             asset = db.execute(
-                "SELECT * FROM visible_assets WHERE id = ? AND committed = 1",
+                f"SELECT * FROM {asset_visibility.media_projection(db)} WHERE id = ? AND committed = 1",
                 (asset_id,),
             ).fetchone()
     if asset is None:
@@ -317,7 +318,7 @@ def create_mobile_media_tickets(
             assets_by_id = {
                 row["id"]: dict(row)
                 for row in db.execute(
-                    f"SELECT * FROM visible_assets WHERE committed = 1 AND id IN ({placeholders})",
+                    f"SELECT * FROM {asset_visibility.media_projection(db)} WHERE committed = 1 AND id IN ({placeholders})",
                     asset_ids,
                 ).fetchall()
             }

@@ -424,7 +424,7 @@ fn routing(
 ) -> Result<Routing> {
     let _snapshot = conn.unchecked_transaction()?;
     let corpus: HashSet<String> = conn
-        .prepare("SELECT id FROM assets WHERE status='normal' AND media_kind IN ('image','gif')")?
+        .prepare("SELECT id FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover' AND media_kind IN ('image','gif')")?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?
         .into_iter()
@@ -750,7 +750,7 @@ impl Library {
         let live = self
             .connection()?
             .prepare(
-                "SELECT id FROM assets WHERE status='normal' AND media_kind IN ('image','gif')",
+                "SELECT id FROM assets WHERE status='normal' AND import_source IS NOT 'favorite_cover' AND media_kind IN ('image','gif')",
             )?
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<HashSet<_>, _>>()?;

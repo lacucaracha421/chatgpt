@@ -240,7 +240,7 @@ pub(crate) fn vocabulary(
     {
         let mut statement = connection.prepare(&format!(
             "SELECT tagged.tag, COUNT(*) FROM asset_auto_tags AS tagged
-             JOIN assets AS asset ON asset.id = tagged.asset_id AND asset.status = 'normal'
+             JOIN assets AS asset ON asset.id = tagged.asset_id AND asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
              WHERE {}
              GROUP BY tagged.tag",
             machine_row_counts_sql("tagged")
@@ -258,7 +258,7 @@ pub(crate) fn vocabulary(
                     SUM(CASE WHEN edit.state = 'added' AND tagged.asset_id IS NULL THEN 1
                              WHEN edit.state = 'removed' AND tagged.asset_id IS NOT NULL THEN -1 ELSE 0 END)
              FROM asset_auto_tag_edits AS edit
-             JOIN assets AS asset ON asset.id = edit.asset_id AND asset.status = 'normal'
+             JOIN assets AS asset ON asset.id = edit.asset_id AND asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
              LEFT JOIN asset_auto_tags AS tagged ON tagged.asset_id = edit.asset_id AND tagged.tag = edit.tag AND {}
              GROUP BY edit.tag",
             machine_row_counts_sql("tagged")

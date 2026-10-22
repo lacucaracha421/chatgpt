@@ -60,6 +60,7 @@ import time
 from pathlib import Path
 
 import head_cache
+import asset_visibility
 import library_thumbnails as thumbs
 
 LOG = logging.getLogger("lakomics.image-thumbnails")
@@ -221,15 +222,16 @@ def _is_hex_digest(value) -> bool:
 def visible_asset(db, asset_id):
     """The Asset row when an ordinary reader can still see it, or ``None``.
 
-    Visibility is the shipped ``visible_assets`` projection, not a re-derived rule, so
-    "hidden" here means exactly what it means to mobile. Uncommitted, trashed or
+    Direct cover media retains lifecycle checks, including thumbnail repair.
+    Uncommitted, trashed or
     tombstoned Assets are invisible, and an Asset whose row is gone is invisible too
     (the projection cannot return what does not exist).
     """
     if not _visible_assets_available(db):
         return None
     try:
-        return db.execute("SELECT * FROM visible_assets WHERE id=?", [asset_id]).fetchone()
+        projection = asset_visibility.media_projection(db)
+        return db.execute(f"SELECT * FROM {projection} WHERE id=?", [asset_id]).fetchone()
     except sqlite3.OperationalError:
         return None
 

@@ -36,8 +36,21 @@ def _predicate(alias):
 
 
 def visibility_clause(alias="asset"):
-    """The same rule as a WHERE fragment, for a query that does not read the view."""
+    """Lifecycle rule as a WHERE fragment, including direct cover media."""
     return f"({_predicate(alias)})"
+
+
+def cover_filter(db, alias="asset"):
+    """Older schemas have no cover marker and retain their existing visibility."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(assets)")}
+    return f"{alias}.import_source IS NOT 'favorite_cover'" if "import_source" in columns else "1"
+
+
+def media_projection(db):
+    """Legacy callers may supply only their own visible_assets table or view."""
+    if db.execute("SELECT 1 FROM sqlite_temp_master WHERE type='view' AND name='media_assets'").fetchone():
+        return "media_assets"
+    return "visible_assets"
 
 
 def install(db):
@@ -47,9 +60,16 @@ def install(db):
                                          "AND name IN ('assets','authority_domains','asset_authority_state')")}
     if 'assets' not in tables:
         return
-    predicate = f" WHERE {_predicate('asset')}" if len(tables) == 3 else ""
+    predicate = visibility_clause("asset") if len(tables) == 3 else "1"
     rating_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_asset_ratings'").fetchone()
     rating = ("CASE WHEN asset.kind='video' THEN NULL ELSE "
               "(SELECT content_rating FROM library_asset_ratings WHERE asset_id=asset.id) END"
               if rating_table else "NULL")
-    db.execute(f"CREATE TEMP VIEW visible_assets AS SELECT asset.*, {rating} AS content_rating FROM assets AS asset" + predicate)
+    covers = cover_filter(db)
+    projection = f"SELECT asset.*, {rating} AS content_rating FROM assets AS asset"
+    db.execute(f"CREATE TEMP VIEW visible_assets AS {projection} WHERE {predicate} AND {covers}")
+    # Preserve the ordinary projection even when a caller replaces it (e.g. to hide
+    # an Asset). Only marked covers may bypass that projection, never lifecycle.
+    cover_media = f"NOT ({covers}) AND {predicate}" if covers != "1" else "0"
+    db.execute(f"CREATE TEMP VIEW media_assets AS {projection} WHERE "
+               f"EXISTS (SELECT 1 FROM visible_assets visible WHERE visible.id=asset.id) OR ({cover_media})")

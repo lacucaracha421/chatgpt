@@ -1031,6 +1031,7 @@ export type EncryptedVaultExportJob = { id: number; running: boolean; progress: 
 
 export type ImportSource =
   | "direct"
+  | "favorite_cover"
   | "browser_extension"
   | "metadata_import"
   | "legacy_lakomics";
@@ -1329,7 +1330,7 @@ export type IngestMediaInput = {
   creatorName?: string | null;
   creatorHandle?: string | null;
   creatorUrl?: string | null;
-  importSource: "direct" | "browser_extension" | "metadata_import" | "legacy_lakomics";
+  importSource: ImportSource;
   importBatchId: string;
 };
 

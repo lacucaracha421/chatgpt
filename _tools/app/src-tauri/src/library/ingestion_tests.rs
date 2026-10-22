@@ -445,6 +445,23 @@
     }
 
     #[test]
+    fn favorite_cover_import_keeps_media_without_entering_asset_lists() {
+        let fixture = IngestionFixture::new();
+        let request = serde_json::from_value(serde_json::json!({
+            "sourcePath":fixture.source,"importSource":"favorite_cover",
+            "importBatchId":"00000000-0000-4000-8000-000000000001"
+        })).unwrap();
+        let IngestOutcome::Added { asset } = fixture.library.ingest_media(request).unwrap() else {
+            panic!("cover import must add its image");
+        };
+        assert_eq!(asset.import_source, Some(ImportSource::FavoriteCover));
+        assert!(fixture.library.resolve_media(&asset.id, crate::library::MediaVariant::Thumbnail).is_ok());
+        let page = fixture.library.list_assets(AssetQuery {limit:20,..Default::default()}).unwrap();
+        assert_eq!(page.total_count, 0);
+        assert!(page.items.is_empty());
+    }
+
+    #[test]
     fn ingest_copies_the_image_and_keeps_the_user_source() {
         let fixture = IngestionFixture::new();
 

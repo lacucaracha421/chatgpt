@@ -43,7 +43,7 @@ const LIST_ALBUMS_SQL: &str = "SELECT id, name, parent_id, icon_key, color_key,
         (SELECT COUNT(*) FROM asset_albums AS count_link
          CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
          WHERE count_link.album_id = albums.id
-           AND count_asset.status = 'normal') AS asset_count
+           AND count_asset.status = 'normal' AND count_asset.import_source IS NOT 'favorite_cover') AS asset_count
      FROM albums
      ORDER BY parent_id, name COLLATE NOCASE, id";
 
@@ -53,7 +53,7 @@ const ASSET_ALBUMS_SQL: &str =
         (SELECT COUNT(*) FROM asset_albums AS count_link
          CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
          WHERE count_link.album_id = album.id
-           AND count_asset.status = 'normal') AS asset_count
+           AND count_asset.status = 'normal' AND count_asset.import_source IS NOT 'favorite_cover') AS asset_count
      FROM albums AS album
      JOIN asset_albums AS link ON link.album_id = album.id
      WHERE link.asset_id = ?1

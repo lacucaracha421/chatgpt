@@ -432,6 +432,8 @@ pub enum AspectRatioFilter {
 #[serde(rename_all = "snake_case")]
 pub enum ImportSource {
     Direct,
+    /// Character artwork: retained for media access/sync, excluded from Asset readers.
+    FavoriteCover,
     BrowserExtension,
     MetadataImport,
     LegacyLakomics,
@@ -441,6 +443,7 @@ impl ImportSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Direct => "direct",
+            Self::FavoriteCover => "favorite_cover",
             Self::BrowserExtension => "browser_extension",
             Self::MetadataImport => "metadata_import",
             Self::LegacyLakomics => "legacy_lakomics",
@@ -450,6 +453,7 @@ impl ImportSource {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "direct" => Some(Self::Direct),
+            "favorite_cover" => Some(Self::FavoriteCover),
             "browser_extension" => Some(Self::BrowserExtension),
             "metadata_import" => Some(Self::MetadataImport),
             "legacy_lakomics" => Some(Self::LegacyLakomics),

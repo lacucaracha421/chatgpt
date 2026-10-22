@@ -10,11 +10,62 @@ from fastapi.testclient import TestClient
 
 import api_auth
 import favorite_characters
+import asset_visibility
 
 PREFIX = favorite_characters.PREFIX
 
 
+class CoverVisibilityTests(unittest.TestCase):
+    def test_media_preserves_reader_visibility_and_cover_lifecycle(self):
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        db.executescript("""
+            CREATE TABLE assets(id TEXT PRIMARY KEY, import_source TEXT, committed INTEGER);
+            CREATE TABLE authority_domains(domain TEXT, library_id TEXT);
+            CREATE TABLE asset_authority_state(library_id TEXT, asset_id TEXT, lifecycle TEXT);
+            INSERT INTO authority_domains VALUES('assets', 'lib');
+            INSERT INTO assets VALUES('ordinary', 'capture', 1), ('cover', 'favorite_cover', 1),
+                ('trash', 'favorite_cover', 1), ('missing', 'favorite_cover', 1),
+                ('tombstoned', 'favorite_cover', 1), ('pending', 'favorite_cover', 0);
+            INSERT INTO asset_authority_state VALUES('lib', 'ordinary', 'normal'),
+                ('lib', 'cover', 'normal'), ('lib', 'trash', 'trash'),
+                ('lib', 'tombstoned', 'tombstoned'), ('lib', 'pending', 'normal');
+        """)
+        asset_visibility.install(db)
+        self.assertEqual(db.execute("SELECT id FROM visible_assets").fetchall(), [("ordinary",)])
+        self.assertEqual(set(db.execute("SELECT id FROM media_assets WHERE committed=1")),
+                         {("ordinary",), ("cover",)})
+        # Ordinary reader restrictions can change after a worker opens its connection.
+        db.executescript("""
+            DROP VIEW visible_assets;
+            CREATE TEMP VIEW visible_assets AS SELECT * FROM assets WHERE 0;
+        """)
+        self.assertEqual(db.execute("SELECT id FROM media_assets WHERE committed=1").fetchall(),
+                         [("cover",)])
+
+
 class FavoriteCharactersTests(unittest.TestCase):
+    def test_legacy_manual_cover_upgrade_keeps_normal_character_asset_visible(self):
+        with self.get_db() as db:
+            db.execute("CREATE TABLE assets(id TEXT PRIMARY KEY, import_source TEXT)")
+            db.executemany("INSERT INTO assets VALUES(?, 'direct')", [("manual-cover",), ("normal-cover",)])
+            db.commit()
+        self.send({"op": "create", "id": "manual-old", "name": "Manual"},
+                  {"op": "update", "id": "manual-old", "set": {"coverAssetId": "manual-cover"}},
+                  {"op": "add", "ids": ["normal"]},
+                  {"op": "update", "id": "normal", "set": {"coverAssetId": "normal-cover"}})
+        # Simulate the existing pre-marker document at process startup.
+        with self.get_db() as db:
+            db.execute("UPDATE assets SET import_source='direct'")
+            favorite_characters.mark_manual_covers(db, favorite_characters._stored(db)[1])
+            favorite_characters.mark_manual_covers(db, favorite_characters._stored(db)[1])
+            db.commit()
+        self.send({"op": "link", "id": "manual-old", "characterId": "linked"})
+        with self.get_db() as db:
+            asset_visibility.install(db)
+            self.assertEqual([row[0] for row in db.execute("SELECT id FROM visible_assets")], ["normal-cover"])
+            self.assertEqual(db.execute("SELECT count(*) FROM media_assets").fetchone()[0], 2)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         path = Path(self.temp.name) / "control.sqlite"

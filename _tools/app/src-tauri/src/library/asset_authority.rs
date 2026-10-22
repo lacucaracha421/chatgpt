@@ -1373,7 +1373,11 @@ impl Library {
                 creator_name: p.creator_name.clone(),
                 creator_handle: p.creator_handle.clone(),
                 creator_url: None,
-                import_source: ImportSource::BrowserExtension,
+                import_source: if p.import_source.as_deref() == Some("favorite_cover") {
+                    ImportSource::FavoriteCover
+                } else {
+                    ImportSource::BrowserExtension
+                },
                 import_batch_id: uuid::Uuid::new_v4().to_string(),
             },
             Some(&identity),

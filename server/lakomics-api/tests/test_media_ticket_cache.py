@@ -11,6 +11,16 @@ from tests.test_capture_api_stub import fake_s3
 
 
 class MediaTicketCacheTests(AssetAuthorityFixture):
+    def test_favorite_cover_still_has_single_and_batch_thumbnail_tickets(self):
+        with api_app.get_db() as db:
+            db.execute("UPDATE assets SET import_source='favorite_cover' WHERE id=?", [self.aid])
+            db.commit()
+        self.assertEqual(self.single().status_code, 200)
+        self.assertTrue(self.batch()["ok"])
+        self.assertEqual(self.command("trashAsset", self.aid, 1).status_code, 200)
+        self.assertEqual(self.single().status_code, 404)
+        self.assertEqual(self.batch()["error"], "not_found")
+
     def setUp(self):
         super().setUp()
         self.activate()

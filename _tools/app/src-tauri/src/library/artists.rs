@@ -444,7 +444,7 @@ impl Snapshot {
                 "SELECT id, creator_name, COALESCE(creator_handle, creator_url), creator_url, source_url, collected_at
                  FROM assets
                  JOIN asset_artist_scope AS artist_scope ON artist_scope.asset_id = assets.id
-                 WHERE status = 'normal'
+                 WHERE status = 'normal' AND import_source IS NOT 'favorite_cover'
                    AND (?1 IS NULL OR assets.id = ?1 OR lower(COALESCE(creator_handle, creator_url)) = lower(?2))
                    AND (?3 IS NULL OR artist_scope.scope_ref = ?3)
                  ORDER BY collected_at DESC, id DESC",
@@ -1569,7 +1569,7 @@ pub(crate) fn fill_ingested_artist(
     let source: Option<String> = connection
         .query_row(
             "SELECT source_url FROM assets JOIN asset_artist_scope scope ON scope.asset_id = assets.id
-         WHERE assets.id = ?1 AND status = 'normal' AND scope.scope_ref = 'unknown:source'",
+         WHERE assets.id = ?1 AND status = 'normal' AND import_source IS NOT 'favorite_cover' AND scope.scope_ref = 'unknown:source'",
             [asset_id],
             |row| row.get(0),
         )
@@ -1627,7 +1627,7 @@ pub(crate) fn asset_artist(
     let scope: Option<String> = connection
         .query_row(
             "SELECT scope_ref FROM asset_artist_scope JOIN assets ON assets.id = asset_id
-             WHERE asset_id = ?1 AND status = 'normal'",
+             WHERE asset_id = ?1 AND status = 'normal' AND import_source IS NOT 'favorite_cover'",
             [asset_id],
             |row| row.get(0),
         )
@@ -1716,7 +1716,7 @@ pub(super) fn materialize(
         return Ok(artist_id);
     }
     let used = connection
-        .query_row("SELECT 1 FROM assets WHERE status = 'normal' AND COALESCE(creator_handle, creator_url) = ?1 LIMIT 1", [id], |_| Ok(()))
+        .query_row("SELECT 1 FROM assets WHERE status = 'normal' AND import_source IS NOT 'favorite_cover' AND COALESCE(creator_handle, creator_url) = ?1 LIMIT 1", [id], |_| Ok(()))
         .optional()?
         .is_some();
     if !used {
@@ -1923,7 +1923,7 @@ pub(crate) fn merge(
                     ));
                 }
                 let used = transaction
-                    .query_row("SELECT 1 FROM assets WHERE status = 'normal' AND COALESCE(creator_handle, creator_url) = ?1 LIMIT 1", [source], |_| Ok(()))
+                    .query_row("SELECT 1 FROM assets WHERE status = 'normal' AND import_source IS NOT 'favorite_cover' AND COALESCE(creator_handle, creator_url) = ?1 LIMIT 1", [source], |_| Ok(()))
                     .optional()?
                     .is_some();
                 if !used {
@@ -2053,7 +2053,7 @@ pub(crate) fn assign_assets(
     for asset_id in &unique {
         let normal = transaction
             .query_row(
-                "SELECT 1 FROM assets WHERE id = ?1 AND status = 'normal'",
+                "SELECT 1 FROM assets WHERE id = ?1 AND status = 'normal' AND import_source IS NOT 'favorite_cover'",
                 [asset_id],
                 |_| Ok(()),
             )
@@ -2130,7 +2130,7 @@ fn list_excluded_folders(
                  FROM descendants
                  JOIN asset_classifications AS link ON link.classification_id = descendants.id
                  JOIN assets AS asset ON asset.id = link.asset_id
-                 WHERE asset.status = 'normal' AND asset.media_kind IN ('image', 'gif')
+                 WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND asset.media_kind IN ('image', 'gif')
                  GROUP BY descendants.root_id
              )
              SELECT excluded.classification_id, entry.name,

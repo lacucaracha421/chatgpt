@@ -75,7 +75,7 @@ static CHRONO_ASC_HALF_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::n
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -110,7 +110,7 @@ static CHRONO_DESC_HALF_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -149,7 +149,7 @@ const ASSET_COUNT_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?2 WHERE ?2 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT COUNT(*) FROM assets AS asset
-WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?4, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?4))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?5 AND link.classification_id = ?1) OR (NOT ?5 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?6 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -195,7 +195,7 @@ fn count_filtered_assets(
 }
 
 /// The listing and count statements all start their filters with this clause.
-const NORMAL_ASSET_CLAUSE: &str = "WHERE asset.status = 'normal'";
+const NORMAL_ASSET_CLAUSE: &str = "WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'";
 
 /// Adds the 자동 태그 filter (`auto_tags.rs`) after the normal-asset clause.
 fn with_auto_tag_filter<'a>(
@@ -285,7 +285,7 @@ impl Library {
     pub(crate) fn list_normal_x_source_urls(&self) -> Result<Vec<String>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT DISTINCT source_url FROM assets\n             WHERE status = 'normal'\n               AND source_url IS NOT NULL\n               AND (source_url LIKE 'https://x.com/%' OR source_url LIKE 'https://twitter.com/%')\n             ORDER BY source_url ASC",
+            "SELECT DISTINCT source_url FROM assets\n             WHERE status = 'normal' AND import_source IS NOT 'favorite_cover'\n               AND source_url IS NOT NULL\n               AND (source_url LIKE 'https://x.com/%' OR source_url LIKE 'https://twitter.com/%')\n             ORDER BY source_url ASC",
         )?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut urls = Vec::new();
@@ -922,7 +922,7 @@ pub(crate) fn asset_summaries_by_ids(
         return Ok(Vec::new());
     }
     let placeholders = std::iter::repeat_n("?", asset_ids.len()).collect::<Vec<_>>().join(",");
-    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
+    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.import_source IS NOT 'favorite_cover' AND asset.id IN ({placeholders})");
     let mut statement = connection.prepare(&sql)?;
     let rows = statement
         .query_map(rusqlite::params_from_iter(asset_ids.iter()), asset_summary_from_row)?
@@ -987,7 +987,7 @@ static FAVORITES_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| 
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -1020,7 +1020,7 @@ asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at,
 asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?14 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?14, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?14))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -1051,7 +1051,7 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ), scoped AS MATERIALIZED (
     SELECT asset.id, asset.creator_name, asset.creator_handle, asset.creator_url, asset.collected_at
     FROM assets AS asset
-    WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
+    WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
     AND COALESCE(asset.creator_handle, asset.creator_url) IS NOT NULL
     AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
     AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -1111,7 +1111,7 @@ LEFT JOIN recent_activity ON recent_activity.key = g.key
 ORDER BY g.asset_count DESC, g.key ASC";
 const DATE_BUCKETS_SQL: &str = "SELECT date(asset.collected_at, printf('%+d minutes', ?3)) AS date, COUNT(*) AS count
 FROM assets AS asset
-WHERE asset.status = 'normal'
+WHERE asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
 AND asset.collected_at >= ?1
 AND asset.collected_at < ?2
 AND (?4 = 0 OR asset.media_kind IN ('image','gif'))
@@ -1121,7 +1121,7 @@ GROUP BY date ORDER BY date DESC";
 // The existing (status, collected_at, id) index bounds each local day; only the requested window is read.
 const LOCAL_DATE_BUCKETS_SQL: &str = "SELECT json_extract(day.value, '$.localDate') AS date, COUNT(*) AS count
 FROM json_each(?5) AS day
-JOIN assets AS asset ON asset.status = 'normal'
+JOIN assets AS asset ON asset.status = 'normal' AND asset.import_source IS NOT 'favorite_cover'
 AND asset.collected_at >= json_extract(day.value, '$.startUtc')
 AND asset.collected_at < json_extract(day.value, '$.endUtc')
 WHERE asset.collected_at >= ?1 AND asset.collected_at < ?2

@@ -174,10 +174,21 @@ def apply(entries, command):
     return [present[id] for id in first] + [entry for entry in entries if entry["characterId"] not in chosen]
 
 
+def mark_manual_covers(db, entries):
+    """Upgrade pre-marker manual imports without removing their media or identity."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='assets'").fetchone():
+        return
+    db.executemany(
+        "UPDATE assets SET import_source='favorite_cover' WHERE id=? AND import_source='direct'",
+        [(entry["coverAssetId"],) for entry in entries
+         if entry["characterId"].startswith("manual-") and entry.get("coverAssetId")])
+
+
 def register(app, get_db, require_client):
     def startup():
         with get_db() as db:
             db.executescript(DDL)
+            mark_manual_covers(db, _stored(db)[1])
             db.commit()
 
     lifecycle(app).on_startup(startup)
@@ -200,6 +211,7 @@ def register(app, get_db, require_client):
             db.execute("BEGIN IMMEDIATE")
             try:
                 revision, current = _stored(db)
+                mark_manual_covers(db, current)
                 entries = current
                 for command in body.commands:
                     entries = apply(entries, command)
@@ -210,6 +222,7 @@ def register(app, get_db, require_client):
                         "INSERT INTO favorite_characters(singleton,revision,payload) VALUES(1,?,?) "
                         "ON CONFLICT(singleton) DO UPDATE SET revision=excluded.revision,payload=excluded.payload",
                         (revision + 1, json.dumps(entries, separators=(",", ":"))))
+                mark_manual_covers(db, entries)
                 db.commit()
             except BaseException:
                 db.rollback()

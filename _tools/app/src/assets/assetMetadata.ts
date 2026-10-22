@@ -26,6 +26,7 @@ export function creatorLabel(
 }
 
 const IMPORT_SOURCE_LABELS: Record<ImportSource, string> = {
+  favorite_cover: "캐릭터 커버",
   direct: "직접 추가",
   browser_extension: "브라우저 확장",
   metadata_import: "메타데이터 가져오기",

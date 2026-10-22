@@ -5,6 +5,7 @@ fn library() -> Connection {
     conn.execute_batch("CREATE TABLE assets(id TEXT PRIMARY KEY,status TEXT,media_kind TEXT);
         INSERT INTO assets VALUES ('a','normal','image'),('b','normal','gif'),('c','normal','image'),
         ('gone','trash','image'),('video','normal','video');
+        ALTER TABLE assets ADD COLUMN import_source TEXT;
         CREATE TABLE character_targets(id TEXT,display_name TEXT,series_classification_id TEXT);
         INSERT INTO character_targets VALUES ('target','레제/Reze','csm'),('empty','없는',NULL);
         CREATE TABLE classification_entries(id TEXT,name TEXT);
@@ -295,6 +296,13 @@ fn nl_search_cosine_ties_rrf_and_live_corpus_filter() {
     assert_eq!(rrf(&scores, &qwen), vec!["a", "b", "c"]);
     let many: Vec<_> = (0..250).map(|i| (format!("{i:03}"), 1.0)).collect();
     assert_eq!(rrf(&many, &[]).len(), 200);
+    conn.execute("UPDATE assets SET import_source='favorite_cover' WHERE id='c'", [])
+        .unwrap();
+    let route = routing(&conn, "풍경", &vectors, 200).unwrap();
+    assert_eq!(
+        cosine(&vectors, &[1., 0.], &route).iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        vec!["a", "b"]
+    );
     conn.execute("UPDATE assets SET status='trash' WHERE id='a'", [])
         .unwrap();
     assert!(!routing(&conn, "레제", &vectors, 200)

@@ -55,7 +55,7 @@ export function FavoriteCoverDialog({ target, entry, initialPage, busy, onSave, 
         if (!clipboard.size || clipboard.size > 64 * 1024 * 1024) throw new Error("이미지는 64 MiB 이하의 비어 있지 않은 파일이어야 합니다.");
         temporary = await gateway.stageClipboardImage(clipboard.type, Array.from(new Uint8Array(await clipboard.arrayBuffer())));
       }
-      const result = await gateway.ingestMedia({ sourcePath: temporary ?? paths[0], classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: crypto.randomUUID() });
+      const result = await gateway.ingestMedia({ sourcePath: temporary ?? paths[0], classificationId: null, sourceUrl: null, importSource: "favorite_cover", importBatchId: crypto.randomUUID() });
       if (result.status === "review_pending") { setError("비슷한 이미지 확인 후 다시 선택하세요."); return; }
       if (result.status === "added" && result.asset.media.kind !== "image") { setError("이미지 파일을 선택하세요."); return; }
       setSelected(result.status === "added" ? result.asset.id : result.existingAssetId); setCoverY(50);
