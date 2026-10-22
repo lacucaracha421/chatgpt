@@ -164,6 +164,7 @@ mod lock;
 pub(crate) mod machine_settings;
 pub mod sync_hold;
 mod manga;
+pub(crate) mod manga_spine_scans;
 pub mod manga_index;
 pub(crate) mod manga_index_sync;
 mod manga_root_guard;

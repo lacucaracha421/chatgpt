@@ -17,3 +17,8 @@ export function mangaPixels(id: string, pxPerMm: number, scale = 1, mm = MANGA_M
 export function mangaShelfStyle(tablet: boolean): CSSProperties {
   return { "--manga-height": `${MANGA_MM.height * MANGA_PX_PER_MM[tablet ? "tablet" : "pc"]}px` } as CSSProperties;
 }
+
+/** The decoded scan records the physical thickness, independent of the cover width. */
+export function mangaScanWidth(height: number, scanRatio: number): number {
+  return height * scanRatio;
+}

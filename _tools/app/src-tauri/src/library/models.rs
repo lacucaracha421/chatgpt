@@ -1107,6 +1107,8 @@ pub struct CollectionVolume {
     pub local_release_date: Option<String>,
     pub isbn13: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spine_scan: Option<super::manga_spine_scans::SpineScan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price: Option<i64>,

@@ -134,7 +134,9 @@ impl Library {
         collection_id: &str,
         mut on_progress: Option<&mut dyn FnMut(u32, u32)>,
     ) -> Result<Vec<CollectionVolume>, LibraryError> {
+        let started = std::time::Instant::now();
         super::collection_authority::collection_write_status(&*self.connection()?)?;
+        let authority_ready = std::time::Instant::now();
         let (binding, volume_range) = {
             let connection = self.connection()?;
             let collection_type: Option<String> = connection
@@ -161,6 +163,7 @@ impl Library {
                 .optional()?;
             (binding, volume_range)
         };
+        let binding_loaded = std::time::Instant::now();
 
         if let Some((manga_id, Some(snapshot))) = binding {
             let covers = mangadex::parse_snapshot_covers(&snapshot, &manga_id)?;
@@ -169,6 +172,7 @@ impl Library {
             materialize_mangadex_volumes(&transaction, collection_id, &covers, None)?;
             transaction.commit()?;
         }
+        let materialized = std::time::Instant::now();
 
         // 뷰어를 연속으로 열면(React StrictMode, 재오픈) 같은 컬렉션의 목록 조회가
         // 동시에 두 번 돌고, 두 흐름이 같은 슬롯을 각자 import해 UNIQUE 제약 위반으로
@@ -177,6 +181,7 @@ impl Library {
             .volume_import_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let import_locked = std::time::Instant::now();
         let legacy_covers = match self.list_collection_covers(collection_id) {
             Ok(covers) => covers,
             Err(
@@ -184,27 +189,44 @@ impl Library {
             ) => Vec::new(),
             Err(error) => return Err(error),
         };
+        let covers_loaded = std::time::Instant::now();
         let mut local_slots = BTreeMap::new();
         for cover in legacy_covers {
             if let Some(slot) = cover
                 .volume_label
                 .strip_prefix("vol.")
                 .and_then(parse_volume_slot)
-                .filter(|(volume_number, _)| volume_range.restart_numbering || volume_range.contains(*volume_number))
+                .filter(|(volume_number, _)| {
+                    volume_range.restart_numbering || volume_range.contains(*volume_number)
+                })
             {
                 local_slots.entry(slot).or_insert(cover.file_name);
             }
         }
+        // The import lock keeps other listings from changing these slots. Read the
+        // imported set once rather than reopening SQLite for every cached cover.
+        // Release the connection before file I/O or progress callbacks.
+        let imported_slots = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT volume_number, edition_index FROM collection_volumes
+                 WHERE collection_id = ?1 AND source_provider = 'local'
+                   AND cover_artwork_id IS NOT NULL",
+            )?;
+            let slots = statement
+                .query_map([collection_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, u8>(1)?))
+                })?
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            slots
+        };
         let total_slots = local_slots.len() as u32;
         for (index, (slot, file_name)) in local_slots.into_iter().enumerate() {
             let (volume_number, edition_index) = slot;
             // 슬롯을 실제로 처리(import)했을 때만 진행을 보고한다. 이미 등록된
             // 슬롯은 건너뛰므로 진행 이벤트도 만들지 않는다.
             let slot_result = (|| -> Result<bool, LibraryError> {
-                if self
-                    .local_volume_artwork(collection_id, volume_number, edition_index)?
-                    .is_some()
-                {
+                if imported_slots.contains(&slot) {
                     return Ok(false);
                 }
                 let existing_artwork = self
@@ -280,8 +302,11 @@ impl Library {
                 }
             }
         }
+        drop(_import_guard);
+        let imported = std::time::Instant::now();
 
         let connection = self.connection()?;
+        let projection_connected = std::time::Instant::now();
         let mut statement = connection.prepare(
             "WITH source_json AS (
                  SELECT *, CASE WHEN json_valid(provider_data_json)
@@ -304,7 +329,7 @@ impl Library {
                     CASE WHEN source.list_price NOT GLOB '*[^0-9]*'
                                    AND CAST(source.list_price AS INTEGER) > 0
                          THEN CAST(source.list_price AS INTEGER) END,
-                    source.publisher_name
+                    source.publisher_name, scan.side, scan.back
              FROM collection_volumes AS volume
              LEFT JOIN source_fields AS source
                ON source.collection_id = volume.collection_id
@@ -316,6 +341,7 @@ impl Library {
                     AND candidate.provider IN ('kakao', 'aladin')
                   ORDER BY CASE candidate.provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1
               )
+             LEFT JOIN manga_spine_scans AS scan ON scan.isbn13 = source.isbn13
              WHERE volume.collection_id = ?1
                AND (?2 IS NULL OR volume.volume_number >= ?2)
                AND (?3 IS NULL OR volume.volume_number <= ?3)
@@ -335,6 +361,12 @@ impl Library {
                     let release_status = local_release_date
                         .as_deref()
                         .and_then(|value| release_status_at(value, chrono::Local::now()));
+                    let isbn13: Option<String> = row.get(5)?;
+                    let side = row.get::<_, Option<bool>>(9)?.unwrap_or(false);
+                    let back = row.get::<_, Option<bool>>(10)?.unwrap_or(false);
+                    let spine_scan = isbn13
+                        .as_deref()
+                        .and_then(|isbn| self.spine_scan_parts(isbn, side, back));
                     Ok(CollectionVolume {
                         id: row.get(0)?,
                         volume_number,
@@ -342,7 +374,8 @@ impl Library {
                         display_label: display_label(volume_number, edition_index),
                         cover_artwork_id: row.get(3)?,
                         local_release_date,
-                        isbn13: row.get(5)?,
+                        isbn13,
+                        spine_scan,
                         contents: row.get(6)?,
                         price: row.get(7)?,
                         publisher: row.get(8)?,
@@ -351,6 +384,27 @@ impl Library {
                 },
             )?
             .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        drop(connection);
+        if crate::perf_log::perf_log_enabled() {
+            let ms = |end: std::time::Instant, start: std::time::Instant| {
+                end.duration_since(start).as_secs_f64() * 1000.0
+            };
+            crate::perf_log::native_record(
+                "collection.volumes",
+                serde_json::json!({
+                    "volumes": volumes.len(), "totalMs": started.elapsed().as_secs_f64() * 1000.0,
+                    "authorityMs": ms(authority_ready, started),
+                    "bindingMs": ms(binding_loaded, authority_ready),
+                    "materializeMs": ms(materialized, binding_loaded),
+                    "importLockWaitMs": ms(import_locked, materialized),
+                    "coversMs": ms(covers_loaded, import_locked),
+                    "localImportMs": ms(imported, covers_loaded),
+                    "projectionConnectionMs": ms(projection_connected, imported),
+                    "projectionMs": projection_connected.elapsed().as_secs_f64() * 1000.0,
+                }),
+            );
+        }
         Ok(volumes)
     }
 
@@ -408,8 +462,16 @@ impl Library {
                 .query_map(
                     params![
                         collection_id,
-                        if volume_range.restart_numbering { None } else { volume_range.min_volume },
-                        if volume_range.restart_numbering { None } else { volume_range.max_volume }
+                        if volume_range.restart_numbering {
+                            None
+                        } else {
+                            volume_range.min_volume
+                        },
+                        if volume_range.restart_numbering {
+                            None
+                        } else {
+                            volume_range.max_volume
+                        }
                     ],
                     |row| {
                         Ok((
@@ -654,6 +716,175 @@ mod tests {
     }
 
     const MANGA_ID: &str = "d1a9fdeb-f713-407f-960c-8326b586e6fd";
+
+    #[test]
+    fn volume_listing_115_cached_covers_cost() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let source = temp.path().join("source");
+        let covers = source.join("work/covers");
+        fs::create_dir_all(&covers).unwrap();
+        library
+            .set_collection_source_root(Some(source.to_str().unwrap()))
+            .unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "115 cached volumes".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        let bytes = cover_bytes();
+        {
+            let db = library.connection().unwrap();
+            db.execute(
+                "UPDATE collections SET source_path='work' WHERE id=?1",
+                [&work.id],
+            )
+            .unwrap();
+            for number in 1..=115 {
+                fs::write(covers.join(format!("vol_{number}_local.png")), &bytes).unwrap();
+                db.execute("INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,isbn13,publication_date,provider_data_json,created_at,updated_at) VALUES(?1,?2,'kakao',?3,'Volume',?3,'2026-01-01','{}','t','t')", rusqlite::params![work.id, number, format!("978{number:010}")]).unwrap();
+            }
+        }
+        let start = std::time::Instant::now();
+        library.list_collection_volumes(&work.id).unwrap();
+        eprintln!("115 initial imports: {:?}", start.elapsed());
+        for _ in 0..3 {
+            super::super::PREPARED_SELECTS.with(|count| count.set(0));
+            let start = std::time::Instant::now();
+            let volumes = library.list_collection_volumes(&work.id).unwrap();
+            let selects = super::super::PREPARED_SELECTS.with(|count| count.get());
+            eprintln!(
+                "115 cached volumes: {:?}, prepared SELECTs: {selects}",
+                start.elapsed()
+            );
+            assert_eq!(volumes.len(), 115);
+            assert!(
+                selects <= 13,
+                "cached cover reads must be batched: {selects}"
+            );
+        }
+        let start = std::time::Instant::now();
+        for _ in 0..115 {
+            std::hint::black_box(chrono::Local::now());
+        }
+        eprintln!("115 local clock reads: {:?}", start.elapsed());
+    }
+
+    /// Copy only the selected Work's metadata into a disposable library. The
+    /// original database is attached read-only; cover files are only read.
+    #[test]
+    #[ignore = "requires LAKOMICS_VOLUME_AUDIT_ROOT and LAKOMICS_VOLUME_AUDIT_WORK"]
+    fn volume_listing_read_only_work_audit() {
+        let root =
+            std::path::PathBuf::from(std::env::var_os("LAKOMICS_VOLUME_AUDIT_ROOT").unwrap());
+        let work = std::env::var("LAKOMICS_VOLUME_AUDIT_WORK").unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let uri = url::Url::from_file_path(root.join("library.sqlite"))
+            .unwrap()
+            .to_string()
+            + "?mode=ro";
+        {
+            let db = library.connection().unwrap();
+            db.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+            db.execute("ATTACH DATABASE ?1 AS audit", [&uri]).unwrap();
+            db.execute(
+                "INSERT INTO collections SELECT * FROM audit.collections WHERE id=?1",
+                [&work],
+            )
+            .unwrap();
+            for table in [
+                "collection_work_artworks",
+                "collection_volumes",
+                "collection_volume_sources",
+                "collection_external_bindings",
+                "collection_volume_ranges",
+            ] {
+                db.execute(
+                    &format!(
+                        "INSERT INTO {table} SELECT * FROM audit.{table} WHERE collection_id=?1"
+                    ),
+                    [&work],
+                )
+                .unwrap();
+            }
+            db.execute(
+                "INSERT INTO manga_spine_scans SELECT * FROM audit.manga_spine_scans",
+                [],
+            )
+            .unwrap();
+        }
+        // Resolve the original setting with the original runtime root, including
+        // the existing portable-path recovery, then use it in the fixture only.
+        let source_db = rusqlite::Connection::open_with_flags(
+            root.join("library.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let source_root =
+            super::super::collection_source::collection_source_root(&source_db, &root).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE library_settings SET collection_source_root=?1 WHERE singleton=1",
+                [source_root.as_deref()],
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let volumes = library.list_collection_volumes(&work).unwrap();
+            eprintln!(
+                "audited Work: {} volumes in {:?}",
+                volumes.len(),
+                start.elapsed()
+            );
+            assert!(!volumes.is_empty());
+        }
+    }
+
+    #[test]
+    fn manga_spine_projection_uses_isbn_and_only_existing_cached_parts() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Spine scan fixture".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        {
+            let connection = library.connection().unwrap();
+            connection.execute("INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at)
+                VALUES ('scan-volume',?1,1,0,1,'t','t'),('no-isbn',?1,2,0,2,'t','t')", [&work.id]).unwrap();
+            connection.execute("INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,isbn13,provider_data_json,created_at,updated_at)
+                VALUES (?1,1,'kakao','item','Volume','9780000000001','{}','t','t')", [&work.id]).unwrap();
+        }
+        assert!(library.list_collection_volumes(&work.id).unwrap()[0]
+            .spine_scan
+            .is_none());
+        library
+            .save_spine_bytes(
+                "9780000000001",
+                "side",
+                include_bytes!("fixtures/yes24-side.jpg"),
+            )
+            .unwrap();
+        library
+            .save_spine_status("9780000000001", "real", true, true, 0)
+            .unwrap();
+        let volumes = library.list_collection_volumes(&work.id).unwrap();
+        let scan = volumes[0].spine_scan.as_ref().unwrap();
+        assert_eq!(
+            scan.side.as_deref(),
+            Some("manga-spine-scan/9780000000001/side")
+        );
+        assert!(scan.back.is_none());
+        assert!(volumes[1].spine_scan.is_none());
+    }
 
     #[test]
     fn projects_volume_back_fields_from_preferred_source_json() {

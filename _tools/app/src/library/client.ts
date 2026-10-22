@@ -412,6 +412,13 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
       .catch(() => {});
     return () => { stopped = true; unlisten?.(); };
   },
+  subscribeMangaScansChanged: (handler) => {
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>("library://manga-scans-changed", event => handler(event.payload))
+      .then(stop => { if (stopped) stop(); else unlisten = stop; }).catch(() => {});
+    return () => { stopped = true; unlisten?.(); };
+  },
   subscribeCollectionsChanged: (handler) => {
     let stopped = false;
     let unlisten: (() => void) | undefined;

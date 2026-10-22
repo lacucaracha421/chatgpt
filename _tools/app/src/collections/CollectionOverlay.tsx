@@ -32,6 +32,7 @@ import { useWorkRecord } from "./work/useWorkRecord";
 import { useCoverFocus } from "./work/useCoverFocus";
 import { forgetMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
 import { CollectionWorkOverlay } from "./work/CollectionWorkOverlay";
+import { useMangaScanRevision } from "./mangaScanUpdates";
 
 type CollectionOverlayProps = {
   collectionId: string;
@@ -57,6 +58,15 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
+  const scanRevision = useMangaScanRevision(gateway, volumes);
+  const scanRefreshSeen = useRef(0);
+  useEffect(() => {
+    if (scanRefreshSeen.current === scanRevision) return;
+    scanRefreshSeen.current = scanRevision;
+    let active = true;
+    void gateway.listCollectionVolumes(collectionId).then(next => { if (active) setVolumes(next); }).catch(() => {});
+    return () => { active = false; };
+  }, [gateway, collectionId, scanRevision]);
   const [volumesCollectionId, setVolumesCollectionId] = useState<string | null>(null);
   const [volumeGridOpen, setVolumeGridOpen] = useState(false);
   const [ownership, setOwnership] = useState<{ id: string; rows: VolumeOwnership[] } | null>(null);

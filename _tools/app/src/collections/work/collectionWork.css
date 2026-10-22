@@ -209,3 +209,25 @@
 .work-film-related-part--external { color: var(--color-muted); }
 .work-film-related-poster { width: 112px; aspect-ratio: 2 / 3; display: grid; place-items: center; background: var(--color-surface); overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); }
 .work-film-related-poster img { width: 100%; height: 100%; object-fit: cover; }
+
+/* A decoded scan covers the printed fallback and shares its light and foot shadow. */
+.manga-spine--scanned { transition: width 360ms var(--ease-sheet); }
+.manga-spine--scanned .manga-spine-strip { transition: width 360ms var(--ease-sheet), opacity 360ms var(--ease-sheet); }
+.manga-spine-strip > .manga-scan, .manga-scan { position: absolute; inset: 0; display: block; overflow: hidden; }
+.manga-spine-strip > .manga-scan { opacity: 0; transition: none; }
+.manga-spine .manga-spine-strip > .manga-scan:not(.is-decoded) { opacity: 0; }
+.manga-spine-strip > .manga-scan.is-decoded { opacity: 1; }
+/* Remove 3% from each edge and 1.6% from the foot, without a per-book filter. */
+.manga-spine .manga-scan img { position: absolute; top: 0; left: -3.191489%; width: 106.382979%; height: 101.626016%; object-fit: fill; }
+.manga-spine-turn { position: absolute; inset: 0; display: block; transform-style: preserve-3d; transition: transform 360ms var(--ease-sheet); }
+.manga-spine-turn.is-back { transform: rotateY(180deg); }
+.manga-spine-face { position: absolute; inset: 0; display: block; backface-visibility: hidden; }
+.manga-spine-face--back { transform: rotateY(180deg); }
+/* The decoded scan has its own specificity; missing/upcoming volumes stay faint. */
+.manga-spine--missing .manga-spine-strip > .manga-scan.is-decoded { opacity: .3; }
+.manga-spine--upcoming .manga-spine-strip > .manga-scan.is-decoded { opacity: .16; }
+@media (prefers-reduced-motion: reduce) {
+  .manga-spine--scanned, .manga-spine--scanned .manga-spine-strip, .manga-spine-strip > .manga-scan, .manga-spine-turn { transition: none; }
+}
+
+.manga-spine-strip--scanned > :not(.manga-scan):not(.collection-spine-light) { visibility: hidden; }

@@ -651,6 +651,7 @@ fn open_library_in_state(
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .replace(library);
+    crate::manga_scans::wake();
     // Stopped after the swap: the scan stop can wait up to 2 s and must not hold the lock.
     if let Some(previous) = previous {
         previous.stop_character_scan();
@@ -3843,14 +3844,26 @@ pub async fn list_collection_volumes(
     state: State<'_, AppState>,
 ) -> Result<Vec<CollectionVolume>, CommandError> {
     let library = current_required(state)?;
+    let queued = std::time::Instant::now();
     tauri::async_runtime::spawn_blocking(move || {
+        let spawn_wait_ms = queued.elapsed().as_secs_f64() * 1000.0;
         let mut reporter: Box<dyn FnMut(u32, u32) + Send> = Box::new(move |imported, total| {
             let _ = on_progress.send(VolumeImportProgress { imported, total });
         });
-        library.list_collection_volumes_with(
+        let result = library.list_collection_volumes_with(
             &collection_id,
             Some(reporter.as_mut() as &mut dyn FnMut(u32, u32)),
         )
+        .inspect(|_| crate::manga_scans::wake());
+        crate::perf_log::native_record(
+            "collection.volumes.dispatch",
+            serde_json::json!({
+                "spawnWaitMs": spawn_wait_ms,
+                "totalMs": queued.elapsed().as_secs_f64() * 1000.0,
+                "ok": result.is_ok(),
+            }),
+        );
+        result
     })
     .await
     .map_err(|_| background_task_error())?

@@ -7,7 +7,7 @@ pub(crate) fn allow_cover_canvas(response: &mut Response<Vec<u8>>, origin: Optio
     let packaged = matches!(origin, "http://tauri.localhost" | "https://tauri.localhost" | "tauri://localhost");
     let development = cfg!(debug_assertions) && matches!(origin, "http://localhost:1420" | "http://127.0.0.1:1420");
     // `/asset/` lets the bundled FAULT game read original images as Blobs; still app origins and images only.
-    let cover = ["/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/", "/preview/", "/card-cutout/", "/vault-thumbnail/"]
+    let cover = ["/manga-spine-scan/", "/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/", "/preview/", "/card-cutout/", "/vault-thumbnail/"]
         .iter().any(|prefix| path.starts_with(prefix));
     // `/vault-thumbnail/` lets the vault view keep decrypted thumbnails in memory (never on disk).
     // A vault video's frame is captured from the app's own player for "이 프레임을 썸네일로".

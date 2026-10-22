@@ -13,6 +13,11 @@ export function nativeMediaUrl(url: string): string {
   return url.startsWith(`${origin}/`) ? `${mediaOrigin()}${url.slice(origin.length)}` : url;
 }
 
+/** Library-local scan paths use the current WebView's media origin. */
+export function mangaSpineScanUrl(path: string): string {
+  return `${mediaOrigin()}/${path}`;
+}
+
 export function thumbnailUrl(assetId: string, revision?: string | number): string {
   const base = `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
   return revision === undefined ? base : `${base}/v${encodeURIComponent(String(revision))}`;

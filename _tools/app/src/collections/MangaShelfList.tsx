@@ -6,6 +6,7 @@ import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { MangaShelfRow, mangaShelfData, shelfEditionVolumes, type MangaShelfPick } from "./MangaShelfRow";
+import { useMangaScanRevision } from "./mangaScanUpdates";
 type ShelfVolumes = { key: string; volumes: CollectionVolume[]; focuses: CollectionCoverFocus[] };
 
 // Rows read their volumes (and stored head focus) two at a time. The last read of each work is
@@ -31,6 +32,7 @@ export function resetMangaShelvesForTests() { loaded.clear(); waiting.length = 0
 function useShelfVolumes(gateway: LibraryGateway, scope: string, collection: CollectionSummary, near: boolean): ShelfVolumes | null {
   const key = JSON.stringify([scope, collection.id]);
   const [shown, setShown] = useState<ShelfVolumes | null>(() => loaded.get(key) ?? null);
+  const scanRevision = useMangaScanRevision(gateway, near && shown?.key === key ? shown.volumes : null);
   useEffect(() => {
     if (!near) return;
     let active = true;
@@ -47,7 +49,7 @@ function useShelfVolumes(gateway: LibraryGateway, scope: string, collection: Col
     }).then(value => { if (active && value) setShown(value); },
       () => { if (active) setShown(current => current?.key === key ? current : { key, volumes: [], focuses: [] }); });
     return () => { active = false; };
-  }, [gateway, key, near, collection.id, collection.updatedAt]);
+  }, [gateway, key, near, collection.id, collection.updatedAt, scanRevision]);
   return shown?.key === key ? shown : null;
 }
 

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 138;
+pub(crate) const SCHEMA_VERSION: i64 = 139;
 
 #[cfg(test)]
 #[path = "db_character_folder_perf_migration_tests.rs"]
@@ -19,6 +19,7 @@ mod character_claude_migration_tests;
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE IF EXISTS manga_spine_scans;
     DROP TABLE character_member_exclusion_state;
     DROP TABLE character_member_excluded_folders;
     DROP VIEW character_member_pending;
@@ -839,6 +840,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version < 138 {
             transaction.execute_batch(include_str!("../../migrations/0138_collection_restart_numbering.sql"))?;
+        }
+        if version < 139 {
+            transaction.execute_batch(include_str!("../../migrations/0139_manga_spine_scans.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

@@ -862,6 +862,8 @@ export type CollectionVolume = {
   coverArtworkId: string | null;
   localReleaseDate: string | null;
   isbn13: string | null;
+  /** PC library-local bookstore scan paths relative to the media origin. Tablet replicas omit this field. */
+  spineScan?: { side: string | null; back: string | null } | null;
   contents?: string | null;
   price?: number | null;
   publisher?: string | null;
@@ -1579,6 +1581,7 @@ export interface LibraryGateway {
   favoriteCharacters?(): Promise<FavoriteCharacters>;
   changeFavoriteCharacters?(commands: FavoriteCommand[]): Promise<FavoriteCharacters>;
   /** Native signal that Collections changed in the background (mobile personal edits). */
+  subscribeMangaScansChanged?(handler: (isbn: string) => void): () => void;
   subscribeCollectionsChanged?(handler: () => void): () => void;
   /** Native signal that tablet artist edits were applied in the background. */
   subscribeArtistsChanged?(handler: () => void): () => void;

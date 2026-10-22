@@ -32,6 +32,35 @@ pub(crate) fn media_response(
 }
 
 const PREVIEW_CACHE_CONTROL: &str = "private, max-age=86400";
+
+#[cfg(test)]
+mod manga_spine_protocol_tests {
+    use super::*;
+    #[test]
+    fn manga_spine_route_serves_original_jpeg_and_rejects_other_parts() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let jpeg = include_bytes!("library/fixtures/yes24-side.jpg");
+        library.save_spine_bytes("9780000000001", "side", jpeg).unwrap();
+        let path = "/manga-spine-scan/9780000000001/side";
+        let mut response = media_response(Some(&library), &Method::GET, path);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "image/jpeg");
+        assert_eq!(response.headers()[CACHE_CONTROL], PREVIEW_CACHE_CONTROL);
+        assert_eq!(response.body(), jpeg);
+        crate::collectible_cors::allow_cover_canvas(&mut response, Some("tauri://localhost"), path);
+        assert_eq!(response.headers()["access-control-allow-origin"], "tauri://localhost");
+        let mut external = media_response(Some(&library), &Method::GET, path);
+        crate::collectible_cors::allow_cover_canvas(&mut external, Some("https://example.com"), path);
+        assert!(!external.headers().contains_key("access-control-allow-origin"));
+        assert_eq!(media_response(None, &Method::GET, path).status(), StatusCode::NOT_FOUND);
+        assert_eq!(media_response(Some(&library), &Method::POST, path).status(), StatusCode::METHOD_NOT_ALLOWED);
+        for path in ["/manga-spine-scan/9780000000001/front", "/manga-spine-scan/9780000000001/side/extra", "/manga-spine-scan/../side"] {
+            assert_eq!(media_response(Some(&library), &Method::GET, path).status(), StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(media_response(Some(&library), &Method::GET, "/manga-spine-scan/9780000000001/back").status(), StatusCode::NOT_FOUND);
+    }
+}
 const PREVIEW_DISK_BYTES: u64 = 128 * 1024 * 1024;
 const PREVIEW_DISK_ENTRIES: usize = 512;
 const PREVIEW_DISK_AGE: Duration = Duration::from_secs(30 * 86400);
@@ -348,6 +377,18 @@ pub(crate) fn media_response_with_range(
     }
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
+    }
+    if let Some(rest) = path.strip_prefix("/manga-spine-scan/") {
+        let Some((isbn, part)) = rest.split_once('/') else { return empty_response(StatusCode::BAD_REQUEST); };
+        if !crate::library::manga_spine_scans::valid_isbn(isbn) || !matches!(part, "side" | "back") {
+            return empty_response(StatusCode::BAD_REQUEST);
+        }
+        return match library.and_then(|lib| lib.spine_scan_path(isbn, part)).and_then(|path| std::fs::read(path).ok()) {
+            Some(bytes) => Response::builder().status(StatusCode::OK)
+                .header(CONTENT_TYPE, "image/jpeg").header(CONTENT_LENGTH, bytes.len().to_string())
+                .header(CACHE_CONTROL, "private, max-age=86400").body(bytes).expect("scan response"),
+            None => empty_response(StatusCode::NOT_FOUND),
+        };
     }
     if let Some(rest) = path.strip_prefix("/av-link-jacket/") {
         // `<id>` is the jacket; `<id>/spine` is the DVD cover a borrowed spine is cut from.

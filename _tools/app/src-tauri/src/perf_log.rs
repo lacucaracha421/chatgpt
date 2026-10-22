@@ -23,6 +23,22 @@ struct Launch {
 static LAUNCH: OnceLock<Launch> = OnceLock::new();
 static WRITER: Mutex<()> = Mutex::new(());
 static NATIVE_LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static NATIVE_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// On-demand diagnostics after startup. Call only after releasing library locks.
+pub(crate) fn native_record(name: &str, fields: serde_json::Value) {
+    let Some(launch) = LAUNCH.get().filter(|launch| launch.enabled) else {
+        return;
+    };
+    let Some(path) = NATIVE_PATH.get() else {
+        return;
+    };
+    append(
+        path,
+        &[serde_json::json!({"event": "native", "name": name, "fields": fields}).to_string()],
+        launch,
+    );
+}
 
 pub(crate) fn startup_enabled() -> bool {
     LAUNCH.get().is_some_and(|launch| {
@@ -220,6 +236,7 @@ pub fn setup(app: &tauri::AppHandle) {
             chrono::Local::now().format("%Y%m%d")
         ));
         // Independent of renderer IPC so a blocked UI cannot hide native timings.
+        let _ = NATIVE_PATH.set(path.clone());
         let _ = std::thread::Builder::new()
             .name("startup-perf-log".into())
             .spawn(move || {

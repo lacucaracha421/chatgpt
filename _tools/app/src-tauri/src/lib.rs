@@ -22,6 +22,7 @@ pub use cloud::thumbnail_refresh::{
 };
 #[cfg(test)]
 mod catalog_source_tests;
+mod manga_scans;
 mod media_protocol;
 mod media_protocol_queue;
 mod media_protocol_timing;
@@ -109,6 +110,7 @@ pub fn run() {
                     }
                 })?;
             }
+            manga_scans::start(app.handle().clone(), app_state.clone());
             // Tablet artist edits applied in the background refresh the UI.
             let artists_handle = app.handle().clone();
             library::artists::set_artists_changed_listener(move || {
@@ -121,6 +123,7 @@ pub fn run() {
             // Mobile personal Collection edits applied in the background refresh the UI.
             let collections_handle = app.handle().clone();
             library::collection_personal_edits::set_collections_changed_listener(move || {
+                manga_scans::wake();
                 let _ =
                     tauri::Emitter::emit(&collections_handle, "library://collections-changed", ());
             });
@@ -188,6 +191,7 @@ pub fn run() {
                 }
                 library::external_vault::stop_mount_watcher();
                 card_cutouts::stop();
+                manga_scans::stop();
                 window.app_handle().exit(0);
             }
         })
@@ -269,6 +273,7 @@ pub fn run() {
             });
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
+            manga_scans::manga_spine_scan_progress,
             activities::activity_snapshot,
             brave_link::open_in_brave,
             link_preview::home_link_preview,
@@ -771,6 +776,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                manga_scans::stop();
                 library::Library::finalize_pending_local_manga_imports();
                 app.state::<library::nl_search_worker::Manager>().shutdown();
             }
