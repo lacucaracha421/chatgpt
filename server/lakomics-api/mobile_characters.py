@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from starlette.concurrency import run_in_threadpool
 
 import library_thumbnails
+import library_assets
 import asset_filters
 import asset_list_query
 import character_exclusions
@@ -454,13 +455,14 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                         after=after, limit=limit + 1)
                     rows = db.execute(sql, params).fetchall()
                     more = len(rows) > limit
-                    rows = rows[:limit]
+                    rows = library_assets.image_text_flags(db, rows[:limit])
                     count_sql, count_params = query.select("COUNT(*)")
                     total = db.execute(count_sql, count_params).fetchone()[0]
                     items = []
                     for row in rows:
                         item = json.loads(row["payload"])
                         item.update(asset_filters.technical_fields(row))
+                        item["has_image_text"] = row["has_image_text"]
                         item["contentRating"] = library_search.content_rating(row)
                         item["thumbnail_available"] = bool(row["thumbnail_key"])
                         if "thumbnail_revision" in item:
@@ -476,7 +478,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             # One statement selects the page, hides deleted Assets and reads the live
             # technical fields, so a page cannot show a dimension from one instant while
             # hiding from another, and metadata repair is visible to the filter itself.
-            rows = db.execute(f"""SELECT m.position, a.payload,
+            rows = db.execute(f"""SELECT m.position, a.payload, asset.id,
                                         asset.width, asset.height, asset.duration_ms,
                                         asset.thumbnail_key, asset.thumbnail_revision, asset.content_rating
                                   FROM mobile_character_members AS m
@@ -488,7 +490,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                                   ORDER BY m.position LIMIT ?""",
                               [node, filter, position] + filter_params + [limit + 1]).fetchall()
             more = len(rows) > limit
-            rows = rows[:limit]
+            rows = library_assets.image_text_flags(db, rows[:limit])
             # Counted under the page's own predicates, in the same read transaction, so an
             # appended page cannot advertise a different total than the page before it.
             # `position > ?` is deliberately left out: the total describes the scope, not
@@ -507,6 +509,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             for row in rows:
                 item = json.loads(row["payload"])
                 item.update(asset_filters.technical_fields(row))
+                item["has_image_text"] = row["has_image_text"]
                 item["contentRating"] = library_search.content_rating(row)
                 item["thumbnail_available"] = bool(row["thumbnail_key"])
                 if "thumbnail_revision" in item:

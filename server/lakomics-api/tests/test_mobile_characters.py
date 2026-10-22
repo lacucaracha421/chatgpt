@@ -10,6 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_capture_api_stub import fake_s3
 import app as api_app
+import asset_authority
 from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer character-test"}
@@ -56,6 +57,36 @@ class MobileCharactersTests(unittest.TestCase):
 
     def browse(self, revision, **params):
         return self.client.get(PREFIX + "/assets", headers=AUTH, params={"node": "character:c", "revision": revision, **params})
+
+    def test_image_text_saved_after_publication_is_available_in_gallery(self):
+        revision = self.publish(fixture()).json()["revision"]
+        before = {}
+        for sort in ("published", "newest", "oldest"):
+            response = self.browse(revision, sort=sort)
+            self.assertEqual(response.status_code, 200, response.text)
+            before[sort] = response.json()
+            self.assertTrue(all(not item["has_image_text"] for item in before[sort]["items"]))
+
+        with api_app.get_db() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS capture_image_text "
+                       "(capture_id TEXT PRIMARY KEY,payload TEXT,updated_at TEXT)")
+            db.execute("INSERT INTO capture_image_text VALUES(?,?,?)",
+                       ("capture-a", json.dumps([{"original": "hello", "korean": "translated"}]), "now"))
+            asset_authority.copy_capture_image_text(db, "capture-a", "a", "now")
+            db.commit()
+
+        for sort, previous in before.items():
+            with self.subTest(sort=sort):
+                response = self.browse(revision, sort=sort)
+                self.assertEqual(response.status_code, 200, response.text)
+                current = response.json()
+                self.assertEqual(current["revision"], revision)
+                self.assertEqual([item["id"] for item in current["items"]],
+                                 [item["id"] for item in previous["items"]])
+                self.assertEqual(current["totalCount"], previous["totalCount"])
+                self.assertEqual(current["sourceCount"], previous["sourceCount"])
+                self.assertEqual({item["id"]: item["has_image_text"] for item in current["items"]},
+                                 {"a": True, "b": False})
 
     def test_navigation_order_is_versioned_with_character_projection(self):
         body = fixture()

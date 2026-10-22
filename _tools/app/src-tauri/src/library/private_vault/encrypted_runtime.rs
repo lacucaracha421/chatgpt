@@ -730,7 +730,7 @@ impl Library {
         let vault_id = vault.vault_id();
         let exported = remember.then(|| vault.master_key().export_for_credential_store());
         let _ = self.install_encrypted_session(root.clone(), vault);
-        self.apply_remember(vault_id, exported.as_ref().map(|key| key.as_bytes()));
+        let _ = self.apply_remember(vault_id, exported.as_ref().map(|key| key.as_bytes()));
         let _ = self.save_encrypted_vault_settings(vault_id, &root);
         let status = self
             .encrypted_vault_status()
@@ -758,8 +758,11 @@ impl Library {
         let vault_id = vault.vault_id();
         let exported = remember.then(|| vault.master_key().export_for_credential_store());
         self.install_encrypted_session(located.root.clone(), vault)?;
-        self.apply_remember(vault_id, exported.as_ref().map(|key| key.as_bytes()));
+        let remember_result =
+            self.apply_remember(vault_id, exported.as_ref().map(|key| key.as_bytes()));
         let _ = self.save_encrypted_vault_settings(vault_id, &located.root);
+        // Credential removal can fail independently of the already installed session.
+        remember_result?;
         self.encrypted_vault_status()
     }
 
@@ -1645,17 +1648,21 @@ impl Library {
         }
     }
 
-    fn apply_remember(&self, vault_id: Uuid, key: Option<&[u8]>) {
+    fn apply_remember(&self, vault_id: Uuid, key: Option<&[u8]>) -> Result<(), LibraryError> {
         let store = &self.encrypted_vault.env.key_store;
         let id = vault_id.to_string();
         let remembered = match key {
             Some(key) => store.write(&id, key).is_ok(),
             None => {
-                let _ = store.delete(&id);
+                if let Err(error) = store.delete(&id) {
+                    self.encrypted_vault.state().remembered = Some((vault_id, true));
+                    return Err(error);
+                }
                 false
             }
         };
         self.encrypted_vault.state().remembered = Some((vault_id, remembered));
+        Ok(())
     }
 
     fn locate_encrypted_vault(&self) -> Result<Option<Located>, LibraryError> {
@@ -2176,6 +2183,77 @@ mod tests {
         assert_eq!(
             library.encrypted_vault_status().unwrap().state,
             EncryptedVaultState::Locked
+        );
+    }
+
+    struct DeleteFailingKeyStore(super::test_support::MemoryKeyStore);
+
+    impl super::VaultKeyStore for DeleteFailingKeyStore {
+        fn read(&self, vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+            self.0.read(vault_id)
+        }
+
+        fn write(&self, vault_id: &str, key: &[u8]) -> Result<(), LibraryError> {
+            self.0.write(vault_id, key)
+        }
+
+        fn delete(&self, _vault_id: &str) -> Result<(), LibraryError> {
+            Err(LibraryError::CredentialStoreLocked)
+        }
+    }
+
+    fn fail_key_deletion(library: &mut Library) {
+        let mut runtime = super::EncryptedVaultRuntime::default();
+        runtime.env.key_store = Box::new(DeleteFailingKeyStore(Default::default()));
+        library.encrypted_vault = std::sync::Arc::new(runtime);
+    }
+
+    #[test]
+    fn failed_key_deletion_keeps_remembered_and_the_password_unlocked_session() {
+        let (_temp, mut library, vault) = setup();
+        fail_key_deletion(&mut library);
+        let created = library
+            .create_encrypted_vault(&vault, PASSWORD, true)
+            .unwrap();
+        library.lock_encrypted_vault();
+        // A locked keyring may have left the cached flag false during auto-unlock.
+        library.encrypted_vault.state().remembered = None;
+
+        assert!(matches!(
+            library.unlock_encrypted_vault(&password(PASSWORD), false),
+            Err(LibraryError::CredentialStoreLocked)
+        ));
+        let status = library.encrypted_vault_status().unwrap();
+        assert_eq!(status.state, EncryptedVaultState::Unlocked);
+        assert!(status.remembered);
+        assert!(library
+            .encrypted_vault
+            .env
+            .key_store
+            .read(created.status.vault_id.as_deref().unwrap())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn creation_returns_recovery_key_even_when_key_deletion_fails() {
+        let (_temp, mut library, vault) = setup();
+        fail_key_deletion(&mut library);
+        let created = library
+            .create_encrypted_vault(&vault, PASSWORD, false)
+            .unwrap();
+        assert_eq!(created.recovery_key.len(), 64);
+        assert_eq!(created.status.state, EncryptedVaultState::Unlocked);
+        library.lock_encrypted_vault();
+        assert_eq!(
+            library
+                .unlock_encrypted_vault(
+                    &EncryptedVaultSecretInput::RecoveryKey(created.recovery_key),
+                    true,
+                )
+                .unwrap()
+                .state,
+            EncryptedVaultState::Unlocked
         );
     }
 

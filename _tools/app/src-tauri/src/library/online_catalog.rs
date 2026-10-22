@@ -557,26 +557,40 @@ impl Library {
         &self,
         identity: &CatalogWorkIdentity,
     ) -> Result<super::remote_media::RemoteMedia, LibraryError> {
+        self.online_catalog_thumbnail_with(identity, super::remote_media::load_catalog_thumbnail)
+    }
+
+    fn online_catalog_thumbnail_with(
+        &self,
+        identity: &CatalogWorkIdentity,
+        load: impl FnOnce(
+            &Path,
+            &CatalogWorkIdentity,
+            &str,
+        ) -> Result<super::remote_media::RemoteMedia, LibraryError>,
+    ) -> Result<super::remote_media::RemoteMedia, LibraryError> {
         let work_id = identity.khentai_numeric_id()?;
         let catalog_path = self.root.join("catalogs/kdata.db");
         if !catalog_path.exists() {
             return Err(LibraryError::OnlineCatalogNotInstalled);
         }
-        let connection = self.connection()?;
-        connection.execute(
-            "ATTACH DATABASE ?1 AS catalog",
-            [catalog_path.to_string_lossy().as_ref()],
-        )?;
-        let thumb: Option<String> = connection
-            .query_row(
-                "SELECT Thumb FROM catalog.Works WHERE Id = ?1 AND Expunged = 0",
-                [work_id as i64],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(LibraryError::MediaNotFound)?;
-        let url = validated_thumbnail_url(thumb).ok_or(LibraryError::MediaNotFound)?;
-        super::remote_media::load_catalog_thumbnail(&self.root, identity, &url)
+        let url = {
+            let connection = self.connection()?;
+            connection.execute(
+                "ATTACH DATABASE ?1 AS catalog",
+                [catalog_path.to_string_lossy().as_ref()],
+            )?;
+            let thumb: Option<String> = connection
+                .query_row(
+                    "SELECT Thumb FROM catalog.Works WHERE Id = ?1 AND Expunged = 0",
+                    [work_id as i64],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(LibraryError::MediaNotFound)?;
+            validated_thumbnail_url(thumb).ok_or(LibraryError::MediaNotFound)?
+        };
+        load(&self.root, identity, &url)
     }
 
     fn catalog_lookup(&self) -> Result<CatalogLookupCache, LibraryError> {
@@ -1031,6 +1045,36 @@ mod tests {
             format!("const a={tag_json};export{{a as default}};"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn thumbnail_fetch_releases_the_library_database_lock() {
+        let library_root = tempfile::tempdir().unwrap();
+        let vck_root = tempfile::tempdir().unwrap();
+        write_vck_fixture(vck_root.path(), 1, r#"{}"#);
+        let url = "https://ehgt.org/cover.jpg";
+        Connection::open(vck_root.path().join("data/kdata.db"))
+            .unwrap()
+            .execute("UPDATE Works SET Thumb = ?1 WHERE Id = 1", [url])
+            .unwrap();
+        let library = Library::open(library_root.path()).unwrap();
+        library.import_vck_catalog(vck_root.path()).unwrap();
+        let identity = CatalogWorkIdentity::khentai(1);
+
+        let media = library
+            .online_catalog_thumbnail_with(&identity, |root, work, resolved_url| {
+                assert!(library.database_lock.try_lock().is_ok());
+                assert_eq!(root, library.root());
+                assert_eq!(work, &identity);
+                assert_eq!(resolved_url, url);
+                Ok(super::super::remote_media::RemoteMedia {
+                    bytes: vec![1, 2, 3],
+                    mime: "image/jpeg",
+                })
+            })
+            .unwrap();
+        assert_eq!(media.bytes, [1, 2, 3]);
+        assert_eq!(media.mime, "image/jpeg");
     }
 
     #[test]

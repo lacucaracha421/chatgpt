@@ -45,12 +45,15 @@ type Props = {
 
 /** The 비밀 view: an unlock panel while locked, the encrypted gallery while unlocked. */
 export function ExternalVaultBrowser({ gateway, status, onStatusChange, onContentChanged, privacyMode = false }: Props) {
-  return status.state === "unlocked"
+  const [unlockWarning, setUnlockWarning] = useState<string | null>(null);
+  return <>{status.state === "unlocked"
     ? <VaultGallery gateway={gateway} status={status} onStatusChange={onStatusChange} onContentChanged={onContentChanged} privacyMode={privacyMode} />
-    : <VaultUnlockPanel gateway={gateway} remembered={status.remembered} onStatusChange={onStatusChange} />;
+    : <VaultUnlockPanel gateway={gateway} remembered={status.remembered} onStatusChange={onStatusChange} onWarning={setUnlockWarning} />}
+    {unlockWarning && <Toast tone="error" onDismiss={() => setUnlockWarning(null)}>{unlockWarning}</Toast>}
+  </>;
 }
 
-function VaultUnlockPanel({ gateway, remembered, onStatusChange }: { gateway: LibraryGateway; remembered: boolean; onStatusChange: (status: EncryptedVaultStatus) => void }) {
+function VaultUnlockPanel({ gateway, remembered, onStatusChange, onWarning }: { gateway: LibraryGateway; remembered: boolean; onStatusChange: (status: EncryptedVaultStatus) => void; onWarning: (message: string) => void }) {
   const [kind, setKind] = useState<"password" | "recoveryKey">("password");
   const [value, setValue] = useState("");
   const [remember, setRemember] = useState(true);
@@ -66,6 +69,14 @@ function VaultUnlockPanel({ gateway, remembered, onStatusChange }: { gateway: Li
       setValue("");
       onStatusChange(next);
     } catch (cause) {
+      // A credential-store failure can follow a successful password unlock.
+      const next = !remember ? await gateway.getEncryptedVaultStatus?.().catch(() => null) : null;
+      if (next?.state === "unlocked") {
+        setValue("");
+        onWarning(`보관함은 열렸지만 PC에 기억한 키를 지우지 못했습니다. ${vaultErrorMessage(cause, kind, "키 삭제에 실패했습니다.")} 설정에서 ‘이 PC에서 잊기’를 다시 시도하세요.`);
+        onStatusChange(next);
+        return;
+      }
       setError(vaultErrorMessage(cause, kind, "비밀 보관함을 열지 못했습니다."));
     } finally {
       setBusy(false);

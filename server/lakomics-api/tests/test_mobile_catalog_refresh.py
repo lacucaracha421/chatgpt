@@ -428,12 +428,12 @@ class RefreshDuplicateCheckTests(unittest.TestCase):
     worker = RefreshTests.worker
     request = RefreshTests.request
 
-    def duplicates(self):
+    def duplicates(self, **params):
         def auth(value):
             if value != base.AUTH["Authorization"]:
                 replica.fail(401)
         catalog_duplicates.register(self.app, self.get_db, auth, auth)()
-        response = self.client.get(catalog_duplicates.PREFIX, headers=base.AUTH)
+        response = self.client.get(catalog_duplicates.PREFIX, headers=base.AUTH, params=params)
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
@@ -447,11 +447,16 @@ class RefreshDuplicateCheckTests(unittest.TestCase):
         self.assertEqual(worker.status()["state"], "completed")
         self.assertEqual(worker.status()["added"], 3)
         listing = self.duplicates()
+        self.assertEqual(listing["items"], [])
+        self.assertEqual(listing["counts"], {"undecided": 0, "decided": 2})
+        listing = self.duplicates(state="decided")
         pairs = {(item["leftWorkId"], item["rightWorkId"]): item for item in listing["items"]}
         self.assertEqual(set(pairs), {("1003", "3"), ("1001", "1002")})
         self.assertEqual({item["source"] for item in listing["items"]}, {"server"})
         self.assertEqual({item["reason"] for item in listing["items"]}, {"exactTitle"})
-        self.assertEqual(listing["counts"], {"undecided": 2, "decided": 0})
+        self.assertTrue(all(item["decision"] == {"decision": "keepBoth", "hiddenWorkId": None}
+                            for item in listing["items"]))
+        self.assertEqual(listing["counts"], {"undecided": 0, "decided": 2})
         with self.get_db() as db:
             state = db.execute("SELECT index_digest,index_built_at FROM catalog_duplicate_state").fetchone()
             self.assertEqual(state[0], replica.current(db)["content_digest"])
