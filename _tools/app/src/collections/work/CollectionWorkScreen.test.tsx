@@ -188,7 +188,7 @@ describe("merged work screen", () => {
     expect(container.querySelector(".disc")).not.toBeNull();
   });
   it("keeps the case until a picked screenshot decodes, then displays it large", async () => {
-    const data = { ...value(), artworks: [{ id: "screenshot", kind: "screenshot", selected: false }] };
+    const data = { ...value(), artworks: [{ id: "screenshot", kind: "screenshot", selected: false }, { id: "art", kind: "artwork", selected: false }] };
     const { container } = view(data);
     expect(container.querySelector(".work-strip-separator")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "스크린샷 1" }));
@@ -285,7 +285,7 @@ function filmValue(): CollectionWorkData {
 }
 it("passes the game's hero, screenshot artworks, localized facts and owned platform to the back", () => {
   const original = value();
-  const data = { ...original, collection: { ...original.collection, selectedHeroArtworkId: "hero", genres: "Action & Adventure" },
+  const data = { ...original, collection: { ...original.collection, selectedHeroArtworkId: "hero", genres: "Role-playing (RPG) · Adventure" },
     record: { ...defaultRecord(original.collection), ownedPlatform: "Nintendo Switch 2" },
     artworks: [{ id: "shot", kind: "screenshot", selected: false }, { id: "art", kind: "artwork", selected: false }] };
   const { container } = view(data);
@@ -293,7 +293,7 @@ it("passes the game's hero, screenshot artworks, localized facts and owned platf
   expect(container.querySelectorAll(".case-back-shots img")).toHaveLength(1);
   expect(container.querySelector(".case-back-shots img")?.getAttribute("src")).toContain("shot");
   expect(container.querySelector(".case-back-facts")).toHaveTextContent("개발개발사배급배급사");
-  expect(container.querySelector(".case-back-facts")).toHaveTextContent("액션 & 모험");
+  expect(container.querySelector(".case-back-facts")).toHaveTextContent("RPG · 어드벤처");
   expect(container.querySelector(".case-back-foot")).toHaveTextContent("배급사Nintendo Switch 2");
 });
 it.each(["game", "av", "movie"] as const)("prints the %s booklet record and facts while the full memo stays in the dock", type => {
@@ -500,11 +500,11 @@ it("waits for a fresh hero decode when a pending surface changes away from and b
 
 it.each(['game', 'movie', 'av'] as const)('waits for the %s strip and backdrop as well as faces and hero before a step', async type => {
   const base = value(type === 'av');
-  const first = {...base, collection: {...base.collection, type, selectedHeroArtworkId: 'hero1'}, artworks: [{id: 'art1', kind: 'screenshot', selected: false}]};
+  const first = {...base, collection: {...base.collection, type, selectedHeroArtworkId: 'hero1'}, artworks: [{id: 'art1', kind: 'screenshot', selected: false}, {id: 'extra1', kind: 'artwork', selected: false}]};
   const actions = callbacks(); const {container, rerender} = view(first, actions);
   await act(async () => container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
   const oldImages = [...container.querySelectorAll<HTMLImageElement>('.work-surface:not([aria-hidden="true"]) .work-case-slot img:not([aria-hidden="true"]), .work-surface:not([aria-hidden="true"]) .work-hero-band img, .work-surface:not([aria-hidden="true"]) .work-strip img, .work-backdrop .is-painted')];
-  const second = {...first, collection: {...first.collection, id: 'two', selectedHeroArtworkId: 'hero2'}, case: {...first.case, title: '작품 둘', front: '/front2', spine: null, back: null}, artworks: [{id: 'art2', kind: 'screenshot', selected: false}]};
+  const second = {...first, collection: {...first.collection, id: 'two', selectedHeroArtworkId: 'hero2'}, case: {...first.case, title: '작품 둘', front: '/front2', spine: null, back: null}, artworks: [{id: 'art2', kind: 'screenshot', selected: false}, {id: 'extra2', kind: 'artwork', selected: false}]};
   rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={second} pending={false} actions={actions}/></PrivacyProvider>);
   const incoming = container.querySelector<HTMLElement>('.work-surface[aria-hidden="true"]')!;
   const thumbnail = incoming.querySelector<HTMLImageElement>('.work-strip img[src*="art2"]')!;

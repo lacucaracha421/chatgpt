@@ -1129,7 +1129,7 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar(gateway(), { reviewCount: 12 });
 
-    const button = screen.getByRole("button", { name: "유사 검토 12개" });
+    const button = screen.getByRole("button", { name: "유사 이미지 검토 12개" });
     await user.click(button);
     expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
   });
@@ -1140,7 +1140,7 @@ describe("ClassificationSidebar", () => {
     const sidebar = screen.getByRole("complementary", { name: "분류" });
     const footer = sidebar.querySelector(".classification-sidebar__footer") as HTMLElement;
 
-    expect(within(footer).getAllByRole("button").map((button) => button.textContent)).toEqual(["유사 검토12", "휴지통", "설정"]);
+    expect(within(footer).getAllByRole("button").map((button) => button.textContent)).toEqual(["유사 이미지 검토12", "휴지통", "설정"]);
     await user.click(screen.getByRole("button", { name: "전체" }));
     expect(onClearAssetSelection).not.toHaveBeenCalled();
 

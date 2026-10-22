@@ -529,6 +529,10 @@ textarea:focus-visible {
   outline: none;
 }
 
+/* A section label over a menu's radio group (Menu groupLabels); groups after the first keep a step of space above. */
+.ui-menu__group-label { padding: var(--space-1) var(--space-2) var(--space-2); }
+.ui-menu__group-label:not(:first-child) { margin-top: var(--space-2); }
+
 .ui-menu__item {
   display: flex;
   align-items: center;

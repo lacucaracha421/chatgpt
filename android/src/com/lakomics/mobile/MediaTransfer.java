@@ -7,6 +7,8 @@ import java.util.concurrent.TimeUnit;
 /** Streaming integrity rules for an individual media response, independent of ticket retries. */
 final class MediaTransfer {
     static final long DEADLINE_NANOS=TimeUnit.SECONDS.toNanos(180);
+    /** A download that is still receiving bytes keeps going; only this long without any fails it. */
+    static final long IDLE_NANOS=TimeUnit.SECONDS.toNanos(30);
     static long expectedLength(String header,long max)throws IOException {
         if(max<=0)throw new IOException("Invalid transfer limit");
         if(header==null)return -1;
@@ -30,7 +32,16 @@ final class MediaTransfer {
             if(!hex.toString().equals(digest))throw new EOFException("Image digest mismatch");
         }catch(java.security.NoSuchAlgorithmException impossible){throw new IOException("Digest unavailable",impossible);}
     }
+    /** Copies within an absolute `deadline` (System.nanoTime) for the whole body. */
     static long copy(InputStream in,OutputStream out,long max,long expected,long deadline,Runnable cancellation)throws IOException {
+        return copy(in,out,max,expected,deadline,0,cancellation);
+    }
+    /** Copies a body of any duration that fails only after `idleNanos` without a received byte. */
+    static long copyWhileProgressing(InputStream in,OutputStream out,long max,long expected,long idleNanos,Runnable cancellation)throws IOException {
+        if(idleNanos<=0)throw new IOException("Invalid transfer bounds");
+        return copy(in,out,max,expected,System.nanoTime()+idleNanos,idleNanos,cancellation);
+    }
+    private static long copy(InputStream in,OutputStream out,long max,long expected,long deadline,long idleNanos,Runnable cancellation)throws IOException {
         if(max<=0||expected==0||expected>max||expected< -1)throw new IOException("Invalid transfer bounds");
         byte[] buffer=new byte[32768];long count=0;
         while(true){
@@ -41,6 +52,7 @@ final class MediaTransfer {
             if(n==0)continue;
             if(n>max-count||(expected>=0&&n>expected-count))throw new EOFException("Media exceeds transfer bounds");
             out.write(buffer,0,n);count+=n;
+            if(idleNanos>0)deadline=System.nanoTime()+idleNanos;
         }
         if(count==0||(expected>=0&&count!=expected))throw new EOFException("Incomplete media response");
         return count;

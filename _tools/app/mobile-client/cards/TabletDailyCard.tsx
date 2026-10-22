@@ -5,6 +5,7 @@ import {Button, Dialog, Skeleton} from '../ui';
 import {BusyLabel} from '../../src/shared/ui/BusyLabel';
 import {HomeSection} from '../../src/home/HomeAttention';
 import {BoosterPack} from '../../src/cards/BoosterPack';
+import {keepOrRead} from '../../src/cards/keep';
 import {PackOpening} from '../../src/cards/PackOpening';
 import {TradingCard} from '../../src/cards/TradingCard';
 import {tierRank, type CardData, type PackCover} from '../../src/cards/types';
@@ -45,6 +46,8 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
   const [session, setSession] = useState<Session | null>(null), [resumeFailed, setResumeFailed] = useState(false);
   const [last, setLast] = useState<{result: OpenResult; cards: CardData[]} | null>(null);
   const mounted = useRef(false);
+  // Today's opened packs already fetched here: their snapshots do not change, so a later state change needs no request.
+  const fetched = useRef('');
   useAndroidBack(() => setSession(null), session !== null);
   useEffect(() => {
     mounted.current = true; let live = true;
@@ -60,7 +63,8 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
     // ids are necessarily closed: POST only retrieves their snapshots.
     const compact = state.day.replace(/-/g, ''), ids = [`d-${compact}`, ...(state.bonusGranted ? [`b-${compact}`] : [])];
     // A result this device already holds for the newest pack needs no request.
-    if (readResult(root)?.packId === ids[ids.length - 1]) return;
+    const fetchKey = `${root}:${ids.join()}`;
+    if (readResult(root)?.packId === ids[ids.length - 1] || fetched.current === fetchKey) return;
     void Promise.resolve().then(() => Promise.allSettled(ids.map(id => api.open(id, operationId(root, id))))).then(async replies => {
       const stored = readResult(root);
       const results = replies.flatMap(reply => reply.status === 'fulfilled' ? [reply.value] : []);
@@ -69,7 +73,9 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
       if (!latest || !live) return;
       saveResult(root, latest); replies.forEach((reply, index) => { if (reply.status === 'fulfilled') finishOperation(root, ids[index]); });
       const cards = await displayCards(api, latest.cards, latest.packId);
-      if (live) setLast({result: latest, cards});
+      if (!live) return;
+      setLast({result: latest, cards});
+      if (replies.every(reply => reply.status === 'fulfilled')) fetched.current = fetchKey;
     }).catch(() => undefined);
     return () => { live = false; };
   }, [api, root, snapshot?.state.revision, snapshot?.state.day, snapshot?.state.unopened.length, snapshot?.state.bonusGranted]);
@@ -84,12 +90,12 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
   /** Puts the chosen slots into the album, then shows the pack as the album now holds it. */
   const keepPack = async (packId: string, slots: number[]) => {
     try {
-      const result = await api.keep(packId, operationId(root, packId, 'keep'), slots);
+      const {result, refused} = await keepOrRead(() => api.keep(packId, operationId(root, packId, 'keep'), slots), () => api.pack(packId), slots);
       saveResult(root, result); finishOperation(root, packId, 'keep');
       const cards = await displayCards(api, result.cards, result.packId);
       if (mounted.current) setLast({result, cards});
       refresh();
-      return cards;
+      return {cards, refused};
     } catch (failure) { refresh(); throw failure; }
   };
   const waiting = state?.pendingKeep ?? [];
@@ -111,19 +117,21 @@ function DailyCard({api, root, active, onOpenAlbum}: Required<Omit<DailyCardProp
   const start = () => { if (pack) setSession({packId: pack.id, cover}); };
   // Compact as on the PC (user 2026-10-18): the card alone in a column as wide as it, beside 전송; the album link under it.
   const album = <button type="button" className="home-link tablet-daily-card__album" onClick={goAlbum}>{albumLabel}<ChevronRightIcon aria-hidden="true"/></button>;
+  // Without a sealed pack it is still offered for an undecided pack the result card does not already reopen, so an older one stays reachable until it expires.
+  const resumeButton = waiting.length > 0 && <Button variant="ghost" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>;
   return <HomeSection title="오늘의 카드">
     <div className="tablet-daily-card">
       {!snapshot ? <div className="tablet-daily-card__loading"><BusyLabel busy={pending} delay={400}>{'불러오는 중'}</BusyLabel>{pending && <Skeleton className="tablet-daily-card__skeleton" label="오늘의 카드"/>}{album}</div> : !pack ? <div className="daily-card-result">
         <div className="daily-card-result__art">{best && last && <button type="button" className="daily-card-result__button" aria-label="오늘의 결과 보기" onClick={() => setSession({packId: last.result.packId, cover, cards: last.cards, undecided: waiting.some(item => item.packId === last.result.packId)})}>
           <TradingCard card={best}/>
         </button>}</div>
-        <div className="tablet-daily-card__meta"><small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>{album}</div>
+        <div className="tablet-daily-card__meta"><small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>{waiting.some(item => item.packId !== last?.result.packId) && resumeButton}{album}</div>
       </div> : <>
         <button type="button" className="tablet-daily-card__art tablet-daily-card__pack" aria-label="오늘의 카드 팩 열기" onClick={start}><span aria-hidden="true" inert><BoosterPack cover={cover} disabled/></span></button>
         <div className="tablet-daily-card__copy">
           <Button variant="primary" onClick={start}>뜯기</Button>
           <small>{`남은 팩 ${state!.unopened.length}`}</small>
-          {waiting.length > 0 && <Button variant="ghost" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>}
+          {resumeButton}
           {state?.bonusGranted && <small>오늘 50장 저장 · 보너스 팩</small>}
           <small>05:00에 새 팩</small>
           {album}

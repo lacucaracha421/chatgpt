@@ -1216,3 +1216,19 @@ test('a Neuralwatt sub model without its key preserves the main provider failure
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].url, 'https://api.anthropic.com/v1/messages');
 });
+
+test('a post over one request is translated in pieces and joined with its breaks; a far longer one says it is too long',async()=>{
+  const paragraph=n=>`Paragraph ${n} `+'word '.repeat(1100).trim();  // about 5,500 characters each
+  const text=[1,2,3].map(paragraph).join('\n\n')+'\n[[LINK_0]]';
+  const f=fixture(legacy,async(url,init)=>{
+    const source=JSON.parse(JSON.parse(init.body).messages.find(message=>message.role==='user').content).text;
+    return translationReply(`문단 ${source.match(/Paragraph (\d)/)[1]}${source.includes('[[LINK_0]]')?'\n[[LINK_0]]':''}`);
+  });
+  const result=await f.handle({type:'translation:request',text});
+  assert.equal(result.ok,true);
+  assert.equal(result.text,'문단 1\n\n문단 2\n\n문단 3\n[[LINK_0]]');
+  assert.equal(f.calls.length,3);
+  await f.handle({type:'translation:request',text}); assert.equal(f.calls.length,3);  // every piece is cached
+  assert.equal((await f.handle({type:'translation:request',text:'a '.repeat(15001)})).code,'text_too_long');
+  assert.equal(f.calls.length,3);
+});

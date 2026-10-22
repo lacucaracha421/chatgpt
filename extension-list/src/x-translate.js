@@ -273,6 +273,7 @@
     if (code === "http_402") return "번역 API 잔액을 확인하세요";
     if (code === "http_403") return "번역 API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
+    if (code === "text_too_long") return "너무 길어서 번역할 수 없음";
     if (isTransientFailure(code)) return autoRetry ? "번역 연결 실패 · 곧 자동 재시도" : "번역 연결 실패 · 다시 보이면 재시도";
     return retryable ? "번역 실패 · 다시 보이면 재시도" : "번역 실패 · 자동 번역을 껐다 켜면 재시도";
   }
@@ -433,7 +434,7 @@
       const attempts = (record?.attempts || 0) + 1;
       // Transient failures retry whenever the post re-enters the viewport; any other
       // failure gets one such retry before it is parked until translation is reset.
-      const retryOnReentry = !isTransientFailure(code) && attempts < 2;
+      const retryOnReentry = !isTransientFailure(code) && code !== "text_too_long" && attempts < 2;
       const autoRetryMs = isTransientFailure(code) ? AUTO_RETRY_DELAYS_MS[attempts - 1] : undefined;
       const next = { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry };
       failures.set(candidate.element, next);

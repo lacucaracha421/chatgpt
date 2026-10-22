@@ -144,14 +144,13 @@ final class CloudClient {
  private void startupDownload(String url,File file,long max,CancellationSignal signal)throws Exception {
   PerfLog.Op perf=PerfLog.current.get();long downloadStarted=System.nanoTime();
   try{URI u=new URI(url);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
-  long deadline=System.nanoTime()+MediaTransfer.DEADLINE_NANOS;
   HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;
   HttpSessionPerf.Sample sample=HttpSessionPerf.begin("download");try{
    prepare(c,signal);c.setRequestProperty("Accept-Encoding","identity");
    int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
    String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
    long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
-   try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample);OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copy(in,out,max,expected,deadline,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
+   try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample);OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copyWhileProgressing(in,out,max,expected,MediaTransfer.IDLE_NANOS,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
    // A fully read and closed body lets the platform pool keep the TLS connection for the
    // next storage download; only failed or cancelled transfers tear the socket down.
    reusable=true;

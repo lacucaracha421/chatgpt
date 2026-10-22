@@ -405,6 +405,9 @@ select.ui-text-input {
 .settings-view__status[data-tone="ok"] { color: var(--color-success); }
 .settings-view__status[data-tone="off"],
 .settings-view__status[data-tone="danger"] { color: var(--color-danger); }
+.settings-view__state[data-tone="ok"] { color: var(--color-success); }
+.settings-view__state[data-tone="off"],
+.settings-view__state[data-tone="danger"] { color: var(--color-danger); }
 .settings-view__property > .settings-view__status,
 .settings-view__property > .settings-view__path { margin-top: var(--space-1); }
 .settings-view__stacked-status { display: grid; gap: var(--space-1); }
@@ -714,6 +717,7 @@ select.ui-text-input {
 .ui-menu.ui-menu,
 .ui-anchored-panel.ui-anchored-panel,
 .ui-overlay-panel.ui-overlay-panel,
+.command-palette.command-palette,
 .ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)) {
   border-radius: 0;
   background-image:

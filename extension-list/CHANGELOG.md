@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.65 — 2026-10-22
+
+- Keep the saved checkmark on X photos saved from a quoted post after the page reloads.
+- Translate X posts longer than 12,000 characters in parts. A post too long even for that
+  now says 너무 길어서 번역할 수 없음 instead of a generic failure.
+
 ## 3.5.64 — 2026-10-22
 
 - Show only matching folders and characters in Arca Live picker search, with path hints

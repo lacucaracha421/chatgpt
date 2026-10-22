@@ -619,7 +619,7 @@ describe("CollectionBrowser", () => {
     await userEvent.click(screen.getByRole("button", { name: "쇼케이스" }));
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: true });
     expect(onLibraryStateChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("heading", { name: /전체/ })).toHaveTextContent("전체2");
+    expect(screen.getByRole("heading", { name: "전체" })).toHaveTextContent(/^전체$/);
   });
 
   it("keeps the Showcase count independent of library search and rating", async () => {
@@ -753,7 +753,7 @@ describe("CollectionBrowser", () => {
     expect(rerendered).toEqual(["key-0", "key-1"]);
   });
 
-  it("puts shelf cases down on planks, gaps and list margins, preserves controls and opens on double-click", async () => {
+  it("puts shelf cases down on planks, gaps and list margins, preserves controls and opens a picked case on click", async () => {
     const onOpenWork = vi.fn();
     renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Second" }], typeFilter: "game", showcase: false, onOpenWork });
     const first = screen.getByRole("button", { name: /Astral Chain/ });
@@ -775,8 +775,7 @@ describe("CollectionBrowser", () => {
     await user.keyboard("{Escape}");
     fireEvent.click(second); expect(first).toHaveAttribute("aria-selected", "false");
     expect(second).toHaveAttribute("aria-selected", "true"); expect(onOpenWork).not.toHaveBeenCalled();
-    fireEvent.click(second); expect(onOpenWork).not.toHaveBeenCalled(); // a second click keeps it picked
-    fireEvent.doubleClick(second); expect(onOpenWork).toHaveBeenCalledExactlyOnceWith("c2", ["c1", "c2"]);
+    fireEvent.click(second); expect(onOpenWork).toHaveBeenCalledExactlyOnceWith("c2", ["c1", "c2"]); // a click on the picked case opens it
     onOpenWork.mockClear();
     await user.dblClick(first);
     expect(onOpenWork).toHaveBeenCalledExactlyOnceWith("c1", ["c1", "c2"]);
@@ -1025,7 +1024,7 @@ describe("CollectionBrowser manga shelf", () => {
     expect(first).toHaveAttribute("aria-selected", "true");
     expect(first.querySelector(".collection-light-case")).toHaveAttribute("data-front");
     expect(onViewChange).not.toHaveBeenCalled();
-    fireEvent.doubleClick(first);
+    fireEvent.click(first);
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m1" });
     fireEvent.keyDown(within(list).getByRole("button", { name: /빈 작품/ }), { key: "Enter" });
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m2" });

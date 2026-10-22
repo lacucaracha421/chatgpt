@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysUntil, ddayLabel, displayCount, displayDate, displayDateRange, displayDateTime, displayDDay, displayDuration, displayTime } from "./displayDate";
+import { daysUntil, ddayLabel, displayCount, displayDate, displayDateRange, displayDateTime, displayDayHeading, displayDDay, displayDuration, displayTime } from "./displayDate";
 
 const now = new Date(2026, 8, 23, 10, 30);
 describe("displayDate", () => {
@@ -55,6 +55,14 @@ describe("displayDateTime", () => {
     expect(displayDateTime(new Date(2025, 8, 28, 21, 45), now)).toBe("2025.9.28");
     expect(displayDateTime(new Date(2025, 8, 28, 21, 45), now, { withTime: true })).toBe("2025.9.28 21:45");
     expect(displayDateTime("2026-09-23", now)).toBe("9.23");
+    expect(displayDateTime(new Date(2026, 8, 23, 4, 20), now, { withDate: true })).toBe("9.23 04:20");
+  });
+});
+
+describe("displayDayHeading", () => {
+  it("writes the long group heading with the weekday", () => {
+    expect(displayDayHeading(new Date(2026, 9, 18, 3, 57), now)).toBe("10월 18일 (일)");
+    expect(displayDayHeading("2025-09-28", now)).toBe("2025년 9월 28일 (일)");
   });
 });
 

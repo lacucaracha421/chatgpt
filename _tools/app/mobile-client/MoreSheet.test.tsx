@@ -34,7 +34,7 @@ function options(overrides: Partial<MoreOptions> = {}): MoreOptions {
 }
 it('shows PC queue grouping and only tablet destinations', () => {
   render(<MoreSheet {...options()} onClose={vi.fn()}/>);
-  expect(within(screen.getByRole('navigation',{name:'확인할 것'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['유사 검토3','미분류1,200','전송2']);
+  expect(within(screen.getByRole('navigation',{name:'확인할 것'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['유사 이미지 검토3','미분류1,200','전송2']);
   expect(within(screen.getByRole('navigation',{name:'이동'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['비밀','작가','휴지통8','설정']);
   for (const label of ['통계','홈','에셋','컬렉션','카탈로그','메모']) expect(screen.queryByRole('button',{name:label})).toBeNull();
 });
@@ -42,9 +42,9 @@ it('keeps empty queues reachable as destinations and omits an absent vault', () 
   render(<MoreSheet {...options({reviewCount:0,unsortedCount:null,unseen:0,vaultPresent:false,trashCount:0})} onClose={vi.fn()}/>);
   expect(screen.queryByRole('navigation',{name:'확인할 것'})).toBeNull();
   expect(screen.queryByRole('button',{name:'비밀'})).toBeNull();
-  expect(within(screen.getByRole('navigation',{name:'이동'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['유사 검토','미분류','전송','작가','휴지통','설정']);
+  expect(within(screen.getByRole('navigation',{name:'이동'})).getAllByRole('button').map(button=>button.textContent)).toEqual(['유사 이미지 검토','미분류','전송','작가','휴지통','설정']);
 });
-it.each([['유사 검토 3개','onReview'],['미분류 1,200개','onUnsorted'],['전송 2개','onExchange'],['비밀','onVault'],['작가','onArtists'],['휴지통 8개','onTrash'],['설정','onSettings']] as const)('closes More and runs %s', (label, action) => {
+it.each([['유사 이미지 검토 3개','onReview'],['미분류 1,200개','onUnsorted'],['전송 2개','onExchange'],['비밀','onVault'],['작가','onArtists'],['휴지통 8개','onTrash'],['설정','onSettings']] as const)('closes More and runs %s', (label, action) => {
   const props=options(), close=vi.fn();
   render(<MoreSheet {...props} onClose={close}/>);
   fireEvent.click(screen.getByRole('button',{name:label}));

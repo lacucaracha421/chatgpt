@@ -18,6 +18,7 @@ import {
 import {blockRoute} from '../src/exchange/route';
 import {RouteWord} from '../src/exchange/RouteWord';
 import {batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type TimelineBlock} from '../src/exchange/timeline';
+import {displayCount} from '../src/shared/displayDate';
 import './exchange.css';
 
 type Actions = {onOpen(id: string): void; onRetry(id: string): void; onCancel(id: string): void};
@@ -190,8 +191,7 @@ function Empty({title, text, limits}: {title: string; text: string; limits?: str
 }
 
 function DaySeparator({at}: {at: string}) {
-  const {date, note} = dayLabel(at);
-  return <li className="exchange-day" aria-label={`${date} ${note}`}><span className="numeric">{date}</span>{note}</li>;
+  return <li className="exchange-day"><span>{dayLabel(at)}</span></li>;
 }
 
 /** One send or arrival: a lone file, or a batch with its combined progress. */
@@ -207,7 +207,7 @@ function Block({block, peerName, actions}: {block: TimelineBlock<ExchangeRow>; p
   const route = blockRoute(rows.map(row => row.route));
   const who = <p className="exchange-who">
     {block.mine ? '나' : peerName}{time && <> · <time className="numeric" dateTime={block.at}>{time}</time></>}
-    {incoming && rows.length > 1 && <> · 파일 <span className="numeric">{rows.length}</span>개</>}
+    {incoming && rows.length > 1 && ` · 파일 ${displayCount(rows.length, '개')}`}
     <RouteWord route={route}/>
     {delivered && <> · 전달됨<CheckIcon className="exchange-delivered" aria-hidden="true"/></>}
   </p>;
@@ -219,7 +219,7 @@ function Block({block, peerName, actions}: {block: TimelineBlock<ExchangeRow>; p
     {who}
     <div className="exchange-bubble" data-error={failed}>
       {head && <div className="exchange-batch-head">
-        <strong>{images ? '사진' : '파일'} <span className="numeric">{rows.length}</span>개</strong>
+        <strong>{images ? '사진' : '파일'} {displayCount(rows.length, '개')}</strong>
         <span className="exchange-batch-meta numeric">{moving ? `${progress.finished}/${progress.total} · ${formatBytes(progress.done)} / ${formatBytes(progress.size)}` : formatBytes(progress.size)}</span>
         {moving && <span className="exchange-pct numeric">{progress.percent}%</span>}
       </div>}

@@ -53,7 +53,7 @@ function article(id, { author = 'artist', photo = 1, likes = '1,234', image = `I
     + `<button data-testid="like" aria-label="${likes} Likes"></button></article>`;
 }
 
-function tab(shared, { articles = [article('100')], messages = [], trigger = true } = {}) {
+function tab(shared, { articles = [article('100')], messages = [], trigger = true, reply = () => ({ ok: false }) } = {}) {
   const dom = new JSDOM(`<body><div data-testid="primaryColumn"><div role="tablist"><div role="tab" aria-selected="true">추천</div><div role="tab" aria-selected="false">팔로잉</div></div><div id="timeline">${articles.join('')}</div></div></body>`,
     { url: 'https://x.com/home', runScripts: 'outside-only' });
   const w = dom.window; windows.push(w);
@@ -66,7 +66,7 @@ function tab(shared, { articles = [article('100')], messages = [], trigger = tru
   w.scrollTo = options => scrolls.push(typeof options === 'object' ? options.top : arguments[1]);
   w.scrollBy = () => {};
   w.IntersectionObserver = class { constructor(callback) { this.callback = callback; } observe(target) { w.setTimeout(() => this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }]), 0); } unobserve() {} };
-  w.chrome = { runtime: { sendMessage(message, callback) { messages.push(message.type); w.setTimeout(() => callback({ ok: false }), 0); } }, storage: shared.storage(w) };
+  w.chrome = { runtime: { sendMessage(message, callback) { messages.push(message.type); w.setTimeout(() => callback(reply(message)), 0); } }, storage: shared.storage(w) };
   // The gallery button ships disabled; these tests exercise it by opting back in.
   if (trigger) w.__LAKOMICS_X_GALLERY_TRIGGER__ = true;
   w.eval(sourceScript); w.eval(galleryScript);
@@ -269,4 +269,13 @@ test('returning to the window refreshes the saved index at most every ten minute
   t.w.dispatchEvent(new t.w.Event('focus'));
   await wait();
   assert.equal(messages.filter(type => type === 'saved-index:get').length, initial + 1);
+});
+
+test('a photo saved from a quoted post keeps its checkmark after a reload', async () => {
+  // The save credits the quoted post (222), not the outer one; the server's saved index holds that key.
+  const quoting = '<article data-testid="tweet"><a href="/outer/status/111"><time datetime="2026-09-23T00:00:00Z"></time></a>'
+    + '<div role="link" tabindex="0"><a href="/quoted/status/222"><time datetime="2026-09-01T00:00:00Z"></time></a>'
+    + '<div data-testid="tweetPhoto"><div style="position: relative"><img src="https://pbs.twimg.com/media/QQQ?format=jpg&name=small"></div></div></div></article>';
+  const t = tab(sharedStorage(), { articles: [quoting], reply: message => message.type === 'saved-index:get' ? { ok: true, authoritative: true, savedKeys: ['222:1'] } : { ok: false } });
+  await until(() => t.w.document.querySelector('[data-testid="tweetPhoto"] .lakomics-x-saved-badge-portal'));
 });

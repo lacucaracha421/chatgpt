@@ -48,6 +48,7 @@ const ROW_MESSAGES: Record<string, string> = {
   digest: '받은 파일이 손상됨 — 다시 받기', digestMismatch: '받은 파일이 손상됨 — 다시 받기',
   sizeMismatch: '업로드된 크기가 다름 — 다시 보내기', uploadMissing: '업로드가 끝나지 않음 — 다시 보내기',
   sourceUnavailable: '원본 파일을 읽을 수 없음 — 다시 선택해 주세요',
+  emptySource: '빈 파일 (0 B) — 보내지 않음',
   interrupted: '앱이 닫혀 중단됨',
   folderTooLarge: '폴더가 너무 큼 (압축 파일 최대 2GB)',
   folderUnreadable: '폴더를 읽을 수 없음 — 다시 선택해 주세요',
@@ -124,7 +125,7 @@ export function rowView(row: ExchangeRow, incoming: boolean): RowView {
     case 'cancelled': return {label: row.code === 'declined' ? '받는 기기에서 받지 않음' : row.code === 'deviceUnregistered' ? '받는 기기가 등록 해제됨' : '취소됨', tone: 'muted', progress: null, actions: []};
     case 'stalled': return {label: '업로드 중단됨', tone: 'error', progress: null, actions: ['cancel']};
     case 'failed': return {label: failureLabel, tone: 'error', progress: null,
-      actions: automatic ? ['cancel'] : row.code === 'sourceUnavailable' ? ['cancel'] : retry};
+      actions: automatic ? ['cancel'] : row.code === 'sourceUnavailable' || row.code === 'emptySource' ? ['cancel'] : retry};
     default: return {label: row.state, tone: 'muted', progress: null, actions: []};
   }
 }

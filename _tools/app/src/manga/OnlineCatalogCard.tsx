@@ -13,7 +13,8 @@ type OnlineCatalogCardProps = {
   selected?: boolean;
   onOpen: (work: CatalogWork, opener: HTMLButtonElement) => void;
   onRead?: (work: CatalogWork, opener: HTMLButtonElement) => void;
-  onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
+  /** Left out inside the 북마크 tab, where every cover is bookmarked and the corner would only repeat it. */
+  onBookmark?: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
 /** Memoized: appending a page must not re-render the cards already shown (parents pass stable handlers). */
@@ -22,5 +23,5 @@ export const OnlineCatalogCard = memo(function OnlineCatalogCard({ work, opening
   return <MangaCard title={work.title} displayTitle={catalogDisplayTitle(work.title)} artist={work.artists.join(" · ")}
     pageCount={work.fileCount} coverUrl={work.thumbnailUrl ? nativeMediaUrl(work.thumbnailUrl) : null} privacyMode={privacyMode}
     opening={opening} selected={selected} bookmarkPending={bookmarkPending} bookmarked={work.bookmarked} savedEdition={work.hasBookmarkedVersion && !work.bookmarked}
-    onRead={onRead ? opener => onRead(work, opener) : undefined} onOpen={(opener) => onOpen(work, opener)} onBookmark={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)} />;
+    onRead={onRead ? opener => onRead(work, opener) : undefined} onOpen={(opener) => onOpen(work, opener)} onBookmark={onBookmark ? () => onBookmark(catalogIdentityOf(work), !work.bookmarked) : undefined} />;
 });

@@ -8,7 +8,7 @@ import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react
 import {CaseInside, CollectionCase} from '../src/collections/case/CollectionCase';
 import {playCaseSound} from '../src/collections/case/caseSounds';
 import type {StageBox} from '../src/collections/case/fitCaseStage';
-import {FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta} from '../src/collections/work/WorkStage';
+import {FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta, workStripShown} from '../src/collections/work/WorkStage';
 import {MangaBookcase, MangaStage, type MangaWorkData} from '../src/collections/work/MangaBookcase';
 import {MangaBook} from '../src/collections/work/MangaBook';
 import {backFacts, insideFacts} from '../src/collections/work/workFacts';
@@ -177,7 +177,7 @@ function CaseWorkSurface({shown, current, active, privacy, score, record = workR
   const hidden: CSSProperties = {visibility: 'hidden', pointerEvents: 'none'};
   const people = usePerformerNames(work.av?.people ?? [], active && current && !privacy);
   return <>
-    <div className="tablet-work__frame" style={{"--work-strip-height": work.type === 'av' || strip.length ? '76px' : '0px'} as CSSProperties}>
+    <div className="tablet-work__frame" style={{"--work-strip-height": workStripShown(work.type === 'av', strip.length) ? '76px' : '0px'} as CSSProperties}>
       {!privacy && shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => ready('hero')}/>}
       <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} onEmptyClick={() => { if (mode !== 'case' || picked !== 'case') pick('case'); }}>
         {work.type === 'av' && !privacy && <WorkBackdrop key={data.front} src={data.front} onReady={() => ready('backdrop')}/>}

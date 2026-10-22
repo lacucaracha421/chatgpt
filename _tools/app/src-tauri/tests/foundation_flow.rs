@@ -6,7 +6,7 @@ use std::{
 use app_lib::library::{
     error::LibraryError,
     models::{
-        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationEntry,
+        AssetAlbumPatch, AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationEntry,
         ClassificationKind, CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome,
         MediaSummary, TrashPolicy,
     },
@@ -238,7 +238,14 @@ fn public_asset_flow_supports_favorites_sorts_random_paging_and_source_urls() {
 
     let first = ingest(&library, &first_path, Some("https://example.test/first"));
     let second = ingest(&library, &second_path, None);
-    library.set_asset_favorite(&first.id, true).unwrap();
+    let likes = library.ensure_likes_album().unwrap();
+    library
+        .patch_asset_albums(AssetAlbumPatch {
+            asset_ids: vec![first.id.clone()],
+            add_album_ids: vec![likes.id],
+            remove_album_ids: vec![],
+        })
+        .unwrap();
 
     let favorites = library
         .list_assets(asset_query(AssetSort::Favorites, true, None, 20))

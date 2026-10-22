@@ -144,6 +144,7 @@ public final class ExchangeShareActivity extends Activity {
             } catch (RuntimeException ignored) {}
             if (size < 0) unknown = true; else total += size;
         }
+        if (!unknown && total == 0) return "파일 " + uris.size() + "개 · 0 B — 빈 파일은 보낼 수 없습니다";
         return "파일 " + uris.size() + "개 · " + (unknown && total == 0 ? "크기 확인 중" : bytes(total) + (unknown ? "+" : ""));
     }
 
@@ -271,6 +272,7 @@ public final class ExchangeShareActivity extends Activity {
             case "batchTooLarge": return "한 번에 최대 100개까지 보낼 수 있음";
             case "targetDeviceUnknown": return "받는 기기가 등록 해제됨";
             case "sourceUnavailable": return "원본 파일을 읽을 수 없음";
+            case "emptySource": return "빈 파일 (0 B)이라 보내지 않음";
             case "network": case "server": case "storageUnavailable": return "서버에 연결할 수 없음 — 자동 재시도";
             default: return "보내지 못했습니다";
         }

@@ -116,7 +116,10 @@
 
 .asset-viewer__vbtn--on { color: var(--color-accent); }
 
-.asset-viewer__vbtn.ui-button--danger { color: var(--color-danger); }
+/* 휴지통으로 rests like the other viewer buttons; red only while it is pointed at or pressed. */
+.asset-viewer__vbtn.ui-button--danger { color: var(--color-muted); }
+.asset-viewer__vbtn.ui-button--danger:hover:not(:disabled),
+.asset-viewer__vbtn.ui-button--danger:active:not(:disabled) { color: var(--color-danger); }
 
 .asset-viewer__action-anchor { position: relative; display: inline-flex; }
 

@@ -18,7 +18,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { Menu } from "../shared/ui/Menu";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
-import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
+import { MangaToolbar, MangaViewMenu, type MangaSource } from "./MangaToolbar";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { useLocalMangaDrop } from "./useLocalMangaDrop";
@@ -249,9 +249,9 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     {localActive && <MangaToolbar source={source === "local" ? "local" : onlineScope} onSourceChange={selectSource}
       localCount={series?.length} bookmarkCount={bookmarkCount} countLabel={series ? countLabel : undefined}
       refreshedAt={refreshedAt}
-      controls={<MangaChoiceMenu label="정렬" value={sort} onChange={setSort} options={[
+      controls={<MangaViewMenu choices={[{ label: "정렬", value: sort, onChange: next => setSort(next as typeof sort), options: [
         { value: "recent", label: "최근 변경순" }, { value: "title_asc", label: "제목순" }, { value: "author_asc", label: "작가순" }, { value: "pages_desc", label: "페이지 많은 순" },
-      ]} />}
+      ] }]} />}
       actions={root ? <Menu label="망가 관리" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "refresh", label: "새로고침", disabled: scanning, onSelect: () => void refreshSeries() },
         ...(gateway.refreshLocalMangaThumbnails ? [{ id: "refresh-thumbnails", label: "썸네일 갱신", disabled: thumbnailBusy, onSelect: () => void refreshThumbnails() }] : []),

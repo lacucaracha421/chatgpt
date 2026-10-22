@@ -39,7 +39,7 @@ it("shows both public assets and advances after a successful decision", async ()
   const onCountChange = vi.fn();
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
 
-  expect(await screen.findByRole("heading", { name: "유사 검토" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "유사 이미지 검토" })).toBeInTheDocument();
   expect(await screen.findByRole("img", { name: "기존 이미지" })).toHaveAttribute("src", assetUrl("existing-review-1"));
   expect(await screen.findByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-1"));
   expect(screen.getAllByText("1,920 × 1,080")).toHaveLength(2);

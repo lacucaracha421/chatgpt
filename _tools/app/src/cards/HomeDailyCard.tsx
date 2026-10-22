@@ -7,6 +7,7 @@ import { Dialog } from "../shared/ui/Dialog";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { BoosterPack } from "./BoosterPack";
+import { keepOrRead } from "./keep";
 import { PackOpening } from "./PackOpening";
 import { TradingCard } from "./TradingCard";
 import { cardsApi, displayCards, finishOperation, isUndecided, operationId, readResult, saveResult, type CardsApi, type OpenResult } from "./api";
@@ -24,6 +25,8 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
   const [session, setSession] = useState<Session | null>(null), [resumeFailed, setResumeFailed] = useState(false);
   const [last, setLast] = useState<{ result: OpenResult; cards: CardData[] } | null>(null);
   const mounted = useRef(false);
+  // Today's opened packs already fetched here: their snapshots do not change, so a later state change needs no request.
+  const fetched = useRef("");
   useEffect(() => {
     mounted.current = true; let live = true;
     const saved = readResult(root);
@@ -38,7 +41,8 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
     // today's granted IDs are necessarily closed: POST only retrieves their snapshots.
     const compact = state.day.replace(/-/g, ""), ids = [`d-${compact}`, ...(state.bonusGranted ? [`b-${compact}`] : [])];
     // A result this device already holds for the newest pack needs no request.
-    if (readResult(root)?.packId === ids[ids.length - 1]) return;
+    const fetchKey = `${root}:${ids.join()}`;
+    if (readResult(root)?.packId === ids[ids.length - 1] || fetched.current === fetchKey) return;
     void Promise.resolve().then(() => Promise.allSettled(ids.map(id => api.open(id, operationId(root, id))))).then(async replies => {
       const stored = readResult(root);
       const results = replies.flatMap(reply => reply.status === "fulfilled" ? [reply.value] : []);
@@ -47,7 +51,9 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
       if (!latest || !live) return;
       saveResult(root, latest); replies.forEach((reply, index) => { if (reply.status === "fulfilled") finishOperation(root, ids[index]); });
       const cards = await displayCards(api, latest.cards, latest.packId);
-      if (live) setLast({ result: latest, cards });
+      if (!live) return;
+      setLast({ result: latest, cards });
+      if (replies.every(reply => reply.status === "fulfilled")) fetched.current = fetchKey;
     }).catch(() => undefined);
     return () => { live = false; };
   }, [api, root, snapshot?.state.revision, snapshot?.state.day, snapshot?.state.unopened.length, snapshot?.state.bonusGranted]);
@@ -63,12 +69,12 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
   /** Puts the chosen slots into the album, then shows the pack as the album now holds it. */
   const keepPack = async (packId: string, slots: number[]) => {
     try {
-      const result = await api.keep(packId, operationId(root, packId, "keep"), slots);
+      const { result, refused } = await keepOrRead(() => api.keep(packId, operationId(root, packId, "keep"), slots), () => api.pack(packId), slots);
       saveResult(root, result); finishOperation(root, packId, "keep");
       const cards = await displayCards(api, result.cards, result.packId);
       if (mounted.current) setLast({ result, cards });
       refresh();
-      return cards;
+      return { cards, refused };
     } catch (failure) { refresh(); throw failure; }
   };
   const waiting = state?.pendingKeep ?? [];
@@ -89,6 +95,8 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
   const goAlbum = () => { setSession(null); onAlbum?.(); };
   // Compact (user 2026-10-18): the column is as wide as the card, beside 전송; the album link sits under the card.
   const album = onAlbum && <button type="button" className="home-link home-daily-card__album" onClick={goAlbum}>{albumLabel}<ChevronRightIcon aria-hidden="true" /></button>;
+  // Without a sealed pack it is still offered for an undecided pack the result card does not already reopen, so an older one stays reachable until it expires.
+  const resumeButton = waiting.length > 0 && <Button variant="quiet" size="sm" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>;
   return <section className="home-attention-section home-daily-card" aria-label="오늘의 카드">
     <SectionLabel title="오늘의 카드" />
     <div className="home-daily-card__body">
@@ -96,13 +104,13 @@ export function HomeDailyCard({ api = cardsApi, root = "", active = true, onAlbu
         <div className="daily-card-result__art">{best && last && <button type="button" className="daily-card-result__button" aria-label="오늘의 결과 보기" onClick={() => setSession({ packId: last.result.packId, cover, cards: last.cards, undecided: waiting.some(item => item.packId === last.result.packId) })}>
           <TradingCard card={best} />
         </button>}</div>
-        <div className="home-daily-card__meta"><small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>{album}</div>
+        <div className="home-daily-card__meta"><small>{displayTime(state!.nextResetAt)} 새 팩 증정</small>{waiting.some(item => item.packId !== last?.result.packId) && resumeButton}{album}</div>
       </div> : <>
         <div className="daily-card-stage__art"><button type="button" className="card-demo-preview__button" aria-label="오늘의 카드 팩 열기" onClick={() => setSession({ packId: pack.id, cover })}><span aria-hidden="true" inert><BoosterPack cover={cover} disabled /></span></button></div>
         <div className="daily-card-stage__copy">
           <Button size="sm" onClick={() => setSession({ packId: pack.id, cover })}>뜯기</Button>
           <small>{`남은 팩 ${state!.unopened.length}`}</small>
-          {waiting.length > 0 && <Button variant="quiet" size="sm" onClick={() => { void resume(); }}>{`정리 안 한 팩 ${waiting.length}`}</Button>}
+          {resumeButton}
           {state?.bonusGranted && <small>오늘 50장 저장 · 보너스 팩</small>}
           <small>05:00에 새 팩</small>
           {album}

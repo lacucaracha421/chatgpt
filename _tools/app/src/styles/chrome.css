@@ -18,6 +18,8 @@
 .workspace-rail__item:hover, .workspace-rail__tail > .ui-menu__trigger:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .workspace-rail__item[aria-current=page] { background: var(--color-selection-context); color: var(--color-selection-context-text); border-radius: 0; }
 .workspace-rail__item[aria-current=page]::after { content: ''; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: currentColor; }
+/* A count badge (더보기, 전송) takes that corner; the slab alone marks the current area then. */
+.workspace-rail__item[aria-current=page]:has(.workspace-rail__count)::after { display: none; }
 .workspace-rail__item:active:not(:disabled), .workspace-rail__tail > .ui-menu__trigger:active:not(:disabled) { background: var(--color-surface-pressed); }
 .workspace-rail__item[aria-current=page]:hover { background: var(--color-selection-context-hover); color: var(--color-selection-context-text); }
 .workspace-rail__item[aria-current=page]:active { background: var(--color-selection-context-hover); }
@@ -76,7 +78,8 @@
 .classification-sidebar__pin[aria-current=page]:hover, .workspace-index-link[aria-current=page]:hover { background: var(--color-accent-hover); }
 .workspace-index-link[aria-current=page]::after { content: ""; width: var(--selection-mark-size); height: var(--selection-mark-size); margin-left: auto; flex: none; background: currentColor; }
 .chrome-tree-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
-.chrome-tree-heading > .classification-sidebar__tree-heading { flex: 1; min-width: 0; }
+/* 폴더 · 앨범 use the shared section label (as 고정 does) as their fold control; icon buttons sit beside it. */
+.chrome-tree-heading > .classification-sidebar__section-heading { flex: 1; width: auto; margin: var(--space-3) 0 var(--space-1); }
 .workspace-index .classification-sidebar__badge { font-variant-numeric: tabular-nums; }
 .workspace-index .classification-sidebar__tree-row[aria-selected=true] .classification-sidebar__badge { color: var(--color-on-accent); opacity: .7; }
 .chrome-tree-heading > .ui-button--icon { width: 24px; min-height: 24px; flex: none; }
@@ -269,7 +272,7 @@ html[data-input="pointer"] :is(.ui-anchored-panel, .ui-overlay-panel, .workspace
 .command-palette__field .ui-text-input { width: 100%; }
 .command-palette__list { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-2); }
 .command-palette__group + .command-palette__group { margin-top: var(--space-2); }
-.command-palette__heading { padding: var(--space-2) var(--space-2) var(--space-1); color: var(--color-muted); font-size: var(--text-xs); }
+.command-palette__heading { padding: var(--space-2) var(--space-2) var(--space-1); }
 .command-palette__option { display: flex; align-items: center; gap: var(--space-3); min-height: 36px; padding: var(--space-2); border-radius: var(--radius-selection); cursor: default; font-size: var(--text-sm); }
 .command-palette__option[aria-selected=true] { background: var(--color-surface-hover); }
 .command-palette__icon { display: grid; place-items: center; color: var(--color-muted); }

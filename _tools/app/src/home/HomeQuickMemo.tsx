@@ -81,7 +81,7 @@ export function HomeQuickMemo({ store, root, delay = QUICK_MEMO_SAVE_DELAY, onOp
   return <section className="home-attention-section home-tool home-qmemo" aria-label="빠른 메모">
     <SectionLabel title="빠른 메모" />
     <div className="home-tool__body">
-      <textarea className="ui-text-input home-qmemo__text" rows={8} spellCheck={false} aria-label="빠른 메모" value={shown} disabled={unavailable !== null}
+      <textarea className="ui-text-input home-qmemo__text" rows={8} spellCheck={false} aria-label="빠른 메모" placeholder="빠른 메모" value={shown} disabled={unavailable !== null}
         onChange={event => change(event.target.value)} onBlur={finish} />
       {(unavailable === "locked" || unavailable === "hidden") && <div className="home-qmemo__status" role="status">
         <span>{unavailable === "locked" ? "메모를 열어야 쓸 수 있습니다" : "숨긴 메모입니다"}</span>

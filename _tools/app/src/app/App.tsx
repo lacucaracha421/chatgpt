@@ -468,7 +468,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     void refreshSidebar();
   }, [refreshSidebar]);
   useEffect(() => {
-    void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 검토 개수를 불러오지 못했습니다.")));
+    void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 이미지 검토 개수를 불러오지 못했습니다.")));
     void refreshTrashCount().catch((error) => setMessage(commandErrorMessage(error, "휴지통 개수를 불러오지 못했습니다.")));
   }, [refreshReviewCount, refreshTrashCount]);
   useDailyLibraryMaintenance(gateway, workload.restricted, appendMessage, refreshTrashCount);

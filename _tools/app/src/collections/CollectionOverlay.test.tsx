@@ -853,7 +853,7 @@ describe("CollectionOverlay movie detail flow", () => {
     const user = userEvent.setup();
     renderOverlay({
       getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 10494, lastSyncedAt: "t" }),
-      listCollectionWorkArtworks: vi.fn().mockResolvedValue([{ id: "movie-backdrop", kind: "backdrop", selected: true }]),
+      listCollectionWorkArtworks: vi.fn().mockResolvedValue([{ id: "movie-backdrop", kind: "backdrop", selected: true }, { id: "movie-still", kind: "screenshot", selected: false }]),
       refreshTmdbMovie: vi.fn().mockRejectedValue(new Error("TMDB 새로고침 실패")),
     }, undefined, undefined, movieCollection);
 

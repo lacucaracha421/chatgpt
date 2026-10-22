@@ -227,8 +227,8 @@ it('pinches a case without opening or turning it, resets, and uses the AV jacket
 });
 
 it('keeps only thumbnails, returns to the case on a repeated artwork tap or empty stage tap, and frees the strip row without tiles', async () => {
-  artwork.urls = {art: '/art'};
-  const item: CollectionDetail = {...manga, id: 'game', type: 'game', artworks: [{id: 'art', kind: 'screenshot', selected: false}]};
+  artwork.urls = {art: '/art', more: '/more'};
+  const item: CollectionDetail = {...manga, id: 'game', type: 'game', artworks: [{id: 'art', kind: 'screenshot', selected: false}, {id: 'more', kind: 'artwork', selected: false}]};
   const props = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 1, score: () => null, onStep: vi.fn(), info: () => null};
   const view = render(<CaseWork {...props}/>);
   expect(screen.queryByRole('button', {name: '케이스'})).toBeNull();
@@ -286,8 +286,8 @@ it.each(['game', 'movie', 'av'] as const)('ignores horizontal stage swipes on %s
 
 
 it.each(['game', 'movie', 'av'] as const)('retains every painted %s surface until the actual incoming images decode together', async type => {
-  artwork.urls = {front1: '/front1', hero1: '/hero1', art1: '/art1', front2: '/front2', hero2: '/hero2', art2: '/art2', spine1: '/spine1', back1: '/back1', spine2: '/spine2', back2: '/back2'};
-  const item: CollectionDetail = {...manga, id: 'one', name: '작품 하나', type, selectedWorkArtworkId: 'front1', selectedHeroArtworkId: 'hero1', artworks: [{id: 'art1', kind: 'screenshot', selected: false}, {id: 'spine1', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back1', kind: 'back', selected: true}] : [])]};
+  artwork.urls = {front1: '/front1', hero1: '/hero1', art1: '/art1', extra1: '/extra1', front2: '/front2', hero2: '/hero2', art2: '/art2', extra2: '/extra2', spine1: '/spine1', back1: '/back1', spine2: '/spine2', back2: '/back2'};
+  const item: CollectionDetail = {...manga, id: 'one', name: '작품 하나', type, selectedWorkArtworkId: 'front1', selectedHeroArtworkId: 'hero1', artworks: [{id: 'art1', kind: 'screenshot', selected: false}, {id: 'extra1', kind: 'artwork', selected: false}, {id: 'spine1', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back1', kind: 'back', selected: true}] : [])]};
   const options = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 2, score: () => null, onStep: vi.fn(), info: (work: CollectionDetail) => <p>{work.name} 정보</p>};
   const {container, rerender} = render(<CaseWork {...options}/>);
   await act(async () => container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
@@ -296,7 +296,7 @@ it.each(['game', 'movie', 'av'] as const)('retains every painted %s surface unti
   fireEvent.keyDown(oldCase, {key: 'Enter'});
   const oldAngle = oldCase.getAttribute('data-angle');
   const oldImages = [...container.querySelectorAll<HTMLImageElement>('.work-case-slot img:not([aria-hidden="true"]), .work-hero-band img, .work-strip img, .work-backdrop .is-painted')];
-  const next = {...item, id: 'two', name: '작품 둘', selectedWorkArtworkId: 'front2', selectedHeroArtworkId: 'hero2', artworks: [{id: 'art2', kind: 'screenshot', selected: false}, {id: 'spine2', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back2', kind: 'back', selected: true}] : [])]};
+  const next = {...item, id: 'two', name: '작품 둘', selectedWorkArtworkId: 'front2', selectedHeroArtworkId: 'hero2', artworks: [{id: 'art2', kind: 'screenshot', selected: false}, {id: 'extra2', kind: 'artwork', selected: false}, {id: 'spine2', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back2', kind: 'back', selected: true}] : [])]};
   rerender(<CaseWork {...options} item={next} position={2}/>);
   expect(screen.getByRole('heading', {name: '작품 하나'})).toBeInTheDocument();
   for (const image of oldImages) expect(image).toBeVisible();

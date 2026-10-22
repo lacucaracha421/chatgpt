@@ -864,6 +864,14 @@ final class ExchangeService {
         catch (RejectedExecutionException e) { fail(row, "network", null); }
     }
 
+    /** The provider's current `OpenableColumns.SIZE`, or -1 when it does not say. */
+    private static long reportedSize(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0);
+        } catch (RuntimeException ignored) { /* Unknown; the pre-pass reads the real length. */ }
+        return -1;
+    }
+
     private void upload(Row row) {
         if (row.cancelled) return;
         ContentResolver resolver = context.getContentResolver();
@@ -872,6 +880,7 @@ final class ExchangeService {
             JSONObject connection = connection();
             if (connection == null) throw new UserError("tokenMissing");
             update(row, "preparing", "");
+            long reported = reportedSize(resolver, uri);
             ExchangeTransfer.Digest digest;
             try (InputStream in = resolver.openInputStream(uri)) {
                 if (in == null) throw new FileNotFoundException();
@@ -882,6 +891,10 @@ final class ExchangeService {
                 if ("File too large".equals(tooLarge.getMessage())) throw new UserError("fileTooLarge");
                 throw tooLarge;
             }
+            // A source that reads shorter than its provider reports did not hand over its content;
+            // an empty one carries nothing worth sending. Neither may end as a successful send.
+            if (reported > 0 && digest.size < reported) throw new UserError("sourceUnavailable");
+            if (digest.size == 0) throw new UserError("emptySource");
             synchronized (this) {
                 // Different bytes under the same id would be refused as a reused transfer id.
                 if (row.freshId || (row.sha != null && !row.sha.equals(digest.sha256))) renew(row);

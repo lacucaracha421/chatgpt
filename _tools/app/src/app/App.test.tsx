@@ -452,8 +452,8 @@ describe("App", () => {
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
     expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
-    await userEvent.click(await screen.findByRole("button", { name: /유사 이미지 검토/ }));
-    expect(await screen.findByRole("region", { name: "유사 검토" })).toBeInTheDocument();
+    await userEvent.click(within(await screen.findByRole("region", { name: /^오늘 할 것/ })).getByRole("button", { name: /유사 이미지 검토/ }));
+    expect(await screen.findByRole("region", { name: "유사 이미지 검토" })).toBeInTheDocument();
   });
 
   it("renders the trash workspace without loading an asset page", async () => {
@@ -690,8 +690,8 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
     expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: /유사 이미지 검토/ }));
-    expect(await screen.findByRole("region", { name: "유사 검토" })).toBeInTheDocument();
+    await user.click(within(await screen.findByRole("region", { name: /^오늘 할 것/ })).getByRole("button", { name: /유사 이미지 검토/ }));
+    expect(await screen.findByRole("region", { name: "유사 이미지 검토" })).toBeInTheDocument();
     fireEvent.mouseUp(window, { button: 3 });
     await waitFor(() => expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page"));
     await user.click(within(rail).getByRole("button", { name: "메모" }));

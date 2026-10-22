@@ -6,6 +6,7 @@ import {ledgerWriter} from '../../src/notes/ledger/entryWrites';
 import {QuickEntry} from '../../src/notes/ledger/LedgerContents';
 import {DayChargeRow, DayLedgerLists, DayMemo, DayReleases, EntryRowParts, DAY_MEMO_SAVE_DELAY} from '../../src/home/HomeDay';
 import {useDayFolds} from '../../src/home/homeDayFolds';
+import {holidayOn} from '../../src/home/koreanHolidays';
 import {Money} from '../../src/home/HomeMonth';
 import type {PaymentEvent} from '../../src/home/homeCalendarModel';
 import type {MonthRelease} from '../../src/home/homeMonthModel';
@@ -113,8 +114,9 @@ export function TabletDaySheet({date, today, releases, savedCount, hideAmounts, 
   const [folds, toggleFold] = useDayFolds();
   const month = Number(date.slice(5, 7)), day = Number(date.slice(8));
   const weekday = SHORT_WEEKDAYS[new Date(`${date}T12:00:00`).getDay()];
-  return <BottomSheet title={`${month}월 ${day}일 (${weekday})`} onClose={onClose}
-    heading={<span className="home-day-sheet__title">{month}월 {day}일 <span>({weekday})</span>{date === today && <Badge variant="accent">오늘</Badge>}</span>}>
+  const holiday = holidayOn(date);
+  return <BottomSheet title={`${month}월 ${day}일 (${weekday})${holiday ? ` ${holiday}` : ''}`} onClose={onClose}
+    heading={<span className="home-day-sheet__title">{month}월 {day}일 <span>({weekday}){holiday && ` ${holiday}`}</span>{date === today && <Badge variant="accent">오늘</Badge>}</span>}>
     <div className="home-day home-day-sheet">
       {savedCount > 0 && <button type="button" className="home-attention-row home-day__saved" onClick={onOpenSaved}>
         <span className="home-attention-mark" aria-hidden="true"><PhotoIcon /></span>

@@ -109,17 +109,17 @@ export function StatusCenter({
     + Number(characterCounted) + Number(libraryVisible) + userWorks.length;
 
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : workCount > 0 ? "available" : reviewCount > 0 ? "queue" : "idle";
-  const text = { attention: `문제 ${problemCount}`, active: `작업 ${activeCount}`, available: `결과 ${workCount}`, queue: `확인 ${reviewCount}`, idle: "상태" }[state];
+  const text = { attention: `문제 ${problemCount}`, active: `작업 ${activeCount}`, available: `결과 ${workCount}`, queue: `유사 ${reviewCount}`, idle: "상태" }[state];
   const label = {
     attention: `상태 · 문제 ${problemCount}개`,
     active: `상태 · 작업 ${activeCount}개 진행 중`,
     available: `상태 · 결과 ${workCount}개`,
-    queue: `상태 · 확인 ${reviewCount}개 대기`,
+    queue: `상태 · 유사 이미지 검토 ${reviewCount}개 대기`,
     idle: "상태",
   }[state];
   const description = [
     state !== "active" && activeCount > 0 ? `작업 ${activeCount}개 진행 중` : null,
-    state !== "queue" && reviewCount > 0 ? `유사 검토 ${reviewCount}개 대기` : null,
+    state !== "queue" && reviewCount > 0 ? `유사 이미지 검토 ${reviewCount}개 대기` : null,
   ].filter(Boolean).join(" · ") || undefined;
 
   const go = (view: AssetView) => { setOpen(false); onNavigate(view); };

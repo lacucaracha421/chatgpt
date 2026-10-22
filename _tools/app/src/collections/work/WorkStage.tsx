@@ -25,20 +25,43 @@ export function workMeta(collection: WorkMetaSource, platform: CaseData["platfor
 export function heroArtwork(collection: { type: string; selectedHeroArtworkId?: string | null; selectedBackdropArtworkId?: string | null }) {
   return collection.selectedHeroArtworkId || (collection.type === "movie" ? collection.selectedBackdropArtworkId : null) || null;
 }
+/** The strip shows only when there is a choice to make: AV always (its flat jacket), other works with two or more artworks. */
+export function workStripShown(av: boolean, artworkCount: number) {
+  return av || artworkCount > 1;
+}
 /** Artwork thumbnails, with the AV flat jacket first. Shared by PC and tablet. */
 export function WorkStrip({ av, mode, artworks, privacy, frontThumbnailUrl, thumbnailUrl = workArtworkThumbnailUrl, onPick, onReady }: { av: boolean; mode: string; artworks: { id: string; kind?: string }[]; privacy: boolean; frontThumbnailUrl?: string | null; thumbnailUrl?(id: string): string | null; onPick(id: string): void; onReady?(): void }) {
   const stripWheel = useHorizontalWheel();
-  const sources = Object.fromEntries(artworks.map(item => [item.id, privacy ? null : thumbnailUrl(item.id)]));
+  const shown = workStripShown(av, artworks.length);
+  const sources = shown ? Object.fromEntries(artworks.map(item => [item.id, privacy ? null : thumbnailUrl(item.id)])) : {};
   const front = !privacy && av ? frontThumbnailUrl ?? null : null;
   const images = useWorkImageReady({ ...sources, flat: front }, onReady);
-  if (!av && !artworks.length) return null;
+  if (!shown) return null;
   const pick = (id: string) => onPick(mode === id ? "case" : id);
   return <div ref={stripWheel} className="work-strip" aria-label="작품 보기">
     {av && <button className="work-strip-tile work-strip-art" aria-label="펼친 표지" aria-pressed={mode === "flat"} onClick={() => pick("flat")}><span className="work-strip-pic">{!privacy && frontThumbnailUrl && <img src={frontThumbnailUrl} alt="" draggable={false} onLoad={event => void images.loaded("flat", event)} onError={() => images.failed("flat", frontThumbnailUrl)} />}</span></button>}
     {artworks.map((item, index) => { const src = sources[item.id]; return <button className="work-strip-tile work-strip-art" key={item.id} aria-label={`${item.kind === "screenshot" ? "스크린샷" : "아트워크"} ${index + 1}`} aria-pressed={mode === item.id} onClick={() => pick(item.id)}><span className="work-strip-pic">{src && <img src={src} alt="" draggable={false} onLoad={event => void images.loaded(item.id, event)} onError={() => images.failed(item.id, src)} />}</span></button>; })}
   </div>;
 }
-export function HeroBand({ src, manga, onReady }: { src: string; manga: boolean; onReady(): void }) {
+/**
+ * Whether decoded art is a logo-type cut-out (a large share of see-through pixels), which reads badly as the sharp hero.
+ * Unreadable pixels (no canvas, or a cross-origin image) count as an ordinary picture.
+ */
+function cutOutArt(image: HTMLImageElement): boolean {
+  if (!image.naturalWidth || !image.naturalHeight) return false;
+  try {
+    const canvas = document.createElement("canvas"); canvas.width = 32; canvas.height = 18;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    context.drawImage(image, 0, 0, 32, 18);
+    const { data } = context.getImageData(0, 0, 32, 18);
+    let clear = 0;
+    for (let index = 3; index < data.length; index += 4) if (data[index] < 128) clear += 1;
+    return clear / (data.length / 4) > .2;
+  } catch { return false; }
+}
+/** `readable`: the art's origin allows canvas reads (the PC media protocol), so a logo-type cut-out can be left out. */
+export function HeroBand({ src, manga, readable = false, onReady }: { src: string; manga: boolean; readable?: boolean; onReady(): void }) {
   const [settled, setSettled] = useState<{ generation: number; decoded: boolean } | null>(null);
   const requested = useRef({ src, generation: 0 });
   if (requested.current.src !== src) requested.current = { src, generation: requested.current.generation + 1 };
@@ -46,11 +69,12 @@ export function HeroBand({ src, manga, onReady }: { src: string; manga: boolean;
   useEffect(() => { if (settled?.generation === generation) onReady(); });
   return <div className={`work-hero-band${manga ? " work-hero-band--manga" : ""}`} aria-hidden="true" style={settled?.generation === generation && settled.decoded ? undefined : { visibility: "hidden" }}>
     {/* The surface's two slots retain this decoded element together with its case. */}
-    <img src={src} alt="" draggable={false} onLoad={async event => {
+    <img src={src} alt="" draggable={false} crossOrigin={readable ? "anonymous" : undefined} onLoad={async event => {
       const image = event.currentTarget;
       try { await image.decode?.(); } catch { if (requested.current.generation === generation) setSettled({ generation, decoded: false }); return; }
       if (requested.current.generation !== generation || !image.isConnected) return;
-      setSettled({ generation, decoded: true });
+      // A cut-out stays hidden but still settles, so the work opens without a hero.
+      setSettled({ generation, decoded: !(readable && cutOutArt(image)) });
     }} onError={() => { if (requested.current.generation === generation) setSettled({ generation, decoded: false }); }} />
   </div>;
 }

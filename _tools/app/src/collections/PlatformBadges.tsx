@@ -11,6 +11,21 @@ const FAMILIES = [
 /** Chip text: the generations present, e.g. "PS5·PS4"; the brand mark says the rest. */
 const SHORT: Record<string, string> = { PC: "PC", PS5: "PS5", PS4: "PS4", "Switch 2": "Switch 2", Switch: "Switch", "Xbox Series": "Series X|S", "Xbox One": "One" };
 
+/** IGDB platform names ("Nintendo Switch 2", "PC (Microsoft Windows)") as the badge members above; others stay as stored. */
+const IGDB_NAMES: [RegExp, string][] = [
+  [/^nintendo switch 2$/i, "Switch 2"], [/^nintendo switch$/i, "Switch"],
+  [/^playstation 5$/i, "PS5"], [/^playstation 4$/i, "PS4"],
+  [/^xbox series x\|s$/i, "Xbox Series"], [/^xbox one$/i, "Xbox One"],
+  [/^pc \(microsoft windows\)$/i, "PC"],
+];
+
+/** A work's stored platform list ("Nintendo Switch · PC (Microsoft Windows)") as badge names, without duplicates. */
+export function platformBadgeNames(value: string | null | undefined): string[] {
+  const names = (value ?? "").split(/\s*[·,]\s*/).filter(Boolean)
+    .map(name => IGDB_NAMES.find(([pattern]) => pattern.test(name))?.[1] ?? name);
+  return [...new Set(names)];
+}
+
 /** One brand-colored icon chip per platform family (PC shows the Steam mark; the generations
  * are in the tooltip and accessible name), plus 이식 for ports. */
 export function PlatformBadges({ platforms, port = false }: { platforms: string[]; port?: boolean }) {

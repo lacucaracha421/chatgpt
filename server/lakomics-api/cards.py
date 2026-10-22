@@ -357,7 +357,8 @@ def open_pack(db, pack_id, operation_id, principal, now):
     if pack is None:
         fail(404, "packNotFound", "Card pack not found.")
     if pack["opened_at"] is not None:
-        return _pack_view(db, pack, True, now)
+        # The opener's own retry (its reply was lost) gets the same reveal; any other request sees it opened.
+        return _pack_view(db, pack, pack["open_operation_id"] != operation_id, now)
     characters = eligible_characters(db)
     if not characters:
         fail(409, "noCharacters", "No registered characters have visible images.")

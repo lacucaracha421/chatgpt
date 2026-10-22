@@ -15,12 +15,8 @@ const SORT_OPTIONS = [
 
 const MEDIA_OPTIONS: { value: AssetMediaFilter; label: string }[] = [{ value: "all", label: "전체" }, { value: "images", label: "이미지" }, { value: "videos", label: "영상" }];
 
-const aspectIcon = (paths: string[]) => <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">{paths.map((d) => <path key={d} d={d} />)}</svg>;
-const ASPECT_OPTIONS: ReadonlyArray<{ value: AssetAspectFilter; label: string; icon: ReturnType<typeof aspectIcon> }> = [
-  { value: "all", label: "전체", icon: aspectIcon(["M2.75 6.75h8.5v8.5h-8.5z", "M13.75 4.75h3.5v10.5h-3.5z"]) },
-  { value: "square", label: "정사각형", icon: aspectIcon(["M4.75 4.75h10.5v10.5H4.75z"]) },
-  { value: "landscape", label: "가로형", icon: aspectIcon(["M2.75 5.75h14.5v8.5H2.75z"]) },
-  { value: "portrait", label: "세로형", icon: aspectIcon(["M5.75 2.75h8.5v14.5h-8.5z"]) },
+const ASPECT_OPTIONS: { value: AssetAspectFilter; label: string }[] = [
+  { value: "all", label: "전체" }, { value: "square", label: "정사각형" }, { value: "landscape", label: "가로형" }, { value: "portrait", label: "세로형" },
 ];
 
 type GalleryViewMenuProps = {
@@ -71,16 +67,11 @@ export function GalleryViewMenu({
       </ViewOptionsSection>}
     </>}>
       {onSortChange && <ViewOptionsSection title="정렬">
-        <div className="asset-view-menu__aspects" role="radiogroup" aria-label="정렬">
-          {SORT_OPTIONS.map(option => <button key={option.value} type="button" className="asset-view-menu__aspect"
-            role="radio" aria-checked={sort === option.value} onClick={() => onSortChange(option.value)}>{option.label}</button>)}
-        </div>
+        <SegmentedControl label="정렬" options={SORT_OPTIONS} value={sort} onChange={onSortChange} fullWidth />
         {sort === "random" && onReshuffle && <Button variant="ghost" onClick={onReshuffle}>다시 섞기</Button>}
       </ViewOptionsSection>}
       {onAspectFilterChange && <ViewOptionsSection title="비율">
-        <div className="asset-view-menu__aspects" role="radiogroup" aria-label="비율">
-          {ASPECT_OPTIONS.map((option) => <button key={option.value} type="button" role="radio" aria-checked={aspectFilter === option.value} className="asset-view-menu__aspect" onClick={() => onAspectFilterChange(option.value)}>{option.icon}<span>{option.label}</span></button>)}
-        </div>
+        <SegmentedControl label="비율" options={ASPECT_OPTIONS} value={aspectFilter} onChange={onAspectFilterChange} fullWidth />
       </ViewOptionsSection>}
       <ViewOptionsSection title="표시">
         <Switch label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />

@@ -1,5 +1,7 @@
 import { EmptyState } from "../shared/ui/EmptyState";
 import { SectionLabel } from "../shared/ui/SectionLabel";
+import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { displayCount } from "../shared/displayDate";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import {useAssetMask} from "../privacy/PrivacyContext";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -15,7 +17,10 @@ import { batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLa
 import { blockRoute } from "./route";
 import { RouteWord } from "./RouteWord";
 import { DirectReceiveBlock } from "./DirectReceive";
+import "../shared/fold.css";
 import "./exchange.css";
+
+const VIEW_OPTIONS = [{ value: "all", label: "전체" }, { value: "received", label: "받은 파일" }] as const;
 
 export type FilePicker = () => Promise<string[] | null>;
 
@@ -219,13 +224,13 @@ function Block({ block, peerName, store, onError }: { block: TimelineBlock<Item>
   return <li className={`exchange-block${block.mine ? " is-mine" : ""}`}>
     <p className="exchange-who">
       {block.mine ? "이 PC" : peerName}{time && <> · <time dateTime={block.at}>{time}</time></>}
-      {!block.mine && entries.length > 1 && <> · 파일 <span className="numeric">{entries.length}</span>개</>}
+      {!block.mine && entries.length > 1 && ` · 파일 ${displayCount(entries.length, "개")}`}
       <RouteWord route={route} />
       {delivered && <> · 전달됨<CheckIcon className="exchange-delivered" aria-hidden="true" /></>}
     </p>
     <div className={`exchange-bubble${entries.some(failed) ? " is-error" : ""}`}>
       {head && <div className="exchange-batch-head">
-        <strong>{images ? "사진" : "파일"} <span className="numeric">{entries.length}</span>개</strong>
+        <strong>{images ? "사진" : "파일"} {displayCount(entries.length, "개")}</strong>
         <span className="exchange-batch-meta">{busy ? `${progress.finished}/${progress.total} · ${formatBytes(progress.done)} / ${formatBytes(progress.size)}` : formatBytes(progress.size)}</span>
         {busy && <span className="exchange-pct">{progress.percent}%</span>}
       </div>}
@@ -273,6 +278,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
   const [receivedOnly, setReceivedOnly] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [emptyHelpOpen, setEmptyHelpOpen] = useState(false);
+  const [tokenOpen, setTokenOpen] = useState(false);
   const { availability, devices } = snapshot;
   const chosen = devices.find((device) => device.deviceId === target) ?? devices[0] ?? null;
 
@@ -340,10 +346,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
         : <p className="exchange-index-value">등록된 기기 없음</p>}
       {chosen && <>
         <SectionLabel className="workspace-section-label" title="보기" />
-        <div className="exchange-filter" role="group" aria-label="보기">
-          <button type="button" aria-pressed={!receivedOnly} onClick={() => setReceivedOnly(false)}>전체</button>
-          <button type="button" aria-pressed={receivedOnly} onClick={() => setReceivedOnly(true)}>받은 파일</button>
-        </div>
+        <SegmentedControl label="보기" options={VIEW_OPTIONS} value={receivedOnly ? "received" : "all"} onChange={(value) => setReceivedOnly(value === "received")} fullWidth />
       </>}
     </div>
     <div className="exchange-index-foot">
@@ -353,7 +356,10 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
       <div className="exchange-index-links">
         <Button size="sm" variant="ghost" onClick={() => void store.openFolder().catch((reason) => setError(commandErrorMessage(reason, "폴더를 열지 못했습니다.")))}>폴더 열기</Button>
       </div>
-      {availability.state !== "unavailable" && <details className="exchange-token-details"><summary>이 PC 전용 토큰</summary><TokenForm store={store} configured={snapshot.tokenConfigured} onError={setError} /></details>}
+      {availability.state !== "unavailable" && <div className="exchange-token-details">
+        <SectionLabel title="이 PC 전용 토큰" collapsible={{ open: tokenOpen, onToggle: () => setTokenOpen((open) => !open), controls: "exchange-token-fold" }} />
+        <div id="exchange-token-fold" className="ui-fold" data-open={tokenOpen} inert={!tokenOpen} aria-hidden={!tokenOpen}><div className="ui-fold__inner"><TokenForm store={store} configured={snapshot.tokenConfigured} onError={setError} /></div></div>
+      </div>}
     </div>
   </div>;
 
@@ -387,12 +393,11 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
     </footer>}
     {dragging !== null && <div className="exchange-drop-veil" aria-hidden="true">
       <strong>{chosen ? `놓으면 ${peer}(으)로 보냅니다` : "받을 기기가 없어 보낼 수 없습니다"}</strong>
-      {dragging > 0 && <span>항목 <span className="numeric">{dragging}</span>개 · 폴더는 zip 하나로</span>}
+      {dragging > 0 && <span>항목 {displayCount(dragging, "개")} · 폴더는 zip 하나로</span>}
     </div>}
   </div>;
 }
 
 function DaySeparator({ at }: { at: string }) {
-  const { date, note } = dayLabel(at);
-  return <li className="exchange-day" aria-label={`${date} ${note}`}><span className="numeric">{date}</span>{note}</li>;
+  return <li className="exchange-day"><span>{dayLabel(at)}</span></li>;
 }

@@ -128,7 +128,7 @@ it("lists only non-empty review queues with real counts and navigates to them", 
   await user.click(within(queues).getByRole("button", { name: /미분류/ }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "unsorted" });
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "상태 · 확인 12개 대기" })).toHaveAttribute("data-state-tone", "queue");
+  expect(screen.getByRole("button", { name: "상태 · 유사 이미지 검토 12개 대기" })).toHaveAttribute("data-state-tone", "queue");
 
   rerender(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null}
     reviewCount={3} unsortedCount={0} onNavigate={onNavigate} onOpenChange={onOpenChange} />);

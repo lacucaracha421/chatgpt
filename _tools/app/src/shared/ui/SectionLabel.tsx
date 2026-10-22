@@ -14,15 +14,15 @@ type SectionLabelProps = {
   as?: "div" | "h2" | "h3";
   id?: string;
   className?: string;
-  /** The complete label becomes the fold control; do not combine with actions/onOpen. */
-  collapsible?: { open: boolean; onToggle: () => void; controls?: string };
+  /** The complete label becomes the fold control; do not combine with actions/onOpen. `label` overrides its accessible name. */
+  collapsible?: { open: boolean; onToggle: () => void; controls?: string; label?: string };
 };
 
 export function SectionLabel({ title, icon: Icon, count, unit, actions, onOpen, as = "div", id, className, collapsible }: SectionLabelProps) {
   const Element = as;
   const classes = ["ui-section-label", className].filter(Boolean).join(" ");
 
-  if (collapsible) return <button type="button" id={id} className={`${classes} ui-section-label--collapsible`} aria-expanded={collapsible.open} aria-controls={collapsible.controls} onClick={collapsible.onToggle}>
+  if (collapsible) return <button type="button" id={id} className={`${classes} ui-section-label--collapsible`} aria-expanded={collapsible.open} aria-controls={collapsible.controls} aria-label={collapsible.label} onClick={collapsible.onToggle}>
     <span className="ui-section-label__title">{Icon && <Icon aria-hidden="true" />}{title}</span>
     {count !== undefined && <>{" "}<span className="ui-section-label__count">{displayCount(count, unit)}</span></>}
     <span className="ui-section-label__rule" aria-hidden="true" />

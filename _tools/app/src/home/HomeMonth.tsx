@@ -18,6 +18,15 @@ export function Money({ amount, hidden, symbol = false }: { amount: number; hidd
   return <span className="numeric">{symbol ? `₩${amount.toLocaleString("ko-KR")}` : displayCount(amount, "원")}</span>;
 }
 
+/** 215,000 → 21.5만, 3,990 → 3,990: what a narrow calendar cell can hold (the cell's mark says it is money). */
+const shortWon = (amount: number) => amount < 10_000 ? amount.toLocaleString("ko-KR") : `${Number((amount / 10_000).toFixed(amount < 1_000_000 ? 1 : 0))}만`;
+
+/** A cell amount: the full one, and the short one a narrow calendar shows instead (homeMonth.css). */
+function CellMoney({ amount, hidden }: { amount: number; hidden: boolean }) {
+  if (hidden) return <Money amount={amount} hidden />;
+  return <><span className="home-cal__money-full numeric">{displayCount(amount, "원")}</span><span className="home-cal__money-short numeric">{shortWon(amount)}</span></>;
+}
+
 export const weekdayName = (date: string) => WEEKDAY_NAMES[new Date(`${date}T12:00:00`).getDay()]!;
 
 type Props = {
@@ -41,19 +50,15 @@ type Props = {
   onEnterPanel(date: string): void;
 };
 
-/** Every chip when they fit in three lines; otherwise what fits in two lines and +N for the rest. */
-function fitChips(chips: ReactNode[], lines: number[]) {
-  const total = lines.reduce((sum, count) => sum + count, 0);
-  if (total <= 3) return chips;
-  let used = 0, shown = 0;
-  while (shown < chips.length && used + lines[shown]! <= 2) used += lines[shown++]!;
-  return <>{chips.slice(0, shown)}<span className="home-cal__more numeric">+{chips.length - shown}</span></>;
+/** Every chip when three fit; otherwise two chips and +N for the rest. */
+function fitChips(chips: ReactNode[]) {
+  if (chips.length <= 3) return chips;
+  return <>{chips.slice(0, 2)}<span className="home-cal__more numeric">+{chips.length - 2}</span></>;
 }
 
 function Cell({ day, heat, selected, tabbable, hideAmounts, chargeAmounts }: { day: MonthDay<MonthRelease>; heat: number; selected: boolean; tabbable: boolean; hideAmounts: boolean; chargeAmounts: boolean }) {
-  // A charge with a second line (amount or trial end) takes two chip lines; a cell holds three.
-  const twoLines = (payment: MonthDay<MonthRelease>["payments"][number]) => chargeAmounts || payment.kind === "trialEnd";
-  const lines = [...day.releases.map(() => 1), ...day.payments.map(payment => twoLines(payment) ? 2 : 1)];
+  // A charge is a release-shaped chip: name, then the amount (or 무료 끝남) on the same line.
+  const chargeDetail = (payment: MonthDay<MonthRelease>["payments"][number]) => chargeAmounts || payment.kind === "trialEnd";
   const chips = [
     ...day.releases.map(release => <span key={`release:${release.key}`} className="home-cal__chip" data-new={release.fresh ? "" : undefined}>
       <span className="home-cal__chip-title">{releaseDisplayTitle(release.name)}</span>
@@ -62,7 +67,7 @@ function Cell({ day, heat, selected, tabbable, hideAmounts, chargeAmounts }: { d
     ...day.payments.map(payment => <span key={`payment:${payment.key}`} className="home-cal__chip home-cal__chip--pay" data-trial={payment.kind === "trialEnd" ? "" : undefined}>
       <ArrowPathRoundedSquareIcon />
       <span className="home-cal__chip-title">{payment.name}</span>
-      {twoLines(payment) && <span className="home-cal__chip-detail">{payment.kind === "trialEnd" ? "무료 끝남" : <Money amount={payment.amount} hidden={hideAmounts} />}</span>}
+      {chargeDetail(payment) && <span className="home-cal__chip-detail">{payment.kind === "trialEnd" ? "무료 끝남" : <CellMoney amount={payment.amount} hidden={hideAmounts} />}</span>}
     </span>),
   ];
   const label = [
@@ -86,10 +91,10 @@ function Cell({ day, heat, selected, tabbable, hideAmounts, chargeAmounts }: { d
       {day.hasMemo && <DocumentTextIcon className="home-cal__memo" />}
     </span>
     <span className="home-cal__chips" aria-hidden="true">
-      {fitChips(chips, lines)}
+      {fitChips(chips)}
     </span>
     {day.spent > 0 && <span className="home-cal__foot" aria-hidden="true">
-      <span className="home-cal__spent"><WalletIcon /><Money amount={day.spent} hidden={hideAmounts} /></span>
+      <span className="home-cal__spent"><WalletIcon /><CellMoney amount={day.spent} hidden={hideAmounts} /></span>
     </span>}
   </button>;
 }

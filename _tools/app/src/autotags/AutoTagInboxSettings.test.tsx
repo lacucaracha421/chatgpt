@@ -48,7 +48,7 @@ it("renders the nightly result and chooses the folder, review toggle and manual 
   await user.click(screen.getByRole("button", { name: "폴더 선택" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: "/tmp/daily", applyTaggerReview: false });
-  await user.click(screen.getByRole("button", { name: "지금 가져오기" }));
+  await user.click(screen.getByRole("button", { name: "가져오기" }));
   expect(invoke).toHaveBeenCalledWith("run_auto_tag_inbox_now");
   expect(await screen.findByText("새로 가져올 파일이 없습니다.")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "사용 안 함" }));
@@ -64,7 +64,7 @@ it("shows failed file results and preserves configuration when a run is busy", a
     : settings);
   render(<AutoTagSettings disabled={false} />);
   await screen.findByText(/자동 태그 가져오기 실패/);
-  await user.click(screen.getByRole("button", { name: "지금 가져오기" }));
+  await user.click(screen.getByRole("button", { name: "가져오기" }));
   expect(await screen.findByText("다른 가져오기가 진행 중입니다.")).toBeTruthy();
   expect(screen.getByText("/tmp/inbox")).toBeTruthy();
 });
@@ -72,7 +72,7 @@ it("shows failed file results and preserves configuration when a run is busy", a
 it("refreshes settings after a background completion and disables actions while unavailable", async () => {
   const view = render(<AutoTagSettings disabled />);
   await screen.findByText("/tmp/inbox");
-  expect((screen.getByRole("button", { name: "지금 가져오기" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "가져오기" }) as HTMLButtonElement).disabled).toBe(true);
   settings = { folder: "/tmp/new", applyTaggerReview: false, last: null };
   const handler = vi.mocked(listen).mock.calls[0][1];
   await act(async () => { handler({ event: "library://auto-tag-inbox", id: 1, payload: {} }); });

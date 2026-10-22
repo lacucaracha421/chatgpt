@@ -21,7 +21,8 @@ import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
-import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { FolderSearchPicker } from "../classification/FolderSearchPicker";
 import { ArtistCollage } from "./ArtistCollage";
 import { artistHandle } from "./format";
@@ -81,9 +82,10 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
       : section === "source-fill" && overview ? <span className="artist-hub__count">출처 주소는 있고 작가가 없는 {formatCount(overview.unknownSource)}장</span> : undefined;
   return <section className="artist-hub" aria-label={titles[section]}>
     <ViewToolbar title={titles[section]} ariaLabel="작가 도구" titleAccessory={accessory} chrome={{
-      status: section === "main" && rule ? <button type="button" className="artist-rule" aria-label={`주요 작가 기준 바꾸기: ${ruleText(rule)}`} onClick={() => setRuleOpen(true)}>
-        {ruleText(rule)}<Cog6ToothIcon aria-hidden="true" />
-      </button> : undefined,
+      // The rule itself is read and changed in the dialog; the bar keeps only its button.
+      status: section === "main" && rule ? <Button size="icon" variant="ghost" aria-label={`주요 작가 기준 바꾸기: ${ruleText(rule)}`} onClick={() => setRuleOpen(true)}>
+        <Cog6ToothIcon aria-hidden="true" />
+      </Button> : undefined,
     }} />
     <div className="artist-hub__scroll" ref={scrollRef} onScroll={(event) => { hubScroll.set(section, event.currentTarget.scrollTop); }}>
       {section === "main" && <MainSection onNavigate={onNavigate} privacyMode={privacyMode} />}
@@ -209,7 +211,7 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
   const shown = rows * columns;
   return <>
     <TodaySection onNavigate={onNavigate} privacyMode={privacyMode} />
-    <div className="artist-section-head"><SectionLabel className="workspace-section-label" title="최근 저장 순 · 고정한 작가 제외" />{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
+    <div className="artist-section-head"><SectionLabel className="workspace-section-label" title="전체" actions={<MainOrderHelp />} />{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
     {!page && <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />}
     {page && page.artists.length === 0 && <EmptyState title="주요 작가가 아직 없습니다">작가 정보가 있는 이미지를 모으면 기준에 맞는 작가가 여기에 모입니다.</EmptyState>}
     {page && <div ref={gridRef} className="artist-grid" role="list" aria-label="주요 작가">
@@ -217,6 +219,14 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
     </div>}
     {page && page.artists.length > shown && <div className="artist-more"><Button variant="ghost" onClick={() => addRows}>주요 작가 {formatCount(Math.min(MAIN_ROWS_STEP * columns, page.artists.length - shown))}명 더 보기</Button></div>}
   </>;
+}
+
+/** The grid's order and what it leaves out, behind one ⓘ (DESIGN.md §12 Words). */
+function MainOrderHelp() {
+  const [open, setOpen] = useState(false);
+  return <AnchoredPanel open={open} onOpenChange={setOpen} title="전체" trigger={<Button size="icon" variant="ghost" aria-label="전체 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}>
+    <p>최근 저장 순입니다. 고정한 작가는 여기서 빠지고 사이드바 고정에 있습니다.</p>
+  </AnchoredPanel>;
 }
 
 function gridMetaLine(artist: ArtistSummary, rule?: ArtistSettings) {

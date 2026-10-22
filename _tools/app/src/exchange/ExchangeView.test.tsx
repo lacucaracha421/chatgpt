@@ -136,7 +136,7 @@ it("filters the timeline to received files", async () => {
   view.push({ devices: [tablet], outgoing: [row({ transferId: "o1", fileName: "sent.txt", state: "delivered" })],
     received: [{ transferId: "r1", fileName: "got.txt", sizeBytes: 1, fromName: "Galaxy Tab S11", receivedAt: "2026-09-25T01:00:00Z", exists: true }] });
   expect(screen.getByText("sent.txt")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "받은 파일" }));
+  await userEvent.click(screen.getByRole("radio", { name: "받은 파일" }));
   expect(screen.queryByText("sent.txt")).toBeNull();
   expect(screen.getByText("got.txt")).toBeInTheDocument();
 });

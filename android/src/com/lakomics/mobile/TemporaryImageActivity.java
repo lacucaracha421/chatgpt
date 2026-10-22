@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.*;
 import java.io.*;
 import java.net.*;
@@ -24,11 +25,19 @@ public final class TemporaryImageActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setGravity(Gravity.CENTER);layout.setPadding(32,32,32,32);layout.setBackgroundColor(Color.rgb(24,25,24));
-        status=new TextView(this);status.setTextColor(Color.rgb(221,220,206));status.setTextSize(18);status.setGravity(Gravity.CENTER);status.setText("임시보관에 저장 중…");layout.addView(status);
+        status=new TextView(this);status.setTextColor(Color.rgb(221,220,206));status.setTextSize(18);status.setGravity(Gravity.CENTER);layout.addView(status);
+        Button save=new Button(this);save.setText("저장");layout.addView(save);
         Button close=new Button(this);close.setText("닫기");close.setOnClickListener(v->finish());layout.addView(close);setContentView(layout);
         Uri data=getIntent().getData();
-        if(Build.VERSION.SDK_INT<29 || data==null || !"lakomics".equals(data.getScheme()) || !"temporary".equals(data.getHost()) || (data.getPath()!=null && !data.getPath().isEmpty())) {status.setText("지원하지 않는 임시 저장 요청입니다.");return;}
+        if(Build.VERSION.SDK_INT<29 || data==null || !"lakomics".equals(data.getScheme()) || !"temporary".equals(data.getHost()) || (data.getPath()!=null && !data.getPath().isEmpty())) {save.setVisibility(View.GONE);status.setText("지원하지 않는 임시 저장 요청입니다.");return;}
         String source=data.getQueryParameter("url");
+        String host;
+        try {host=TemporaryImagePolicy.url(source).getHost();} catch(Exception e) {save.setVisibility(View.GONE);status.setText("지원하지 않는 이미지 주소입니다.");return;}
+        // Any web page can open this link, so nothing is downloaded until the user confirms the source.
+        status.setText(host+"의 이미지를\n임시보관에 저장할까요?");
+        save.setOnClickListener(v->{save.setEnabled(false);save.setVisibility(View.GONE);status.setText("임시보관에 저장 중…");start(source);});
+    }
+    private void start(String source) {
         worker.execute(()->{
             File staging=null;
             try {

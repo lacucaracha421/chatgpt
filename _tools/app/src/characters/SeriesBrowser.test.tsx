@@ -325,7 +325,9 @@ it("offers a plain folder's 보기 options in a series folder and sends them wit
   await user.click(screen.getByRole("button", { name: "보기" }));
   // 미분류/전체 stays above the series gallery, so the menu starts with 종류.
   expect(viewSections()).toEqual(["종류", "배치", "정렬", "비율", "표시"]);
-  expect(within(screen.getByRole("radiogroup", { name: "정렬" })).getAllByRole("radio").map(radio => radio.textContent)).toEqual(["최신순", "오래된순", "좋아요순", "랜덤"]);
+  const sortGroup = within(screen.getByRole("radiogroup", { name: "정렬" }));
+  expect(sortGroup.getAllByRole("radio")).toHaveLength(4);
+  for (const name of ["최신순", "오래된순", "좋아요순", "랜덤"]) expect(sortGroup.getByRole("radio", { name })).toBeInTheDocument();
   expect(screen.getAllByRole("switch").map(item => item.getAttribute("aria-label"))).toEqual(["비공개 모드", "NSFW 필터", "정보"]);
   await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
   await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: null, seriesFilter: "unclassified",

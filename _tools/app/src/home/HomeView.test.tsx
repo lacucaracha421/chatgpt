@@ -241,7 +241,7 @@ describe('Home attention', () => {
     const today = await screen.findByRole('region', { name: '오늘 할 것' });
     await waitFor(() => expect(within(today).getAllByRole('button')).toHaveLength(4));
     const buttons = within(today).getAllByRole('button');
-    expect(buttons.map(b => b.textContent)).toEqual(['○구독 이번 달 ₩17,000다음 결제 D-2 · Netflix1개', '○Netflix 무료 끝남9.28 · ₩17,000부터 결제D-2', '□미분류 에셋1', '○피드백남은 항목 1개1']);
+    expect(buttons.map(b => b.textContent)).toEqual(['□구독 이번 달 ₩17,000다음 결제 D-2 · Netflix1개', '□Netflix 무료 끝남9.28 · ₩17,000부터 결제D-2', '□미분류 에셋1', '□피드백남은 항목 1개1']);
     fireEvent.click(buttons[3]!); expect(onNavigate).toHaveBeenCalledWith({ kind: 'notes', noteId: 'todo' });
   });
   it('shows connection failures only, using the problem wording rather than a last-success time', async () => {

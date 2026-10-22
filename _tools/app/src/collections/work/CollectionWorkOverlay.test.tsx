@@ -46,12 +46,13 @@ describe("Collection work open path", () => {
     gateway.listCollectionWorkArtworks.mockImplementation(() => new Promise(resolve => { artworks = resolve; }));
     vi.useFakeTimers();
     try {
-      fireEvent.doubleClick(screen.getByRole("button", { name: /^가 작품/ }));
+      // The first click picks the case, a click on the picked case opens it.
+      fireEvent.click(screen.getByRole("button", { name: /^가 작품/ })); fireEvent.click(screen.getByRole("button", { name: /^가 작품/ }));
       await act(async () => vi.advanceTimersByTimeAsync(READY_CAP_MS + 100));
       expect(shelf).toBeVisible();
       expect(container.querySelector(".collection-work")).toBeNull();
       await act(async () => record({ status: null, ownedPlatform: "PS5", myScore: null, memo: null }));
-      await act(async () => artworks([{ id: "chosen-spine", kind: "spine", selected: true }, { id: "shot", kind: "screenshot", selected: false }]));
+      await act(async () => artworks([{ id: "chosen-spine", kind: "spine", selected: true }, { id: "shot", kind: "screenshot", selected: false }, { id: "art", kind: "artwork", selected: false }]));
       const work = container.querySelector(".collection-work")!;
       expect(work).not.toBeVisible();
       expect(work.querySelector("[data-spine-template]")).toBeNull();
@@ -96,7 +97,7 @@ describe("Collection work open path", () => {
     gateway.fetchLaunchBoxSpine.mockRejectedValue(new Error("요청 실패"));
     vi.useFakeTimers();
     try {
-      render(<Harness />); fireEvent.doubleClick(screen.getByRole("button", { name: /^가 작품/ }));
+      render(<Harness />); fireEvent.click(screen.getByRole("button", { name: /^가 작품/ })); fireEvent.click(screen.getByRole("button", { name: /^가 작품/ }));
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
       expect(screen.queryByRole("alert")).toBeNull();

@@ -45,7 +45,7 @@ import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 import { useCaseSounds } from "../preferences/caseSoundPreference";
-import { SettingsGroup, SettingsRow } from "../shared/ui/SettingsRow";
+import { SettingsGroup, SettingsRow, StatusWord } from "../shared/ui/SettingsRow";
 import { ConfirmLine, CredentialRow, InlineEdit } from "./CredentialRow";
 import { ClaudeSettings } from "./ClaudeSettings";
 import { AnimationSettings } from "./AnimationSettings";
@@ -500,15 +500,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <LightweightModeRow />
           </SettingsGroup>
           <SettingsGroup title="동기화">
-            <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && joinStatus(serverRow.value, serverRow.time)}>확인 중…</BusyLabel>} tone={serverRow?.tone} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
+            <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && <ServerStatus row={serverRow} />}>확인 중…</BusyLabel>} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
             <SimpleRow name="태블릿" status={tabletRow ? `전송 · ${tabletRow.value}` : "전송 사용 불가"} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("qr")}>QR 연결</Button>} />
             <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection && (extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가")}>확인 중…</BusyLabel>} tone={extensionConnection?.status === "ready" ? "ok" : extensionConnection ? "off" : undefined} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("pc")}>PC 연결</Button>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
           <SettingsGroup title="갱신">
             <SimpleRow name="온라인 카탈로그" status={catalogStatus?.installed ? `${catalogDbUpdatedAt ? localDateTime(catalogDbUpdatedAt) : "갱신 기록 없음"} · ${intervalLabel(catalogStatus.updateIntervalSeconds)}` : "설치 안 됨"} control={catalogStatus?.installed ? <Button size="sm" variant="quiet" disabled={catalogBusy} onClick={() => void refreshCatalog()}>지금 갱신</Button> : undefined} />
-            <SimpleRow name="발매 캘린더" status={<BusyLabel busy={!calendar} idle={calendar && calendarStatus(calendar)}>확인 중…</BusyLabel>} tone={calendar && calendar.sources.some(source => source.errorCode) ? "off" : "ok"} control={<Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>새로 받기</Button>} />
-            {inbox.settings?.folder && <SimpleRow name="자동 태그" status={autoTagInboxResult(inbox.settings)} control={<Button size="sm" variant="quiet" disabled={inbox.locked} onClick={() => void inbox.runNow()}>지금 가져오기</Button>} />}
+            <SimpleRow name="발매 캘린더" status={<BusyLabel busy={!calendar} idle={calendar && calendarStatus(calendar)}>확인 중…</BusyLabel>} control={<Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>지금 갱신</Button>} />
+            {inbox.settings?.folder && <SimpleRow name="자동 태그" status={autoTagInboxResult(inbox.settings)} control={<Button size="sm" variant="quiet" disabled={inbox.locked} onClick={() => void inbox.runNow()}>가져오기</Button>} />}
           </SettingsGroup>
         </div>}
         {section === "display" && <div className="settings-view__section">
@@ -560,7 +560,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
               {editingCloudPublisherToken && <InlineEdit><TextInput aria-label="서버 송신 키" type="password" autoComplete="off" value={cloudPublisherToken} onChange={event => setCloudPublisherToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudPublisherToken.trim() || cloudBusy} onClick={() => void saveCloudPublisherToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudPublisherToken(false); setCloudPublisherToken(""); }}>취소</Button></InlineEdit>}
               {confirmingCloudPublisherTokenDelete && <ConfirmLine text="저장된 송신 키를 삭제할까요?" onCancel={() => setConfirmingCloudPublisherTokenDelete(false)} onConfirm={() => void deleteCloudPublisherToken()} busy={cloudBusy} />}
             </>}
-            <SimpleRow name="연결 상태" status={<BusyLabel busy={!serverRow} idle={serverRow && joinStatus(serverRow.value, serverRow.time)}>확인 중…</BusyLabel>} tone={serverRow?.tone} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
+            <SimpleRow name="연결 상태" status={<BusyLabel busy={!serverRow} idle={serverRow && <ServerStatus row={serverRow} />}>확인 중…</BusyLabel>} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
             {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />
             <SimpleRow name="클라우드로 복제" control={<Switch aria-label="클라우드로 복제" checked={cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(event.target.checked, cloudSettings?.captureEnabled ?? cloudSettings?.enabled)} />} />
@@ -583,8 +583,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <CredentialRow name="StashDB" configured={stashdbConfigured} editing={editingStashdb} value={stashdbKey} busy={stashdbBusy} onEdit={() => setEditingStashdb(true)} onChange={setStashdbKey} onSave={() => void saveCredential("stashdb")} onCancel={() => { setEditingStashdb(false); setStashdbKey(""); }} confirmDelete={confirmingStashdbDelete} onDelete={() => setConfirmingStashdbDelete(true)} onCancelDelete={() => setConfirmingStashdbDelete(false)} onConfirmDelete={() => void deleteCredential("stashdb")} />
           </SettingsGroup>
           <SettingsGroup title="발매 캘린더">
-            {calendar?.sources.map(source => <SimpleRow key={source.provider} name={SOURCE_LABEL[source.provider]} status={source.errorCode ? "가져오기 실패" : source.fetchedAt ? localDateTime(source.fetchedAt) : "받은 기록 없음"} tone={source.errorCode ? "off" : "ok"} />)}
-            <div className="settings-view__group-action"><Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>새로 받기</Button>{calendarMessage && <span className="settings-view__status">{calendarMessage}</span>}</div>
+            {calendar?.sources.map(source => <SimpleRow key={source.provider} name={SOURCE_LABEL[source.provider]} status={source.errorCode ? "가져오기 실패" : source.fetchedAt ? localDateTime(source.fetchedAt) : "받은 기록 없음"} tone={source.errorCode ? "off" : undefined} />)}
+            <div className="settings-view__group-action"><Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>지금 갱신</Button>{calendarMessage && <span className="settings-view__status">{calendarMessage}</span>}</div>
             <p className="settings-view__status">TMDB 제공: <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a></p>
           </SettingsGroup>
         </div>}
@@ -677,12 +677,15 @@ function LightweightModeRow() {
   return <SimpleRow name="절약 모드" status={status} control={control} />;
 }
 
-function joinStatus(value: string, time?: string) { return time ? `${value} · ${time}` : value; }
+/** The server line: only the state word is coloured, the time after it stays muted. */
+function ServerStatus({ row }: { row: { value: string; time?: string; tone?: string } }) {
+  return <><StatusWord tone={row.tone}>{row.value}</StatusWord>{row.time && ` · ${row.time}`}</>;
+}
 function intervalLabel(seconds: number) { return seconds === 3600 ? "1시간마다" : seconds === 21600 ? "6시간마다" : "24시간마다"; }
 function calendarStatus(calendar: { sources: { provider: keyof typeof SOURCE_LABEL; fetchedAt: string | null; errorCode?: string | null }[] }) {
   const fetched = calendar.sources.map(source => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().reverse()[0];
   const sources = calendar.sources.map(source => SOURCE_LABEL[source.provider]).join(" · ");
-  return `${fetched ? localDateTime(fetched) : "받은 기록 없음"}${sources ? ` · ${sources}` : ""}${calendar.sources.some(source => source.errorCode) ? " · 일부 실패" : ""}`;
+  return <>{`${fetched ? localDateTime(fetched) : "받은 기록 없음"}${sources ? ` · ${sources}` : ""}`}{calendar.sources.some(source => source.errorCode) && <> · <StatusWord tone="off">일부 실패</StatusWord></>}</>;
 }
 function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDate(value); }
 function localDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDateTime(value, new Date(), { withTime: true }); }

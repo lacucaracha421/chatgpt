@@ -55,3 +55,6 @@ export function koreanHolidays(year: number): ReadonlyMap<string, string> {
   }
   return result;
 }
+
+/** The holiday name of one `YYYY-MM-DD` date, for the day panel's title (a narrow calendar cell shows only the red date). */
+export const holidayOn = (date: string): string | undefined => koreanHolidays(Number(date.slice(0, 4))).get(date);

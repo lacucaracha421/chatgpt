@@ -34,7 +34,7 @@
 .home-cal--month {
   --cal-ink:#f5f6f7; --cal-ink-on:#17181a; --cal-muted:#a9aeb5; --cal-soft:#cdd1d6;
   --cal-line:#2e3135; --cal-sun:#f97770; --cal-sat:#6aa7f4; --cal-selected:#e8eaed;
-  --cal-new:#f8d14f; --cal-new-detail:#5a4a12; --cal-release:#385064; --cal-pay-line:#464b52; --cal-heat:#7f95b5;
+  --cal-new:#f8d14f; --cal-new-detail:#5a4a12; --cal-release:#385064; --cal-pay:#3a3e44; --cal-heat:#7f95b5;
   --cal-chip-text:13px; --cal-chip-line:18px; --cal-chip-height:20px;
   --cal-today-size:26px; --cal-cell-height:132px;
   grid-auto-rows:auto; gap:0; border-top:1px solid var(--cal-line);
@@ -43,7 +43,7 @@
 .home-cal--month .home-cal__weekday { padding:var(--space-2); border-bottom:1px solid var(--cal-line); color:var(--cal-muted); font-size:var(--type-meta); font-weight:600; line-height:var(--line-meta); text-align:left; }
 .home-cal--month .home-cal__weekday[data-dow="0"] { color:var(--cal-sun); }
 .home-cal--month .home-cal__weekday[data-dow="6"] { color:var(--cal-sat); }
-.home-cal--month .home-cal__day { position:relative; display:flex; flex-direction:column; gap:3px; min-width:0; min-height:0; height:var(--cal-cell-height); box-sizing:border-box; width:100%; margin:0; padding:var(--space-1); overflow:hidden;
+.home-cal--month .home-cal__day { position:relative; display:flex; flex-direction:column; gap:var(--space-1); min-width:0; min-height:0; height:var(--cal-cell-height); box-sizing:border-box; width:100%; margin:0; padding:var(--space-1); overflow:hidden;
   border:0; border-bottom:1px solid var(--cal-line); border-left:1px solid var(--cal-line); border-radius:0;
   background:var(--cal-wash, transparent); color:var(--cal-ink); font:inherit; text-align:left; cursor:pointer; transition:background-color 90ms var(--ease-standard); }
 .home-cal--month .home-cal__day[data-dow="0"] { border-left:0; }
@@ -71,16 +71,30 @@
 .home-cal__chip-detail { flex:none; color:inherit; font-weight:400; font-variant-numeric:tabular-nums; }
 .home-cal__chip[data-new] { background:var(--cal-new); color:var(--cal-ink-on); font-weight:600; }
 .home-cal__chip[data-new] .home-cal__chip-detail { color:var(--cal-new-detail); }
-.home-cal__chip--pay { background:transparent; box-shadow:inset 0 0 0 1px var(--cal-pay-line); color:var(--cal-soft); font-weight:400; }
+/* A charge has the release chip's shape (one line, a face, no outline) on a neutral face. */
+.home-cal__chip--pay { background:var(--cal-pay); color:var(--cal-soft); font-weight:400; }
 .home-cal__chip--pay svg { flex:none; width:12px; height:12px; }
-/* A charge with an amount or trial end reads as two lines: name, then the amount. */
-.home-cal__chip--pay:has(.home-cal__chip-detail) { display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:4px; height:calc(var(--cal-chip-height) * 2); padding-block:1px; align-content:center; }
-.home-cal__chip--pay:has(.home-cal__chip-detail) .home-cal__chip-detail { grid-column:2; }
 .home-cal__more { padding:0 var(--space-1); color:var(--cal-soft); font-size:var(--type-meta); font-weight:600; line-height:16px; font-variant-numeric:tabular-nums; }
-.home-cal__foot { display:flex; align-items:center; gap:var(--space-1); margin-top:auto; min-height:var(--line-meta); padding:0 2px; color:var(--cal-muted); font-size:var(--type-meta); line-height:var(--line-meta); font-variant-numeric:tabular-nums; }
+.home-cal__foot { display:flex; align-items:center; gap:var(--space-1); min-width:0; margin-top:auto; min-height:var(--line-meta); padding:0 2px; color:var(--cal-muted); font-size:var(--type-meta); line-height:var(--line-meta); font-variant-numeric:tabular-nums; }
 .home-cal__foot svg { flex:none; width:12px; height:12px; }
-.home-cal__spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; white-space:nowrap; }
+.home-cal__spent { margin-left:auto; display:inline-flex; align-items:center; gap:2px; min-width:0; overflow:hidden; white-space:nowrap; }
 .home-cal--month .home-mask { color:var(--cal-muted); }
+.home-cal__money-full, .home-cal__money-short { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.home-cal__money-short { display:none; }
+
+/* A narrow calendar (cells under ~100 px, the PC's 960 px window): a cell keeps the title, the red date and a
+   short amount (21.5만); volumes and holiday names are read in the day panel. */
+.home-month { container:homecal / inline-size; }
+@container homecal (max-width:699px) {
+  .home-cal--month .home-cal__holiday { display:none; }
+  .home-cal__chip:not(.home-cal__chip--pay) .home-cal__chip-detail { display:none; }
+  /* A charge keeps its amount; the name (read in the day panel) gives way first. */
+  .home-cal__chip--pay { overflow:hidden; }
+  .home-cal__chip--pay .home-cal__chip-title { display:none; }
+  .home-cal__chip--pay .home-cal__chip-detail { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .home-cal__money-full { display:none; }
+  .home-cal__money-short { display:inline; }
+}
 
 /* Adjacent-month content dims; selection and heat never change the text colours. */
 .home-cal--month .home-cal__day[data-outside] > * { opacity:.38; }
@@ -111,8 +125,9 @@
 .home-day__body { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; }
 .home-day__col { display:flex; flex-direction:column; gap:var(--space-6); min-width:0; }
 .home-day__col:empty { display:none; }
-/* Under the grid the panel is wide: 발매·이미지 | 메모 | 가계부 side by side. */
-@container homemonth (max-width:1099px) {
+/* Under the grid on a wide window the panel is wide: 발매·이미지 | 메모 | 가계부 side by side.
+   Narrower (the 960 px window) the three would be ~130 px columns, so they stay stacked. */
+@container homemonth (min-width:820px) and (max-width:1099px) {
   .home-day__body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr); gap:var(--space-8); align-items:start; }
   .home-day__col:empty { display:flex; }
 }
@@ -123,7 +138,9 @@
 .home-day__saved > svg:last-child { flex:none; width:16px; height:16px; color:var(--color-faint); }
 .home-day__saved .home-attention-mark > svg { width:16px; height:16px; }
 /* One short note: the 빠른 메모 text area, shorter. */
-textarea.ui-text-input.home-day__memo { display:block; width:100%; height:auto; min-height:96px; resize:none; margin:0; padding:var(--space-3); line-height:1.7; }
+/* It rests at one line while empty and opens to the full box on focus or once it holds text. */
+textarea.ui-text-input.home-day__memo { display:block; width:100%; height:auto; min-height:calc(1.7em + var(--space-3) * 2); resize:none; margin:0; padding:var(--space-3); line-height:1.7; transition:min-height 140ms var(--ease-standard); }
+textarea.ui-text-input.home-day__memo:where(:focus, :not(:placeholder-shown)) { min-height:96px; }
 textarea.ui-text-input.home-day__memo:focus { box-shadow:none; }
 /* Ledger: the 가계부's own rows and quick entry; subscription charges are read-only rows. */
 .home-day .ledger-items { margin:0; }
@@ -148,5 +165,6 @@ textarea.ui-text-input.home-day__memo:focus { box-shadow:none; }
 @media (prefers-reduced-motion:reduce) {
   .home-fold { transition:none; }
   .home-cal--month .home-cal__day { transition:none; }
+  textarea.ui-text-input.home-day__memo { transition:none; }
   .home-day .ledger-entry[data-fresh] .ledger-entry__main { animation:none; }
 }

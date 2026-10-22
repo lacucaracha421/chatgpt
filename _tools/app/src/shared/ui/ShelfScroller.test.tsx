@@ -87,7 +87,7 @@ describe("ShelfScroller wheel and touch boundaries", () => {
   });
 
   it("latches a real artwork strip without smooth scrolling, including StrictMode ref cleanup", () => {
-    const { container } = render(<StrictMode><WorkStrip av={false} mode="case" artworks={[{id:"art"}]} privacy onPick={() => undefined}/></StrictMode>);
+    const { container } = render(<StrictMode><WorkStrip av={false} mode="case" artworks={[{id:"art"},{id:"more"}]} privacy onPick={() => undefined}/></StrictMode>);
     const strip = container.querySelector<HTMLElement>(".work-strip")!;
     Object.defineProperties(strip, {clientWidth:{value:200}, scrollWidth:{value:800}});
     strip.scrollLeft = 590;

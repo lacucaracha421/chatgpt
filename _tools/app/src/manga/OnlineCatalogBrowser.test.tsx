@@ -56,14 +56,14 @@ describe("OnlineCatalogBrowser", () => {
     const gateway = createGateway(true);
     const first = renderBrowser(gateway, "bookmarked");
     await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledWith(expect.objectContaining({ sort: "bookmarkAdded", scope: "bookmarked" }), expect.any(Function), expect.any(String)));
-    await userEvent.click(screen.getByRole("button", { name: "정렬" }));
+    await userEvent.click(screen.getByRole("button", { name: "보기" }));
     expect(screen.queryByRole("menuitemradio", { name: "조회순" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitemradio", { name: "최신순" }));
     await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "latest" }), expect.any(Function), expect.any(String)));
     first.unmount();
     renderBrowser(gateway, "bookmarked");
     await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "latest" }), expect.any(Function), expect.any(String)));
-    await userEvent.click(screen.getByRole("button", { name: "정렬" }));
+    await userEvent.click(screen.getByRole("button", { name: "보기" }));
     await userEvent.click(await screen.findByRole("menuitemradio", { name: "최근 추가순" }));
     await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "bookmarkAdded" }), expect.any(Function), expect.any(String)));
   });
@@ -202,7 +202,7 @@ describe("OnlineCatalogBrowser", () => {
       emit({ type: "count", totalCount: 1 });
     });
     expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
-    expect(screen.getByText("1개 결과")).toBeVisible();
+    expect(screen.getByText("1개 작품")).toBeVisible();
     expect(onReady).toHaveBeenCalledWith("all");
     expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
   });
@@ -224,7 +224,7 @@ describe("OnlineCatalogBrowser", () => {
       events[0]({ type: "end", cancelled: true });
     });
     expect(screen.queryByText("이전 요청 작품")).not.toBeInTheDocument();
-    expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+    expect(screen.queryByText("999개 작품")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
     act(() => {
       events[1]({ type: "page", page: { works: [{ ...work, title: "최신 요청 작품", groupId: "new", versionCount: 1, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
@@ -370,7 +370,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(screen.queryByText("북마크된 판본 있음")).not.toBeInTheDocument();
     expect(footer.textContent).toBe(before);
     expect(before).toBe("1 / 60");
-    expect(screen.getByRole("button", { name: "언어" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "보기" })).toBeEnabled();
     expect(await catalogMenuItem("새로고침")).toBeEnabled();
     await userEvent.keyboard("{Escape}");
     await act(async () => pending.resolve({ works: [{ ...work, bookmarked: false }], totalCount: 60, page: 0, pageSize: 48 }));
@@ -389,7 +389,7 @@ describe("OnlineCatalogBrowser", () => {
     </WorkspaceChromeProvider></LibraryProvider>);
     const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
     const bar = (await screen.findByRole("radiogroup", { name: "망가 출처" })).closest(".ui-section-bar") as HTMLElement;
-    expect(await within(bar).findByRole("button", { name: "정렬" })).toBeVisible();
+    expect(await within(bar).findByRole("button", { name: "보기" })).toBeVisible();
     expect(within(index).queryByRole("button", { name: "신규 작품 갱신" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("checkbox", { name: "숨긴 결과 표시" })).not.toBeInTheDocument();
@@ -399,8 +399,8 @@ describe("OnlineCatalogBrowser", () => {
     expect(within(screen.getByTestId("shared-titlebar")).getByRole("heading", { name: "망가" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.getByTestId("shared-titlebar")).toContainElement(screen.getByRole("toolbar"));
-    expect(within(bar).getByRole("button", { name: "언어" })).toBeVisible();
-    expect(within(screen.getByTestId("shared-titlebar")).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "보기" })).toBeVisible();
+    expect(within(screen.getByTestId("shared-titlebar")).queryByRole("button", { name: "보기" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "온라인 만화 검색" })).not.toBeInTheDocument();
     await user.click(within(index).getByRole("button", { name: "온라인 만화 검색" }));
     const input = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
@@ -465,7 +465,7 @@ describe("OnlineCatalogBrowser", () => {
     vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(catalogStatusWithJapanese(true));
     renderBrowser(gateway);
 
-    await screen.findByRole("button", { name: "언어" });
+    await screen.findByRole("button", { name: "보기" });
     await chooseMenu("언어", "일본어");
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ language: "japanese" }),
@@ -499,7 +499,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(await catalogMenuItem("숨긴 결과 표시", "menuitemcheckbox")).toBeChecked();
     await userEvent.keyboard("{Escape}");
     expect(await screen.findByText("숨긴 분류와 차단 태그를 표시 중입니다")).toBeVisible();
-    expect(screen.getByText("3개 결과")).toBeVisible();
+    expect(screen.getByText("3개 작품")).toBeVisible();
   });
 
   it("reloads policy-filtered counts after settings change and catalog reentry", async () => {
@@ -520,7 +520,7 @@ describe("OnlineCatalogBrowser", () => {
       pageSize: 48,
     }));
     const first = renderBrowser(gateway);
-    expect(await screen.findByText("3개 결과")).toBeVisible();
+    expect(await screen.findByText("3개 작품")).toBeVisible();
     first.unmount();
 
     const settings = render(
@@ -534,7 +534,7 @@ describe("OnlineCatalogBrowser", () => {
 
     renderBrowser(gateway);
 
-    expect(await screen.findByText("1개 결과")).toBeVisible();
+    expect(await screen.findByText("1개 작품")).toBeVisible();
     expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(2);
   });
 
@@ -631,8 +631,13 @@ describe("OnlineCatalogBrowser", () => {
     expect(document.querySelector(".online-catalog__list-end")).toHaveTextContent("96 / 97");
     const grid = document.querySelector<HTMLDivElement>(".online-catalog__content")!;
     grid.scrollTop = 900;
+    // Inside 북마크 the covers carry no corner toggle; removal goes through the detail panel.
+    expect(screen.queryByRole("button", { name: "북마크 1-0 북마크 해제" })).not.toBeInTheDocument();
+    vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail, bookmarked: true });
+    await userEvent.click(screen.getByRole("button", { name: "북마크 1-0 상세 보기" }));
+    const removal = await within(await screen.findByRole("complementary", { name: "망가 상세" })).findByRole("button", { name: "북마크 해제" });
     const before = vi.mocked(gateway.searchOnlineCatalog).mock.calls.length;
-    await userEvent.click(screen.getByRole("button", { name: "북마크 1-0 북마크 해제" }));
+    await userEvent.click(removal);
     await waitFor(() => expect(screen.queryByRole("button", { name: "북마크 1-0 상세 보기" })).not.toBeInTheDocument());
     expect(vi.mocked(gateway.searchOnlineCatalog).mock.calls.slice(before).map(([query]) => [query.scope, query.page])).toEqual([["bookmarked", 0], ["bookmarked", 1]]);
     expect(screen.getByRole("button", { name: "북마크 0-0 상세 보기" })).toBeInTheDocument();
@@ -654,7 +659,9 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(screen.getByRole("radio", { name: /^북마크/ }));
     const pending = deferred<void>();
     vi.mocked(gateway.setOnlineCatalogBookmark).mockReturnValueOnce(pending.promise);
-    await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
+    vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail, bookmarked: true });
+    await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+    await userEvent.click(await within(await screen.findByRole("complementary", { name: "망가 상세" })).findByRole("button", { name: "북마크 해제" }));
     await userEvent.click(screen.getByRole("radio", { name: "카탈로그" }));
     await act(async () => pending.resolve());
 
@@ -1130,8 +1137,8 @@ it("shows grouped cards before exact count and rejects stale counts and failures
   expect(document.querySelector(".online-catalog__list-end")).toHaveTextContent("1개");
   await chooseMenu("언어", "일본어");
   await act(async () => { events[1]({ type: "count", totalCount: 0 }); events[0]({ type: "count", totalCount: 999 }); old.reject(new Error("old failure")); });
-  expect(await screen.findByText("0개 결과")).toBeVisible();
-  expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+  expect(await screen.findByText("0개 작품")).toBeVisible();
+  expect(screen.queryByText("999개 작품")).not.toBeInTheDocument();
   expect(screen.queryByText("old failure")).not.toBeInTheDocument();
 });
 
@@ -1184,19 +1191,19 @@ it("invalidates pending counts on bookmark and reveal changes and retains cards 
   const view = renderBrowser(gateway);
   await userEvent.click(await screen.findByRole("button", { name: `${work.title} 북마크` }));
   act(() => events[0]({ type: "count", totalCount: 100 }));
-  expect(screen.queryByText("100개 결과")).not.toBeInTheDocument();
+  expect(screen.queryByText("100개 작품")).not.toBeInTheDocument();
   await act(async () => bookmark.resolve());
   act(() => events[1]({ type: "count", totalCount: 200 }));
-  expect(screen.getByText("200개 결과")).toBeVisible();
+  expect(screen.getByText("200개 작품")).toBeVisible();
   await userEvent.click(await catalogMenuItem("숨긴 결과 표시", "menuitemcheckbox"));
-  expect(screen.queryByText("200개 결과")).not.toBeInTheDocument();
+  expect(screen.queryByText("200개 작품")).not.toBeInTheDocument();
   act(() => { events[1]({ type: "count", totalCount: 999 }); events[2]({ type: "countError", message: "snapshot changed" }); });
   expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
   expect(screen.getByText("결과 수 확인 실패")).toBeVisible();
   expect(document.querySelector(".online-catalog__list-end")).toHaveTextContent("1개");
   view.unmount();
   act(() => events[2]({ type: "count", totalCount: 999 }));
-  expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+  expect(screen.queryByText("999개 작품")).not.toBeInTheDocument();
 });
 
 
@@ -1219,8 +1226,10 @@ it("refreshes the grouped card when a representative save finishes after closing
   expect(await screen.findByRole("button", { name: "새 대표 판본 상세 보기" })).toBeVisible();
 });
 
-async function chooseMenu(label: string, option: string) {
-  await userEvent.click(screen.getByRole("button", { name: label }));
+/** Picks an option of the 보기 menu's `group` (언어, 정렬). */
+async function chooseMenu(group: string, option: string) {
+  await userEvent.click(screen.getByRole("button", { name: "보기" }));
+  await screen.findByRole("group", { name: group });
   await userEvent.click(await screen.findByRole("menuitemradio", { name: option }));
 }
 

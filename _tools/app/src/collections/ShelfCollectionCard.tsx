@@ -10,7 +10,7 @@ import { releaseCaption } from "./releaseCaption";
  */
 export const ShelfCollectionCard = memo(function ShelfCollectionCard({ collection, coverUrl, picked, shelf, work, boardEntry, inbox, today, menu, onPick, onOpen }: {
   collection: CollectionSummary; coverUrl: string | null; picked: boolean; shelf: boolean;
-  /** A case that is picked first and opened on double-click or Enter; a manga row card opens at once. */
+  /** A case that is picked by the first click and opened by a click on it once picked (or Enter), like the tablet's tap; a manga row card opens at once. */
   work: boolean;
   boardEntry: ReleaseBoardEntry | undefined; inbox: ReleaseInboxItem[]; today: string;
   menu(collection: CollectionSummary): ContextMenuItem[];
@@ -25,8 +25,7 @@ export const ShelfCollectionCard = memo(function ShelfCollectionCard({ collectio
       lightCase
       shelf={shelf}
       releaseCaption={releaseCaption(collection, boardEntry, inbox, today)}
-      onClick={() => { if (work) onPick(collection.id); else onOpen(collection); }}
-      onDoubleClick={() => { if (work) onOpen(collection); }}
+      onClick={() => { if (work && !picked) onPick(collection.id); else onOpen(collection); }}
       onKeyDown={event => { if (work && event.key === "Enter") { event.preventDefault(); onOpen(collection); } }}
     />
   </ContextMenu>;

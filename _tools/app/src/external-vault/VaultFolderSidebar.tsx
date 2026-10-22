@@ -1,5 +1,6 @@
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronRightIcon, FolderIcon, InboxIcon, PlusIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { buildTree, type TreeNode } from "../classification/buildTree";
 import type { EncryptedVaultFolder } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -91,10 +92,8 @@ export function VaultFolderSidebar({ folders, scope, onScopeChange, totalCount, 
     </nav>
     <section className="classification-sidebar__folder-section" aria-label="폴더 탐색">
       <div className="chrome-tree-heading">
-        <button type="button" className="classification-sidebar__tree-heading" aria-expanded={open} aria-label={`폴더 ${open ? "접기" : "펼치기"}`} onClick={() => setOpen((value) => !value)}>
-          <ChevronRightIcon aria-hidden="true" />
-          <span>폴더</span>
-        </button>
+        <SectionLabel className="workspace-section-label classification-sidebar__section-heading" title="폴더"
+          collapsible={{ open, onToggle: () => setOpen((value) => !value), label: `폴더 ${open ? "접기" : "펼치기"}` }} />
         <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" disabled={readOnly} onClick={() => startCreate(null)}><PlusIcon aria-hidden="true" /></Button>
       </div>
       <ContextMenu items={readOnly ? [] : [{ id: "create-root", label: "새 폴더", onSelect: () => startCreate(null) }]}>

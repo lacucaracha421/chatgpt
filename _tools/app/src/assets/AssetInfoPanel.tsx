@@ -181,9 +181,9 @@ export function AssetInfoPanel({
       <SectionLabel as="h3" title="기록" />
       <dl className="asset-info-panel__facts-list">
         <div><dt>{asset.sourceUrl ? <button type="button" className="asset-inspector__link" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!)}>게시물<ArrowTopRightOnSquareIcon aria-hidden="true" /></button> : "게시물"}</dt><dd className="asset-inspector__source">{asset.sourceUrl ? <><span className="asset-inspector__source-url" aria-description={asset.sourceUrl}>{sourceLabel(asset.sourceUrl)}</span><Button size="icon" variant="ghost" aria-label="출처 복사" onClick={() => void copySource()}>{copied ? <CheckIcon aria-hidden="true" /> : <ClipboardDocumentIcon aria-hidden="true" />}</Button></> : "—"}</dd></div>
-        <div><dt>게시</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withTime: true }) || "—"}</dd></div>
+        <div><dt>게시</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withDate: true }) || "—"}</dd></div>
         <div data-info-section="file"><dt>파일</dt><dd><span>{asset.width}×{asset.height}</span> · <span>{formatBytes(asset.byteSize)}</span>{duration && <> · <span>{duration}</span></>}</dd></div>
-        <div><dt>가져옴</dt><dd><span>{displayDateTime(asset.collectedAt, new Date(), { withTime: true }) || "—"}</span> · <span>{importSourceLabel(asset.importSource)}</span></dd></div>
+        <div><dt>가져옴</dt><dd><span>{displayDateTime(asset.collectedAt, new Date(), { withDate: true }) || "—"}</span> · <span>{importSourceLabel(asset.importSource)}</span></dd></div>
         <div><dt>폴더</dt><dd className="asset-info-panel__folders">{folderPaths.join(" · ") || "—"}</dd></div>
       </dl>
     </section>

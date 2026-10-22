@@ -22,6 +22,7 @@ import { daysAfter } from "./homeModel";
 import { ledgerLists, type MonthRelease, type SubscriptionRow } from "./homeMonthModel";
 import { useDayFolds, type DayFold, type DayFolds } from "./homeDayFolds";
 import { ReleaseKindMark, volumeDetail } from "./ReleaseKindMark";
+import { holidayOn } from "./koreanHolidays";
 import { Money } from "./HomeMonth";
 import "./homeMonth.css";
 
@@ -71,7 +72,8 @@ export function DayMemo({ date, store, saved, conflict, unavailable, syncing, on
   return <section className="home-attention-section" aria-label="메모">
     <SectionLabel title="메모" />
     <div>
-      <textarea className="ui-text-input home-day__memo" rows={3} spellCheck={false} maxLength={DAY_MEMO_MAX_CHARS} aria-label={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 메모`}
+      <textarea className="ui-text-input home-day__memo" rows={1} spellCheck={false} maxLength={DAY_MEMO_MAX_CHARS} aria-label={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 메모`}
+        placeholder={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 메모`}
         value={draft ?? saved} disabled={unavailable} onChange={event => change(event.target.value)} onBlur={() => { void save().finally(() => store?.finish()); }} />
       {unavailable && <div className="home-qmemo__status" role="status">
         <span>메모를 열어야 쓸 수 있습니다</span>
@@ -275,11 +277,12 @@ export type HomeDayProps = {
 /** The day panel: always shown, today first. Its content is keyed by the date, so choosing another day swaps it in one step. */
 export function HomeDay({ date, today, releases, savedCount, hideAmounts, store, ledger, notesUnavailable, syncing, memo, memoNote, entries, allEntries, payments, panelRef, memoDelay = DAY_MEMO_SAVE_DELAY, onToday, onOpenSaved, onOpenNotes }: HomeDayProps) {
   const weekday = SHORT_WEEKDAYS[new Date(`${date}T12:00:00`).getDay()];
+  const holiday = holidayOn(date);
   const isToday = date === today;
   const [folds, toggleFold] = useDayFolds();
-  return <aside className="home-day" aria-label={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 (${weekday})`} ref={panelRef}>
+  return <aside className="home-day" aria-label={`${Number(date.slice(5, 7))}월 ${Number(date.slice(8))}일 (${weekday})${holiday ? ` ${holiday}` : ""}`} ref={panelRef}>
     <header className="home-day__head">
-      <h3 className="home-day__title">{Number(date.slice(5, 7))}월 {Number(date.slice(8))}일 <span>({weekday})</span></h3>
+      <h3 className="home-day__title">{Number(date.slice(5, 7))}월 {Number(date.slice(8))}일 <span>({weekday}){holiday && ` ${holiday}`}</span></h3>
       {isToday ? <Badge variant="accent" className="ui-dday">오늘</Badge> : <button type="button" className="home-link" onClick={onToday}>오늘로</button>}
     </header>
     <div className="home-day__body" key={date}>

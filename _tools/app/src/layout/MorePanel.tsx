@@ -11,10 +11,10 @@ export function MorePanel({ entries, current = false, onOpenChange }: { entries:
   const setOpen = (next: boolean) => { setOpenState(next); onOpenChange?.(next); };
   const queues = entries.filter((entry) => entry.group === "queue");
   const destinations = entries.filter((entry) => entry.group === "go");
-  // Only 유사 검토 feeds the rail mark: 미분류 is usually large and would keep it on permanently.
+  // Only 유사 이미지 검토 feeds the rail mark: 미분류 is usually large and would keep it on permanently.
   const queueTotal = queues.find((entry) => entry.id === "review")?.count ?? 0;
   const activity = entries.find((entry) => entry.activity)?.activity;
-  const label = queueTotal > 0 ? `더보기 · 유사 검토 ${queueTotal.toLocaleString()}개` : "더보기";
+  const label = queueTotal > 0 ? `더보기 · 유사 이미지 검토 ${queueTotal.toLocaleString()}개` : "더보기";
   return <AnchoredPanel
     open={open}
     onOpenChange={setOpen}

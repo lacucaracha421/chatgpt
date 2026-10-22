@@ -2,6 +2,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMotionSurface } from "./useMotionSurface";
 import { CheckIcon } from "@heroicons/react/20/solid";
 import { useRef, useState, type ReactNode } from "react";
+import { SectionLabel } from "./SectionLabel";
 
 export type MenuItem = {
   id: string;
@@ -34,9 +35,11 @@ type MenuProps = {
   triggerClassName?: string;
   contentClassName?: string;
   align?: "start" | "center" | "end";
+  /** Each radio group starts with its `group` name as a section label (a 보기 menu of several choices). */
+  groupLabels?: boolean;
 };
 
-export function Menu({ open, onOpenChange, items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start" }: MenuProps): ReactNode {
+export function Menu({ open, onOpenChange, items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start", groupLabels = false }: MenuProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const surfaceRef = useMotionSurface("menu");
   const [panelOwner, setPanelOwner] = useState<string | undefined>();
@@ -49,14 +52,14 @@ export function Menu({ open, onOpenChange, items = [], content, label, trigger, 
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content ref={surfaceRef} className={`ui-menu${contentClassName ? ` ${contentClassName}` : ""}`} data-panel-owner={panelOwner} align={align} sideOffset={4}>
-          {content ?? renderMenuItems(items)}
+          {content ?? renderMenuItems(items, groupLabels)}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
 }
 
-function renderMenuItems(items: MenuItem[]): ReactNode {
+function renderMenuItems(items: MenuItem[], groupLabels: boolean): ReactNode {
   const rows: ReactNode[] = [];
   let index = 0;
   while (index < items.length) {
@@ -72,9 +75,11 @@ function renderMenuItems(items: MenuItem[]): ReactNode {
       index += 1;
     }
     const active = group.find((entry) => entry.selected)?.id ?? "";
+    if (groupLabels) rows.push(<DropdownMenu.Label key={`label-${item.group}`} asChild><SectionLabel title={item.group} className="ui-menu__group-label" /></DropdownMenu.Label>);
     rows.push(
       <DropdownMenu.RadioGroup
         key={`group-${item.group}`}
+        aria-label={groupLabels ? item.group : undefined}
         value={active}
         onValueChange={(value) => group.find((entry) => entry.id === value)?.onSelect()}
       >

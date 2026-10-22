@@ -2,6 +2,7 @@ package com.lakomics.mobile;
 
 import java.io.*;
 import java.net.SocketTimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class MediaTransferTest {
@@ -9,6 +10,7 @@ public final class MediaTransferTest {
     private interface Checked { void run()throws Exception; }
     private static void check(boolean value){checks++;if(!value)throw new AssertionError("check "+checks);}
     private static void rejects(Checked action)throws Exception{try{action.run();throw new AssertionError("Expected rejection");}catch(IOException expected){checks++;}}
+    private static void pause(long millis){try{Thread.sleep(millis);}catch(InterruptedException e){throw new AssertionError(e);}}
     private static long transfer(int count,long max,long expected)throws Exception{return MediaTransfer.copy(new ByteArrayInputStream(new byte[count]),new ByteArrayOutputStream(),max,expected,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,null);}
     public static void main(String[] args)throws Exception {
         check(MediaTransfer.expectedLength(null,10)==-1);
@@ -26,6 +28,13 @@ public final class MediaTransferTest {
         try{MediaTransfer.copy(unread,output,10,-1,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,()->{throw new IllegalStateException("cancelled");});throw new AssertionError("cancellation");}catch(IllegalStateException expected){check(reads.get()==0);}
         AtomicInteger cancellation=new AtomicInteger();
         try{MediaTransfer.copy(new ByteArrayInputStream(new byte[1]),output,10,-1,System.nanoTime()+MediaTransfer.DEADLINE_NANOS,()->{if(cancellation.incrementAndGet()==2)throw new IllegalStateException("cancelled after read");});throw new AssertionError("late cancellation");}catch(IllegalStateException expected){check(cancellation.get()==2);}
+        // A long download that keeps receiving bytes outlives the idle limit; a stall does not.
+        InputStream steady=new InputStream(){int left=6;public int read(){return -1;}
+            @Override public int read(byte[] b,int off,int len){if(left==0)return -1;pause(40);left--;b[off]=1;return 1;}};
+        check(MediaTransfer.copyWhileProgressing(steady,new ByteArrayOutputStream(),10,6,TimeUnit.MILLISECONDS.toNanos(150),null)==6);
+        InputStream stalled=new InputStream(){boolean first=true;public int read(){return -1;}
+            @Override public int read(byte[] b,int off,int len){if(!first){pause(300);return -1;}first=false;b[off]=1;return 1;}};
+        try{MediaTransfer.copyWhileProgressing(stalled,new ByteArrayOutputStream(),10,-1,TimeUnit.MILLISECONDS.toNanos(150),null);throw new AssertionError("stall");}catch(SocketTimeoutException expected){check(true);}
         File file=File.createTempFile("ticket-integrity-", ".bin");
         try{
             try(FileOutputStream bytes=new FileOutputStream(file)){bytes.write(new byte[]{1,2,3});}

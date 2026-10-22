@@ -691,10 +691,8 @@ export function ClassificationSidebar({
       </nav>}
       <section className="classification-sidebar__folder-section" aria-label="폴더 탐색">
       <div className="chrome-tree-heading">
-      <button type="button" className="classification-sidebar__tree-heading" aria-expanded={foldersOpen} aria-label={`폴더 ${foldersOpen ? "접기" : "펼치기"}`} onClick={() => setFoldersOpen((open) => !open)}>
-        <ChevronRightIcon aria-hidden="true" />
-        <span>폴더</span>
-      </button>
+      <SectionLabel className="workspace-section-label classification-sidebar__section-heading" title="폴더"
+        collapsible={{ open: foldersOpen, onToggle: () => setFoldersOpen((open) => !open), label: `폴더 ${foldersOpen ? "접기" : "펼치기"}` }} />
       {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}><PlusIcon aria-hidden="true" /></Button>}
       <Menu label="폴더 보기 옵션" triggerClassName="ui-button ui-button--icon ui-button--ghost classification-sidebar__heading-menu" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={treeViewActions} />
       </div>
@@ -754,10 +752,8 @@ export function ClassificationSidebar({
       <ContextMenu items={[{ id: "create-album", label: "새 앨범", onSelect: () => openTopLevelCreate("album") }]}>
         <div>
           <div className="chrome-tree-heading">
-          <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
-            <ChevronRightIcon aria-hidden="true" />
-            <span>앨범</span>
-          </button>
+          <SectionLabel className="workspace-section-label classification-sidebar__section-heading" title="앨범"
+            collapsible={{ open: albumsOpen, onToggle: () => setAlbumsOpen((open) => !open), label: `앨범 ${albumsOpen ? "접기" : "펼치기"}` }} />
           {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 앨범" onClick={() => openTopLevelCreate("album")}><PlusIcon aria-hidden="true" /></Button>}
           </div>
           <div className="classification-sidebar__reveal" data-open={albumsOpen} aria-hidden={!albumsOpen} inert={!albumsOpen || undefined}>
@@ -804,7 +800,7 @@ export function ClassificationSidebar({
       </ContextMenu>
       </>}
       {!embedded && <div className="classification-sidebar__footer">
-        <QuickViewButton icon={<Square2StackIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
+        <QuickViewButton icon={<Square2StackIcon aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" count={trashCount} selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
       </div>}

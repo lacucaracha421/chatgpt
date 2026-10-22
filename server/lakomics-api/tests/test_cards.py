@@ -331,6 +331,13 @@ class CardRoutes(HomeFixture):
                              "operation-1")
             self.assertEqual(db.execute("SELECT SUM(count) FROM card_album").fetchone()[0], 10)
 
+    def test_open_retried_with_its_own_key_replays_the_reveal(self):
+        first = self.ok(self.open(operation="operation-1"))
+        retry = self.ok(self.open(operation="operation-1"))
+        self.assertFalse(retry["alreadyOpened"])
+        self.assertEqual(retry["cards"], first["cards"])
+        self.assertTrue(self.ok(self.open(operation="operation-2"))["alreadyOpened"])
+
     def test_concurrent_open_is_one_draw(self):
         self.ok(self.state())
         barrier = threading.Barrier(2)

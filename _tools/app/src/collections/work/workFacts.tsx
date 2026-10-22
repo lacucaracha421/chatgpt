@@ -5,6 +5,8 @@ import { Badge } from "../../shared/ui/Badge";
 import type { Fact } from "../case/CollectionCase";
 import { displayAvGenres } from "../avGenreNames";
 import { displayGenres } from "../displayGenres";
+import { displayGameGenres } from "../gameGenreNames";
+import { PlatformBadges, platformBadgeNames } from "../PlatformBadges";
 
 /* A work's fact rows (작품 정보 and the case's inside card), as plain data rules shared by the PC and the tablet. */
 
@@ -15,8 +17,8 @@ export function workFacts(collection: WorkFactSource, av: WorkFactAv | null, bad
   const rows = collection.type === "av" ? [
     ["품번", av?.productCode], ["메이커", av?.maker], ["레이블", av?.label],
     ["발매", displayDate(av?.releaseDate || collection.releaseDate)], ["태그", av ? displayAvGenres(av.genres).map(genre => genre.name).join(" · ") : undefined],
-  ] : collection.type === "movie" ? [["감독", collection.director], ["제작사", collection.productionCompany], ["개봉", displayDate(collection.releaseDate)], ["러닝타임", collection.runtimeMinutes ? `${collection.runtimeMinutes}분` : null], ["장르", displayGenres(collection.genres)]] : collection.type === "manga" ? [["작가", collection.author], ["연도", collection.year?.toString()], ["출판사", collection.publisher], ["발매", displayDate(collection.releaseDate)]] : [["개발사", collection.developer], ["배급사", collection.publisher], ["발매", displayDate(collection.releaseDate)], ["플랫폼", collection.platforms], ["장르", displayGenres(collection.genres)]];
-  return rows.filter(row => Boolean(row[1])).map(([label, value]) => [label!, badges && (label === "장르" || label === "태그") ? <span className="work-badges">{(label === "태그" ? displayAvGenres(av?.genres).map(genre => genre.name) : String(value).split(/\s*[,·]\s*/)).map((genre, index) => <Badge key={`${genre}/${index}`}>{genre}</Badge>)}</span> : value!] as Fact);
+  ] : collection.type === "movie" ? [["감독", collection.director], ["제작사", collection.productionCompany], ["개봉", displayDate(collection.releaseDate)], ["러닝타임", collection.runtimeMinutes ? `${collection.runtimeMinutes}분` : null], ["장르", displayGenres(collection.genres)]] : collection.type === "manga" ? [["작가", collection.author], ["연도", collection.year?.toString()], ["출판사", collection.publisher], ["발매", displayDate(collection.releaseDate)]] : [["개발사", collection.developer], ["배급사", collection.publisher], ["발매", displayDate(collection.releaseDate)], ["플랫폼", collection.platforms], ["장르", displayGameGenres(collection.genres)]];
+  return rows.filter(row => Boolean(row[1])).map(([label, value]) => [label!, badges && label === "플랫폼" ? <PlatformBadges platforms={platformBadgeNames(String(value))} /> : badges && (label === "장르" || label === "태그") ? <span className="work-badges">{(label === "태그" ? displayAvGenres(av?.genres).map(genre => genre.name) : String(value).split(/\s*[,·]\s*/)).map((genre, index) => <Badge key={`${genre}/${index}`}>{genre}</Badge>)}</span> : value!] as Fact);
 }
 /** The back uses the info panel's localization, with compact printed labels. */
 export function backFacts(collection: WorkFactSource, av: WorkFactAv | null): Fact[] {

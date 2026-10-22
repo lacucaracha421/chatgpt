@@ -121,6 +121,17 @@ it('keeps the keep step open with an error and the same key after a failed keep'
   expect(screen.getByText('앨범에 1장을 넣었습니다')).toBeTruthy();
 });
 
+it('shows a pack another device already decided instead of asking to retry the keep', async () => {
+  const api = apiFixture(); vi.mocked(api.keep).mockRejectedValueOnce(new Error('alreadyKept'));
+  vi.mocked(api.pack).mockResolvedValueOnce(decided([3]));
+  await openPack(api);
+  fireEvent.click(document.querySelectorAll<HTMLElement>('.pack-opening__slot')[1]);
+  fireEvent.click(screen.getByRole('button', {name: '앨범에 넣기 (1장)'})); await settle(1000);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('이미 정리된 팩입니다 · 앨범에 1장')).toBeTruthy();
+  expect(screen.queryByRole('button', {name: /앨범에 넣기/})).toBeNull();
+});
+
 it('shows the stored result of the newest pack without any open request and replays it as results', async () => {
   saveResult('tablet', {...result(), packId: 'b-20261015'}); const api = apiFixture(state({unopened: [], bonusGranted: true, nextResetAt: new Date(2026, 9, 16, 7, 35).toISOString()}));
   show(api); await settle();
@@ -171,6 +182,16 @@ it('opens today’s undecided result by tapping the card when no packs remain', 
   expect(screen.getAllByRole('checkbox')).toHaveLength(5);
   expect((screen.getByRole('button', {name: '앨범에 넣기 (0장)'}) as HTMLButtonElement).disabled).toBe(true);
   expect(api.open).not.toHaveBeenCalled();
+});
+
+it('keeps an older undecided pack reachable once no sealed pack is left', async () => {
+  saveResult('tablet', result());
+  const pendingKeep = [{packId: 'd-20261014', openedAt: '2026-10-14T01:00:00Z', expiresAt: '2026-10-21T01:00:00Z'}, {packId: 'd-20261015', openedAt: '2026-10-15T01:00:00Z', expiresAt: '2026-10-22T01:00:00Z'}];
+  const api = apiFixture(state({unopened: [], pendingKeep}));
+  show(api); await settle();
+  fireEvent.click(screen.getByRole('button', {name: '정리 안 한 팩 2'})); await settle();
+  expect(api.pack).toHaveBeenCalledWith('d-20261014');
+  expect(screen.getAllByRole('checkbox')).toHaveLength(5);
 });
 
 it('says so when a waiting pack cannot be loaded, and retries', async () => {

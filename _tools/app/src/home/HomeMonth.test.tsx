@@ -21,13 +21,13 @@ function show(releases: MonthRelease[], hideAmounts = false) {
   return { view, cell: screen.getByRole("gridcell", { name: /10월 9일/ }) };
 }
 
-it("counts a charge as two lines, so two releases and a charge become two chips and +1", () => {
+it("fits two releases and a one-line charge in the cell", () => {
   const { cell } = show([release("첫 작품"), release("새 작품", true)]);
   const content = within(cell);
   expect(content.getByText("새 작품").compareDocumentPosition(content.getByText("첫 작품")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(content.getAllByText("12권")).toHaveLength(2);
-  expect(content.queryByText("구독")).toBeNull();
-  expect(content.getByText("+1")).toBeTruthy();
+  expect(content.getByText("구독")).toBeTruthy();
+  expect(content.queryByText(/^\+\d/)).toBeNull();
   expect(cell.getAttribute("aria-label")).toContain("한글날");
   expect(cell.getAttribute("aria-label")).toContain("메모 있음");
 });

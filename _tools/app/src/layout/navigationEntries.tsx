@@ -51,7 +51,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
   const go = (next: AssetView) => () => onNavigate(next);
   const queued = (count: number | null) => (count ?? 0) > 0;
   const entries: NavigationEntry[] = [
-    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: MORE_LABELS.review, keywords: ["유사 이미지 검토", "중복"], icon: <Square2StackIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
+    { id: "review", group: queued(reviewCount) ? "queue" : "go", label: MORE_LABELS.review, keywords: ["유사 검토", "중복"], icon: <Square2StackIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: MORE_LABELS.unsorted, icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
     { id: "notes", group: "go", label: "메모", icon: <AREA_ICONS.notes />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
     // Utility outside the Library: listed as a queue only while received files are unseen.

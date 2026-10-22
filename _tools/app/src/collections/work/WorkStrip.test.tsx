@@ -8,7 +8,9 @@ it('labels screenshot sources separately from artwork, including a selected hero
   expect(screen.getByRole('button', {name: '스크린샷 1'})).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('button', {name: '아트워크 2'})).toHaveAttribute('aria-pressed', 'false');
 });
-const props = {av: false, mode: 'case', artworks: [{id: 'art'}], privacy: false, thumbnailUrl: (id: string) => `/thumb/${id}`, onPick: vi.fn()};
+// A lone artwork has no strip, so a second tile (without a thumbnail) keeps it on screen.
+const props = {av: false, mode: 'case', artworks: [{id: 'art'}, {id: 'more'}], privacy: false, thumbnailUrl: (id: string) => id === 'more' ? null : `/thumb/${id}`, onPick: vi.fn()};
+const only = (src: string) => (id: string) => id === 'art' ? src : null;
 it('has only label-less artwork buttons, no case/inside buttons or separator, and toggles a selected tile back to the case', () => {
   const {container, rerender} = render(<WorkStrip {...props}/>);
   expect(screen.queryByRole('button', {name: '케이스'})).toBeNull();
@@ -33,8 +35,10 @@ it('places the AV flat jacket first using its front thumbnail and the artwork se
   rerender(<WorkStrip {...props} av mode="flat" frontThumbnailUrl="/front" privacy/>);
   expect(buttons[0].querySelector('img')).toBeNull();
 });
-it('renders no strip without tiles, while an AV without additional artwork keeps its flat tile', () => {
+it('renders no strip without a choice, while an AV without additional artwork keeps its flat tile', () => {
   const {container, rerender} = render(<WorkStrip {...props} artworks={[]}/>);
+  expect(container.firstChild).toBeNull();
+  rerender(<WorkStrip {...props} artworks={[{id: 'art'}]}/>);
   expect(container.firstChild).toBeNull();
   rerender(<WorkStrip {...props} artworks={[]} av/>);
   expect(screen.getByRole('button', {name: '펼친 표지'})).toBeTruthy();
@@ -43,14 +47,14 @@ it('renders no strip without tiles, while an AV without additional artwork keeps
 
 it('ignores cancelled thumbnail decodes when a pending work changes away and back to the same source', async () => {
   const onReady = vi.fn();
-  const {container, rerender} = render(<WorkStrip {...props} thumbnailUrl={() => '/a'} onReady={onReady}/>);
+  const {container, rerender} = render(<WorkStrip {...props} thumbnailUrl={only('/a')} onReady={onReady}/>);
   const image = container.querySelector<HTMLImageElement>('img')!;
   const pending: (() => void)[] = [];
   Object.defineProperty(image, 'decode', {value: () => new Promise<void>(resolve => pending.push(resolve))});
   fireEvent.load(image);
-  rerender(<WorkStrip {...props} thumbnailUrl={() => '/b'} onReady={onReady}/>);
+  rerender(<WorkStrip {...props} thumbnailUrl={only('/b')} onReady={onReady}/>);
   fireEvent.load(image);
-  rerender(<WorkStrip {...props} thumbnailUrl={() => '/a'} onReady={onReady}/>);
+  rerender(<WorkStrip {...props} thumbnailUrl={only('/a')} onReady={onReady}/>);
   await act(async () => {pending[0](); pending[1]();});
   expect(onReady).not.toHaveBeenCalled();
   fireEvent.load(image);

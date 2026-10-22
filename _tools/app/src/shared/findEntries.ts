@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export const MORE_LABELS = {
-  review: "유사 검토", unsorted: "미분류", exchange: "전송", private_vault: "비밀",
+  review: "유사 이미지 검토", unsorted: "미분류", exchange: "전송", private_vault: "비밀",
   artists: "작가", links: "링크 보관", trash: "휴지통", settings: "설정",
 } as const;
 

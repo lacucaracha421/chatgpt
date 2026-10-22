@@ -1,5 +1,6 @@
 import { Skeleton } from "../shared/ui/Skeleton";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useMotionSurface } from "../shared/ui/useMotionSurface";
 import {AssetImage, AssetStableImage} from "../privacy/AssetImage";
@@ -192,7 +193,7 @@ export function CommandPalette({ context = { tab: "home" }, open, onClose, entri
           <BusyLabel busy={loading && ordered.length === 0} idle={!loading && ordered.length === 0 && <EmptyState inline className="command-palette__empty" title={query.trim() ? "검색 결과 없음" : "최근 항목 없음"} />}><p className="command-palette__empty">이름을 불러오는 중…</p></BusyLabel>
           {displayed.map(({ group, items }, groupIndex) => {
             return <div key={`${group}-${groupIndex}`} role={group === "best" ? undefined : "group"} aria-labelledby={group === "best" ? undefined : `${id}-${group}-${groupIndex}`} className={`command-palette__group${group === "best" ? " command-palette__best" : ""}`}>
-              {group !== "best" && <div id={`${id}-${group}-${groupIndex}`} className="command-palette__heading" role="presentation">{NAVIGATION_GROUP_LABELS[group]}</div>}
+              {group !== "best" && <SectionLabel id={`${id}-${group}-${groupIndex}`} className="command-palette__heading" title={NAVIGATION_GROUP_LABELS[group]} />}
               {items.map((entry) => {
                 index += 1;
                 const own = index;

@@ -399,10 +399,52 @@
       { role: "user", content: JSON.stringify({ text }) },
     ];
   }
+  // A post longer than one request takes (X Premium allows 25,000 characters) is translated in
+  // pieces at the same time, each cached on its own, and joined with its original breaks.
+  const SINGLE_MAX_CHARS = 12000, LONG_PIECE_CHARS = 6000, LONG_MAX_CHARS = 30000;
+  function splitLong(text) {
+    const pieces = [];
+    let rest = text;
+    while (rest.length > LONG_PIECE_CHARS) {
+      const head = rest.slice(0, LONG_PIECE_CHARS);
+      let cut = -1;
+      // Prefer a paragraph break, then a line break, a sentence end, any space; never cut a link token.
+      for (const pattern of [/\n[ \t]*\n/g, /\n/g, /[。！？]|[.!?]\s/g, /\s/g]) {
+        let last = -1;
+        for (const match of head.matchAll(pattern)) last = match.index + match[0].length;
+        if (last > LONG_PIECE_CHARS / 2) { cut = last; break; }
+      }
+      if (cut < 0) {
+        cut = LONG_PIECE_CHARS;
+        for (const token of rest.slice(0, cut + 16).matchAll(/\[\[LINK_\d+\]\]/g)) {
+          if (token.index < cut && token.index + token[0].length > cut) cut = token.index;
+        }
+        if (/[\uD800-\uDBFF]/.test(rest[cut - 1])) cut -= 1;
+      }
+      pieces.push(rest.slice(0, cut)); rest = rest.slice(cut);
+    }
+    pieces.push(rest);
+    return pieces;
+  }
+  async function translateLong(text, epoch, preferFallback) {
+    const pieces = splitLong(text).map(piece => {
+      const lead = piece.match(/^\s*/)[0], body = piece.trim();
+      return { lead, body, trail: body ? piece.slice(lead.length + body.length) : "" };
+    });
+    const results = await Promise.all(pieces.map(piece => piece.body ? translateSingle(piece.body, epoch, preferFallback) : null));
+    const failed = results.find(result => result && !result.ok);
+    if (failed) return failed;
+    if (results.every(result => !result || result.text === null)) return translatedResult(null);
+    // A piece with nothing to translate keeps its original text. Quality retries work on whole
+    // posts of one request, so a joined translation does not ask for one.
+    return { ok: true, text: pieces.map((piece, index) => piece.lead + (results[index]?.text ?? piece.body) + piece.trail).join(""), qualityRetry: false };
+  }
   async function translateSingle(text, epoch, preferFallback = false) {
     if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
     if (!keyFor(settings.model)) return { ok: false, code: "api_key_missing" };
-    if (typeof text !== "string" || !text.trim() || text.length > 12000) return { ok: false, code: "invalid_text" };
+    if (typeof text === "string" && text.length > LONG_MAX_CHARS) return { ok: false, code: "text_too_long" };
+    if (typeof text === "string" && text.length > SINGLE_MAX_CHARS && text.trim()) return translateLong(text, epoch, preferFallback);
+    if (typeof text !== "string" || !text.trim() || text.length > SINGLE_MAX_CHARS) return { ok: false, code: "invalid_text" };
     const cacheKey = core.translationCacheKey(text, settings.dictionaryRevision);
     const hit = await cached(cacheKey);
     if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };

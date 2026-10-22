@@ -1378,6 +1378,11 @@
     }
 
     function timelineImageIdentity(image, mediaUrl) {
+      // Same resolver as the save, so a quoted post's photo is looked up under the quoted post.
+      const candidate = globalThis.LakomicsXSource?.findCandidate?.(image);
+      if (candidate?.type === "image" && candidate.postId && candidate.mediaIndex > 0) {
+        return { tweetId: candidate.postId, imageIndex: candidate.mediaIndex };
+      }
       const article = image?.closest?.(TWEET_SELECTOR);
       if (!article) return null;
       const post = extractPost(article, 0);

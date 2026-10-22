@@ -248,7 +248,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const otherNotes=pinnedNotes.length?notes.filter(n=>!n.pinned):notes;
   const sectionDrop=useSectionDrop({label:"메모 종류", options:kindOptions, value:kindFilter, onChange:setKindFilter, trailing:<>
       <Menu label="새 메모" items={newItems} trigger={<PlusIcon aria-hidden="true"/>} triggerClassName="notes-new-trigger" />
-      <Menu label={viewLabel==="보기"?"보기 · 모든 메모":`보기 · ${viewLabel}`} items={viewItems} trigger={<><span>{viewLabel}</span>{viewLabel==="보기"&&<span className="notes-view-trigger__count">{scopeCounts.all.toLocaleString()}</span>}<ChevronDownIcon aria-hidden="true"/></>} triggerClassName="notes-view-trigger" />
+      <Menu label={viewLabel==="보기"?"보기 · 모든 메모":`보기 · ${viewLabel}`} items={viewItems} trigger={<><span>{viewLabel}</span>{viewLabel==="보기"&&<span className="notes-view-trigger__count">{notes.length.toLocaleString()}</span>}<ChevronDownIcon aria-hidden="true"/></>} triggerClassName="notes-view-trigger" />
     </>}, state.unlocked&&!selected&&!creatingSecret);
   const board=<div ref={boardRef} className="notes-board">
     {sectionDrop.inline}

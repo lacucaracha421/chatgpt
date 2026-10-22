@@ -16,11 +16,11 @@ it("opens next to the rail, bottom aligned, without a header and returns focus o
   });
   const run = vi.fn();
   render(<div className="workspace-navigation"><div className="workspace-rail"><MorePanel entries={[
-    {id: "review", group: "queue", label: "유사 검토", count: 2, icon: null, run},
+    {id: "review", group: "queue", label: "유사 이미지 검토", count: 2, icon: null, run},
     {id: "settings", group: "go", label: "설정", icon: null, run},
   ]}/></div><div className="workspace-index"/><button>바깥</button></div>);
   const user = userEvent.setup();
-  const trigger = screen.getByRole("button", {name: "더보기 · 유사 검토 2개"});
+  const trigger = screen.getByRole("button", {name: "더보기 · 유사 이미지 검토 2개"});
   await user.click(trigger);
   const panel = screen.getByRole("dialog", {name: "더보기"});
   expect(panel).toHaveStyle({left: "72px", top: "508px"});

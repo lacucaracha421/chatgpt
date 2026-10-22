@@ -79,7 +79,7 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
       onCountChange(page.totalCount);
     } catch (error) {
       if (generation === generationRef.current) {
-        setMessage(commandErrorMessage(error, "유사 검토 목록을 불러오지 못했습니다."));
+        setMessage(commandErrorMessage(error, "유사 이미지 검토 목록을 불러오지 못했습니다."));
       }
     } finally {
       if (generation === generationRef.current) setLoading(false);
@@ -173,9 +173,9 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
     reviewRef.current = staged.review;
     setReview(staged.review); setTotalCount(staged.count); onCountChange(staged.count); setStaged(null);
   };
-  return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
+  return <section className="similarity-review" aria-label="유사 이미지 검토" onKeyDown={(event) => event.stopPropagation()}>
     <ViewToolbar
-      title="유사 검토"
+      title="유사 이미지 검토"
       chrome={{ status: review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined }}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}

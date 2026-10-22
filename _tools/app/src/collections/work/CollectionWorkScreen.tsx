@@ -24,7 +24,7 @@ import { MangaStage, MangaBookcase, editionName, type MangaWorkData } from "./Ma
 import { defaultRecord } from "./WorkRecord";
 import { volumeLabel } from "../collectionFormat";
 import type { StageBox } from "../case/fitCaseStage";
-import { FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta } from "./WorkStage";
+import { FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta, workStripShown } from "./WorkStage";
 import "./collectionWork.css";
 
 export type CollectionWorkData = { collection: CollectionSummary; record?: CollectionWorkRecord; tmdb?: TmdbConnection | null; providerBusy?: boolean; manga?: MangaWorkData; av: AvDetails | null; covers: AvCoverSet | null; related: AvRelated | null; case: CaseData; artworks: WorkArtworkSummary[]; position: number; total: number; providerConnected: boolean };
@@ -132,13 +132,13 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
   const record = data.record ?? defaultRecord(data.collection);
   return <>
     {coverSrc && <div className={`work-cover-band${data.collection.type === "av" ? " work-cover-band--av" : ""}${info ? " work-cover-band--info" : ""}`}><WorkBackdrop key={coverSrc} src={coverSrc} onReady={() => ready("backdrop")} /></div>}
-    {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
+    {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} readable onReady={() => ready("hero")} />}
     {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga && (volumeId => {
       // The volume viewer opens only on a volume with a cover; the book sound goes with it.
       if (data.manga?.volumes.some(volume => volume.id === volumeId && volume.coverArtworkId)) playCaseSound("book", "open");
       actions.onEnlargeManga?.();
     })} /></> : <>
-    <WorkZoomStage stageRef={stage} className={`work-stage${data.collection.type !== "av" && !data.artworks.length ? " work-stage--no-strip" : ""}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
+    <WorkZoomStage stageRef={stage} className={`work-stage${workStripShown(data.collection.type === "av", data.artworks.length) ? "" : " work-stage--no-strip"}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
         <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} sound={active ? { turn: caseTurn, work: data.collection.id } : undefined} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset} initialAngle={handedCaseAngle(data.collection.id)} onDiscHold={jable && actions.onOpenJable ? () => actions.onOpenJable?.(jable) : undefined}

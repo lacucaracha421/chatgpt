@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronDownIcon } from "@heroicons/react/24/outline";
+import { Squares2X2Icon } from "@heroicons/react/24/outline";
 import { SidebarOpenIcon } from "../shared/ui/SidebarIcons";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
@@ -15,18 +15,22 @@ const sourceOptions = [
   { value: "all" as const, label: "카탈로그" }, { value: "bookmarked" as const, label: "북마크" }, { value: "local" as const, label: "로컬" },
 ];
 
-/** The source switch as the section bar under the top bar; sort and language menus sit at its right end. */
+/** The source switch as the section bar under the top bar; the 보기 menu sits at its right end. */
 export function MangaSourceControl({ value, onChange, trailing }: {
   value: MangaSource; onChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number; trailing?: ReactNode;
 }) {
   return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={sourceOptions} />;
 }
 
-export function MangaChoiceMenu<T extends string>({ label, value, options, onChange }: {
-  label: string; value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void;
-}) {
-  return <Menu label={label} triggerClassName="manga-toolbar__quiet-menu" trigger={<><span>{label}</span><b>{options.find(option => option.value === value)?.label}</b><ChevronDownIcon aria-hidden="true" /></>}
-    items={options.map(option => ({ id: option.value, label: option.label, group: label, selected: value === option.value, onSelect: () => onChange(option.value) }))} />;
+/** One choice of the 망가 보기 menu (언어, 정렬): a labelled radio group. */
+export type MangaViewChoice = { label: string; value: string; options: readonly { value: string; label: string }[]; onChange(value: string): void };
+
+/** 보기 for 망가, the same trigger as the Asset and Collections 보기: each choice is a labelled group of options. */
+export function MangaViewMenu({ choices }: { choices: MangaViewChoice[] }) {
+  return <Menu label="보기" align="end" triggerClassName="asset-toolbar__quiet-menu" groupLabels
+    trigger={<><Squares2X2Icon aria-hidden="true" /><span>보기</span></>}
+    items={choices.flatMap(choice => choice.options.map(option => ({ id: `${choice.label}:${option.value}`, label: option.label, group: choice.label,
+      selected: choice.value === option.value, onSelect: () => choice.onChange(option.value) })))} />;
 }
 
 export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, controls, refreshedAt, actions, chrome, ariaLabel = "망가 도구" }: {

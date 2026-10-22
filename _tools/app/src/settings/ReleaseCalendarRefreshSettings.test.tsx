@@ -24,7 +24,7 @@ it.each(["queued", "unavailable", "rateLimited"])("Settings requests the server 
   gateway.releaseCalendar.serverEnabled.mockResolvedValue(true);
   gateway.releaseCalendar.requestServerRun.mockResolvedValue({ outcome });
   render(<ReleaseCalendarRefreshSettings />);
-  fireEvent.click(await screen.findByRole("button", { name: "새로 받기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "지금 갱신" }));
   await waitFor(() => expect(gateway.releaseCalendar.requestServerRun).toHaveBeenCalledOnce());
   expect(gateway.releaseCalendar.refreshNow).not.toHaveBeenCalled();
   expect((await screen.findByRole("status")).textContent).not.toContain("개 작품을 새로 받았습니다");
@@ -37,7 +37,7 @@ it("Settings uses local immediate refresh when the run reports a genuine OFF", a
   gateway.releaseCalendar.serverEnabled.mockResolvedValue(true);
   gateway.releaseCalendar.requestServerRun.mockResolvedValue({ outcome: "local" });
   render(<ReleaseCalendarRefreshSettings />);
-  fireEvent.click(await screen.findByRole("button", { name: "새로 받기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "지금 갱신" }));
   await screen.findByText("0개 작품을 새로 받았습니다.");
   expect(gateway.releaseCalendar.refreshNow).toHaveBeenCalledOnce();
 });

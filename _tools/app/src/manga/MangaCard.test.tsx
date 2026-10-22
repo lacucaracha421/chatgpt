@@ -49,7 +49,7 @@ it.each([false, true])("keeps the painted cover without another fade through ope
 it("reserves two title lines and uses a separate artist line and page badge", () => {
   const { container, rerender } = render(<MangaCard {...props} />);
   expect(screen.getByText("한 줄 제목")).toHaveClass("manga-card__title");
-  expect(screen.getByText("작가 미상")).toHaveClass("manga-card__artist");
+  expect(container.querySelector(".manga-card__artist")).toBeEmptyDOMElement();
   expect(screen.getByText("76p")).toHaveClass("ui-badge--scrim", "manga-card__pages");
   expect(container.querySelector(".manga-card__frame")).toContainElement(screen.getByText("76p"));
   expect(container.querySelector('[class*="progress"]')).toBeNull();

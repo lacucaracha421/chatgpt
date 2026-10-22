@@ -5,6 +5,7 @@ import { exchangeStore, useExchangeSnapshot } from "../exchange/exchangeStore";
 import { clockLabel, cloudLine, serverOutage } from "../home/homeModel";
 import type { AssetView, AuthoritySyncHealth, CatalogStatus, LibraryGateway, ReleaseCalendar } from "../library/types";
 import { noteDateLabel } from "../notes/format";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 
 type Tone = "ok" | "busy" | "idle" | "off";
 export type ConnectionRow = { key: string; label: string; value: string; time?: string; tone: Tone; view: AssetView };
@@ -76,7 +77,7 @@ export function ConnectionStatusBlock({ gateway, cloud, authorityHealth, onNavig
   const rows = useConnectionRows({ gateway, cloud, authorityHealth });
   if (rows.length === 0) return null;
   return <section className="status-center__block" aria-label="연결">
-    <h3 className="status-center__heading">연결</h3>
+    <SectionLabel as="h3" className="status-center__heading" title="연결" />
     {rows.map((row) => <button key={row.key} type="button" className="status-center__connection" data-tone={row.tone} onClick={() => onNavigate(row.view)} aria-label={`${row.label} ${row.value}`}>
       <span className="status-center__dot" aria-hidden="true" />
       <span className="status-center__connection-label">{row.label}</span>

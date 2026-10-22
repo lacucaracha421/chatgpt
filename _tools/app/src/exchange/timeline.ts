@@ -3,7 +3,7 @@
  * device, stacked by time. Each client normalizes its own snapshot rows into entries; this
  * module only groups, orders and labels them (no protocol knowledge).
  */
-import { displayDate, displayTime } from "../shared/displayDate";
+import { displayDayHeading, displayTime } from "../shared/displayDate";
 
 export type TimelineEntry<T> = {
   row: T;
@@ -39,22 +39,19 @@ export function buildTimeline<T>(entries: TimelineEntry<T>[]): TimelineBlock<T>[
   return list.sort((a, b) => time(a.at) - time(b.at) || a.key.localeCompare(b.key));
 }
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
 /** Local calendar day of an ISO time, for day separators ("" when unknown). */
 export function dayKey(at: string): string {
   const value = new Date(at);
   return Number.isNaN(value.getTime()) ? "" : `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
 }
 
-/** The shared date ("9.26", "2025.9.26") and "오늘" / "어제" / a weekday. */
-export function dayLabel(at: string, now = new Date()): { date: string; note: string } {
+/** A day separator: "오늘", "어제", or the shared group heading ("10월 18일 (일)"). */
+export function dayLabel(at: string, now = new Date()): string {
   const value = new Date(at);
-  if (Number.isNaN(value.getTime())) return { date: "", note: "" };
+  if (Number.isNaN(value.getTime())) return "";
   const start = (day: Date) => new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const days = Math.round((start(now) - start(value)) / 86_400_000);
-  const date = displayDate(value, now);
-  return { date, note: days === 0 ? "오늘" : days === 1 ? "어제" : WEEKDAYS[value.getDay()] };
+  return days === 0 ? "오늘" : days === 1 ? "어제" : displayDayHeading(value, now);
 }
 
 /** "14:02" in local time. */

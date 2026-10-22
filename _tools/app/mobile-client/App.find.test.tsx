@@ -90,5 +90,5 @@ it('keeps the review corner count and queue group available on Assets',async()=>
   render(<App/>);fireEvent.click(nav('에셋'));await screen.findByRole('heading',{name:'에셋'});
   await waitFor(()=>expect(screen.getByRole('button',{name:'더보기'}).parentElement?.querySelector('.header-badge')?.textContent).toBe('3'));
   fireEvent.click(screen.getByRole('button',{name:'더보기'}));
-  expect(await within(screen.getByRole('navigation',{name:'확인할 것'})).findByRole('button',{name:'유사 검토 3개'})).toBeTruthy();
+  expect(await within(screen.getByRole('navigation',{name:'확인할 것'})).findByRole('button',{name:'유사 이미지 검토 3개'})).toBeTruthy();
 });

@@ -240,6 +240,7 @@ Leave out text the screen does not need: explanations, captions that restate wha
 | A search that matched nothing | 검색 결과 없음 (a hint line under it may differ per screen) | 검색 결과가 없습니다/없어요, 일치하는 … 없습니다 |
 | Reload the current view | 새로고침 | 새로 고침, 다시 불러오기, 리로드; provider data updates keep `갱신` / `<provider> 새로고침` |
 | Retry after an error | 다시 시도 | 다시 불러오기, 다시 확인, 새로고침 |
+| Review of similar images (the queue; 확인 is character confirmation only) | 유사 이미지 검토 (top-bar status trigger `유사 N`) | 유사 검토, 확인 N for this queue |
 
 **빼기 vs 제거 (and 제외):** 빼기 takes an item out of a set while the item itself remains — album, character, collection, 쇼케이스 and 관심 목록 membership, filter and scope chips, tags and labels on an item (`이 앨범에서 빼기`, `이 캐릭터에서 빼기`, `태그 필터 빼기`). 제거 removes a thing that then no longer exists in that place — a reference, a link or binding, an artwork choice (`레퍼런스 1 제거`, `참조에서 제거`, `연결 제거`). 제외 is kept for a standing rule that keeps something out of an automatic process or a search (`캐릭터 분류에서 제외`, `자동 인식 끄기`, a tag filter's 제외 mode, 작가 제외 폴더). A filter reset is `필터 초기화`. `src/shared/sharedPieces.test.ts` fails on the retired wordings.
 

@@ -60,7 +60,7 @@ export function ReleaseCalendarRefreshSettings() {
       {SOURCE_LABEL[source.provider]} · {source.fetchedAt ? `마지막으로 받음 ${displayDateTime(source.fetchedAt, new Date(), { withTime: true })}` : "받은 기록 없음"}
       {source.errorCode && ` · ${RELEASE_SOURCE_PROBLEM[source.errorCode] ?? "받지 못했습니다."}`}
     </dd>)}
-    <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={busy} onClick={() => void refreshNow()}><BusyLabel busy={!!(busy)} idle={"새로 받기"}>받는 중…</BusyLabel></Button></dd>
+    <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={busy} onClick={() => void refreshNow()}><BusyLabel busy={!!(busy)} idle={"지금 갱신"}>갱신 중…</BusyLabel></Button></dd>
     {message && <dd className="settings-view__row-message" role="status">{message}</dd>}
   </dl>;
 }

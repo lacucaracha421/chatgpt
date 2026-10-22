@@ -7,10 +7,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/artists/artists.css": {
-      "offScaleSpacing": 19,
-      "offRoleFontSize": 1,
+      "offScaleSpacing": 17,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 21
+      "legacyToken": 20
     },
     "_tools/app/src/assets/SelectionBar.css": {
       "offScaleSpacing": 0,
@@ -313,10 +313,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/exchange/exchange.css": {
-      "offScaleSpacing": 17,
+      "offScaleSpacing": 16,
       "offRoleFontSize": 3,
       "pillRadius": 0,
-      "legacyToken": 12
+      "legacyToken": 10
     },
     "_tools/app/src/external-vault/externalVault.css": {
       "offScaleSpacing": 4,
@@ -771,8 +771,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/exchange.css": {
-      "offScaleSpacing": 27,
-      "offRoleFontSize": 18,
+      "offScaleSpacing": 26,
+      "offRoleFontSize": 16,
       "pillRadius": 0,
       "legacyToken": 0
     },

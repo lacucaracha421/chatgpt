@@ -370,7 +370,8 @@ export function CollectionBrowser({
   const typeOptions = TYPES.map(value => ({ value, label: TYPE_LABEL[value] }));
 
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
-    <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
+    {/* The count is shown once, beside the title in the top bar. */}
+    <h3>{filtered ? "검색 결과" : "전체"}</h3>
     {libraryState.rating !== "all" && <button type="button" className="collection-filter-chip" aria-label="내 별점 필터 빼기" onClick={() => patchLibraryState({ rating: "all" })}>
       <StarSolidIcon className="collection-filter-chip__star" aria-hidden="true" /><span>내 별점 {ratingLabel(libraryState.rating)}</span>
       <span className="collection-filter-chip__x"><XMarkIcon aria-hidden="true" /></span>
@@ -444,7 +445,7 @@ export function CollectionBrowser({
       {!kakaoReviewOpen && (!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
-        titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}<BusyLabel busy={charactersOpen && !charactersReady} delay={400}>캐릭터 확인 중</BusyLabel></>}
+        titleAccessory={<>{!inbox && <span className="collection-toolbar__count" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span>}{toolbarControls}<BusyLabel busy={charactersOpen && !charactersReady} delay={400}>캐릭터 확인 중</BusyLabel></>}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ArrowLeftIcon aria-hidden="true" /></Button>}
         chrome={chrome}

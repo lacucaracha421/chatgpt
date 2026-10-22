@@ -255,14 +255,14 @@ it("opens Home from the first rail entry, marks it current there and names the i
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
 });
 
-it("shows the 더보기 count only for 유사 검토, never for 미분류", () => {
+it("shows the 더보기 count only for 유사 이미지 검토, never for 미분류", () => {
   const { rerender } = render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
   const more = screen.getByRole("button", { name: "더보기" });
   expect(more.querySelector(".workspace-rail__count")).toBeNull();
   rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} reviewCount={0} unsortedCount={5000} />);
   expect(screen.getByRole("button", { name: "더보기" }).querySelector(".workspace-rail__count")).toBeNull();
   rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} reviewCount={12} unsortedCount={30} />);
-  const counted = screen.getByRole("button", { name: "더보기 · 유사 검토 12개" });
+  const counted = screen.getByRole("button", { name: "더보기 · 유사 이미지 검토 12개" });
   expect(counted.querySelector(".workspace-rail__count")).toHaveTextContent("12");
   expect(counted.querySelector(".workspace-rail__icon svg")).not.toBeNull();
 });
@@ -314,20 +314,20 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} reviewCount={2} trashCount={3}
     unsortedCount={0} onQueuesRequested={onQueuesRequested} privateVaultAvailable />);
 
-  const trigger = screen.getByRole("button", { name: "더보기 · 유사 검토 2개" });
+  const trigger = screen.getByRole("button", { name: "더보기 · 유사 이미지 검토 2개" });
   trigger.focus();
   await user.keyboard("{Enter}");
   expect(onQueuesRequested).toHaveBeenCalled();
   const panel = screen.getByRole("dialog", { name: "더보기" });
   expect(panel).not.toHaveTextContent("진행 중인 작업");
   const queues = within(panel).getByRole("navigation", { name: "확인할 것" });
-  expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 검토 2개"]);
+  expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 이미지 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
     .toEqual(["미분류", "링크 보관", "작가", "통계", "휴지통 3개", "설정"]);
 
   const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }],
-    ["작가", { kind: "artists" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];
+    ["작가", { kind: "artists" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 이미지 검토 2개", { kind: "similarity_review" }]];
   for (const [name, view] of expected) {
     if (!screen.queryByRole("dialog", { name: "더보기" })) await user.click(trigger);
     await user.click(within(screen.getByRole("dialog", { name: "더보기" })).getByRole("button", { name }));
@@ -354,7 +354,7 @@ it("opens the 찾기 palette with Ctrl+Q, filters by name and navigates with Ent
   expect(field).toHaveFocus();
   const groups = within(palette).getAllByRole("group").filter(group => group.hasAttribute("aria-labelledby")).map((group) => group.getAttribute("aria-labelledby") && document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent);
   expect(groups[0]).toBe("확인할 것");
-  expect(within(palette).getAllByRole("option")[0]).toHaveAccessibleName("유사 검토 5개");
+  expect(within(palette).getAllByRole("option")[0]).toHaveAccessibleName("유사 이미지 검토 5개");
   expect(within(palette).queryByRole("option", { name: /설정 › 클라우드/ })).not.toBeInTheDocument();
   expect(within(palette).queryByRole("option", { name: "메모" })).not.toBeInTheDocument();
 

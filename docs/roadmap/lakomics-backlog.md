@@ -62,6 +62,15 @@ Status: `PARTIAL` — 3.5.41 (`a36403e9`) added capture-phase handling, a per-si
 - **Coverage:** the [2026-10-16 code-level inventory](../../extension-list/options/context-menu-coverage.md) records blocker causes, protected native menus, frame limitations and the PDF fallback. A live site-by-site inventory was not recorded; investigate remaining reported sites without overriding intentionally native menus.
 - **Later idea (user 2026-10-13):** save an X post (text + media as one item), a link or a whole page into Lakomics from the same menu. Current-frame saving still needs an image-byte upload API; existing capture accepts remote HTTPS URLs.
 
+## REVIEW-20261022 — Bug hunt and UI sweep (2026-10-22)
+
+Status: `PARTIAL` — two read-only bug-hunt rounds (server, desktop Rust, PC/tablet React, extension, Android native, cards; reports in `.tmp/bughunt/`, not in the repo) and a PC UI sweep at 960×640 and 1700 px (`.tmp/ui-review-20261022/`). All confirmed findings and all sweep items F1–F18 were fixed (`d2405203` and the follow-up commit); server deployed; PC release rebuilt; tablet 0.9.141 and collector 3.5.65 installed on the tablet. Remaining:
+- Tablet UI sweep not done (device was locked); do it when the tablet is available.
+- Game work detail: the tablet still shows logo-type artwork as the hero (remote https art, transparency cannot be read); PC hides it.
+- Pre-existing test failures to clean up: `designFoundation.test.ts` (settings.css legacyToken 12 > 11) and `sharedLayers.test.ts` (tablet copies of `favoriteTargets`, `folderBreadcrumb`).
+- The empty `NAI_Backup…json` came from the NAI app's Android export (`V:\nai_frontend`, `services/backup.ts`), not from Lakomics transfer (unconfirmed); the tablet now refuses to send empty files.
+- "영상 유사 검토" in the video panel kept its name (video feature); decide whether it follows "유사 이미지 검토".
+
 ## UI-REVIEW-20261011 — Automated UI sweep findings
 
 Status: `PARTIAL` — 2026-10-11 sweep of PC (release, 960×640 and maximized) and Galaxy Tab S11 (portrait and landscape) main screens with a DOM lint, reviewed by the design reviewer. Report with screenshots: https://claude.ai/artifact/GUva3DvrULedEUzmeafeCx (local copy `.tmp/ui-review/`). Sweep tool: session temp `ui-sweep/sweep.mjs` (CDP + lint + adb screencap), not in the repo.

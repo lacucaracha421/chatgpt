@@ -42,7 +42,7 @@ import { MangaDetail } from "./MangaDetail";
 import { OverlayPanel } from "../shared/ui/OverlayPanel";
 import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
 import { MangaSkeletonGrid } from "./MangaCard";
-import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
+import { MangaToolbar, MangaViewMenu, type MangaSource } from "./MangaToolbar";
 import { MangaIndexToken } from "./MangaIndex";
 import { mangaIndexQuery, withMangaIndexQuery } from "./mangaIndexModel";
 import type { MangaIndexIdentity } from "../library/types";
@@ -643,19 +643,21 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     setScope(next); setSort(nextSort);
     void search(query.trim(), nextSort, next);
   }
-  const catalogControls = status?.installed ? <>
-    <MangaChoiceMenu label="언어" value={language} options={[{ value: "korean", label: "한국어" }, { value: "japanese", label: "일본어" }]} onChange={nextLanguage => {
+  const catalogControls = status?.installed ? <MangaViewMenu choices={[
+    { label: "언어", value: language, options: [{ value: "korean", label: "한국어" }, { value: "japanese", label: "일본어" }], onChange: next => {
+      const nextLanguage = next as typeof language;
       languageRef.current = nextLanguage; setLanguage(nextLanguage);
       setKnownBookmarkCount(undefined); onBookmarkCount?.(undefined);
       void search(query.trim(), sort, scope, revealBlocked, nextLanguage);
-    }} />
-    <MangaChoiceMenu label="정렬" value={sort} options={scope === "bookmarked" ? BOOKMARK_SORT_OPTIONS : [
+    } },
+    { label: "정렬", value: sort, options: scope === "bookmarked" ? BOOKMARK_SORT_OPTIONS : [
       { value: "latest", label: "최신순" }, { value: "views", label: "조회순" }, { value: "hotDay", label: "오늘 인기" }, { value: "hotWeek", label: "주간 인기" }, { value: "hotMonth", label: "월간 인기" },
-    ]} onChange={nextSort => {
+    ], onChange: next => {
+      const nextSort = next as typeof sort;
       if (scope === "bookmarked") { setBookmarkSort(nextSort as BookmarkSort); writeBookmarkSort(nextSort as BookmarkSort); }
       setSort(nextSort); void search(appliedQuery, nextSort, scope);
-    }} />
-  </> : undefined;
+    } },
+  ]} /> : undefined;
   // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
   const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
     { id: "refresh", label: "새로고침", disabled: loading, onSelect: () => { void refreshSearch.current().then(success => { if (success) setRefreshedAt(new Date().toISOString()); }); } },
@@ -730,7 +732,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
-      countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : countError ? "결과 수 확인 실패" : undefined}
+      countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}${appliedQuery || indexFilter ? "개 결과" : "개 작품"}` : countError ? "결과 수 확인 실패" : undefined}
       controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate}
       ariaLabel="온라인 망가 도구" actions={catalogMenu} chrome={{
         summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,
@@ -775,7 +777,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
               bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
               onOpen={cardOpen}
               onRead={cardRead}
-              onBookmark={cardBookmark}
+              onBookmark={displayedView.current?.scope === "bookmarked" ? undefined : cardBookmark}
             />)}
           </div>
           {loadingMore && <MangaSkeletonGrid more />}

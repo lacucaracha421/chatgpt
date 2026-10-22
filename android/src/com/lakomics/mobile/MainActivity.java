@@ -257,9 +257,18 @@ public final class MainActivity extends Activity {
  private final Handler clipboardHandler=new Handler(Looper.getMainLooper());
  /** The clip this app placed for a secret value (its timestamp), until it is cleared or replaced. */
  private long secretClip=-1,secretClipDue=0;
+ private boolean watchingClips;
+ /** While Lakomics has focus: a newer clip (copied here or in the WebView) is not cleared later. */
+ private final ClipboardManager.OnPrimaryClipChangedListener secretClipReplaced=()->{
+  if(secretClip<0)return;
+  ClipboardManager manager=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(manager==null)return;
+  ClipDescription now;try{now=manager.getPrimaryClipDescription();}catch(RuntimeException e){now=null;}
+  if(now!=null&&now.getTimestamp()!=secretClip){secretClip=-1;clipboardHandler.removeCallbacks(this.clearSecretClip);SecretClipReceiver.cancel(this);}
+ };
  /**
   * Copies a secret-note value, marked sensitive so the system hides its preview, and clears
-  * it after 30 s if the clipboard still holds it. The value is never logged.
+  * it after 30 s if the clipboard still holds it, also while Lakomics is in the background
+  * (SecretClipReceiver). The value is never logged.
   */
  private void copySecret(final String text,final CancellationSignal signal)throws Exception{
   final String value=ClipboardPolicy.text(text);
@@ -268,21 +277,19 @@ public final class MainActivity extends Activity {
    extras.putBoolean(Build.VERSION.SDK_INT>=33?ClipDescription.EXTRA_IS_SENSITIVE:"android.content.extra.IS_SENSITIVE",true);clip.getDescription().setExtras(extras);
    manager.setPrimaryClip(clip);ClipDescription placed=manager.getPrimaryClipDescription();
    secretClip=placed==null?-1:placed.getTimestamp();secretClipDue=SystemClock.uptimeMillis()+30_000;
+   if(!watchingClips){manager.addPrimaryClipChangedListener(secretClipReplaced);watchingClips=true;}
+   if(secretClip>=0)SecretClipReceiver.schedule(this,secretClip,SystemClock.elapsedRealtime()+30_000);else SecretClipReceiver.cancel(this);
    clipboardHandler.removeCallbacks(clearSecretClip);clipboardHandler.postDelayed(clearSecretClip,30_000);return null;});
   runOnUiThread(write);
   try{write.get(5,TimeUnit.SECONDS);}
   catch(java.util.concurrent.ExecutionException e){Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Clipboard write failed");}
   finally{write.cancel(false);}
  }
- /** Runs on the main thread; while the app is in the background the clip cannot be checked, so resume retries. */
+ /** Runs on the main thread when due; a frozen background process is covered by the alarm, and focus retries. */
  private final Runnable clearSecretClip=()->{
   if(secretClip<0||SystemClock.uptimeMillis()<secretClipDue)return;
-  ClipboardManager manager=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(manager==null){secretClip=-1;return;}
-  ClipDescription now;try{now=manager.getPrimaryClipDescription();}catch(RuntimeException e){now=null;}
-  // Unreadable without window focus (Android 10+): keep it and check again on focus.
-  if(now==null)return;
-  if(now.getTimestamp()==secretClip){if(Build.VERSION.SDK_INT>=28)manager.clearPrimaryClip();else manager.setPrimaryClip(ClipData.newPlainText("",""));}
-  secretClip=-1;
+  SecretClipReceiver.clearIfOurs(this,secretClip);
+  secretClip=-1;SecretClipReceiver.cancel(this);
  };
  final class Bridge {
   /** Set synchronously before React paints a secret screen; no snapshot of its contents. */
@@ -432,7 +439,10 @@ public final class MainActivity extends Activity {
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
  }
- @Override public void onTrimMemory(int level){if(resumeCover!=null&&(level==TRIM_MEMORY_RUNNING_CRITICAL||level>=TRIM_MEMORY_BACKGROUND))resumeCover.clear();if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
+ @Override public void onTrimMemory(int level){if(resumeCover!=null&&(level==TRIM_MEMORY_RUNNING_CRITICAL||level>=TRIM_MEMORY_BACKGROUND))resumeCover.clear();
+  // Leaving the app (UI_HIDDEN, and BACKGROUND when it is cached) is not memory pressure: the
+  // vault's one-minute background grace (PrivateVault.stopped/resumed) applies there.
+  if(vault!=null&&level==TRIM_MEMORY_RUNNING_CRITICAL)vault.lock("메모리가 부족해 잠겼습니다");super.onTrimMemory(level);}
  @Override public void onLowMemory(){if(resumeCover!=null)resumeCover.clear();super.onLowMemory();}
  @Override protected void onActivityResult(int request,int result,Intent data){
   if(request==EXCHANGE_TREE){
@@ -487,5 +497,5 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();thumbnailPrepare.shutdownNow();thumbnailWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);if(watchingClips){ClipboardManager clips=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(clips!=null)clips.removePrimaryClipChangedListener(secretClipReplaced);watchingClips=false;}stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();thumbnailPrepare.shutdownNow();thumbnailWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
@@ -320,6 +320,64 @@ it("keeps the selection and the same operation id when saving fails, then succee
   expect(screen.getByRole("status")).toHaveTextContent("앨범에 1장을 넣었습니다");
 });
 
+it("shows what the album actually took when a retried keep answers with the first decision", async () => {
+  const { api } = apiFixture(); await tearToResults(api);
+  // The first keep (slots 0 and 1) committed but its reply was lost; the retry with slot 2 added gets that decision back.
+  vi.mocked(api.keep).mockResolvedValueOnce({ ...decided([0, 1]), alreadyKept: true });
+  fireEvent.click(slots()[0]); fireEvent.click(slots()[1]); fireEvent.click(slots()[2]);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "앨범에 넣기 (3장)" })); }); await settle(500);
+  expect(document.querySelectorAll(".pack-opening__pick--saved")).toHaveLength(2);
+  expect(within(slots()[2]).queryByText("앨범에 넣음")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("앨범에 2장을 넣었습니다");
+});
+
+it("shows a pack decided elsewhere or past its keep window instead of asking to retry", async () => {
+  const { api } = apiFixture(); await tearToResults(api);
+  vi.mocked(api.keep).mockRejectedValueOnce(new Error("alreadyKept"));
+  vi.mocked(api.pack).mockResolvedValueOnce(decided([3]));
+  fireEvent.click(slots()[0]);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "앨범에 넣기 (1장)" })); }); await settle(500);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /앨범에 넣기/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("이미 정리된 팩입니다 · 앨범에 1장");
+  expect(within(slots()[3]).getByText("앨범에 넣음")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "닫기" })); await settle(500);
+
+  cleanup(); localStorage.clear();
+  const late = apiFixture(); await tearToResults(late.api);
+  vi.mocked(late.api.keep).mockRejectedValueOnce(new Error("packExpired"));
+  vi.mocked(late.api.pack).mockResolvedValueOnce({ ...result(true), expired: true });
+  fireEvent.click(slots()[0]);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "앨범에 넣기 (1장)" })); }); await settle(500);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("정리할 수 있는 기간이 지나 앨범에 넣지 못했습니다");
+  expect(document.querySelectorAll(".pack-opening__pick--saved")).toHaveLength(0);
+});
+
+it("shows its own keep when the reply was lost but the album took exactly those cards", async () => {
+  const { api } = apiFixture(); await tearToResults(api);
+  vi.mocked(api.keep).mockRejectedValueOnce(new Error("offline"));
+  vi.mocked(api.pack).mockResolvedValueOnce(decided([1, 4]));
+  fireEvent.click(slots()[1]); fireEvent.click(slots()[4]);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "앨범에 넣기 (2장)" })); }); await settle(500);
+  expect(api.keep).toHaveBeenCalledOnce();
+  expect(screen.getByRole("status")).toHaveTextContent("앨범에 2장을 넣었습니다");
+});
+
+it("fetches today's opened packs once, even when the bonus pack was opened before the daily one", async () => {
+  // The daily pack was opened last, so the stored result is not the bonus id the shortcut looks for.
+  saveResult("library", { ...result(true), openedAt: "2026-10-15T01:30:00Z" });
+  let revision = 1;
+  const { api, change } = apiFixture();
+  vi.mocked(api.state).mockImplementation(async () => state({ unopened: [], bonusGranted: true, revision: revision++ }));
+  vi.mocked(api.open).mockImplementation(async (packId: string) => ({ ...result(true), packId, openedAt: packId.startsWith("b-") ? "2026-10-15T01:10:00Z" : "2026-10-15T01:30:00Z" }));
+  render(<HomeDailyCard api={api} root="library" />); await settle();
+  expect(api.open).toHaveBeenCalledTimes(2);
+  change(); await settle(); change(); await settle();
+  expect(api.state).toHaveBeenCalledTimes(3);
+  expect(api.open).toHaveBeenCalledTimes(2);
+});
+
 it("leaves the pack waiting on 나중에 and reopens it from the Home slot", async () => {
   const { api } = apiFixture();
   vi.mocked(api.state).mockResolvedValueOnce(state()).mockResolvedValue(state({ unopened: [], pendingKeep: [waitingPack] }));
@@ -347,6 +405,15 @@ it("does not offer the keep step for a stored result that is no longer waiting",
   expect(screen.queryByRole("button", { name: /정리 안 한 팩/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "오늘의 결과 보기" })); await settle();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+});
+
+it("keeps an older undecided pack reachable once no sealed pack is left", async () => {
+  saveResult("library", result()); const older = { ...waitingPack, packId: "d-20261014", openedAt: "2026-10-14T01:00:00Z" };
+  const { api } = apiFixture(state({ unopened: [], pendingKeep: [older, waitingPack] }));
+  render(<HomeDailyCard api={api} root="library" />); await settle();
+  fireEvent.click(screen.getByRole("button", { name: "정리 안 한 팩 2" })); await settle(500);
+  expect(api.pack).toHaveBeenCalledWith("d-20261014");
+  expect(screen.getAllByRole("checkbox")).toHaveLength(5);
 });
 
 it("warms the art of sealed packs in the background from the prefetch hint, locally and quietly", async () => {

@@ -2,6 +2,8 @@ type DisplayDate = string | number | Date | null | undefined;
 
 export type DisplayDateTimeOptions = {
   withTime?: boolean;
+  /** Always write the date (`10.22 04:20`), for a lone value outside a dated group. */
+  withDate?: boolean;
 };
 
 /** Calendar dates keep their precision; timestamps use the viewer's local date. */
@@ -82,6 +84,17 @@ function parseDisplayValue(value: DisplayDate): ParsedDisplayValue | null {
   return Number.isFinite(date.getTime()) ? { date, hasTime: true } : null;
 }
 
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** A date group heading: `10월 18일 (일)`, other years `2025년 9월 28일 (일)`; empty when unreadable. */
+export function displayDayHeading(value: DisplayDate, now = new Date()): string {
+  const parsed = parseDisplayValue(value);
+  if (!parsed) return "";
+  const { date } = parsed;
+  const year = date.getFullYear() === now.getFullYear() ? "" : `${date.getFullYear()}년 `;
+  return `${year}${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAYS[date.getDay()]})`;
+}
+
 export function displayTime(value: DisplayDate, _now = new Date()): string {
   const parsed = parseDisplayValue(value);
   if (!parsed) return "";
@@ -95,6 +108,7 @@ export function displayDateTime(value: DisplayDate, now = new Date(), options: D
   if (!parsed.hasTime) return dateLabel;
 
   const time = displayTime(parsed.date);
+  if (options.withDate) return `${dateLabel} ${time}`;
   const dayDifference = localDayNumber(parsed.date) - localDayNumber(now);
   if (dayDifference === 0) return time;
   if (dayDifference === -1) return `어제 ${time}`;

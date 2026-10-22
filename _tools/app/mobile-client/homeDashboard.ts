@@ -25,7 +25,7 @@ export type TodoKey = 'pending' | 'character' | 'similar' | 'duplicates';
 export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: string}> = {
   pending: {label: '처리 대기', unit: '건', note: '수집 요청 · 분류 전'},
   character: {label: '확인', unit: '건', note: '맞음 · 아님을 기다리는 이미지'},
-  similar: {label: '유사 이미지', unit: '쌍', note: '같은 그림일 수 있음'},
+  similar: {label: '유사 이미지 검토', unit: '쌍', note: '같은 그림일 수 있음'},
   duplicates: {label: '중복 판본', unit: '건', note: '카탈로그 · 같은 작품'},
 };
 export const TODO_ORDER: TodoKey[] = ['pending', 'character', 'similar', 'duplicates'];

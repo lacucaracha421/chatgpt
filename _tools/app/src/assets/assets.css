@@ -46,12 +46,6 @@
 .asset-toolbar__controls > *, .series-header-actions > * { flex: none; }
 .asset-toolbar__quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .asset-toolbar__quiet-menu svg { width: var(--icon-sm); height: var(--icon-sm); }
-.asset-view-menu__aspects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); }
-.asset-view-menu__aspect { display: flex; min-width: 0; min-height: var(--control-height-compact); align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: var(--border-width) solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-body); text-align: left; cursor: pointer; }
-.asset-view-menu__aspect svg { width: var(--icon-sm); height: var(--icon-sm); flex: none; }
-.asset-view-menu__aspect:hover { background: var(--color-surface-hover); color: var(--color-text); }
-.asset-view-menu__aspect[aria-checked="true"] { border-color: var(--color-border-strong, var(--color-border)); background: var(--color-surface-elevated); color: var(--color-text); }
-.asset-view-menu__aspect:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: calc(var(--focus-width) * -1); }
 
 /* 정보 panel (user, 2026-10-05): the image alone and whole on top, then the artist and the record, then the tags.
    NieR within DESIGN.md: section labels (square + hairline), hairline rows, square corners, tabular values. */

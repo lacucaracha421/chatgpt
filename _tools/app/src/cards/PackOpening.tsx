@@ -9,13 +9,17 @@ import { RevealEffects } from "./RevealEffects";
 import { TradingCard } from "./TradingCard";
 import { cardTiers, revealOrder, type CardData, type PackCover } from "./types";
 import { BusyLabel } from "../shared/ui/BusyLabel";
+import type { KeepRefusal } from "./keep";
 
 type Phase = "pack" | "opening" | "reveal" | "results";
 const noCards: readonly CardData[] = [];
 /** The keep step after the reveal: the player picks the cards that enter the album. */
 export interface KeepActions {
-  /** Sends the chosen server slots; may return the cards as the album now holds them (serials). */
-  onKeep: (slots: number[]) => Promise<readonly CardData[] | void>;
+  /**
+   * Sends the chosen server slots and returns the pack as the server decided it (kept flags,
+   * serials). `refused`: the pack was already decided elsewhere or its keep window had closed.
+   */
+  onKeep: (slots: number[]) => Promise<{ cards: readonly CardData[]; refused?: KeepRefusal }>;
   /** Leaves the pack undecided; it stays listed as waiting for a decision. */
   onLater: () => void;
 }
@@ -41,7 +45,7 @@ export function PackOpening({ cards: suppliedCards = noCards, cover, onClose, lo
   const [undecided, setUndecided] = useState(suppliedUndecided);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [saved, setSaved] = useState<ReadonlySet<string>>(() => new Set());
-  const [saving, setSaving] = useState(false), [keepError, setKeepError] = useState(false);
+  const [saving, setSaving] = useState(false), [keepError, setKeepError] = useState(false), [refused, setRefused] = useState<KeepRefusal>();
   const stage = useRef<HTMLDivElement>(null), wrapper = useRef<HTMLDivElement>(null), stack = useRef<HTMLDivElement>(null), grid = useRef<HTMLDivElement>(null);
   const [burst, setBurst] = useState(false);
   const cutinRoot = useRef<HTMLDivElement>(null), cutinDim = useRef<HTMLDivElement>(null), cutinCard = useRef<HTMLDivElement>(null), cutinBanner = useRef<HTMLSpanElement>(null);
@@ -234,13 +238,16 @@ export function PackOpening({ cards: suppliedCards = noCards, cover, onClose, lo
     try {
       const next = await keep.onKeep(slots);
       if (!mounted.current) return;
-      if (next) setLoaded(next);
-      setSaved(new Set(selected)); setUndecided(false);
+      // The server's kept flags, not the local selection: a retried keep answers with the first decision.
+      setLoaded(next.cards); setSaved(new Set(next.cards.filter(card => card.kept).map(card => card.id)));
+      setRefused(next.refused); setUndecided(false);
     } catch { if (mounted.current) setKeepError(true); }
     finally { if (mounted.current) setSaving(false); }
   };
   const inAlbum = (card: CardData) => !picking && phase === "results" && (!!card.kept || saved.has(card.id));
-  const resultText = saved.size ? `앨범에 ${saved.size}장을 넣었습니다` : `공개 완료 · ${cards.length}장 · ${cards.filter(card => card.isNew).length}장 새로 발견`;
+  const resultText = refused === "expired" ? "정리할 수 있는 기간이 지나 앨범에 넣지 못했습니다"
+    : refused === "decided" ? `이미 정리된 팩입니다${saved.size ? ` · 앨범에 ${saved.size}장` : ""}`
+    : saved.size ? `앨범에 ${saved.size}장을 넣었습니다` : `공개 완료 · ${cards.length}장 · ${cards.filter(card => card.isNew).length}장 새로 발견`;
   return <div className="lkm-cards pack-opening" style={printVariables} data-phase={phase} data-reduced-motion={reduced}>
     <div className="pack-opening__toolbar"><span>오늘의 카드</span><div>{phase !== "pack" && phase !== "results" && <Button onClick={skip}>건너뛰기</Button>}{onAlbum && phase === "results" && <Button onClick={onAlbum}>앨범</Button>}<Button onClick={onClose}>닫기</Button></div></div>
     <div className="pack-opening__stage" ref={stage}>

@@ -18,6 +18,11 @@ export function SettingsRow({ name, value, status, statusClassName, tone, contro
   return <dl className={`settings-view__property${className ? ` ${className}` : ""}`}><dt><span>{name}</span>{value && <strong className="settings-view__value">{value}</strong>}</dt>{status && <dd className={`settings-view__status${statusClassName ? ` ${statusClassName}` : ""}`} data-tone={tone}>{status}</dd>}{control && <dd className="settings-view__inline-controls">{control}</dd>}</dl>;
 }
 
+/** The state word inside a longer status line ("연결 안 됨 · 21:45부터"): only the word takes the tone's colour. */
+export function StatusWord({ tone, children }: { tone?: string; children: ReactNode }) {
+  return <span className="settings-view__state" data-tone={tone}>{children}</span>;
+}
+
 export function SettingsGroup({ title, help, children }: { title: string; help?: string; children: ReactNode }) {
   return <section className="settings-view__group" aria-labelledby={`settings-group-${title}`}>
     <SectionLabel as="h3" id={`settings-group-${title}`} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />

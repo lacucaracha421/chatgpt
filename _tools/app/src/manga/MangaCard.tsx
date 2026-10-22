@@ -43,7 +43,7 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
         {selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
       <strong className="manga-card__title" aria-description={displayTitle !== title ? title : undefined}>{displayTitle}</strong>
-      <span className="manga-card__artist">{artist?.trim() || "작가 미상"}</span>
+      <span className="manga-card__artist">{artist?.trim()}</span>
     </button>
     {onBookmark && <BookmarkToggle form="corner" className="manga-card__bookmark" bookmarked={!!bookmarked}
       label={`${title} ${bookmarked ? "북마크 해제" : "북마크"}`}
