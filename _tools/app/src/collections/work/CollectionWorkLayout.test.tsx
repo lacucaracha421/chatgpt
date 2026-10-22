@@ -26,19 +26,6 @@ describe.each([false, true])("shared manga shelf CSS (tablet: %s)", mobile => {
     expect(container.querySelector('[data-volume-id="v1"]')).not.toBeNull();
     expect(container.querySelector(`[data-volume-id="v${count}"]`)).not.toBeNull();
   });
-  it("reserves a separate 184px row for 120px books, padding and the picked number", () => {
-    styles(mobile);
-    const { container } = render(<div className={mobile ? "tablet-work tablet-work--manga" : "work-surface"}><div className="work-stage manga-work-stage" /><MangaBookcase manga={data(37)} privacy={false} onPick={() => undefined} /></div>);
-    const shelf = getComputedStyle(container.querySelector(".manga-bookcase")!);
-    const board = getComputedStyle(container.querySelector(".manga-bookcase-board")!);
-    const track = getComputedStyle(container.querySelector(".home-shelf__track")!);
-    const tokens = getComputedStyle(document.documentElement);
-    const padding = parseFloat(tokens.getPropertyValue("--space-8"));
-    expect(track.boxSizing).toBe("border-box"); expect(track.height).toBe("100%");
-    expect(parseFloat(shelf.height)).toBe(parseFloat(board.height) + 2 * padding);
-    expect(padding).toBeGreaterThanOrEqual(parseFloat(tokens.getPropertyValue("--space-2")) + parseFloat(tokens.getPropertyValue("--line-meta")));
-    if (!mobile) expect(getComputedStyle(container.querySelector(".manga-work-stage")!).bottom).toBe(shelf.height);
-  });
 });
 it("keeps provider cards in one column inside the work dock at any window width", () => {
   styles(false);

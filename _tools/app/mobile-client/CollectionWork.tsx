@@ -1,3 +1,4 @@
+import { mangaShelfStyle } from "../src/collections/mangaDimensions";
 import {usePerformerNames} from "./PerformerName";
 import {performerName} from "../src/collections/av/performerName";
 import {useWorkSurfaceReady} from "../src/collections/work/useWorkSurfaceReady";
@@ -256,7 +257,7 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
   const [entered, setEntered] = useState(false);
   if (!visible) return <Skeleton className="tablet-work__skeleton" label="작품을 불러오는 중"/>;
   const waiting = !incoming || visible !== incoming;
-  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting || !entered} inert={waiting || undefined}>
+  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{...mangaShelfStyle(true), position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting || !entered} inert={waiting || undefined}>
     {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
       style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
       <MangaWorkSurface shown={index === painted ? visible : slot} privacy={privacy} reset={reset} onReset={() => setReset(value => value + 1)} onPick={setWanted} onEnlarge={onEnlarge} onReady={() => {
@@ -284,7 +285,7 @@ function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, on
           : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook key={shown.book} src={shown.book} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => ready('object')}/></WorkZoomObject></WorkZoomStage>}
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ViewfinderCircleIcon aria-hidden="true"/></Button>
       </div>
-      <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
+      <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} title={item.name} author={item.author} publisher={item.publisher} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
         // The cover viewer stays shut in privacy mode, and so does the book sound.
         if (!privacy) playCaseSound('book', 'open');
         onEnlarge(id);

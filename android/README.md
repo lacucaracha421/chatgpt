@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.9.149 (286)**, declared in [AndroidManifest.xml](AndroidManifest.xml), checked on 2026-10-23 at `e800bde5`. The [backlog](../docs/roadmap/lakomics-backlog.md#fav-char-001) separately records installation of 0.9.140 and pending favourite-character feedback; this pass did not inspect a device. Older releases below retain their dated evidence.
+Current source version: **0.9.150 (287)**, declared in [AndroidManifest.xml](AndroidManifest.xml), checked on 2026-10-23 at `94fdfdbb`. The [backlog](../docs/roadmap/lakomics-backlog.md#fav-char-001) separately records installation of 0.9.140 and pending favourite-character feedback; this pass did not inspect a device. Older releases below retain their dated evidence.
 
 ## Current functionality and remaining gates
 

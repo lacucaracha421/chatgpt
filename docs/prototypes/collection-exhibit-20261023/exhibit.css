@@ -1,0 +1,216 @@
+/* Collection exhibit — PROPOSED object CSS (room, furniture, spines, pulled-out objects).
+   Colours start from the app tokens (tokens.css); the furniture materials are new tokens (--bk-*) so a light
+   "종이" theme can swap them. Geometry is computed in exhibit.js from millimetres × px-per-mm. */
+
+/* ---------- Materials (one set per finish; 먹색 목재 is the proposal's default) ---------- */
+.ex, .ex-mat-ink {
+  --bk-carcass: #24221f;          /* uprights, cap, plinth */
+  --bk-carcass-edge: rgba(255, 244, 228, .07);
+  --bk-back: #1a1918;             /* back panel */
+  --bk-board-top: #2f2c28;
+  --bk-lip: #2a2724;
+  --bk-lip-edge: rgba(255, 244, 228, .10);
+  --bk-light: rgba(255, 236, 210, .085); /* warm light from the strip under the shelf above */
+  --bk-light-strip: rgba(255, 238, 214, .30);
+  --bk-shadow: rgba(0, 0, 0, .55);
+  --bk-paper: #dcd7ca;            /* label cards: the accent ivory, as printed paper */
+  --bk-paper-ink: #23272a;
+  --wall: #191919;
+  --wall-light: rgba(255, 238, 214, .05);
+  --floor: #111112;
+}
+.ex-mat-lacquer {
+  --bk-carcass: #151617; --bk-carcass-edge: rgba(220, 230, 255, .10);
+  --bk-back: #121314; --bk-board-top: #1d1f21; --bk-lip: #18191b; --bk-lip-edge: rgba(230, 236, 255, .16);
+  --bk-light: rgba(225, 233, 255, .07); --bk-light-strip: rgba(225, 235, 255, .34);
+}
+.ex-mat-oak {
+  --bk-carcass: #b9a587; --bk-carcass-edge: rgba(255, 255, 255, .25);
+  --bk-back: #e9e3d6; --bk-board-top: #cdb998; --bk-lip: #c2ad8c; --bk-lip-edge: rgba(255, 255, 255, .35);
+  --bk-light: rgba(255, 250, 240, .25); --bk-light-strip: rgba(255, 250, 238, .7); --bk-shadow: rgba(60, 40, 20, .35);
+  --wall: #efece5; --floor: #ddd7cb;
+}
+
+/* ---------- Bookcase ---------- */
+.bk { position: relative; box-sizing: border-box; padding: 0 var(--up, 14px); background: var(--bk-carcass);
+  box-shadow: inset 1px 0 var(--bk-carcass-edge), inset -1px 0 var(--bk-carcass-edge), 0 24px 48px -24px rgba(0, 0, 0, .7); }
+.bk-cap { height: var(--cap, 12px); margin: 0 calc(var(--up, 14px) * -1); background: linear-gradient(var(--bk-carcass-edge), transparent 2px), var(--bk-carcass); }
+.bk-plinth { position: relative; height: var(--plinth, 40px); margin: 0 calc(var(--up, 14px) * -1); background: linear-gradient(var(--bk-carcass), color-mix(in srgb, var(--bk-carcass) 70%, black)); }
+
+.bk-row { position: relative; background:
+    linear-gradient(var(--bk-light), transparent 46%),
+    linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 6%, transparent 94%, rgba(0, 0, 0, .35)),
+    var(--bk-back); }
+/* The row holding a pulled-out object paints over its neighbours. */
+.bk-row.is-holding { z-index: 10; }
+/* The LED strip under the shelf above: a thin warm line at the top of the compartment. */
+.bk-row::before { content: ""; position: absolute; left: 3%; right: 3%; top: 0; height: 1px; background: var(--bk-light-strip); opacity: .55; filter: blur(.4px); pointer-events: none; }
+.bk-items { position: absolute; left: var(--pad, 8px); right: var(--pad, 8px); bottom: var(--board, 22px); top: 0; display: flex; align-items: flex-end; perspective: 1400px; }
+.bk-board { position: absolute; left: 0; right: 0; bottom: 0; height: var(--board, 22px); z-index: 4; }
+.bk-board::before { /* top face of the shelf, seen a little from above */ content: ""; position: absolute; left: 0; right: 0; top: 0; height: var(--board-top, 4px);
+  background: linear-gradient(color-mix(in srgb, var(--bk-board-top) 80%, black), var(--bk-board-top)); }
+.bk-board::after { /* the lip, with its lit top edge */ content: ""; position: absolute; left: calc(var(--up, 14px) * -1); right: calc(var(--up, 14px) * -1); top: var(--board-top, 4px); bottom: 0;
+  background: linear-gradient(var(--bk-lip-edge), transparent 1px), linear-gradient(var(--bk-lip), color-mix(in srgb, var(--bk-lip) 82%, black)); }
+/* Contact shadow where objects meet the shelf. */
+.bk-items::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 8px; background: linear-gradient(transparent, var(--bk-shadow)); filter: blur(2px); opacity: .7; pointer-events: none; z-index: -1; }
+.bk-labels { position: absolute; left: var(--pad, 8px); right: var(--pad, 8px); bottom: 0; height: calc(var(--board, 22px) - var(--board-top, 4px)); z-index: 5; pointer-events: none; }
+
+/* Label holder on the lip: a printed card in a thin frame. Square, no colour mark. */
+.lh { position: absolute; bottom: 3px; display: inline-flex; align-items: center; gap: 6px; height: calc(100% - 6px); max-width: 260px; padding: 0 6px; box-sizing: border-box;
+  background: var(--bk-paper); color: var(--bk-paper-ink); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .35);
+  font: 600 11px/1 var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0; }
+.lh .n { font-weight: 400; font-variant-numeric: tabular-nums; opacity: .7; }
+.lh.dday { gap: 0; padding: 0 4px; }
+.lh.dday.today { background: var(--color-accent); }
+.lh.ghost { opacity: 0; transform: translateY(2px); transition: opacity 140ms var(--ease-standard), transform 140ms var(--ease-standard); }
+.lh.ghost.on { opacity: 1; transform: none; }
+
+/* Divider card standing between groups, its tab rising above the books. */
+.dv { position: relative; flex: none; align-self: flex-end; width: 3px; margin: 0 3px; background: linear-gradient(90deg, #4a4640, #33302c); z-index: 2; }
+.dv > b { position: absolute; left: -1px; top: 0; transform: translateY(-100%); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; display: grid; place-items: center;
+  background: var(--bk-paper); color: var(--bk-paper-ink); font: 600 11px/1 var(--font-ui); box-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+/* Bookend: dark folded metal at a group's end. */
+.be { flex: none; align-self: flex-end; width: 5px; margin: 0 6px 0 2px; background: linear-gradient(90deg, #45484c, #2a2c2f 60%, #1f2022); box-shadow: 2px 0 3px rgba(0, 0, 0, .5); }
+.gap { flex: none; }
+
+/* ---------- Spines ---------- */
+.sp { position: relative; flex: none; display: block; overflow: hidden; box-sizing: border-box; cursor: pointer; transform-origin: 50% 100%;
+  transition: transform 120ms var(--ease-standard), filter 120ms var(--ease-standard); }
+.sp::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 240, 220, .16), transparent 18%, transparent 72%, rgba(0, 0, 0, .28)),
+    linear-gradient(90deg, rgba(0, 0, 0, .34), rgba(255, 255, 255, .07) 32%, transparent 58%, rgba(0, 0, 0, .32)); }
+.sp.far { box-shadow: inset -1px 0 rgba(0, 0, 0, .45); }
+.sp.far::after { background: linear-gradient(rgba(255, 240, 220, .12), transparent 30%, rgba(0, 0, 0, .25)); }
+.bk-items:not(.is-scrolling) .sp:not(.far):hover { transform: translateY(-4px); }
+.sp.is-run { transform: translateY(-3px); filter: brightness(1.08); }
+.sp.is-out { visibility: hidden; }
+.sp.is-dim { filter: brightness(.55) saturate(.8); }
+.sp.is-hit { transform: translateY(-6px); filter: brightness(1.12); }
+.sp:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* Manga volume: synthesised spine. */
+.sp.m { background: var(--c); color: var(--ink, #fff); }
+.sp.m > .art { position: absolute; left: 0; right: 0; top: 0; height: 21%; background: var(--art); }
+.sp.m > .no { position: absolute; left: 50%; top: 23%; transform: translateX(-50%); min-width: calc(100% - 4px); height: var(--nob); display: grid; place-items: center;
+  background: var(--nobg, #f2efe6); color: var(--noink, #15181a); font: 700 var(--nof)/1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.sp.m > .tt { position: absolute; left: 0; right: 0; top: calc(23% + var(--nob) + 5px); bottom: 13%; display: flex; justify-content: center; overflow: hidden;
+  writing-mode: vertical-rl; text-orientation: upright; font: 700 var(--ttf)/1.02 var(--font-spine); letter-spacing: -.02em; white-space: nowrap; }
+.sp.m > .pub { position: absolute; left: 0; right: 0; bottom: 3%; text-align: center; font: 700 calc(var(--ttf) * .8)/1 var(--font-ui); opacity: .8; }
+/* A missing volume: the gap it would fill, with its number. */
+.slot { position: relative; flex: none; box-sizing: border-box; border: 1px dashed rgba(221, 216, 202, .22); border-bottom: 0; }
+.slot > b { position: absolute; left: 0; right: 0; top: 6px; text-align: center; color: rgba(221, 216, 202, .5); font: 600 10px/1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.slot.soon { border-style: solid; border-color: rgba(221, 216, 202, .35); background: repeating-linear-gradient(135deg, rgba(221, 216, 202, .05) 0 3px, transparent 3px 7px); }
+/* Box set: one slipcase for a finished run. */
+.sp.box { background: linear-gradient(90deg, rgba(0, 0, 0, .25), transparent 12%, transparent 88%, rgba(0, 0, 0, .25)), var(--c); }
+.sp.box > .art { position: absolute; left: 4px; right: 4px; top: 6px; height: 30%; background: var(--art); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); }
+.sp.box > .tt { position: absolute; left: 0; right: 0; top: calc(30% + 14px); bottom: 34px; display: flex; justify-content: flex-start; overflow: hidden; white-space: nowrap; writing-mode: vertical-rl; text-orientation: upright; font: 700 12px/1 var(--font-spine); color: #fff; }
+.sp.box > .rg { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; color: #fff; font: 600 11px/1 var(--font-ui); font-variant-numeric: tabular-nums; opacity: .85; }
+
+/* Game case spines (stand-ins for the app's real platform templates). */
+.sp.g { background: var(--plastic); }
+.sp.g > .ins { position: absolute; left: 0; right: 0; top: var(--rim); bottom: var(--rim); overflow: hidden; background: var(--c); }
+.sp.g > .ins > .hd { position: absolute; left: 0; right: 0; top: 0; height: 13%; display: grid; place-items: center; background: var(--hd); color: var(--hdink); font: 800 calc(var(--w) * .42)/1 var(--font-ui); letter-spacing: -.04em; }
+.sp.g > .ins > .art { position: absolute; left: 0; right: 0; top: 13%; height: 20%; background: var(--art); }
+.sp.g > .ins > .tt { position: absolute; left: 0; right: 0; top: 36%; bottom: 8%; display: flex; justify-content: center; writing-mode: vertical-rl; font: 700 var(--ttf)/1 var(--font-spine); color: #fff; white-space: nowrap; overflow: hidden; }
+/* Movie poster board (option B of movie-spines-20261022). */
+.sp.f { background: #121314; }
+.sp.f > .art { position: absolute; left: 0; right: 0; top: 0; height: 41%; background: var(--art); }
+.sp.f > .tt { position: absolute; left: 0; right: 0; top: 44%; bottom: 13%; display: flex; justify-content: center; writing-mode: vertical-rl; font: 700 var(--ttf)/1 var(--font-spine); color: #fff; white-space: nowrap; overflow: hidden; }
+.sp.f > .yr { position: absolute; left: 0; right: 0; bottom: 4%; text-align: center; color: #c9c6bd; font: 600 calc(var(--ttf) * .78)/1 var(--font-ui); writing-mode: vertical-rl; }
+/* AV DVD jacket spine. */
+.sp.a { background: #0f1011; }
+.sp.a > .ins { position: absolute; left: 0; right: 0; top: var(--rim); bottom: var(--rim); overflow: hidden; background: var(--c); }
+.sp.a > .ins > .hd { position: absolute; left: 0; right: 0; top: 0; height: 9%; background: var(--hd); }
+.sp.a > .ins > .art { position: absolute; left: 0; right: 0; top: 9%; height: 36%; background: var(--art); }
+.sp.a > .ins > .tt { position: absolute; left: 0; right: 0; top: 48%; bottom: 6%; display: flex; justify-content: center; writing-mode: vertical-rl; font: 700 var(--ttf)/1 var(--font-ui); color: #fff; letter-spacing: .02em; }
+
+/* ---------- Face-out ledge ---------- */
+.ledge { position: relative; background:
+    linear-gradient(var(--bk-light), transparent 50%),
+    linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 6%, transparent 94%, rgba(0, 0, 0, .35)), var(--bk-back); }
+.ledge-items { position: absolute; left: var(--pad, 8px); right: var(--pad, 8px); bottom: var(--board, 22px); top: 0; display: flex; align-items: flex-end; gap: var(--fo-gap, 24px); }
+.fo { position: relative; flex: none; transform: perspective(900px) rotateX(6deg); transform-origin: 50% 100%; box-shadow: 0 -2px 10px rgba(0, 0, 0, .35), 6px 10px 18px -6px rgba(0, 0, 0, .8); cursor: pointer; transition: transform 160ms var(--ease-standard); }
+.fo:hover { transform: perspective(900px) rotateX(2deg) translateY(-3px); }
+.fo > .art-cover { position: absolute; inset: 0; }
+.fo-tag { position: absolute; left: 0; top: -22px; z-index: 6; display: flex; align-items: center; gap: 4px; }
+.fo-tag .ui-badge { --badge-height: 16px; height: 16px; padding: 0 5px; font-size: 10px; }
+
+/* ---------- Plinth objects: boxes and stacks ---------- */
+.kraft { position: relative; flex: none; background: linear-gradient(#77654b, #5d4e3a); box-shadow: inset 0 2px rgba(255, 255, 255, .12), inset 0 -6px 10px rgba(0, 0, 0, .25), 0 6px 12px -4px rgba(0, 0, 0, .6); }
+.kraft::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 22%; background: linear-gradient(rgba(0, 0, 0, .18), transparent); border-bottom: 1px solid rgba(0, 0, 0, .25); }
+.kraft > .lbl { position: absolute; left: 10%; right: 10%; top: 38%; padding: 4px 6px; box-sizing: border-box; background: var(--bk-paper); color: var(--bk-paper-ink); font: 600 11px/1.25 var(--font-ui); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+.kraft > .lbl .n { display: block; font-weight: 400; opacity: .7; font-variant-numeric: tabular-nums; }
+.kraft > .peek { position: absolute; top: -10px; height: 14px; box-shadow: 0 2px 3px rgba(0, 0, 0, .4); }
+.stk { flex: none; display: flex; flex-direction: column; align-items: flex-start; }
+.stk > i { position: relative; display: block; overflow: hidden; background: var(--c); box-shadow: inset 0 -1px rgba(0, 0, 0, .45), inset 0 1px rgba(255, 255, 255, .1); }
+.stk > i > span { position: absolute; left: 22%; top: 50%; transform: translateY(-50%); color: #fff; font: 700 calc(var(--h) * .52)/1 var(--font-spine); white-space: nowrap; }
+.stk > i > em { position: absolute; left: 0; top: 0; bottom: 0; width: 16%; background: var(--hd); }
+
+/* ---------- Pulled-out 3D object ---------- */
+.o3wrap { position: absolute; bottom: 0; z-index: 8; transform-style: preserve-3d; transform-origin: 50% 100%; cursor: grab; }
+.o3wrap::before { content: ""; position: absolute; left: 6%; right: 6%; bottom: -10px; height: 16px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 0, 0, .55), transparent); transform: translateZ(-40px); }
+.o3 { position: relative; transform-style: preserve-3d; }
+.o3 > .face { position: absolute; top: 0; left: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-sizing: border-box; }
+.o3 > .face.side::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, .18); pointer-events: none; }
+.o3 > .face.top { background: #e9e2d0; }
+.o3 .pages { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, #ece6d6 0 1px, #d9d1bd 1px 2px); }
+.o3 .pages.h { background: repeating-linear-gradient(0deg, #ece6d6 0 1px, #d9d1bd 1px 2px); }
+.o3 .plastic { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255, 255, 255, .08), transparent), var(--plastic, #1b1c1e); }
+.o3 > .cover { position: absolute; top: 0; left: 0; transform-style: preserve-3d; transition: transform 520ms var(--ease-standard); }
+.o3 > .cover > .face { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.o3 > .cover > .inside { transform: rotateY(180deg); background: #e7e1d2; }
+.o3 > .face.inner { background: #efe9da; }
+.o3.k-game > .face.inner, .o3.k-av > .face.inner { background: linear-gradient(90deg, #26282b, #1a1b1d); }
+.o3.k-game > .cover > .inside, .o3.k-av > .cover > .inside { background: linear-gradient(90deg, #1d1e20, #2a2c2f); }
+.o3 .disc { position: absolute; border-radius: 50%; background: radial-gradient(circle, #1a1b1d 0 9%, #c9ccd2 9.5% 13%, transparent 13.5%), conic-gradient(from 30deg, #b8bdc6, #e9ecf1, #9aa1ad, #dfe3ea, #b8bdc6); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3); }
+.o3 .panel-grid { position: absolute; inset: 8%; display: grid; grid-template: 1fr 1.4fr 1fr / 1fr 1fr; gap: 4%; }
+.o3 .panel-grid > i { border: 1px solid #3a3a3a; background: linear-gradient(135deg, #f7f3ea, #e3dccb); }
+.o3 .panel-grid > i:nth-child(2) { grid-row: span 2; }
+.o3 .back-lines { position: absolute; left: 10%; right: 10%; bottom: 8%; height: 18%; background: repeating-linear-gradient(#ffffff40 0 2px, transparent 2px 7px); }
+.o3 .barcode { position: absolute; right: 8%; bottom: 6%; width: 26%; height: 9%; background: #fff repeating-linear-gradient(90deg, #111 0 1px, #fff 1px 2px, #111 2px 4px, #fff 4px 5px); }
+
+/* ---------- Placeholder artwork (CSS only) ---------- */
+.art-cover { overflow: hidden; background: linear-gradient(var(--ang, 160deg), var(--a), var(--b)); }
+.art-cover::before { content: ""; position: absolute; width: 42%; aspect-ratio: 1; right: 12%; top: 14%; border-radius: 50%; background: radial-gradient(circle at 40% 40%, var(--sun, #fff6), transparent 70%); }
+.art-cover > .fig { position: absolute; left: var(--fx, 22%); bottom: 0; width: 46%; height: 58%; }
+.art-cover > .fig::before { content: ""; position: absolute; left: 30%; top: 0; width: 40%; aspect-ratio: 1; border-radius: 50%; background: var(--fig, #0008); }
+.art-cover > .fig::after { content: ""; position: absolute; left: 6%; right: 6%; top: 34%; bottom: 0; border-radius: 40% 40% 0 0; background: var(--fig, #0008); }
+.art-cover.k1::before { width: 120%; right: -10%; top: auto; bottom: -30%; border-radius: 50%; background: radial-gradient(closest-side, var(--sun, #fff4), transparent); }
+.art-cover.k2 > .fig { left: 50%; transform: translateX(-50%); width: 60%; height: 70%; }
+.art-cover.k3 { background: linear-gradient(var(--ang, 160deg), var(--a) 0 55%, var(--b) 55%); }
+.art-cover > .ttl { position: absolute; left: 7%; right: 7%; top: 6%; color: #fff; font: 800 var(--tf, 14px)/1.05 var(--font-ui); letter-spacing: -.03em; text-shadow: 0 1px 6px rgba(0, 0, 0, .45); }
+.art-cover > .vno { position: absolute; right: 6%; bottom: 5%; min-width: 1.4em; padding: .15em .2em; background: #f2efe6; color: #15181a; text-align: center; font: 800 var(--nf, 12px)/1 var(--font-ui); }
+.art-cover > .sub { position: absolute; left: 7%; bottom: 6%; color: #ffffffcc; font: 600 var(--sf, 9px)/1 var(--font-ui); }
+
+/* ---------- Room overview (the wall) ---------- */
+.wall { position: absolute; inset: 0; overflow: hidden; background:
+    radial-gradient(60% 50% at 50% 0%, var(--wall-light), transparent 70%),
+    linear-gradient(var(--wall), color-mix(in srgb, var(--wall) 85%, black)); }
+.wall-floor { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(color-mix(in srgb, var(--floor) 70%, var(--wall)), var(--floor) 40%); }
+.wall-floor::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: rgba(255, 255, 255, .05); }
+.wall-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.bay { position: absolute; cursor: pointer; }
+.bay::after { /* the lamp's pool of light on the wall above and behind the bay */ content: ""; position: absolute; left: -12%; right: -12%; top: -70px; height: 220px; background: radial-gradient(50% 60% at 50% 20%, rgba(255, 236, 208, .07), transparent 70%); pointer-events: none; z-index: -1; }
+.bay-lamp { position: absolute; left: 30%; right: 30%; top: -26px; height: 4px; background: #2c2a27; box-shadow: 0 2px 0 rgba(0, 0, 0, .4); }
+.bay-lamp::after { content: ""; position: absolute; left: 10%; right: 10%; bottom: -2px; height: 2px; background: var(--bk-light-strip); }
+.bay:hover .bk, .bay:focus-visible .bk { box-shadow: inset 1px 0 var(--bk-carcass-edge), inset -1px 0 var(--bk-carcass-edge), 0 0 0 1px rgba(221, 216, 202, .25), 0 24px 48px -24px rgba(0, 0, 0, .7); }
+.bay:focus-visible { outline: none; }
+.plq { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: baseline; gap: 6px; padding: 5px 8px; white-space: nowrap; background: var(--bk-paper); color: var(--bk-paper-ink); font: 600 12px/1 var(--font-ui); box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+.plq .n { font-weight: 400; opacity: .7; font-variant-numeric: tabular-nums; }
+/* AV cabinet door: frosted glass that slides aside when you walk up (closed in privacy mode). */
+.av-door { position: absolute; top: 0; bottom: 0; right: 0; width: 50%; background: linear-gradient(100deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .03) 40%, rgba(255, 255, 255, .07)); backdrop-filter: blur(5px) saturate(.6); -webkit-backdrop-filter: blur(5px) saturate(.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .10); z-index: 9; transition: transform 420ms var(--ease-standard); }
+.av-door::after { content: ""; position: absolute; left: 6px; top: 46%; width: 2px; height: 8%; background: #8b8e92; }
+.av-door.closed { width: 100%; }
+/* Showcase niches. */
+.niche { position: absolute; background: radial-gradient(70% 55% at 50% 0%, rgba(255, 238, 212, .16), transparent 70%), #141414; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04), inset 0 10px 18px -8px rgba(0, 0, 0, .8); }
+.niche > .obj { position: absolute; left: 50%; bottom: 10%; transform: translateX(-50%); box-shadow: 0 8px 14px -6px rgba(0, 0, 0, .8); }
+
+/* Zoom: the stage moves as one; the near view takes over when the camera lands. */
+.room-near { position: absolute; inset: 0; overflow: auto; opacity: 0; pointer-events: none; transition: opacity 160ms var(--ease-standard); scrollbar-width: thin; scrollbar-color: #3a3b3d transparent; }
+.room-near.on { opacity: 1; pointer-events: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sp, .fo, .o3 > .cover, .av-door, .room-near, .lh.ghost { transition: none !important; }
+}

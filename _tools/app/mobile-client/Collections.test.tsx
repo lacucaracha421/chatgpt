@@ -1016,20 +1016,16 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
     }
     fireEvent.click(track,{detail:1});
   };
-  fireEvent.click(second);
+  tapGap();
   expect(second.getAttribute('aria-pressed')).toBe('true');
   expect(detailPane()?.style.display??'none').toBe('none');
-  tapGap();
-  expect(second.getAttribute('aria-pressed')).toBe('false');
-  expect(detailPane().style.display).toBe('none');
-  fireEvent.click(second);
   for(const type of ['pointerdown','pointermove','pointerup']){
     const event=new MouseEvent(type,{bubbles:true,clientX:type==='pointerdown'?20:100,clientY:20,button:0});
     Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});fireEvent(track,event);
   }
   fireEvent.click(track,{detail:1});expect(second.getAttribute('aria-pressed')).toBe('true');
-  tapGap();expect(second.getAttribute('aria-pressed')).toBe('false');
-  fireEvent.click(second);fireEvent.click(second);
+  // A second nearest-volume tap opens the already picked volume.
+  tapGap();
   const bookcase=await screen.findByRole('group',{name:'권별 책장'});
   await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true'));
   within(bookcase).getAllByRole('button').forEach((spine,index)=>{

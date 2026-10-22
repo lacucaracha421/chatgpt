@@ -1,3 +1,4 @@
+import { mangaShelfStyle } from "../mangaDimensions";
 import {performerName} from "../av/performerName";
 import {useWorkSurfaceReady} from "./useWorkSurfaceReady";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
@@ -81,7 +82,7 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ViewfinderCircleIcon aria-hidden="true" /></Button>
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보" aria-pressed={info} onClick={() => setInfo(value => !value)}><InformationCircleIcon /></Button>
     </header>
-    {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
+    {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={{ ...mangaShelfStyle(false), ...(index === active ? {} : { visibility: "hidden", pointerEvents: "none" }) }} inert={index !== active || waiting} aria-hidden={index !== active}>
       <WorkSurface data={index === active ? visible : slot} active={index === active} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => {
         if (index === active) setEntered(true);
         else if (slot === requested.current) { setEntered(true); setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); }
@@ -132,7 +133,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
   return <>
     {coverSrc && <div className={`work-cover-band${data.collection.type === "av" ? " work-cover-band--av" : ""}${info ? " work-cover-band--info" : ""}`}><WorkBackdrop key={coverSrc} src={coverSrc} onReady={() => ready("backdrop")} /></div>}
     {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} readable onReady={() => ready("hero")} />}
-    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga && (volumeId => {
+    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} title={data.collection.name} author={data.collection.author} publisher={data.collection.publisher} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga && (volumeId => {
       // The volume viewer opens only on a volume with a cover; the book sound goes with it.
       if (data.manga?.volumes.some(volume => volume.id === volumeId && volume.coverArtworkId)) playCaseSound("book", "open");
       actions.onEnlargeManga?.();

@@ -6,11 +6,11 @@ export type MangaBackData = { isbn13?: string | null; localReleaseDate?: string 
 export const MANGA_BACK_COLOR = "#5a3f3d";
 
 /** Reuse the decoded cover; asset protocols may forbid reading the canvas. */
-export function coverAverageColor(image: HTMLImageElement): string {
-  if (!image.naturalWidth || !image.naturalHeight) return MANGA_BACK_COLOR;
+export function coverAverageColor(image: HTMLImageElement, fallback = MANGA_BACK_COLOR): string {
+  if (!image.naturalWidth || !image.naturalHeight) return fallback;
   try {
     const canvas = document.createElement("canvas"); canvas.width = 8; canvas.height = 8;
-    const context = canvas.getContext("2d"); if (!context) return MANGA_BACK_COLOR;
+    const context = canvas.getContext("2d"); if (!context) return fallback;
     context.drawImage(image, 0, 0, 8, 8);
     const { data } = context.getImageData(0, 0, 8, 8);
     let red = 0, green = 0, blue = 0, weight = 0;
@@ -18,8 +18,8 @@ export function coverAverageColor(image: HTMLImageElement): string {
       const alpha = data[index + 3] / 255;
       red += data[index] * alpha; green += data[index + 1] * alpha; blue += data[index + 2] * alpha; weight += alpha;
     }
-    return weight ? `#${[red, green, blue].map(channel => Math.round(channel / weight).toString(16).padStart(2, "0")).join("")}` : MANGA_BACK_COLOR;
-  } catch { return MANGA_BACK_COLOR; }
+    return weight ? `#${[red, green, blue].map(channel => Math.round(channel / weight).toString(16).padStart(2, "0")).join("")}` : fallback;
+  } catch { return fallback; }
 }
 
 export function MangaBack({ title, volumeNumber, color, picture, isbn13, localReleaseDate, contents, price, publisher }: MangaBackData & { title: string; volumeNumber: number | null; color: string; picture: ReactNode }) {

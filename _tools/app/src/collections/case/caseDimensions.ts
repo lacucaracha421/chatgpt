@@ -35,7 +35,7 @@ export const SPINE_SCALE_AV = {
   pc: { small: 1, normal: 1.3, large: 1.8, huge: 3.15 },
   tablet: { small: 1.15, normal: 1.5, large: 2.05, huge: 2.8 },
 } as const satisfies Record<keyof typeof SPINE_SCALE, Record<SpineSize, number>>;
-/** Manga keeps its existing 120px books at 보통 on both clients; huge uses 크게 like games. */
+/** Manga multiplies its client-specific millimetre scale; huge uses 크게 like games. */
 export const SPINE_SCALE_MANGA = { small: .8, normal: 1, large: 1.35, huge: 1.35 } as const satisfies Record<SpineSize, number>;
 /** The 책장 scale for a client, a type tab and a 책등 크기. */
 export function spineScale(client: keyof typeof SPINE_SCALE, type: string, size: SpineSize) {

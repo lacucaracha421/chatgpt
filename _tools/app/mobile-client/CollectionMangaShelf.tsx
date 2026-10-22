@@ -57,7 +57,7 @@ function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, o
   const picked = pick?.id === work.id ? pick.volumeId : null;
   const manga = shown ? mangaShelfData(volumes, shown.item ? coverFocuses(shown.item.volumes) : [], count, picked) : null;
   // A first tap picks the volume (its cover turns forward); a tap on the picked volume opens the work there.
-  return <MangaShelfRow id={work.id} title={work.name} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets onLongPress={onActions ? () => onActions(work) : undefined}
+  return <MangaShelfRow id={work.id} title={work.name} author={shown?.item?.author ?? work.author} publisher={shown?.item?.publisher ?? work.publisher} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets onLongPress={onActions ? () => onActions(work) : undefined}
     onNear={() => setNear(true)} onPick={volumeId => volumeId === picked ? onOpen(work.id, {volumeId, edition}) : onPick({id: work.id, volumeId})}
     onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
 }

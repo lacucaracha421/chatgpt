@@ -1,12 +1,13 @@
 import { displayDate } from "../../shared/displayDate";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MangaBookcase, MANGA_SPINE_WIDTH, type MangaWorkData } from "./MangaBookcase";
+import { MangaBookcase, type MangaWorkData } from "./MangaBookcase";
+import { mangaPixels, MANGA_PX_PER_MM } from "../mangaDimensions";
 import { stripPosition } from "./coverStrip";
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const volumes=[1,2,3].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),coverArtworkId:`a${n}`,localReleaseDate:n===3?"2026-12-01":null,isbn13:null,releaseStatus:n===3?"upcoming" as const:"released" as const}));
 const manga:MangaWorkData={volumes,activeVolumeId:"v1",editionIndex:0,focuses:[],ownedNumbers:[1],scope:"",revision:"",ownership:null,management:null};
-describe("accepted cover-strip bookcase",()=>{
+describe("printed-spine bookcase",()=>{
   it("labels only the latest Korean release and preserves its unowned look", () => {
     const view = render(<MangaBookcase manga={{ ...manga, latestKoreanVolume: 2 }} privacy={false} onPick={() => undefined} />);
     const latest = screen.getByRole("button", { name: "2권 보기" });
@@ -40,13 +41,16 @@ describe("accepted cover-strip bookcase",()=>{
     expect(image.style.objectPosition).not.toBe("50% 50%");
     expect(screen.getByRole("button",{name:"3권 보기"})).toHaveAttribute("aria-description",`${displayDate("2026-12-01")} 출간 예정`);
   });
-  it("gives every work the same spine width and scrolls the shelf, not the page, to the current volume",()=>{
-    const many=Array.from({length:60},(_,i)=>({...volumes[0],id:`m${i+1}`,volumeNumber:i+1,coverArtworkId:`c${i+1}`,localReleaseDate:null,releaseStatus:"released" as const}));
+  it("keeps each volume thickness stable across works and scrolls the shelf, not the page, to the current volume",()=>{
+    const many=Array.from({length:60},(_,i)=>({...volumes[0],id:`m${i+1}`,volumeNumber:i+1,displayLabel:String(i+1),coverArtworkId:`c${i+1}`,localReleaseDate:null,releaseStatus:"released" as const}));
     const view=render(<MangaBookcase manga={{...manga,volumes:many,activeVolumeId:"m1"}} privacy={false} onPick={()=>undefined}/>);
-    const widths=new Set(screen.getAllByRole("button",{name:/권 보기$/}).map(spine=>spine.style.getPropertyValue("--spine-width")));
-    expect([...widths]).toEqual([`${MANGA_SPINE_WIDTH}px`]);
+    const first = screen.getByRole("button", { name: "1권 보기" });
+    const firstWidth = first.style.getPropertyValue("--spine-width");
+    expect(firstWidth).toBe(`${mangaPixels("m1", MANGA_PX_PER_MM.pc).spine}px`);
+    view.rerender(<MangaBookcase manga={{...manga,volumes:many.slice().reverse(),activeVolumeId:"m1"}} privacy={false} onPick={()=>undefined}/>);
+    expect(first.style.getPropertyValue("--spine-width")).toBe(firstWidth);
     view.rerender(<MangaBookcase manga={{...manga,activeVolumeId:"v1"}} privacy={false} onPick={()=>undefined}/>);
-    expect(screen.getByRole("button",{name:"2권 보기"}).style.getPropertyValue("--spine-width")).toBe(`${MANGA_SPINE_WIDTH}px`);
+    expect(screen.getByRole("button",{name:"2권 보기"}).style.getPropertyValue("--spine-width")).toBe(`${mangaPixels("v2", MANGA_PX_PER_MM.pc).spine}px`);
     const track=view.container.querySelector<HTMLElement>(".home-shelf__track")!;
     const scrollTo=vi.fn();track.scrollTo=scrollTo;
     track.getBoundingClientRect=()=>({left:0,right:400,width:400,top:0,bottom:184,height:184,x:0,y:0,toJSON:()=>null});

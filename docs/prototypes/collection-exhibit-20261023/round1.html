@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>컬렉션 전시실 1차 시안</title>
+<!-- 앱의 실제 폰트·토큰·공용 컨트롤을 읽는다. exhibit.css = 새로 제안하는 방·가구·책등·꺼내기 표현,
+     page.css = 시안 틀(창 모양·표), exhibit.js = 예시 데이터·책장 배치·동작, board.js = 이 보드의 견본들.
+     작품 제목·작가·출판사·그림은 모두 지어낸 임시 데이터다. 실제 라이브러리 이미지는 없다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="exhibit.css">
+<link rel="stylesheet" href="page.css">
+</head>
+<body class="ex">
+<div class="doc">
+<header>
+  <h1>컬렉션 전시실 — 진짜 꽂혀 있는 컬렉션</h1>
+  <p class="lead">게임·AV 책장에서 마음에 들었던 것(책등만 보이게 꽂힘, 하나를 꺼냄)을 컬렉션 전체의 원리로 넓힌 구상이다. 컬렉션은 <b>한쪽 벽에 늘어선 가구들</b>이 되고, 종류마다 가구가 다르며, 모든 물건이 <b>실제 크기 비율</b>로 선다. 화면은 그 벽을 멀리서 보거나(전체), 한 칸 앞으로 다가가 보는(게임·만화·영화·AV) 두 거리만 있다.</p>
+  <p class="lead">변경 비용은 따지지 않았다. 대신 칸마다 <b>지금 있는 데이터</b>로 되는지, <b>새 데이터</b>가 필요한지, 무엇이 위험한지를 적었다. 모든 그림은 CSS로 그린 임시 그림이고, 창 모양은 앱의 실제 토큰·Pretendard·섹션 바를 쓴다. 책등을 클릭하면 꺼내고, 꺼낸 것을 클릭하면 열거나 뒤집고, 끌면 돌리고, 빈 곳을 클릭하면 꽂는다.</p>
+  <ul class="toc">
+    <li><a href="#c0">0 큰 그림: 벽 하나</a></li><li><a href="#c1">1 만화 책장</a></li><li><a href="#c2">2 꺼내기 문법</a></li><li><a href="#c3">3 정면 진열·더미·상자</a></li>
+    <li><a href="#c4">4 정리가 물건이 된다</a></li><li><a href="#c5">5 빛·재질·깊이</a></li><li><a href="#c6">6 태블릿 세로</a></li><li><a href="#c7">7 데이터와 위험</a></li><li><a href="#c8">8 추천 방향과 순서</a></li>
+  </ul>
+</header>
+
+<section class="c" id="c0">
+  <h2>0. 큰 그림: 한 벽, 한 축척, 한 손짓 <small>PC 1700 × 1000 · 칸을 클릭하면 다가간다</small></h2>
+  <div class="principles">
+    <div><h3>한 벽</h3><p>컬렉션은 벽 하나에 선 가구들이다. 쇼케이스 진열대 · 게임 랙 · 만화 책장 · 영화 포스터 선반 · AV 장(유리문). 섹션 바의 <b>전체</b>가 벽 전체, 유형 탭은 그 칸 앞으로 걸어가는 것이다.</p></div>
+    <div><h3>한 축척</h3><p>모든 물건이 실제 mm 크기에 같은 배율(px/mm)로 선다. 만화 B6 한 권과 PS5 케이스, DVD의 키 차이가 실물과 같다. 지금 게임·AV 책장이 쓰는 <code>caseDimensions</code>를 만화·영화까지 넓힌다.</p></div>
+    <div><h3>한 손짓</h3><p>꽂힘 → 당김 → 앞면 → 마지막 손짓. 네 단계가 모든 종류에 같고, 마지막 손짓만 종류마다 다르다(책은 표지를 열고, 케이스는 뚜껑을 열고, 포스터는 뒤집는다).</p></div>
+  </div>
+  <p class="keep"><b>지키는 선.</b> 설계 문서(pc-design-reference §2)는 Lakomics가 “방 시뮬레이터가 아니다”라고 적고 있다. 이 구상은 그 선을 <b>정면에서 바라보는 벽</b>까지만 넘는다: 1인칭 걷기, 원근 바닥, 화분·창문 같은 소품, 먼지·낡음 효과는 없다. 벽·가구·조명은 어둡고 조용하게 두고 색은 작품에서만 나온다. 이 선을 어디까지 넘을지는 사용자 결정이 필요하다.</p>
+  <div class="ctl">시안 조작 <button data-walk="all">전체</button><button data-walk="show">쇼케이스로</button><button data-walk="game">게임 칸으로</button><button data-walk="manga">만화 칸으로</button><button data-walk="film">영화 칸으로</button><button data-walk="av">AV 칸으로</button> · Esc 또는 섹션 바의 전체 = 뒤로 물러남</div>
+  <div class="frames"><div class="fr" id="f-hero"></div></div>
+  <p class="fr-cap">벽 전체(0.26 px/mm): 칸마다 실제 책등 색이 그대로 보이는 축소판. 칸을 누르면 카메라가 그 칸으로 다가가(520ms, 감속) 칸의 너비가 화면을 채울 때 가까운 책장(1.1 px/mm)으로 이어진다. 칸 아래 이름표는 종류와 개수, AV 장은 반투명 유리문(비밀 모드면 닫힘).</p>
+  <table class="spec">
+    <tr><td>보이는 것</td><td>벽 하나에 다섯 가구. 각 가구 위에 작은 조명과 벽에 번지는 빛. 바닥 근처 이름표. 칸 위 정면 진열 선반, 아래 칸 상자.</td></tr>
+    <tr><td>동작</td><td>칸 클릭·Enter = 다가가기, Esc·전체 = 물러나기, 유형 탭끼리 바꾸면 벽을 따라 옆 칸으로 이동. 다가간 뒤에는 지금처럼 세로로 스크롤하는 책장.</td></tr>
+    <tr><td>데이터</td><td><span class="tag">있음</span>개수·유형·책등 이미지·표지. <span class="tag new">새로</span>멀리서 그릴 작품별 대표색(표지·책등에서 한 번 계산해 캐시, 파생 데이터). 칸 순서·폭은 기기별 설정.</td></tr>
+    <tr><td>위험</td><td><span class="tag risk">결정</span>“방 시뮬레이터 아님”(§2)과 “내용 전환에 움직임 없음”(§12 No flash) 두 규칙과 부딪힌다. 다가가기는 카메라 이동이고, 전체 화면은 수천 개 책등을 한 장(canvas)으로 그려야 한다. 착지 순간 축소판→실물 교체가 튀지 않게 같은 배치를 다른 배율로 계산해야 한다.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c1">
+  <h2>1. 만화 책장: 시리즈가 이어 꽂힌 진짜 책장 <small>PC 1700 × 1040 · 960 × 640</small></h2>
+  <p class="note">지금 만화 책장은 작품마다 한 줄씩, 표지를 세로로 자른 30px 조각을 늘어놓는다. 이것을 게임·AV와 같은 <b>공용 책장</b>으로 바꾼다: 모든 시리즈가 가나다순으로 <b>이어서 꽂히고</b>, 한 권이 실제 두께(12–19mm)와 판형 높이(문고·B6·A5)로 선다. 초성이 바뀌는 곳에 <b>칸막이 카드</b>(ㄱ, ㄴ…), 시리즈 사이엔 손가락 하나 틈. 없는 권은 그 두께만큼 <b>빈 자리</b>(점선, 번호), 나올 권은 <b>예약 자리</b>와 선반 앞 D-day. 책등에 손을 올리면 그 시리즈가 함께 살짝 떠오르고 선반 앞에 이름표가 나타난다. 책등을 클릭하면 머리를 당겨 기울여 빼고 표지로 돌린다. 한 번 더 클릭하면 표지가 열린다.</p>
+  <div class="ctl">시안 조작 <button data-manga-box="0" aria-pressed="true">낱권</button><button data-manga-box="1" aria-pressed="false">다 모은 시리즈는 박스로</button><button data-demo-pull>‘등대지기의 딸’ 3권 꺼내기</button></div>
+  <div class="frames"><div class="fr" id="f-manga"></div></div>
+  <p class="fr-cap">맨 위 칸은 정면 진열 선반(새로 들어온 시리즈 NEW, 쇼케이스에 넣은 시리즈의 최신 권). 아래 칸은 신간 상자(나올 권 수와 다음 날짜). 보통 1.1 px/mm에서 B6 한 권은 약 200px 높이, 14–17px 두께.</p>
+  <div class="frames" style="margin-top:24px"><div class="fr" id="f-manga960" data-max="960"></div></div>
+  <p class="fr-cap">960 × 640 PC 창 1:1. 같은 배율에 선반만 짧아진다. 정면 진열 선반이 첫 화면의 위쪽을 차지하므로, 좁은 창에서는 진열 선반을 한 단 낮은 높이(표지 0.7배)로 그리는 안을 함께 검토.</p>
+
+  <h3 style="margin:32px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">책등을 무엇으로 그리나 (실제 크기)</h3>
+  <p class="note">A는 지금 방식(표지의 한 조각)으로, 책장이 표지 그림 띠처럼 보인다. <b>B 합성 책등(추천)</b>은 표지 오른쪽 끝 색(오른쪽 제본이면 책등이 이어지는 쪽)을 바탕으로, 머리에 표지 그림 창, 권 번호 상자, 세로 제목, 발에 출판사 표식을 찍는다. 실제 만화 책등의 문법(같은 시리즈는 같은 틀, 권마다 색만 바뀜)을 따르므로 이어 꽂으면 진짜 책장처럼 읽힌다. C는 실물 책등 사진이 있을 때(새 데이터, 권마다 사진 한 장).</p>
+  <div id="spec-spines"></div>
+  <h3 style="margin:32px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">한 축척: 모든 판형을 같은 배율로</h3>
+  <div id="spec-scale"></div>
+  <table class="spec">
+    <tr><td>보이는 것</td><td>한 개의 긴 책장. 시리즈는 이어 꽂히고 줄이 바뀌어도 이어진다. 칸막이 카드(초성), 빈 자리, 예약 자리, 선반 앞 D-day(당일은 강조색), 손이 간 시리즈의 이름표.</td></tr>
+    <tr><td>동작</td><td>올리기 = 시리즈 떠오름 + 이름표. 클릭 = 한 권 꺼냄(기울여 빼기 → 표지). 꺼낸 책 클릭 = 표지 열기, 끌기 = 돌려 보기, Enter = 작품 화면(그 권). 빈 곳 = 꽂기. 키보드는 지금 책장과 같음(←/→ 한 권, ↑/↓ 위아래 줄).</td></tr>
+    <tr><td>데이터</td><td><span class="tag">있음</span>권 표지·권 번호·판본·출간 예정일(releaseStatus, localReleaseDate)·출판사·보유 권수. <span class="tag new">새로</span>권별 보유(지금은 “n권까지 보유”라는 수 하나라 중간 빈 자리는 못 그림), 판형과 두께(쪽수 또는 실측 mm; 알라딘 상품 조회의 포장 크기 같은 출처는 확인 필요, 없으면 판본별 판형 하나 + 기본 14mm), 표지 끝 색(파생, 캐시).</td></tr>
+    <tr><td>위험</td><td><span class="tag risk">가독</span>보통 크기에서 책등 폭이 12–17px라 제목은 무늬 수준이고 권 번호가 주인공이다. 제목을 읽으려면 크게(1.45). 권이 수천 개면 지금 책장처럼 보이는 줄만 그리는 창 방식이 필수.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c2">
+  <h2>2. 꺼내기 문법: 네 단계, 마지막만 다르다 <small>정지 장면 · 1.0 px/mm</small></h2>
+  <p class="note">지금 게임·AV·영화 책장의 “빼서 앞면으로 돌리기”를 공통 2·3단계로 두고, 1단계(꽂힘)와 4단계(마지막 손짓)를 종류의 물성에 맞춘다. 책은 손끝으로 <b>머리를 당겨 기울여</b> 빼고(케이스는 똑바로 밀려 나옴), 4단계는 책 = 표지 열기, 게임 = 뚜껑 열기, 영화 = 판 뒤집기, AV = 앞뒤 재킷 돌려 보기. 꺼낸 물건은 언제든 끌어서 돌릴 수 있고, Enter 또는 두 번째 클릭으로 작품 화면에 들어간다.</p>
+  <div class="story" id="story"></div>
+  <table class="spec">
+    <tr><td>데이터</td><td><span class="tag">있음</span>게임 케이스 속(CaseInside), AV 뒷면 재킷, 영화 배경 이미지(selectedBackdropArtworkId), 만화 권 표지·책 렌더러(MangaBook). <span class="tag new">새로</span>만화의 첫 장 그림(없으면 빈 종이 + 목차 contents 글자)이 있으면 더 좋다.</td></tr>
+    <tr><td>위험</td><td>꺼낸 물건 하나만 실시간 3D로 그리고 나머지는 그림으로 두는 지금 원칙을 지킨다. 태블릿 WebView의 3D 성능은 기기 확인 필요.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c3">
+  <h2>3. 정면 진열 · 더미 · 상자 <small>PC 1700 × 880 · 게임 칸</small></h2>
+  <p class="note">칸마다 세 가지 “놓는 방법”을 더한다. <b>정면 진열 선반</b>(맨 위): 쇼케이스에 넣은 작품과 새로 들어온 작품이 표지를 앞으로 기대 서 있다. 새로 들어온 것은 며칠 지나면 제자리(책등)로 돌아간다. <b>쌓아 둔 더미</b>(아래 칸, 선택): 아직 안 한 게임을 눕혀 쌓아 제목이 가로로 읽힌다. 이어 읽기·이어 하기 선반은 만들지 않는다. <b>상자</b>(아래 칸): 발매 예정·신간이 택배 상자로 놓이고 이름표에 개수와 다음 날짜. 클릭하면 지금의 발매 캘린더로 연다.</p>
+  <div class="frames"><div class="fr" id="f-game"></div></div>
+  <p class="fr-cap">기기마다 새 선반에서 시작하고 선반 앞 이름표(스위치 2, 스위치, PS5…)와 끝의 북엔드로 묶음을 나눈다. 지금의 묶기 제목줄(SectionLabel)을 대신한다.</p>
+  <h3 style="margin:32px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">다 모은 시리즈는 박스 세트로 (만화, 보기에서 선택)</h3>
+  <div id="spec-box"></div>
+  <table class="spec">
+    <tr><td>데이터</td><td><span class="tag">있음</span>쇼케이스 여부와 순서(showcase, showcaseOrder), 추가일(createdAt), 상태(안 함/다 모음), 발매 캘린더·관심 목록. <span class="tag new">새로</span>“새로 들어옴” 기간 설정 정도.</td></tr>
+    <tr><td>위험</td><td>더미는 “안 한 게임”을 매번 보여 주는 압박이 될 수 있어 기본은 끔. 박스 세트는 낱권 찾기를 한 번 더 누르게 하므로 선택 사항.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c4">
+  <h2>4. 정리가 물건이 된다: 칸막이 · 이름표 · 북엔드 · 앞으로 당김 <small>살아 있는 견본</small></h2>
+  <p class="note">정렬·묶기·필터를 버튼 모양이 아니라 <b>선반 위 물건</b>으로 보인다. 묶음은 선반 앞 이름표(인쇄된 종이 카드, 네모)와 칸막이 카드, 끝의 북엔드. 정렬을 바꾸면 책등이 새 자리로 <b>미끄러져</b> 옮겨 간다(제안, 아래 위험 참고). 필터와 찾기는 맞는 것만 <b>앞으로 당겨</b> 빛을 받게 하고 나머지는 제자리에 그늘로 남긴다: 위치 감각을 잃지 않는다. 색 줄·알약 모양 칩은 쓰지 않는다.</p>
+  <div class="ctl">정렬 <button data-sort="name">이름순</button><button data-sort="year">발매일순</button> · 당겨 보기 <button data-sort="score">내 별점 5</button><button data-sort="playing">하는 중</button><button data-sort="find">찾기 ‘바다’</button><button data-sort="clear">해제</button></div>
+  <div id="spec-sort" style="width:100%;max-width:1640px"></div>
+  <div class="grid4" style="margin-top:24px">
+    <div class="cardx"><h3>선반 앞 이름표</h3><p>묶음이 시작하는 선반의 앞판에 붙는 종이 카드. 글자는 meta 크기, 수는 흐린 숫자. SectionLabel의 네모 표식과 선은 쓰지 않는다.</p></div>
+    <div class="cardx"><h3>칸막이 카드</h3><p>한 줄 안에서 묶음이 바뀔 때(만화 초성, 영화 연대). 책보다 조금 높게 탭이 올라온다.</p></div>
+    <div class="cardx"><h3>직접 꽂기 (새 데이터)</h3><p>책등을 끌어 원하는 자리에 꽂으면 그 순서가 “내 배치” 정렬이 된다. 쇼케이스 순서처럼 유형별 수동 순서를 서버에 저장.</p></div>
+    <div class="cardx"><h3>찾기와 이어짐</h3><p>찾기(Ctrl+Q)로 작품을 고르면 벽에서 그 칸으로 다가가 해당 책등을 앞으로 당겨 둔다. 다른 화면으로 넘어가지 않는다.</p></div>
+  </div>
+  <div style="position:relative;height:250px;margin-top:24px">
+    <div class="menu" style="left:0;top:0">
+      <div class="ui-section-label"><span class="ui-section-label__title">만화 책장</span><span class="ui-section-label__rule"></span></div>
+      <div class="row"><span>묶기</span><div class="ui-segmented"><button class="ui-segmented__cell" data-segmented-active="true">초성</button><button class="ui-segmented__cell">출판사</button><button class="ui-segmented__cell">작가</button><span class="ui-segmented__thumb"></span></div></div>
+      <div class="row"><span>다 모은 것</span><div class="ui-segmented"><button class="ui-segmented__cell" data-segmented-active="true">낱권</button><button class="ui-segmented__cell">박스</button><span class="ui-segmented__thumb"></span></div></div>
+      <div class="row"><span>책등 크기</span><div class="ui-segmented"><button class="ui-segmented__cell">작게</button><button class="ui-segmented__cell" data-segmented-active="true">보통</button><button class="ui-segmented__cell">크게</button><span class="ui-segmented__thumb"></span></div></div>
+      <div class="row"><span>빈 자리</span><div class="ui-segmented"><button class="ui-segmented__cell" data-segmented-active="true">보이기</button><button class="ui-segmented__cell">닫기</button><span class="ui-segmented__thumb"></span></div></div>
+    </div>
+    <p class="caption" style="position:absolute;left:330px;top:8px;max-width:520px">보기 메뉴(지금의 보기에 붙이는 행). 정렬 기준·순서와 내 별점 필터는 지금 그대로. “빈 자리 닫기”는 빈 자리를 지우고 책을 붙여 꽂는다.</p>
+  </div>
+  <table class="spec">
+    <tr><td>데이터</td><td><span class="tag">있음</span>정렬·묶기·내 별점·상태·찾기. <span class="tag new">새로</span>직접 꽂기 순서(유형별 수동 순서, 서버 명령 필요).</td></tr>
+    <tr><td>위험</td><td><span class="tag risk">결정</span>정렬 미끄러짐과 필터 그늘은 §12 “내용이 바뀔 때 움직이거나 흐리게 하지 않는다”와 부딪힌다. 이 구상에서는 책장만 예외(물건이 옮겨지는 것)로 두자는 제안이며, 원치 않으면 한 번에 바뀌는 지금 방식으로 둔다.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c5">
+  <h2>5. 빛 · 재질 · 깊이 <small>같은 선반, 세 마감</small></h2>
+  <p class="note">현실감은 장식이 아니라 <b>빛의 방향 하나</b>에서 나온다: 각 선반 밑에 따뜻한 조명 띠가 있어 아래 칸 뒤판 위쪽과 책 머리가 밝고, 책 발치에는 접지 그림자가 진다. 뒤판은 좌우 끝이 어둡고, 선반은 윗면(4px)과 앞판(18px, 이름표 자리)으로 두께가 보인다. 기본 마감은 앱 바탕색에 아주 약한 온기를 더한 <b>먹색 목재</b>로, 작품 색을 방해하지 않는다. 마감 값은 토큰(--bk-*)이라 종이 테마에서 밝은 오크로 바뀐다.</p>
+  <div id="spec-mat" class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))"></div>
+  <svg viewBox="0 0 820 260" style="width:100%;max-width:820px;margin-top:24px;display:block" font-family="Pretendard Variable, Pretendard, sans-serif" font-size="12" aria-label="선반 옆에서 본 단면">
+    <rect x="0" y="0" width="820" height="260" fill="#161718"/>
+    <rect x="40" y="16" width="14" height="224" fill="#1a1918"/>
+    <rect x="54" y="16" width="380" height="14" fill="#2f2c28"/><rect x="434" y="16" width="10" height="26" fill="#2a2724"/>
+    <rect x="392" y="30" width="38" height="3" fill="rgba(255,238,214,.8)"/>
+    <path d="M392 33 L120 196 L330 196 L430 33 Z" fill="rgba(255,236,210,.05)"/>
+    <rect x="66" y="66" width="270" height="148" fill="#3b4a5c"/><rect x="66" y="66" width="270" height="20" fill="rgba(255,240,220,.16)"/>
+    <text x="201" y="148" text-anchor="middle" fill="#e7e9ec">책 (옆에서 본 모습)</text>
+    <rect x="54" y="214" width="380" height="6" fill="#2f2c28"/><rect x="434" y="214" width="10" height="26" fill="#2a2724"/><rect x="434" y="214" width="10" height="1" fill="rgba(255,244,228,.35)"/>
+    <ellipse cx="200" cy="214" rx="140" ry="4" fill="rgba(0,0,0,.6)"/>
+    <g stroke="#55585a" stroke-width="1"><line x1="54" y1="50" x2="470" y2="50" stroke-dasharray="2 3"/><line x1="430" y1="31" x2="470" y2="31"/><line x1="336" y1="76" x2="470" y2="76"/><line x1="336" y1="212" x2="470" y2="200"/><line x1="444" y1="228" x2="470" y2="228"/></g>
+    <text x="478" y="35" fill="#a0a3a5">선반 밑 조명 띠 (따뜻한 흰빛, 앞쪽에)</text>
+    <text x="478" y="54" fill="#7d8184">뒤판: 위가 밝고 좌우 끝이 어둡다</text>
+    <text x="478" y="80" fill="#a0a3a5">책 머리가 가장 밝다</text>
+    <text x="478" y="204" fill="#a0a3a5">발치의 접지 그림자 · 선반 윗면 4px</text>
+    <text x="478" y="232" fill="#a0a3a5">선반 앞판 18px: 이름표·D-day 자리</text>
+  </svg>
+  <table class="spec">
+    <tr><td>데이터</td><td>없음(표현만). 마감 선택은 설정 하나.</td></tr>
+    <tr><td>위험</td><td>그림자와 그라데이션이 많아지면 긴 시간 보기에 피로하다. 빛은 고정이며 마우스를 따라 움직이는 조명·반짝임은 넣지 않는다. DPR 1.125/1.25에서 선반 앞판의 1px 하이라이트가 번지지 않는지 실기 확인 필요.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c6">
+  <h2>6. 태블릿 세로 <small>800 × 1280 CSS px · 48%로 축소해 표시</small></h2>
+  <p class="note">PC와 같은 책장·같은 책등·같은 꺼내기를 쓰고, 터치와 세로 화면에 필요한 것만 다르다. 책등은 좁으므로 <b>탭한 위치에서 가장 가까운 책등</b>을 집는다(지금 태블릿 책장 방식). 탭 = 꺼내기, 다시 탭 = 작품 화면, 길게 누르기 = 작업 시트, 두 손가락 오므리기 = 벽 전체로 물러나기. 벽 전체는 세로 화면에 맞춰 크게 보이고 <b>옆으로 밀면 벽을 따라 걷는다</b>; 섹션 바의 선택이 따라 움직이고, 칸을 탭하면 다가간다.</p>
+  <div class="frames">
+    <div><div class="fr" id="f-tab-manga" data-max="384"></div><p class="fr-cap">만화 칸 (1.2 px/mm)</p></div>
+    <div><div class="fr" id="f-tab-wall" data-max="384"></div><p class="fr-cap">벽 전체 (오므린 상태) · 옆으로 밀어 이동</p></div>
+  </div>
+  <table class="spec">
+    <tr><td>위험</td><td>12–17px 책등은 손가락보다 좁다: “가장 가까운 책등 + 꺼낸 뒤 확인” 두 단계로 오조작을 막는다. 벽 전체의 가로 이동은 세로 스크롤과 방향이 겹치지 않게 벽 화면에서만 쓴다.</td></tr>
+  </table>
+</section>
+
+<section class="c" id="c7">
+  <h2>7. 데이터와 위험 한눈에</h2>
+  <table class="spec">
+    <tr><th>구상</th><th>지금 있는 데이터로</th><th>새로 필요한 것</th><th>위험 · 결정</th></tr>
+    <tr><td>벽 전체·다가가기</td><td>유형·개수·책등 이미지·표지</td><td>작품별 대표색(파생 캐시), 칸 순서 설정</td><td>§2 방 시뮬레이터, §12 전환 움직임, 수천 책등 성능</td></tr>
+    <tr><td>만화 공용 책장</td><td>권 표지·번호·판본·출간 예정·출판사·보유 권수</td><td>권별 보유(중간 빈 자리), 판형·두께, 표지 끝 색</td><td>보통 크기 가독성</td></tr>
+    <tr><td>합성 책등</td><td>표지·제목·권 번호·출판사</td><td>없음 (색은 파생)</td><td>합성이 진짜 책등과 다르다는 점은 감수</td></tr>
+    <tr><td>실물 책등 사진</td><td>게임·AV는 이미 책등 아트워크 있음</td><td>만화 권별 책등 이미지(직접 촬영·가져오기)</td><td>수집 노력이 큼</td></tr>
+    <tr><td>꺼내기 4단계</td><td>케이스 속, AV 뒷면, 영화 배경, 책 렌더러</td><td>만화 첫 장 그림(선택)</td><td>태블릿 3D 성능</td></tr>
+    <tr><td>정면 진열·상자·박스</td><td>쇼케이스·추가일·상태·발매 캘린더</td><td>“새로 들어옴” 기간</td><td>더미는 압박이 될 수 있어 기본 끔</td></tr>
+    <tr><td>이름표·칸막이·당겨 보기</td><td>정렬·묶기·별점·상태·찾기</td><td>직접 꽂기 순서(서버 명령)</td><td>§12 내용 전환 규칙 예외 필요</td></tr>
+    <tr><td>빛·재질</td><td>—</td><td>마감 설정</td><td>DPR 1px 선, 장시간 피로</td></tr>
+  </table>
+  <h3 style="margin:32px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">더 멀리 (원하면)</h3>
+  <ul class="plain">
+    <li><b>선반 길이</b>: 칸 이름표에 “만화 6.3m”처럼 실제로 차지할 길이. mm 크기가 이미 있으므로 계산만 하면 된다.</li>
+    <li><b>캐릭터 진열장</b>: 즐겨찾는 캐릭터를 아크릴 스탠드처럼 쇼케이스 옆 작은 장에. 캐릭터는 컬렉션 유형이 아니므로 별도 결정.</li>
+    <li><b>카드 앨범</b>: 카드 바인더를 같은 벽의 한 권으로 꽂아 두고, 꺼내면 지금의 카드 앨범이 열린다.</li>
+    <li><b>소리</b>: 이미 있는 선택형 꺼내기 소리를 종이(만화)·플라스틱(케이스)·판지(포스터)로 나눈다.</li>
+  </ul>
+  <h3 style="margin:24px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">하지 않을 것</h3>
+  <ul class="plain">
+    <li>1인칭으로 방을 걷기, 원근 바닥, 소품(화분·창문·포스터 액자 장식), 먼지·낡음·흔들림 효과, 마우스를 따라오는 조명.</li>
+    <li>이어 읽기·이어 하기 선반, 색 띠·왼쪽 막대로 상태 표시, 알약 모양 칩.</li>
+  </ul>
+</section>
+
+<section class="c" id="c8">
+  <h2>8. 추천 방향과 순서</h2>
+  <p class="note"><b>추천: “한 벽, 한 축척, 한 손짓”을 목표로 하되, 사용자가 가장 먼저 원한 만화 책장부터 공용 책장 위에 올린다.</b> 앞 단계는 지금 데이터만으로 되고, 각 단계가 끝날 때마다 그 자체로 쓸 만한 화면이 남는다. 벽 전체(다가가기)는 칸들이 충분히 “가구”가 된 뒤에 붙여야 축소판이 의미를 가진다.</p>
+  <ol class="stage-list">
+    <li><b>만화를 공용 책장으로</b><span>합성 책등(B), 시리즈 이어 꽂기, 초성 칸막이, 나올 권 예약 자리와 D-day, 기울여 빼기. 판형은 판본마다 하나(기본 B6), 두께 기본 14mm. 지금 데이터만으로.</span></li>
+    <li><b>가구와 빛 (모든 책장 공통)</b><span>뒤판·선반 두께·선반 밑 조명·접지 그림자, 선반 앞 이름표와 북엔드가 지금의 묶기 제목줄을 대신. 게임·AV·영화·만화가 한꺼번에 “가구”가 된다.</span></li>
+    <li><b>정면 진열 선반 · 상자 · 박스 세트</b><span>쇼케이스와 새로 들어온 것을 칸 맨 위에, 신간·발매 예정을 상자로, 다 모은 시리즈는 선택적으로 박스.</span></li>
+    <li><b>꺼내기 4단계 마무리</b><span>책 표지 열기, 게임 뚜껑 열기, 영화 판 뒤집기, 끌어서 돌리기를 공통 부품으로.</span></li>
+    <li><b>벽 전체와 다가가기</b><span>섹션 바에 전체를 더하고 칸 사이를 걷는 카메라 이동. PC 먼저, 같은 라운드에 태블릿(오므리기, 옆으로 밀기). §2·§12 결정이 먼저 필요.</span></li>
+    <li><b>당겨 보기 · 직접 꽂기 · 찾기 연결</b><span>필터·찾기를 앞으로 당김으로, 끌어서 꽂는 내 배치(서버 명령 추가).</span></li>
+    <li><b>새 데이터</b><span>권별 보유, 판형·두께 실측, 실물 책등 사진, 대표색 캐시. 들어오는 대로 책장이 더 정확해진다.</span></li>
+  </ol>
+  <h3 style="margin:32px 0 8px;font:600 var(--type-body)/1.4 var(--font-ui)">사용자 결정이 필요한 것</h3>
+  <ul class="plain">
+    <li>“방 시뮬레이터가 아니다”(§2)를 “정면에서 보는 벽까지는 된다”로 바꿀지.</li>
+    <li>책장에서만 정렬 미끄러짐·필터 그늘을 허용할지(§12 내용 전환 규칙의 예외).</li>
+    <li>만화 책등을 B(합성)로 갈지, 지금의 A(표지 조각)를 남길지.</li>
+    <li>쌓아 둔 더미(안 한 게임)를 둘지.</li>
+  </ul>
+</section>
+</div>
+<script src="exhibit.js"></script>
+<script src="board.js"></script>
+</body>
+</html>

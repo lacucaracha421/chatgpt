@@ -4,12 +4,13 @@ import { useLongPress } from "../shared/useLongPress";
 import { MangaBookcase, type MangaWorkData } from "./work/MangaBookcase";
 import "./work/collectionWork.css";
 import "./mangaShelf.css";
+import { mangaShelfStyle } from "./mangaDimensions";
 import { ShelfMaterial } from "./ShelfMaterial";
 
 /**
  * The Collections 만화 list as shelves (accepted 2026-09-30, docs/archive/prototypes/pc-collection-detail-20260930/):
  * one row per work — its title and owned count, then the work screen's own bookcase of
- * cover-strip spines on the thin plank. PC and tablet share this row; each client loads the
+ * printed spines on the thin plank. PC and tablet share this row; each client loads the
  * volumes, focuses and cover URLs its own way once the row comes near the viewport.
  */
 
@@ -44,8 +45,8 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 /** Rows this far beyond the list's visible edge already load, so scrolling meets ready shelves. */
 const NEAR_MARGIN = "600px 0px";
 
-export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false }: {
-  id: string; title: string;
+export function MangaShelfRow({ id, title, author = null, publisher = null, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false }: {
+  id: string; title: string; author?: string | null; publisher?: string | null;
   /** Owned volumes in the shown edition; `null` when none is recorded. */owned: number | null;
   /** `null` until the row's volumes are loaded: the empty plank holds the row's place. */manga: MangaWorkData | null;
   touchTargets?: boolean;
@@ -77,7 +78,7 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     if (event.key !== "Enter" || !spine || spine.getAttribute("aria-pressed") !== "true") return;
     event.preventDefault(); onOpen(spine.dataset.volumeId ?? null);
   };
-  return <section ref={row} className="manga-shelf-row" aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
+  return <section ref={row} className="manga-shelf-row" style={mangaShelfStyle(touchTargets)} aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
     onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}>
     <div className="manga-shelf-row__label">
       <button type="button" className="manga-shelf-row__title" data-collection-id={id} onClick={() => onOpen(null)}>{title}</button>
@@ -85,7 +86,7 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     </div>
     <div className="manga-shelf-row__shelf" onKeyDown={keyDown}>
       {manga
-        ? <MangaBookcase touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
+        ? <MangaBookcase title={title} author={author} publisher={publisher} touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
         : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board"><ShelfMaterial /></div></div></div>}
     </div>
   </section>;

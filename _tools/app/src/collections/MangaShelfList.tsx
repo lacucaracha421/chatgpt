@@ -62,7 +62,7 @@ function PcMangaRow({ collection, owned, pick, privacy, menu, onPick, onOpen }: 
   const count = owned(edition);
   const manga = shelf ? mangaShelfData(shelf.volumes, shelf.focuses, count, pick?.id === collection.id ? pick.volumeId : null) : null;
   return <ContextMenu items={menu}><div className="manga-shelf-list__item">
-    <MangaShelfRow id={collection.id} title={collection.name} owned={count} manga={manga} privacy={privacy} coverUrl={workArtworkThumbnailUrl}
+    <MangaShelfRow id={collection.id} title={collection.name} author={collection.author} publisher={collection.publisher} owned={count} manga={manga} privacy={privacy} coverUrl={workArtworkThumbnailUrl}
       onNear={() => setNear(true)} onPick={volumeId => onPick({ id: collection.id, volumeId })}
       onOpen={volumeId => onOpen(collection, volumeId)} onEnlarge={volumeId => onOpen(collection, volumeId)} />
   </div></ContextMenu>;

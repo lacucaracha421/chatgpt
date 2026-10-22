@@ -2,7 +2,7 @@
    left-aligned under the work's title. Spines, the thin plank and the picked cover keep their own look. */
 .manga-shelf-list { display: flex; flex-direction: column; padding: var(--space-4) 0 var(--space-8); }
 /* Rows below the fold skip style, layout and paint until they near the viewport. The placeholder follows the label and scaled shelf; `auto` keeps a row's real height once seen. content-visibility implies paint containment, so the clip margin keeps the title's focus ring from being cut at the row edge. */
-.manga-shelf-row { min-width: 0; content-visibility: auto; contain-intrinsic-block-size: auto calc(120px * var(--manga-spine-scale, 1) + 68px); overflow-clip-margin: 8px; }
+.manga-shelf-row { min-width: 0; content-visibility: auto; contain-intrinsic-block-size: auto calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 48px + var(--manga-label-height, var(--line-ui))); overflow-clip-margin: 8px; }
 .manga-shelf-row__label { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; padding: 0 var(--space-6); }
 .manga-shelf-row__title { min-width: 0; padding: 0; overflow: hidden; color: var(--color-text); font: inherit; font-size: var(--type-body); font-weight: 600; line-height: var(--line-ui); text-align: left; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; cursor: pointer; }
 .manga-shelf-row__title:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
@@ -10,8 +10,8 @@
 /* 16 above the books leaves room for the picked cover's lift; 32 below holds its number under the plank. */
 /* Size changes reuse the decoded covers and mounted books: all dimensions swap in one layout,
    without a loading pass or scaling the title, volume numbers and touch controls. */
-.manga-shelf-row__shelf { height: calc(120px * var(--manga-spine-scale, 1) + 48px); }
-.manga-bookcase--list .manga-bookcase-board, .manga-bookcase--list .manga-spine { height: calc(120px * var(--manga-spine-scale, 1)); }
+.manga-shelf-row__shelf { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 48px); }
+.manga-bookcase--list .manga-bookcase-board, .manga-bookcase--list .manga-spine { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
 .manga-bookcase--list { height: 100%; overflow: hidden; }
 .manga-bookcase.manga-bookcase--list .home-shelf { display: block; height: 100%; margin: 0; padding: 0; overflow: visible; }
 .manga-bookcase.manga-bookcase--list .home-shelf__track, .manga-shelf-row__waiting { box-sizing: border-box; height: 100%; gap: 0; padding: var(--space-4) var(--space-6) var(--space-8); }

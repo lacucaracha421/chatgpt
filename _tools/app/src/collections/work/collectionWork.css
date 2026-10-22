@@ -12,7 +12,7 @@
 .work-stage--no-strip { bottom: 0; }
 .work-stage[data-zoom-enabled] { touch-action: none; }
 .work-zoom-object { position: absolute; inset: 0; transform: scale(var(--work-zoom, 1)); transform-origin: center; transition: transform 90ms linear; }
-.work-cover-band { position: absolute; inset: 0 0 184px; overflow: hidden; pointer-events: none; visibility: visible; opacity: 1; transition: opacity var(--motion-medium) var(--ease-out); }
+.work-cover-band { position: absolute; inset: 0 0 calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 64px); overflow: hidden; pointer-events: none; visibility: visible; opacity: 1; transition: opacity var(--motion-medium) var(--ease-out); }
 /* Work surfaces swap after their ready gate; their keyed backdrops fade at this boundary. */
 .work-surface[aria-hidden="true"] > .work-cover-band { opacity: 0; }
 .work-cover-band .work-backdrop img { transition: none; }
@@ -31,7 +31,7 @@
 .work-surface:has(> .work-stage--no-strip) .work-hero-band { bottom: 0; }
 .work-hero-band { position: absolute; inset: 0 0 76px; overflow: hidden; pointer-events: none; }
 .work-surface--info .work-hero-band { right: 340px; }
-.work-hero-band--manga { bottom: 184px; }
+.work-hero-band--manga { bottom: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 64px); }
 .work-hero-band img { position: absolute; top: 0; left: 0; width: 100%; height: 62%; object-fit: cover; display: block; opacity: .9; mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); -webkit-mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); }
 .work-hero-band::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent), transparent 28%, transparent 72%, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent)); }
 /* Previous/next targets stay narrow and short so they never cover the case (user, 2026-10-01). */
@@ -108,7 +108,7 @@
 .work-owned-stepper b { min-width: var(--space-6); text-align: center; font-weight: 500; }
 .collection-ownership--work { display: flex; flex-direction: column; gap: var(--space-2); }
 .work-own-row .ui-choice { display: flex; gap: var(--space-3); }
-.manga-work-stage.work-stage { bottom: 184px; }
+.manga-work-stage.work-stage { bottom: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 64px); }
 /* The approved book is one physical object, scaled with its material and spine type. */
 .manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); }
 /* Keep the snapshot outside the preserve-3d book, with object-sized bounds. */
@@ -146,29 +146,45 @@
 .manga-book-shadow { position: absolute; left: 50%; top: calc(50% + var(--bh) * var(--book-scale) / 2 - 6px); width: calc(var(--bw) * var(--book-scale) * 1.2); height: 26px; transform: translateX(-50%); background: rgba(0,0,0,.65); filter: blur(14px); border-radius: 50%; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .manga-bigbook { transition: none; } }
 .manga-cover-empty { color: var(--color-faint); }
-/* Approved physical bookshelf: no band/recess; only real cover strips and a fading plank. */
+/* Approved real-proportion books, printed spines and the shared shelf material. */
 /* Fixed-width spines scroll sideways in the shared ShelfScroller (wheel, drag, swipe; no visible bar); the track holds the padding so the labels above and below stay inside it. */
-.manga-bookcase.work-strip { height: 184px; padding: 0; display: block; overflow: hidden; }
+.manga-bookcase.work-strip { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 64px); padding: 0; display: block; overflow: hidden; }
 .manga-bookcase .home-shelf { display: block; height: 100%; margin: 0; padding: 0; overflow: visible; }
 .manga-bookcase .home-shelf__track { box-sizing: border-box; height: 100%; gap: 0; padding: var(--space-8); }
-.manga-bookcase-board { position: relative; flex: none; width: max-content; min-width: 100%; height: 120px; }
-.manga-bookcase-spines { position: relative; z-index: 1; display: flex; justify-content: center; align-items: flex-end; gap: 2px; height: 100%; }
-.manga-spine { position: relative; flex: none; width: calc(var(--spine-width) * var(--manga-spine-scale, 1)); height: 120px; padding: 0; color: var(--color-text); }
+.manga-bookcase-board { position: relative; flex: none; width: max-content; min-width: 100%; height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
+.manga-bookcase-spines { position: relative; z-index: 1; display: flex; justify-content: center; align-items: flex-end; gap: 1px; height: 100%; }
+.manga-spine { position: relative; flex: none; width: calc(var(--spine-width) * var(--manga-spine-scale, 1)); height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); padding: 0; border: 0; background: transparent; color: var(--color-text); cursor: pointer; }
 .manga-spine[aria-pressed="true"] { width: calc(var(--cover-width) * var(--manga-spine-scale, 1)); z-index: 2; }
 .manga-spine.is-settling { z-index: 1; }
 .manga-spine-strip, .manga-spine-front { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--color-surface); }
-.manga-spine-strip { width: calc(var(--spine-width) * var(--manga-spine-scale, 1)); transition: opacity 360ms var(--ease-sheet); border-radius: var(--radius-mark); }
+.manga-spine-strip { --print-width: calc(var(--print-nominal, var(--spine-width)) * var(--manga-spine-scale, 1)); color: #242421; background: #f4f1e9; width: calc(var(--spine-width) * var(--manga-spine-scale, 1)); transition: opacity 360ms var(--ease-sheet); border-radius: 1px; }
 .manga-spine img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .manga-spine-front { width: calc(var(--cover-width) * var(--manga-spine-scale, 1)); transform-origin: 0 100%; transform: rotateY(var(--spine-angle)); opacity: 0; transition: transform 360ms var(--ease-sheet), opacity 360ms var(--ease-sheet); }
 .manga-spine.is-fronted .manga-spine-front { transform: translateY(-6px) rotateY(0deg); opacity: 1; }
 .manga-spine.is-fronted .manga-spine-strip { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .manga-spine-front, .manga-spine-strip { transition: none; } }
-.manga-spine-front img { object-fit: fill; }
+.manga-spine-front img { object-fit: contain; }
 .manga-spine-empty { display: block; width: 100%; height: 100%; background: var(--color-surface); }
-.manga-spine-number { position: absolute; left: 2px; right: 2px; bottom: 2px; display: grid; place-items: center; font-size: var(--type-meta); line-height: var(--line-meta); background: var(--color-cover-scrim); z-index: 1; }
+.manga-spine-strip > :not(.collection-spine-light) { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; line-height: 1; transition: color 180ms var(--ease-standard), background-color 180ms var(--ease-standard); }
+.manga-print-label { top: 0; height: calc(var(--print-width) * 1.15); background: #242421; color: #f4f1e9; font-size: calc(var(--label-font) * var(--manga-spine-scale, 1)); font-weight: 800; white-space: nowrap; }
+.manga-print-title { top: calc(var(--print-width) * 1.6); bottom: calc(27% + var(--print-width) * 3.35); color: var(--spine-ink); font-size: calc(var(--title-font) * var(--manga-spine-scale, 1)); font-weight: 800; }
+.manga-print-title > span, .manga-print-author > span, .manga-print-publisher > span { writing-mode: vertical-rl; text-orientation: upright; white-space: nowrap; }
+.manga-print-title--latin > span { text-orientation: sideways; }
+.manga-spine-strip .manga-spine-number { bottom: calc(27% + var(--print-width) * 2); left: 12%; right: 12%; height: var(--print-width); background: color-mix(in srgb, var(--spine-ink), #242421 var(--number-mix)); color: #f4f1e9; font-size: calc(var(--print-width) * .7); font-weight: 800; font-variant-numeric: tabular-nums; }
+.manga-print-art { bottom: calc(10% + var(--print-width) * 1.7); height: 17%; background: #ebe7dd; }
+.manga-print-art .manga-spine-empty { background: transparent; }
+.manga-print-author { bottom: calc(var(--print-width) * 1.4); height: 10%; font-size: calc(var(--author-font) * var(--manga-spine-scale, 1)); font-weight: 600; }
+.manga-print-publisher { bottom: 0; height: calc(var(--print-width) * 1.2); font-size: calc(var(--publisher-font) * var(--manga-spine-scale, 1)); font-weight: 800; }
+.manga-print-publisher > span { max-height: 100%; }
+.manga-spine-strip--private > :not(.collection-spine-light) { visibility: hidden; }
+.manga-spine-strip--private .manga-spine-number { visibility: visible; background: transparent; color: #b9b6ae; }
+.manga-spine:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 .manga-picked-number { position: absolute; top: calc(100% + var(--space-2)); left: 0; right: 0; text-align: center; font-size: var(--type-meta); line-height: var(--line-meta); }
-.manga-spine--missing .manga-spine-strip, .manga-spine--missing .manga-spine-front { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
-.manga-spine--missing img { opacity: .35; }
+.manga-spine--missing .manga-spine-strip, .manga-spine--missing .manga-spine-front, .manga-spine--upcoming .manga-spine-strip { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+.manga-spine--missing .manga-spine-strip > :not(.collection-spine-light) { opacity: .3; }
+.manga-spine--missing .manga-spine-front img { opacity: .35; }
+.manga-spine--upcoming .manga-spine-strip > :not(.collection-spine-light) { opacity: .16; }
+@media (prefers-reduced-motion: reduce) { .manga-spine-strip > :not(.collection-spine-light) { transition: none; } }
 .manga-spine--upcoming { color: var(--color-faint); }
 .manga-upcoming-date { position: absolute; top: calc(100% + var(--space-2)); left: 50%; transform: translateX(-50%); font-size: var(--type-meta); line-height: var(--line-meta); white-space: nowrap; }
 .manga-latest-label { position: absolute; bottom: calc(100% + var(--space-1)); left: 50%; transform: translateX(-50%); font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); white-space: nowrap; }

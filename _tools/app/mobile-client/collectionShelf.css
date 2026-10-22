@@ -30,7 +30,7 @@
   .mobile-collections .collection-cover-cell .collection-light-case .cs-box { transition:none; }
 }
 /* 만화 · 책장: the shared bookcase rows (mangaShelf.css) run to the screen edge like the planks; titles keep the gutter. */
-.mobile-collections .manga-shelf-list { margin: 0 calc(var(--mobile-gutter) * -1); padding: var(--space-4) 0 var(--space-6); }
+.mobile-collections .manga-shelf-list { --manga-label-height: var(--touch-target); margin: 0 calc(var(--mobile-gutter) * -1); padding: var(--space-4) 0 var(--space-6); }
 .mobile-collections .manga-shelf-row__label { align-items: center; padding: 0 var(--mobile-gutter); }
 .mobile-collections .manga-shelf-row__title { min-height: var(--touch-target); }
 .mobile-collections .manga-bookcase.manga-bookcase--list .home-shelf__track, .mobile-collections .manga-shelf-row__waiting { padding-inline: var(--mobile-gutter); }
@@ -42,7 +42,7 @@
 .tablet-work { display: flex; flex-direction: column; min-width: 0; }
 .tablet-work__frame { position: relative; margin: 0 calc(var(--mobile-gutter) * -1); background: var(--color-viewer-bg); }
 .tablet-work .work-hero-band { inset: 0 0 var(--work-strip-height, 76px); }
-.tablet-work--manga .work-hero-band { inset: 0 0 184px; }
+.tablet-work--manga .work-hero-band { inset: 0 0 calc(var(--manga-height, 227.5px) * var(--manga-spine-scale, 1) + 64px); }
 .tablet-work .work-stage.tablet-work__stage { position: relative; inset: auto; height: calc(clamp(320px, 52vh, 640px) + 112px - var(--work-strip-height, 76px)); touch-action: pan-y; }
 .tablet-work__manga-stage { position: relative; height: clamp(320px, 52vh, 640px); touch-action: pan-y; }
 .tablet-work__manga-stage .work-stage.manga-work-stage { position: absolute; inset: 0; }
@@ -52,7 +52,7 @@
 .tablet-work .work-strip { position: relative; inset: auto; height: 76px; justify-content: flex-start; padding: 0 var(--mobile-gutter); scrollbar-width: none; }
 .tablet-work .work-strip::-webkit-scrollbar { display: none; }
 .tablet-work .work-strip-tile { min-width: var(--touch-target); padding: 0; background: transparent; border: 0; font: inherit; font-size: var(--type-meta); }
-.tablet-work .manga-bookcase.work-strip { height: 184px; padding: 0; }
+.tablet-work .manga-bookcase.work-strip { height: calc(var(--manga-height, 227.5px) * var(--manga-spine-scale, 1) + 64px); padding: 0; }
 .tablet-work .manga-bookcase .home-shelf__track { padding: var(--space-8) var(--mobile-gutter); }
 .tablet-work .manga-spine { border: 0; background: transparent; font: inherit; }
 .tablet-work .asset-viewer__edge { position: absolute; z-index: 2; top: 30%; bottom: 30%; display: flex; align-items: center; justify-content: center; width: var(--touch-target); padding: 0; color: var(--color-muted); background: transparent; border: 0; }

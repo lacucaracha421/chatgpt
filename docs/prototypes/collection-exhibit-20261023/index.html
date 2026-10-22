@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>컬렉션 책장 2차 시안</title>
+<!-- 앱의 실제 폰트·토큰·공용 컨트롤을 읽는다. shelf2.css = 새로 제안하는 선반·빛·책등 표현, page.css = 시안 틀,
+     shelf2.js = 예시 데이터, canvas로 그린 표지·스캔, 책등 틀, 꺼내기. 제목·작가·출판사·표식·그림은 모두 지어낸 것이다. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/shared-base.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<link rel="stylesheet" href="shelf2.css">
+<link rel="stylesheet" href="page.css">
+<style>
+/* Board-only layout (not product CSS). */
+.lst { position: relative; }
+.mrow { margin-bottom: 8px; }
+.mrow-label { display: flex; align-items: baseline; gap: var(--space-2); height: 24px; }
+.mrow-title { padding: 0; border: 0; background: none; color: var(--color-text); font: 600 var(--type-body)/var(--line-ui, 1.4) var(--font-ui); cursor: pointer; }
+.mrow-count { color: var(--color-faint); font: 400 var(--type-meta)/1 var(--font-ui); font-variant-numeric: tabular-nums; }
+.mrow .shelf { margin-bottom: 40px; }
+.glabel { height: 40px; display: flex; align-items: center; }
+.glabel .ui-section-label { flex: 1; }
+.spec-wide { width: 100%; overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg); padding: 12px 0 40px; }
+.spec-wide .shelf { margin-bottom: 0; }
+.fins { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.fin { margin: 0; overflow: hidden; border: 1px solid var(--color-border); padding: 8px 0 12px; }
+.fin figcaption, .mixrow-h { padding: 8px 24px 0; color: var(--color-faint); font-size: var(--type-meta); }
+.mixrow { border: 1px solid var(--color-border); padding: 4px 0 28px; margin-bottom: 16px; overflow: hidden; }
+.mixrow-h { padding: 8px 24px 4px; }
+.shelf.wide-gaps .shelf-books { gap: 84px; padding-left: 40px; }
+.spfig { position: relative; flex: none; margin: 0; }
+.spfig > .bs { position: absolute; inset: 0; }
+.spfig > figcaption { position: absolute; top: calc(100% + 24px); left: 50%; transform: translateX(-50%); width: 96px; text-align: center; color: var(--color-faint); font-size: var(--type-meta); line-height: 1.3; }
+.grid-fb { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px; }
+.grid-fb > div { border: 1px solid var(--color-border); padding-bottom: 64px; overflow: hidden; }
+.h3 { margin: 12px 24px 4px; color: var(--color-muted); font: 600 var(--type-meta)/1.3 var(--font-ui); }
+/* Anatomy */
+.anat { position: relative; display: flex; align-items: flex-start; gap: 32px; padding: 24px 24px 48px; border: 1px solid var(--color-border); overflow: hidden; }
+.anat-cover { position: relative; flex: none; }
+.anat-cover > .cvimg { position: absolute; inset: 0; background-size: 100% 100%; box-shadow: var(--shadow-floating); }
+.anat-cap { position: absolute; left: 0; color: var(--color-faint); font-size: var(--type-meta); }
+.am { position: absolute; border: 1.5px dashed #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }
+.am > b, .co-no { display: grid; place-items: center; width: 20px; height: 20px; background: var(--color-accent); color: var(--color-text-on-accent, #161718); font: 700 12px/1 var(--font-ui); border-radius: 2px; }
+.am > b { position: absolute; left: -10px; top: -10px; }
+.anat-arrow { align-self: center; color: var(--color-faint); font-size: 28px; }
+.anat-spine { position: relative; flex: none; }
+.anat-spine > .bs { position: absolute; inset: 0; }
+.dim { position: absolute; border-color: var(--color-faint); border-style: solid; }
+.dim.v { left: -18px; top: 0; width: 6px; border-width: 1px 0 1px 1px; }
+.dim.v > b { position: absolute; top: 50%; right: 10px; transform: translateY(-50%) rotate(-90deg); transform-origin: 100% 50%; color: var(--color-faint); font: 400 11px/1 var(--font-ui); white-space: nowrap; }
+.dim.h { left: 0; bottom: -16px; height: 6px; border-width: 0 1px 1px 1px; }
+.dim.h > b { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: var(--color-faint); font: 400 11px/1 var(--font-ui); white-space: nowrap; }
+.anat-calls { position: relative; flex: none; width: 380px; }
+.co { position: absolute; left: 0; right: 0; display: flex; gap: 8px; align-items: flex-start; transform: translateY(-10px); }
+.co-line { position: absolute; left: -32px; top: 10px; width: 26px; height: 1px; background: var(--color-faint); }
+.co-h { color: var(--color-text); font: 600 14px/1.4 var(--font-ui); }
+.co-t { color: var(--color-muted); font-size: 13px; line-height: 1.45; }
+.anat-side { flex: 1; min-width: 260px; display: grid; gap: 16px; align-content: start; }
+.co-free { display: flex; gap: 8px; align-items: flex-start; }
+.tag.auto { background: color-mix(in srgb, var(--color-success, #6fae7a) 18%, transparent); color: var(--color-success, #8fc79a); }
+/* Scan pipeline */
+.pipe { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--color-border); }
+.pstep { margin: 0; flex: 1 1 0; min-width: 150px; border-right: 1px solid var(--color-border); padding: 16px 8px 12px; background: linear-gradient(rgba(255, 232, 200, .05), transparent 40%), #1b1a18; }
+.pstep:last-child { border-right: 0; }
+.pbox { display: flex; align-items: flex-end; justify-content: center; }
+.pbox > span { box-shadow: 0 6px 10px -6px rgba(0, 0, 0, .8); }
+.pbox > span > .bs { position: absolute; inset: 0; }
+.pstep figcaption { margin-top: 12px; color: var(--color-muted); font-size: 12px; line-height: 1.4; text-align: center; }
+.pstep figcaption b { display: block; margin: 0 auto 4px; color: var(--color-accent); font: 600 var(--type-number)/1 var(--font-ui); }
+.cols2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.keep2 { margin: 16px 0 0; padding: 12px 16px; border: 1px solid var(--color-border); color: var(--color-muted); font-size: 14px; max-width: 1120px; }
+.keep2 b { color: var(--color-text); }
+details.r1 { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--color-border); }
+details.r1 summary { cursor: pointer; color: var(--color-muted); font: 600 var(--type-body)/1.4 var(--font-ui); }
+details.r1 p { color: var(--color-muted); font-size: 14px; max-width: 1120px; }
+details.r1 a { color: var(--color-text); }
+</style>
+</head>
+<body class="ex">
+<div class="doc">
+<header>
+  <h1>컬렉션 책장 2차 — 지금 책장을 더 실물처럼</h1>
+  <p class="lead">1차에서 고른 <b>빛·재질</b>(선반 위 조명, 밝은 책 머리, 발치 그림자, 목재 선반, 깊이)만 가져오고, 방·벽·종류별 가구 모형은 뺐다. 게임·영화·AV 책장은 지금처럼 <b>묶음 제목 아래 줄줄이</b>, 만화 책장은 지금처럼 <b>작품마다 한 줄</b>이다. 바뀌는 것은 선반의 두께와 빛, 책등 표면, 꺼낸 물건이다.</p>
+  <p class="lead">만화 책등은 1차의 “표지로 만든 책등”을 실제 한국 단행본 책등의 문법으로 다시 짰다: 위쪽 레이블, 세로 제목, 번호 표식, 캐릭터 조각, 눕힌 작가 이름, 아래 출판사 표식, 그리고 <b>출판사마다 다른 틀</b>. 서점 책등 스캔이 있는 권(약 3권에 1권)은 실제 책등과 뒷표지를 쓰고, 없는 권은 합성한다. 책등·케이스를 클릭하면 꺼내고, 뒷표지가 있는 책은 한 번 더 클릭하면 뒤집힌다. 빈 곳 클릭이나 Esc로 꽂는다.</p>
+  <ul class="toc">
+    <li><a href="#a">가 게임·영화·AV 책장</a></li><li><a href="#b">나 만화 책장</a></li><li><a href="#c">다 책등 해부</a></li><li><a href="#d">라 실제 스캔과 합성</a></li><li><a href="#e">마 태블릿 세로</a></li><li><a href="#f">바 데이터·위험·순서</a></li>
+  </ul>
+</header>
+
+<section class="c" id="a">
+  <h2>가. 게임·영화·AV 책장 — 지금 배치 그대로, 빛과 재질 <small>PC 1700 × 1000 · 960 × 640</small></h2>
+  <p class="note">배치·크기·묶음 제목줄은 지금과 같다. 더한 것: 줄마다 위쪽의 <b>가는 조명</b>과 뒤 벽에 번지는 따뜻한 빛, 두께가 보이는 <b>선반</b>(윗면 5px + 앞판 11px, 앞판 윗모서리만 빛남), 선반이 아래로 떨어뜨리는 그림자, 케이스 머리의 밝음과 발치의 접지 그림자, 플라스틱 테의 반사. 꺼낸 케이스 자리는 어두운 틈으로 남고 양옆 케이스의 안쪽 면이 살짝 보인다.</p>
+  <div class="ctl">선반 마감 <button data-fin="fin-ink" aria-pressed="true">먹색 목재</button><button data-fin="fin-lacquer" aria-pressed="false">검은 옻칠</button><button data-fin="fin-oak" aria-pressed="false">밝은 오크</button></div>
+  <div class="frames"><div class="fr" id="f-game"></div></div>
+  <p class="fr-cap">게임 1.1 px/mm (보통). 케이스 하나를 꺼낸 상태 — 지금처럼 앞면으로 돌며 떠오르고, 선반에는 그 크기만큼 그림자가 진다.</p>
+  <div class="frames" style="margin-top:24px"><div class="fr" id="f-film"></div></div>
+  <p class="fr-cap">영화 960 × 640 1:1. 포스터 판은 무광 판지라 반사 없이 빛만 받는다.</p>
+  <h3 class="h3" style="margin:32px 0 8px">AV 케이스 가까이 (2.0 px/mm) — 투명 슬리브의 긴 반사, 위아래 검은 테</h3>
+  <div id="spec-av" class="spec-wide"></div>
+  <h3 class="h3" style="margin:32px 0 8px">마감 3종 — 토큰만 바뀐다</h3>
+  <div id="spec-fin" class="fins"></div>
+</section>
+
+<section class="c" id="b">
+  <h2>나. 만화 책장 — 작품마다 한 줄, 실제 단행본 책등 <small>PC 1700 × 1120 · 960 × 640</small></h2>
+  <p class="note">지금처럼 작품 제목과 보유 권수 아래 그 작품의 책 한 줄. 다른 점은 책이 <b>실제 비율</b>로 선다는 것(보통 1.1 px/mm: 신서판 194px · B6 200px · 대형판 231px, 두께 12–18px). 지금의 30 × 120 표지 조각은 실제 책등보다 3배 뚱뚱해 스캔을 넣을 수 없다. 같은 시리즈는 같은 틀이라 한 줄이 <b>세트</b>로 읽히고, 권마다 캐릭터 조각·번호 표식 색이 바뀐다. 없는 권은 흐린 인쇄 + 점선, 나올 권은 더 흐리게 + 날짜. ‘바다의 서재’ 1–7권은 서점 스캔, 8권은 합성이다.</p>
+  <div class="frames"><div class="fr" id="f-manga"></div></div>
+  <p class="fr-cap">‘등대지기의 딸’ 7권을 꺼낸 상태: 자리가 표지 폭으로 벌어지며 책이 앞으로 돌아 나오고, 아래에 번호. 뒷표지가 없는 책은 뒤집지 않는다.</p>
+  <div class="frames" style="margin-top:24px"><div class="fr" id="f-manga960"></div></div>
+  <p class="fr-cap">960 × 640 1:1. ‘바다의 서재’ 2권은 서점 뒷표지가 있어, 꺼낸 뒤 한 번 더 누르면 뒤집혀 줄거리·바코드·가격이 보인다(지금 뒤집힌 상태).</p>
+  <h3 class="h3" style="margin:32px 0 8px">세트로 보이는가 — 세 시리즈를 한 선반에 (2.0 px/mm)</h3>
+  <div id="spec-set" class="spec-wide"></div>
+  <p class="fr-cap">해오름(흰 바탕, 표지색 제목, 번호 표식) · 은하문고(권마다 색이 바뀌는 무지개 세트, 눕힌 영문 로고) · 둥지북스(종이색 바탕, 시리즈색 띠, 대형판이라 더 큼).</p>
+  <h3 class="h3" style="margin:32px 0 8px">섞인 선반 — 출판사·판형이 다른 11작품 (크게 1.45 px/mm)</h3>
+  <div id="spec-mixed" class="spec-wide"></div>
+  <p class="fr-cap">흰 바탕 책등이 다수이고 색 바탕이 사이사이에 끼는 실제 서가의 리듬. 높이 차이는 판형에서만 난다(같은 시리즈는 같은 높이). 출판사 틀이 없는 ‘우주 택배’·‘모래시계 학원’은 기본 틀.</p>
+</section>
+
+<section class="c" id="c">
+  <h2>다. 책등 해부 — 무엇이 자동이고 무엇이 데이터인가 <small>3.4 px/mm</small></h2>
+  <p class="note">실제 책등(서점 스캔 10권 참고)의 공통 문법: 위 출판사 레이블 → 세로 제목(한글은 세움, 영문 로고는 눕힘) → 번호 표식 → 캐릭터 그림 → 눕힌 작가 이름 → 아래 출판사 로고. 바탕은 대부분 흰색이고 시리즈색은 제목·표식에 쓰인다. 합성은 이 순서를 지키고, <b>표지에서 자동으로 뽑는 것</b>(색, 그림 조각)과 <b>이미 있는 데이터</b>(제목, 권 번호, 작가, 출판사 이름)로 대부분을 채운다.</p>
+  <div id="spec-anat"></div>
+  <div id="spec-fallback"></div>
+  <p class="fr-cap">왼쪽: 데이터가 모자랄 때 내려가는 순서. 오른쪽: 같은 책등의 크기별 모습 — 두께가 15px 아래면 작가·레이블 글자는 지운다(어차피 읽히지 않는 크기).</p>
+</section>
+
+<section class="c" id="d">
+  <h2>라. 실제 스캔과 합성 책등을 한 선반에 <small>2.4 px/mm · 1.6 px/mm</small></h2>
+  <p class="note">서점은 인기작 일부 권에 좁은 책등 스캔(약 70–100 × 1,200, 1:12–1:17)과 뒷표지를 준다. ISBN으로 찾고, 있으면 <b>실제 책등 + 실제 뒷표지</b>, 없으면 합성. 스캔은 빛이 평평하고 누런 기가 있으며 가장자리에 스캐너 바탕, 발치에 서점 표시가 있다. 둘을 같은 선반에 세우는 방법은 <b>스캔을 먼저 정규화하고, 둘 다 같은 표면 층을 덮는 것</b>이다.</p>
+  <div id="spec-pipe" class="pipe"></div>
+  <p class="fr-cap">스캔 한 장이 선반에 서기까지(왼쪽부터). 6은 8권 스캔이 없을 때의 합성 — 바탕·강조색을 7권 스캔에서 가져온다. 7은 7권 스캔을 그대로 쓰고 번호 표식만 다시 칠한 것.</p>
+  <div id="spec-mixrows" style="margin-top:24px"></div>
+  <div class="cols2">
+    <div class="keep2"><b>하나로 보이게 하는 것</b><br>① 좌우 3%, 발치 1.6% 자름(스캐너 바탕·서점 표시) ② 종이 흰색 기준 색 보정 ③ 높이는 판형, 폭은 스캔 비율 = 실제 두께 ④ 모든 책등에 같은 빛(머리 밝음·발치 어둠·둥근 등)과 같은 인쇄 결 ⑤ 같은 모서리 반경, 같은 1px 틈, 같은 접지 그림자.</div>
+    <div class="keep2"><b>시리즈 안에서 섞일 때</b><br>스캔이 있는 시리즈의 합성 권은 표지 대신 <b>이웃 스캔에서 색을 뽑는다</b>(나). 더 맞추려면 이웃 스캔의 번호 자리만 다시 칠한다(다) — 시리즈마다 번호 표식 위치를 한 번 표시해야 한다. 새로 나온 권은 스캔이 늦게 올라오는 경우가 많아(확인 필요) 나중에 다시 찾아 바꾼다.</div>
+  </div>
+</section>
+
+<section class="c" id="e">
+  <h2>마. 태블릿 세로 <small>800 × 1280 CSS px · 축소 표시 · 아래는 1:1 일부</small></h2>
+  <p class="note">PC와 같은 책등·같은 선반·같은 빛. 태블릿 보통은 1.25 px/mm(신서판 220px, 두께 15–20px). 책등이 손가락보다 좁으므로 지금처럼 <b>누른 곳에서 가장 가까운 책</b>을 집는다. 탭 = 꺼내기, 꺼낸 책을 탭 = 작품 화면, 꺼낸 책을 옆으로 끌기 = 돌려 보기(뒷표지가 있으면 뒤까지), 길게 누르기 = 작업 시트.</p>
+  <div class="frames">
+    <div style="flex:none;width:520px"><div class="fr" id="f-tab" data-max="520"></div><p class="fr-cap">세로 전체 (65%)</p></div>
+    <div style="flex:1;min-width:0"><div class="fr" id="f-tabcrop"></div><p class="fr-cap">1:1 일부 — NEON HARBOR 9권을 꺼낸 상태</p></div>
+  </div>
+</section>
+
+<section class="c" id="f">
+  <h2>바. 데이터 · 위험 · 순서</h2>
+  <table class="spec">
+    <tr><th>요소</th><th>쓰는 데이터</th><th>상태</th><th>없을 때</th></tr>
+    <tr><td>선반 빛·재질·두께</td><td>없음, 마감은 토큰</td><td><span class="tag">표현만</span></td><td>—</td></tr>
+    <tr><td>책 높이·두께</td><td>판형(신서판·B6·대형판), 쪽수 또는 스캔 비율</td><td><span class="tag new">새로</span></td><td>B6 · 14mm</td></tr>
+    <tr><td>책등 색</td><td>표지 책등 쪽 끝 띠의 평균색 (권마다 계산해 캐시)</td><td><span class="tag auto">자동</span></td><td>제목에서 고른 색</td></tr>
+    <tr><td>캐릭터 조각</td><td>표지 + 저장된 얼굴 위치 focusX, 세로 위치</td><td><span class="tag">focusX 있음</span><span class="tag new">세로 새로</span></td><td>표지 위쪽 가운데</td></tr>
+    <tr><td>제목·권 번호·작가</td><td>작품 이름, volumeNumber, 작가 (세로쓰기는 기존 verticalSpineText)</td><td><span class="tag">있음</span></td><td>로마자 작가명은 있으면</td></tr>
+    <tr><td>출판사 틀·레이블·표식</td><td>volume.publisher → 출판사별 틀 표 (10곳 안팎, 손으로 한 번)</td><td><span class="tag">이름 있음</span><span class="tag new">틀 표 새로</span></td><td>기본 틀</td></tr>
+    <tr><td>실제 책등·뒷표지</td><td>ISBN(isbn13)으로 서점 이미지 찾기, 로컬 저장</td><td><span class="tag new">새로</span></td><td>합성 책등, 뒤집기 없음</td></tr>
+    <tr><td>이웃 스캔 틀 빌리기</td><td>시리즈마다 번호 표식 위치 한 번</td><td><span class="tag new">새로 · 선택</span></td><td>스캔 색으로 합성</td></tr>
+  </table>
+  <h3 class="h3" style="margin:32px 0 8px">위험</h3>
+  <ul class="plain">
+    <li><b>디자인 규칙 변경.</b> 지금 문서는 만화 책장을 “실제 표지 조각, 빛만, 지어낸 인쇄 없음”, “선반은 받침 표시이지 가구가 아님”으로 적고 있다. 합성 책등과 두께 있는 선반은 이 줄을 바꾸는 결정이다.</li>
+    <li><b>작품마다 한 줄이 길어진다.</b> 만화 한 줄이 약 168 → 290px. 같은 화면에 보이는 작품 수가 줄어든다(1700 × 1100 창에서 약 3.5줄). ‘작게’(0.9 px/mm)로 덜 수 있다.</li>
+    <li><b>좁은 책등의 글자.</b> 보통에서 12–18px 폭이라 작가·레이블은 무늬 수준. 제목과 번호가 주인공이고, 읽으려면 크게.</li>
+    <li><b>성능.</b> 합성 책등은 여러 겹의 DOM이라 수백 권을 그대로 그리면 무겁다. 권마다 한 번 비트맵으로 그려 캐시하고, 선반에서는 스캔과 똑같이 이미지 한 장 + 공통 빛 층으로 다룬다. 보이는 줄만 그리는 지금 방식 유지.</li>
+    <li><b>색 뽑기 실패.</b> 흰 테두리가 있는 표지는 끝 띠가 흰색이다 → 흰색이면 한 칸 안쪽 띠를 쓴다. 표지가 없으면 제목에서 고른 색.</li>
+    <li><b>스캔 출처.</b> 서점 이미지를 개인 서가용으로 받아 로컬에 저장하는 것. 얼마나 넓게 받을지는 사용자 결정. 새 권은 스캔이 늦을 수 있다(확인 필요).</li>
+    <li><b>깜빡임 없음 규칙.</b> 합성 비트맵이나 스캔이 준비되기 전에는 지금 책등(표지 조각)을 그대로 두고, 준비되면 한 번에 바꾼다. 빈 책등을 보이지 않는다.</li>
+  </ul>
+  <h3 class="h3" style="margin:32px 0 8px">추천 순서</h3>
+  <ol class="stage-list">
+    <li><b>선반 빛·재질 (모든 책장)</b><span>줄 위 조명, 뒤 벽 빛, 선반 두께, 그림자, 공통 표면 층(케이스·포스터 판). 데이터 없이 CSS만. 게임·영화·AV·만화가 한 번에 좋아진다.</span></li>
+    <li><b>만화를 실제 비율로 + 기본 틀 합성 책등</b><span>표지 색 뽑기, 얼굴 위치로 그림 조각, 제목·번호·작가·출판사 이름. 비트맵 캐시. 판형은 기본 B6.</span></li>
+    <li><b>서점 책등·뒷표지 (ISBN)</b><span>정규화 파이프라인, 스캔 비율에서 두께, 꺼낸 책 뒤집기. 스캔 있는 시리즈의 합성 권은 스캔 색으로.</span></li>
+    <li><b>출판사 틀 표</b><span>자주 나오는 출판사 몇 곳부터 레이블·표식·배치. 나머지는 기본 틀.</span></li>
+    <li><b>마무리</b><span>판형·쪽수 데이터, 얼굴 세로 위치, 이웃 스캔 틀 빌리기(선택), 태블릿 끌어서 돌리기.</span></li>
+  </ol>
+  <h3 class="h3" style="margin:32px 0 8px">사용자 결정</h3>
+  <ul class="plain">
+    <li>만화 책장을 실제 비율(키 큰 좁은 책)로 바꿀지 — 스캔을 쓰려면 필요하다.</li>
+    <li>“지어낸 인쇄 없음” 규칙을 합성 책등에 한해 풀지.</li>
+    <li>서점 이미지를 얼마나 넓게 받을지(지금 보유 권 전부 / 새로 추가하는 권만).</li>
+    <li>기본 마감(먹색 목재)을 그대로 둘지.</li>
+  </ul>
+</section>
+
+<details class="r1">
+  <summary>1차 시안 (벽·가구·다가가기)</summary>
+  <p>1차 보드는 <a href="round1.html">round1.html</a>에 그대로 있다. 그중 빛·재질만 2차로 옮겼고, 벽 전체·종류별 가구·다가가기·정면 진열 선반·당겨 보기는 이번 방향에서 뺐다.</p>
+</details>
+</div>
+<script src="shelf2.js"></script>
+</body>
+</html>

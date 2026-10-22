@@ -1,0 +1,178 @@
+/* Collection shelves, round 2 — PROPOSED object CSS.
+   The layout stays the app's current one (SpineShelf rows under section labels; one manga row per work).
+   What is new: the shelf's material and light, the spine surface shared by every kind of spine
+   (synthesised, scanned, game/AV/film), the synthesised manga spine templates and the pulled-out 3D book.
+   All geometry comes from millimetres x px-per-mm in shelf2.js. */
+
+/* ---------- Materials (먹색 목재 is the default; tokens so the 종이 theme can swap them) ---------- */
+.s2, .fin-ink {
+  --bk-back: #1b1a18;                         /* the wall section behind a row */
+  --bk-light: rgba(255, 232, 200, .10);       /* warm wash from the lamp at the top of the row */
+  --bk-lamp: rgba(255, 236, 210, .75);        /* the lamp line itself */
+  --bk-board-top: #3a3631;                    /* plank top face, seen a little from above */
+  --bk-lip: #2c2926;                          /* plank front edge */
+  --bk-lip-hi: rgba(255, 242, 224, .20);      /* the lit top edge of the lip */
+  --bk-grain: rgba(255, 240, 220, .035);      /* wood grain lines on the lip */
+  --bk-shadow: rgba(0, 0, 0, .62);
+}
+.fin-lacquer {
+  --bk-back: #141516; --bk-light: rgba(225, 233, 255, .085); --bk-lamp: rgba(230, 238, 255, .8);
+  --bk-board-top: #26282a; --bk-lip: #1a1b1d; --bk-lip-hi: rgba(235, 240, 255, .26); --bk-grain: rgba(255, 255, 255, 0);
+}
+.fin-oak {
+  --bk-back: #2a2520; --bk-light: rgba(255, 228, 190, .13); --bk-lamp: rgba(255, 238, 214, .85);
+  --bk-board-top: #8a7558; --bk-lip: #6e5c45; --bk-lip-hi: rgba(255, 246, 230, .35); --bk-grain: rgba(40, 24, 8, .10);
+}
+
+/* ---------- One shelf row: lit wall section, books, plank with thickness, drop shadow ---------- */
+.shelf { position: relative; padding-top: 16px; }
+.shelf-back { position: absolute; left: calc(var(--g, 24px) * -1); right: calc(var(--g, 24px) * -1); top: 4px; bottom: 16px; pointer-events: none;
+  background:
+    radial-gradient(60% 46px at 50% 0, var(--bk-light), transparent),
+    linear-gradient(var(--bk-light), transparent 62%),
+    linear-gradient(transparent 82%, rgba(0, 0, 0, .28)),
+    var(--bk-back);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent), linear-gradient(transparent, #000 14px); mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent), linear-gradient(transparent, #000 14px);
+  -webkit-mask-composite: source-in; mask-composite: intersect; }
+/* The lamp: a thin warm line at the top of the row, the one light source. */
+.shelf-back::before { content: ""; position: absolute; left: 12%; right: 12%; top: 6px; height: 2px; background: linear-gradient(90deg, transparent, var(--bk-lamp) 15%, var(--bk-lamp) 85%, transparent); opacity: .3; filter: blur(.8px); }
+.shelf-books { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 1px; height: var(--ih); }
+/* Contact shadow where books meet the plank (on the wall just behind their feet). */
+.shelf-books::before { content: ""; position: absolute; left: -6px; right: -6px; bottom: -1px; height: 10px; background: linear-gradient(transparent, var(--bk-shadow)); filter: blur(2.5px); z-index: -1; pointer-events: none; }
+.shelf-plank { position: relative; z-index: 2; height: 16px; margin: 0 calc(var(--g, 24px) * -1);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 2%, #000 98%, transparent); mask-image: linear-gradient(90deg, transparent, #000 2%, #000 98%, transparent); }
+.shelf-plank::before { /* top face: darker at the back, lighter at the front edge */ content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5px;
+  background: linear-gradient(color-mix(in srgb, var(--bk-board-top) 62%, black), var(--bk-board-top)); }
+.shelf-plank::after { /* front edge (lip) with its lit top line and a faint grain */ content: ""; position: absolute; left: 0; right: 0; top: 5px; bottom: 0;
+  background:
+    linear-gradient(var(--bk-lip-hi), transparent 1px),
+    repeating-linear-gradient(90deg, transparent 0 37px, var(--bk-grain) 37px 38px, transparent 38px 91px, var(--bk-grain) 91px 93px),
+    linear-gradient(var(--bk-lip), color-mix(in srgb, var(--bk-lip) 78%, black)); }
+/* Shadow the plank throws onto the wall below it. */
+.shelf-drop { position: absolute; z-index: 0; left: 2%; right: 2%; height: 22px; margin-top: -4px; background: radial-gradient(ellipse 50% 50% at 50% 0, var(--bk-shadow), transparent 75%); pointer-events: none; }
+
+/* ---------- Shared spine surface: one light for every spine (synthesised, scanned, game, film, AV) ---------- */
+.lit { position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: inherit;
+  background:
+    /* lamp from above: lit head, darker foot */
+    linear-gradient(rgba(255, 238, 212, .22), rgba(255, 238, 212, .05) 9%, transparent 26%, transparent 80%, rgba(0, 0, 0, .34)),
+    /* rounded paper spine: dark folds at both edges, a soft gloss ridge left of centre */
+    linear-gradient(90deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .12) 11%, rgba(255, 255, 255, .13) 30%, rgba(255, 255, 255, .02) 48%, rgba(0, 0, 0, .05) 74%, rgba(0, 0, 0, .40));
+  box-shadow: inset 0 1px rgba(255, 248, 236, .32); }
+/* Print grain, the same on every spine so scans and synthesised spines share one texture. */
+.lit::after { content: ""; position: absolute; inset: 0; opacity: .30; mix-blend-mode: overlay; border-radius: inherit;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 1 0'/></filter><rect width='96' height='96' filter='url(%23n)'/></svg>"); }
+/* Plastic cases: flatter, with a crisp left highlight and lit rims. */
+.lit.plastic { background:
+    linear-gradient(rgba(255, 238, 212, .20), transparent 14%, transparent 84%, rgba(0, 0, 0, .30)),
+    linear-gradient(90deg, rgba(255, 255, 255, .20), rgba(255, 255, 255, .06) 12%, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, .06) 80%, rgba(0, 0, 0, .42));
+  box-shadow: inset 0 1px rgba(255, 250, 240, .45), inset 1px 0 rgba(255, 255, 255, .10); }
+.lit.plastic::after { opacity: .14; }
+/* A film poster board: matte card, no ridge. */
+.lit.board { background: linear-gradient(rgba(255, 238, 212, .18), transparent 18%, transparent 82%, rgba(0, 0, 0, .3)), linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 14%, transparent 86%, rgba(0, 0, 0, .35)); }
+
+/* ---------- Manga volume on the shelf ---------- */
+.mv { position: relative; flex: none; display: block; padding: 0; border: 0; background: none; cursor: pointer; transform-origin: 50% 100%;
+  transition: transform 120ms var(--ease-standard), width 380ms var(--ease-sheet); -webkit-tap-highlight-color: transparent; }
+.mv > .bs { position: absolute; inset: 0; }
+@media (hover: hover) { .mv:not(.is-out):hover { transform: translateY(-3px); } }
+.mv:focus-visible { outline: none; }
+.mv:focus-visible::after { content: ""; position: absolute; inset: -3px; border: var(--focus-width, 2px) solid var(--color-focus); border-radius: 2px; pointer-events: none; }
+/* Not owned: the spine printed faintly behind a dashed outline; upcoming: fainter, its date under the plank. */
+.mv.miss > .bs, .mv.soon > .bs { opacity: .3; filter: grayscale(.75); }
+.mv.soon > .bs { opacity: .16; }
+.mv.miss::before, .mv.soon::before { content: ""; position: absolute; inset: 0; z-index: 4; outline: 1px dashed var(--color-border-strong, #4a4c4f); outline-offset: -1px; pointer-events: none; }
+.mv-under { position: absolute; left: 50%; top: calc(100% + 24px); transform: translateX(-50%); color: var(--color-faint); font: 400 var(--type-meta)/1 var(--font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.mv.is-out .mv-under.no { color: var(--color-text); }
+
+/* ---------- Synthesised spine ---------- */
+.bs { position: relative; display: block; overflow: hidden; border-radius: 1.5px 1.5px 1px 1px; background: var(--body); color: var(--ink); }
+.bs > .p { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; font-style: normal; }
+.bs .cut { background-repeat: no-repeat; }
+.bs .no { font-family: "Anton", var(--font-ui); font-weight: 400; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+/* In vertical writing the flex column runs across the spine: justify centres across, align-items puts the text at the top. */
+.bs .tt { justify-content: center; align-items: flex-start; writing-mode: vertical-rl; text-orientation: upright; white-space: nowrap; line-height: 1; font-family: var(--font-spine); font-weight: 700; letter-spacing: -.03em; }
+.bs .tt.lat { text-orientation: mixed; letter-spacing: .06em; font-family: "Cinzel", serif; font-weight: 800; }
+/* A word gap in upright vertical type: a third of an em instead of the full em a space takes. */
+.bs .tt .vsp { margin-inline-start: .3em; }
+.bs .tt small { font-size: .5em; margin-top: .5em; letter-spacing: 0; font-family: var(--font-spine); text-orientation: upright; }
+.bs .au { writing-mode: vertical-rl; text-orientation: upright; white-space: nowrap; font-family: var(--font-ui); font-weight: 600; line-height: 1; letter-spacing: -.02em; justify-content: center; align-items: flex-start; }
+.bs .au.sd { text-orientation: mixed; font-weight: 700; letter-spacing: .02em; align-items: center; }
+/* Number emblem: a printed diamond in the volume's own colour (artwork, not a UI badge). */
+.bs .emb { position: absolute; transform: rotate(45deg); box-shadow: 0 0 0 1px rgba(0, 0, 0, .7); }
+.bs .sw { writing-mode: vertical-rl; text-orientation: mixed; white-space: nowrap; font-style: normal; font-weight: 700; letter-spacing: .1em; line-height: 1; font-family: var(--font-ui); }
+/* Small sizes drop the type you could not read anyway (author, imprint words). */
+.bs.lod-s .au, .bs.lod-s .sw { visibility: hidden; }
+
+/* Publisher marks (fictional). */
+.mk { display: block; flex: none; }
+.mk.sun { border-radius: 50%; background: radial-gradient(circle at 50% 60%, #f39a3d 0 45%, #e2632a 46% 62%, transparent 63%); }
+.mk.star { background: currentColor; clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%); }
+.mk.nest { border-bottom: 1.5px solid currentColor; border-radius: 0 0 50% 50%; }
+.mk.bird { background: #fff; color: #2a5bd7; display: grid; place-items: center; font-family: var(--font-ui); font-weight: 800; line-height: 1; }
+
+/* ---------- Scanned spine (a narrow bookstore scan) ---------- */
+.bs.scan { background: #222; }
+/* Normalised crop: 3% off each side (scanner bleed) and 1.6% off the foot (the shop's watermark). */
+.bs.scan > .img { position: absolute; top: 0; bottom: -1.6%; left: -3%; right: -3%; background-size: 100% 100%; background-repeat: no-repeat; }
+/* Normalised: scanner bleed cropped, cast and flat contrast corrected. */
+.bs.scan.norm > .img { filter: contrast(1.08) saturate(1.06) hue-rotate(-4deg) brightness(.97); }
+.bs.scan.raw > .img, .bs.scan.uncut > .img { left: 0; right: 0; bottom: 0; }
+.bs.scan.raw { border-radius: 0; }
+
+/* ---------- Game / AV case spines (stand-ins for the app's platform templates) ---------- */
+.gc { position: relative; flex: none; display: block; padding: 0; border: 0; background: none; cursor: pointer; transition: transform 120ms var(--ease-standard); -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .gc:not(.is-out):hover { transform: translateY(-4px); } }
+.gface { position: absolute; inset: 0; overflow: hidden; border-radius: 1.5px; background: var(--plastic); }
+.gface > .ins { position: absolute; left: 0; right: 0; top: var(--rim); bottom: var(--rim); overflow: hidden; background: var(--c); box-shadow: 0 1px rgba(0, 0, 0, .5), 0 -1px rgba(0, 0, 0, .5); }
+.gface .hd { position: absolute; left: 0; right: 0; top: 0; height: 13%; display: grid; place-items: center; font-family: var(--font-ui); font-weight: 800; line-height: 1; letter-spacing: -.04em; font-style: normal; }
+.gface .art { position: absolute; left: 0; right: 0; top: 13%; height: 21%; }
+.gface .tt { position: absolute; left: 0; right: 0; top: 37%; bottom: 7%; display: flex; justify-content: center; writing-mode: vertical-rl; font-family: var(--font-spine); font-weight: 700; line-height: 1; color: #fff; white-space: nowrap; overflow: hidden; }
+.gface.av .hd { height: 8%; }
+.gface.av .art { top: 8%; height: 38%; }
+.gface.av .tt { top: 49%; font-family: var(--font-ui); letter-spacing: .03em; }
+/* Clear sleeve over the AV insert: a faint long reflection. */
+.gface.av::before { content: ""; position: absolute; inset: var(--rim) 0; z-index: 2; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .07) 45%, transparent 60%); pointer-events: none; }
+.gface.film { background: #111213; }
+.gface.film .art { top: 0; height: 41%; }
+.gface.film .tt { top: 44%; bottom: 14%; }
+.gface.film .yr { position: absolute; left: 0; right: 0; bottom: 4%; display: flex; justify-content: center; writing-mode: vertical-rl; color: #bdb9ae; font-family: var(--font-ui); font-weight: 600; line-height: 1; font-style: normal; }
+/* The empty slot a pulled-out case leaves: wall in shadow, the neighbours' inner sides catching a little light. */
+.gc.is-out > .gface { visibility: hidden; }
+.gc.is-out::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255, 240, 220, .10), transparent 2px, transparent calc(100% - 2px), rgba(255, 240, 220, .06)), linear-gradient(rgba(0, 0, 0, .55), rgba(0, 0, 0, .8)); }
+
+/* ---------- Pulled-out object: a real 3D box; only this one object is 3D ---------- */
+.b3wrap { position: absolute; left: 50%; bottom: 0; z-index: 20; width: var(--W); height: var(--H); margin-left: calc(var(--W) / -2); perspective: 1500px; perspective-origin: 50% 40%; pointer-events: none; transform-origin: 50% 100%; transition: transform 460ms var(--ease-sheet); }
+.b3wrap::after { /* its shadow on the plank, narrow while edge-on */ content: ""; position: absolute; left: 4%; right: 4%; bottom: -7px; height: 12px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 0, 0, .6), transparent); transform: scaleX(var(--edge, .12)); opacity: .7; transition: transform 460ms var(--ease-sheet), opacity 460ms var(--ease-sheet); }
+.b3 { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 460ms var(--ease-sheet); }
+.b3 > .fc { position: absolute; left: 0; top: 0; width: var(--W); height: var(--H); overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.b3 > .fc.front { transform: translateZ(calc(var(--T) / 2)); background-size: 100% 100%; }
+.b3 > .fc.front::after { /* laminate gloss, fixed light from above-left */ content: ""; position: absolute; inset: 0;
+  background: linear-gradient(115deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 34%), linear-gradient(rgba(255, 238, 212, .10), transparent 30%, transparent 85%, rgba(0, 0, 0, .25)); }
+.b3 > .fc.back { transform: rotateY(180deg) translateZ(calc(var(--T) / 2)); background: var(--body, #333); }
+.b3 > .fc.side { width: var(--T); left: calc((var(--W) - var(--T)) / 2); }
+.b3 > .fc.right { transform: rotateY(90deg) translateZ(calc(var(--W) / 2)); }
+.b3 > .fc.left { transform: rotateY(-90deg) translateZ(calc(var(--W) / 2)); }
+.b3 > .fc.top { height: var(--T); top: calc((var(--H) - var(--T)) / 2); transform: rotateX(90deg) translateZ(calc(var(--H) / 2)); background: #e8e1cf; }
+.b3 > .fc > .bs { position: absolute; inset: 0; }
+.b3 .pages { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0, 0, 0, .25), transparent 30%, transparent 70%, rgba(0, 0, 0, .2)), repeating-linear-gradient(90deg, #ece5d3 0 1px, #d8cfb9 1px 2px); }
+.b3 .plastic { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255, 255, 255, .1), transparent), #1d1e20; }
+/* Poses: one transform list so the browser turns it angle by angle. Spine-on puts the spine face exactly where the flat spine was. */
+.b3wrap.book .b3 { transform: translate3d(0, 0, calc(var(--W) / -2)) rotateY(-90deg); }
+.b3wrap.book.is-turned .b3 { transform: translate3d(0, -8px, calc(var(--T) / -2)) rotateY(-17deg); }
+.b3wrap.kase .b3 { transform: translate3d(0, 0, calc(var(--W) / -2)) rotateY(90deg); }
+.b3wrap.kase.is-turned { transform: translateY(-14px) scale(1.2); }
+.b3wrap.kase.is-turned .b3 { transform: translate3d(0, 0, calc(var(--T) / -2)) rotateY(15deg); }
+.b3wrap.book.is-turned.is-flipped .b3 { transform: translate3d(0, -8px, calc(var(--T) / -2)) rotateY(-197deg); }
+.b3wrap.is-turned::after { transform: none; opacity: 1; }
+.b3 > .fc.back.real { background-color: #f6f3ec; background-size: 100% 100%; filter: contrast(1.05) hue-rotate(-3deg); }
+.b3 > .fc.back.real::after { content: ""; position: absolute; inset: 0; background: linear-gradient(245deg, rgba(255, 255, 255, .14), transparent 34%), linear-gradient(rgba(255, 238, 212, .1), transparent 30%, transparent 85%, rgba(0, 0, 0, .22)); }
+.b3 > .fc.back.plain { display: grid; place-items: center; background: color-mix(in srgb, var(--body, #333) 70%, #1a1a1a); }
+.b3 > .fc.back.plain > span { color: rgba(255, 255, 255, .4); font: 400 11px/1 var(--font-ui); }
+.mv.is-out { z-index: 5; }
+.mv.is-out > .bs, .mv.is-out > .lit { visibility: hidden; }
+.gc.is-out { z-index: 5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mv, .gc, .b3wrap, .b3wrap::after, .b3 { transition: none !important; }
+}
