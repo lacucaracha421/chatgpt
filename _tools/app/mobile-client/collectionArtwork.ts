@@ -179,10 +179,11 @@ export function useArtworkSet(item:CollectionSummary|null,requests:Record<string
   const entries=Object.entries(requests).filter(([,request])=>!!request.id||(!!request.asset&&!!item?.coverAssetId));
   const key=item?JSON.stringify([item.id,entries.map(([name,request])=>[name,artworkSource(item,request.id,revision,request.original)])]):'';
   const [state,setState]=useState<{key:string;urls:Record<string,string>}>({key:'',urls:{}});
+  const sources=useRef<Record<string,string>>({});
   const latest=useRef({item,entries,revision});latest.current={item,entries,revision};
   useEffect(()=>{
     const {item:work,entries:wanted,revision:version}=latest.current;
-    if(!active||!work||state.key===key)return;
+    if(!active||!work||(atomic&&state.key===key))return;
     const controller=new AbortController();
     const load=([name,request]:[string,ArtworkRequest])=>artworkTicket(work,request.id,version,request.original,controller.signal).then(async ticket=>{
       if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
@@ -194,9 +195,16 @@ export function useArtworkSet(item:CollectionSummary|null,requests:Record<string
       });
     } else {
       // Spines that are already shown stay; new ones join as they decode.
+      const loaded=Object.fromEntries(wanted.flatMap(([name,request])=>{
+        const source=artworkSource(work,request.id,version,request.original);
+        return sources.current[name]===source&&state.urls[name]?[[name,state.urls[name]]]:[];
+      }));
       const kept=state.urls;
       setState({key,urls:Object.fromEntries(wanted.flatMap(([name])=>kept[name]?[[name,kept[name]]]:[]))});
-      for(const entry of wanted)if(!kept[entry[0]])void load(entry).then(value=>{if(value&&!controller.signal.aborted)setState(current=>current.key===key?{key,urls:{...current.urls,[value[0]]:value[1]}}:current);});
+      for(const entry of wanted)if(!loaded[entry[0]])void load(entry).then(value=>{if(value&&!controller.signal.aborted){
+        sources.current[value[0]]=artworkSource(work,entry[1].id,version,entry[1].original);
+        setState(current=>current.key===key?{key,urls:{...current.urls,[value[0]]:value[1]}}:current);
+      }});
     }
     return()=>controller.abort();
   },[key,active]);// eslint-disable-line react-hooks/exhaustive-deps

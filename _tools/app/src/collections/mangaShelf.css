@@ -15,5 +15,6 @@
 .manga-bookcase--list { height: 100%; overflow: hidden; }
 .manga-bookcase.manga-bookcase--list .home-shelf { display: block; height: 100%; margin: 0; padding: 0; overflow: visible; }
 .manga-bookcase.manga-bookcase--list .home-shelf__track, .manga-shelf-row__waiting { box-sizing: border-box; height: 100%; gap: 0; padding: var(--space-4) var(--space-6) var(--space-8); }
+.manga-shelf-row__waiting .manga-bookcase-board { width: 100%; }
 .manga-bookcase.manga-bookcase--list .manga-bookcase-spines { justify-content: flex-start; }
 .manga-bookcase--list .manga-cover-empty { align-self: center; font-size: var(--type-meta); }

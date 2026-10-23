@@ -6,6 +6,12 @@ import type {CollectionSummary, CollectionVolume} from './collectionModel';
 
 vi.mock('./transport', () => ({native: vi.fn()}));
 
+it('queues sides for a row and only the picked volume back', () => {
+  const volumes:CollectionVolume[] = [1,2].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),spineScan:{side:`side${n}`,back:`back${n}`}}));
+  expect(Object.keys(mangaScanRequests(volumes))).toEqual(['side1','side2']);
+  expect(Object.keys(mangaScanRequests(volumes,'v2'))).toEqual(['side1','side2','back2']);
+});
+
 it('requests scans with the published digest through the cover media cache and projects decoded URLs', async () => {
   const digest = 'a'.repeat(64), id = `manga-scan-9780306406157-side-${digest}`;
   const volume: CollectionVolume = {id: 'v', volumeNumber: 1, editionIndex: 0, displayLabel: '1', spineScan: {side: id, back: null}};

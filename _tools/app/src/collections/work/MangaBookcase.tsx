@@ -111,7 +111,7 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   return <div ref={viewport} style={mangaShelfStyle(touchTargets)} onPointerDown={pointerDown} onPointerMove={touchTargets ? moved : undefined} onPointerUp={touchTargets ? pointerUp : undefined}
     onScrollCapture={touchTargets ? () => { if (tap.current) tap.current.moved = true; } : undefined}
     onPointerCancel={touchTargets ? () => { tap.current = null; } : undefined}
-    onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
+    onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller releaseAtEdges previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
     {manga.volumes.map(volume => <Spine key={volume.id} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={(front, event) => void images.loaded(`${volume.id}:${front ? "front" : "strip"}`, event)} onImageError={(front, src) => images.failed(`${volume.id}:${front ? "front" : "strip"}`, src)} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={manga.focuses.find(focus => focus.volumeId === volume.id && focus.coverArtworkId === volume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(volume.volumeNumber)} src={volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null} onPick={() => onPick(volume.id)} onEnlarge={onEnlarge && (() => onEnlarge(volume.id))} />)}
     {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
   </div><ShelfMaterial /></div></ShelfScroller></div>;
@@ -135,11 +135,11 @@ function Spine({ title, author, publisher, ink, tablet, onSample, onScanSample, 
   const latin = !/[\u1100-\u11ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/u.test(title);
   const titleHeight = size.height * .73 - print * 4.95;
   const titleLength = latin ? title.length * .74 : Array.from(title.trim()).length * 1.22;
-  const titleFont = Math.max(4, Math.min(print * .66, titleHeight / Math.max(1, titleLength) * .92));
+  const titleFont = Math.min(print * .66, titleHeight / Math.max(1, titleLength) * .92);
   const labelLength = Array.from(publisher ?? "").reduce((length, character) => length + (/[\u1100-\u11ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/u.test(character) ? 1 : .65), 0);
   const labelFont = Math.min(print * .34, print * .95 / Math.max(1, labelLength));
-  const authorFont = Math.min(print * .32, size.height * .1 / Math.max(1, author?.length ?? 0));
-  const publisherFont = Math.min(print * .3, print * 1.2 / Math.max(1, publisher?.length ?? 0));
+  const authorFont = Math.min(print * .32, size.height * .1 / Math.max(1, Array.from(author ?? "").length * 1.22));
+  const publisherFont = Math.min(print * .3, print * 1.2 / Math.max(1, Array.from(publisher ?? "").length * 1.22));
   // Admit a front only when picked, then retain it through put-down. The strip remains
   // visible until that front loads; StableImage retains decoded covers on refresh.
   const [frontMounted, setFrontMounted] = useState(picked);
@@ -183,7 +183,7 @@ function Spine({ title, author, publisher, ink, tablet, onSample, onScanSample, 
     {latest && <span className="manga-latest-label">최신</span>}
     <span className={`manga-spine-strip${scanned ? " manga-spine-strip--scanned" : ""}${privacy ? " manga-spine-strip--private" : ""}`} aria-hidden="true">
       {!privacy && <>
-        <span className="manga-print-label"><span style={labelFont < 3 ? { visibility: "hidden" } : undefined}>{publisher}</span></span>
+        <span className="manga-print-label"><span>{publisher}</span></span>
         <span className={`manga-print-title${latin ? " manga-print-title--latin" : ""}`}><span>{title}</span></span>
       </>}
       <span className="manga-spine-number">{volume.volumeNumber}</span>

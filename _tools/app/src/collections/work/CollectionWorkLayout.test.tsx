@@ -21,7 +21,8 @@ describe.each([false, true])("shared manga shelf CSS (tablet: %s)", mobile => {
     styles(mobile);
     const { container } = render(<div className={mobile ? "tablet-work tablet-work--manga" : "work-surface"}><MangaBookcase manga={data(count)} privacy={false} onPick={() => undefined} /></div>);
     const board = getComputedStyle(container.querySelector(".manga-bookcase-board")!);
-    expect(board.flexShrink).toBe("0"); expect(board.width).toBe("max-content"); expect(board.minWidth).toBe("100%");
+    // The board grows to fill the track without forcing overflow, and never shrinks below its books.
+    expect(board.flexShrink).toBe("0"); expect(board.flexGrow).toBe("1"); expect(board.width).toBe("max-content");
     expect(getComputedStyle(container.querySelector(".manga-bookcase-spines")!).justifyContent).toBe("center");
     expect(container.querySelector('[data-volume-id="v1"]')).not.toBeNull();
     expect(container.querySelector(`[data-volume-id="v${count}"]`)).not.toBeNull();

@@ -1318,6 +1318,40 @@ describe('shelf view',()=>{
 });
 
 
+it('renders row spines before artwork finishes and resumes interrupted covers without fetching unpicked backs', async()=>{
+  const work={...mangaItem(),volumes:[{...item.volumes[0],spineScan:{side:'scan-side',back:'scan-back'}}]};
+  mocks.api.mockResolvedValue({revision:'r1',item:work});
+  const pending=Promise.withResolvers<{url:string}>();
+  mocks.native.mockReturnValue(pending.promise);
+  const props={items:[work],label:'만화 작품 목록',revision:'r1',active:true,privacy:false,owned:()=>null,pick:null,onPick:vi.fn(),onOpen:vi.fn()};
+  const view=render(<TabletMangaShelf {...props}/>);
+  await screen.findByRole('button',{name:'2권 보기'});
+  await waitFor(()=>expect(mocks.native).toHaveBeenCalledTimes(2));
+  expect(mocks.native.mock.calls.map(call=>call[1].artworkId)).toEqual(['c2','scan-side']);
+  view.rerender(<TabletMangaShelf {...props} active={false}/>);
+  expect(mocks.native.mock.calls.every(call=>(call[2] as AbortSignal).aborted)).toBe(true);
+  mocks.native.mockResolvedValue({url:'https://example.invalid/resumed'});
+  view.rerender(<TabletMangaShelf {...props}/>);
+  await waitFor(()=>expect(mocks.native).toHaveBeenCalledTimes(4));
+  await waitFor(()=>expect(view.container.querySelector('img[src="https://example.invalid/resumed"]')).toBeTruthy());
+  view.rerender(<TabletMangaShelf {...props} pick={{id:work.id,volumeId:'v2'}}/>);
+  await waitFor(()=>expect(mocks.native.mock.calls.some(call=>call[1].artworkId==='scan-back')).toBe(true));
+  await act(async()=>pending.resolve({url:'https://example.invalid/abandoned'}));
+  expect(view.container.querySelector('img[src="https://example.invalid/abandoned"]')).toBeNull();
+});
+
+it('re-reads only the manga row whose scan availability changed', async()=>{
+  const works=[{...mangaItem(),scanRevision:'s1'},{...mangaItem(),id:'other',name:'Other',scanRevision:'s1'}];
+  mocks.api.mockImplementation(async(path:string)=>({revision:'r1',item:{...works.find(work=>path.endsWith(work.id))!,volumes:item.volumes}}));
+  const props={items:works,label:'만화 작품 목록',revision:'r1',active:true,privacy:false,owned:()=>null,pick:null,onPick:vi.fn(),onOpen:vi.fn()};
+  const view=render(<TabletMangaShelf {...props}/>);
+  await screen.findByRole('group',{name:'Other 책장'});
+  expect(mocks.api).toHaveBeenCalledTimes(2);
+  view.rerender(<TabletMangaShelf {...props} items={[{...works[0],scanRevision:'s2'},works[1]]}/>);
+  await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(3));
+  expect(mocks.api.mock.calls.filter(call=>call[0].endsWith('/other'))).toHaveLength(1);
+});
+
 it('renders an empty tablet manga shelf when the detail reply has no item', async()=>{
   mocks.api.mockResolvedValue({revision:'empty-detail'});
   render(<TabletMangaShelf items={[mangaItem()]} label="만화 작품 목록" revision="empty-detail" active privacy={false} owned={()=>null} pick={null} onPick={vi.fn()} onOpen={vi.fn()}/>);

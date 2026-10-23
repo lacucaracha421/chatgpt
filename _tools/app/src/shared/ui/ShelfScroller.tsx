@@ -15,10 +15,11 @@ type ShelfScrollerProps = {
   previousLabel?: string;
   nextLabel?: string;
   wholeCards?: boolean;
+  releaseAtEdges?: boolean;
 };
 
 /** Horizontal shelf with wheel panning, pointer drag, glide, and paging arrows. */
-export function ShelfScroller({ children, previousLabel = "이전 발매 예정", nextLabel = "다음 발매 예정", wholeCards = false }: ShelfScrollerProps) {
+export function ShelfScroller({ children, previousLabel = "이전 발매 예정", nextLabel = "다음 발매 예정", wholeCards = false, releaseAtEdges = false }: ShelfScrollerProps) {
   const bridge = useContext(ShelfBridgeContext);
   const track = useRef<HTMLDivElement>(null);
   const shelf = useRef<HTMLDivElement>(null);
@@ -85,6 +86,7 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   useEffect(() => stop, []);
 
   const bindWheel = useHorizontalWheel({
+    releaseAtEdges,
     getLeft: () => target.current ?? track.current?.scrollLeft ?? 0,
     pan: delta => easeTo((target.current ?? track.current?.scrollLeft ?? 0) + (wholeCards && cardStep.current ? Math.sign(delta) * Math.max(cardStep.current, Math.abs(delta) * 1.6) : delta * 1.6)),
   });
@@ -98,7 +100,7 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   const drag = useRef<{ x: number; left: number; moved: boolean; lastX: number; lastT: number; velocity: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const pointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "mouse" || event.button !== 0 || !track.current || bridge?.locked) return;
+    if (event.pointerType !== "mouse" || event.button !== 0 || !track.current || track.current.scrollWidth <= track.current.clientWidth + 1 || bridge?.locked) return;
     stop();
     drag.current = { x: event.clientX, left: track.current.scrollLeft, moved: false, lastX: event.clientX, lastT: event.timeStamp, velocity: 0 };
   };

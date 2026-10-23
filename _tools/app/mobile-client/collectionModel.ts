@@ -14,6 +14,8 @@ export type AvPortraitImage = {sha256:string;sizeBytes:number;contentType:string
 export type AvPerson = ProfilePerson & {id:string;name:string;nameJa?:string|null;creditName?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
+  /** Scan availability for this work, independent of the authority publication. */
+  scanRevision?:string;
   kakaoReview?: import('../src/library/types').KakaoReview | null;
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null;/** Spine artwork only, from a server that made the medium (768 px) copy. */medium?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;

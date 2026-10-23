@@ -8,6 +8,21 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const volumes=[1,2,3].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),coverArtworkId:`a${n}`,localReleaseDate:n===3?"2026-12-01":null,isbn13:null,releaseStatus:n===3?"upcoming" as const:"released" as const}));
 const manga:MangaWorkData={volumes,activeVolumeId:"v1",editionIndex:0,focuses:[],ownedNumbers:[1],scope:"",revision:"",ownership:null,management:null};
 describe("printed-spine bookcase",()=>{
+  it("lets the page wheel pass over a short row and at the end of a horizontal run", () => {
+    const view=render(<MangaBookcase list manga={manga} privacy={false} onPick={()=>undefined}/>);
+    const track=view.container.querySelector<HTMLElement>(".home-shelf__track")!;
+    let width=200;
+    Object.defineProperties(track,{clientWidth:{value:200},scrollWidth:{get:()=>width}});
+    const wheel=()=>{
+      const event=new WheelEvent('wheel',{deltaY:30,bubbles:true,cancelable:true});
+      fireEvent(track,event);return event.defaultPrevented;
+    };
+    expect(wheel()).toBe(false);
+    width=800;track.scrollLeft=590;
+    expect(wheel()).toBe(true);
+    expect(wheel()).toBe(false);
+  });
+
   it("labels only the latest Korean release and preserves its unowned look", () => {
     const view = render(<MangaBookcase manga={{ ...manga, latestKoreanVolume: 2 }} privacy={false} onPick={() => undefined} />);
     const latest = screen.getByRole("button", { name: "2권 보기" });

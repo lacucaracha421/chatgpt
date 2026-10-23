@@ -931,6 +931,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                     waiting = {row[0] for row in db.execute("SELECT collection_id FROM collection_binding_requests WHERE provider='kakao' AND state='pending'")}
                     review_meta["kakaoUnlinkedCount"] = sum(not item["kakaoReview"]["bound"] and not item["kakaoReview"]["hideConnectionPrompt"]
                                                           and item["id"] not in waiting for item in manga)
+            manga_scans.annotate_revisions(db, payloads, active["libraryId"] if active is not None else None)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "scanRevision": scan_revision, "filterVersion": 1, "totalCount": total,
                 "items": [public_item(payload, include_review=kakaoReview, medium=mediums) for payload in payloads], "nextCursor": next_cursor, **review_meta}

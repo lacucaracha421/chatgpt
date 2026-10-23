@@ -42,6 +42,26 @@ function renderShelf() {
 }
 
 describe("ShelfScroller wheel and touch boundaries", () => {
+  it("passes a short collection row's wheel to the page and releases both ends of a long row", () => {
+    const view = render(<ShelfScroller releaseAtEdges><button>책</button></ShelfScroller>);
+    const track = view.container.querySelector<HTMLElement>(".home-shelf__track")!;
+    let width = 200;
+    Object.defineProperties(track, {clientWidth:{value:200},scrollWidth:{get:()=>width}});
+    expect(wheel(track, 0, 30).defaultPrevented).toBe(false);
+    expect(wheel(track, 10, -30).defaultPrevented).toBe(false);
+    width = 800;
+    expect(wheel(track, 20, -30).defaultPrevented).toBe(false);
+    track.scrollLeft = 590;
+    expect(wheel(track, 30, 30).defaultPrevented).toBe(true);
+    expect(wheel(track, 40, 30).defaultPrevented).toBe(false);
+    flushFrames();
+    expect(track.scrollLeft).toBe(600);
+    expect(wheel(track, 50, -30).defaultPrevented).toBe(true);
+    flushFrames();
+    width = 200; track.scrollLeft = 0;
+    expect(wheel(track, 60, 30).defaultPrevented).toBe(false);
+  });
+
   it("holds the wheel at the pending animated end, then releases a new gesture", () => {
     const { track } = renderShelf();
     expect(wheel(track, 0, 30).defaultPrevented).toBe(true);

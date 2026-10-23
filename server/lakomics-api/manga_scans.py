@@ -23,6 +23,29 @@ def version(db):
     return hashlib.sha256(repr([tuple(row) for row in rows]).encode()).hexdigest()
 
 
+def annotate_revisions(db, items, library_id=None):
+    """List rows invalidate only when scans belonging to that work change."""
+    works = {item["id"]: {v.get("isbn13") for v in item.get("volumes", []) if v.get("isbn13")}
+             for item in items if item.get("type") == "manga"}
+    if not works:
+        return
+    if library_id is not None:
+        for work_id, isbn in db.execute(
+                "SELECT work_id,isbn13 FROM collection_authority_volume_sources WHERE library_id=? "
+                "AND deleted=0 AND work_id IN (SELECT value FROM json_each(?)) AND isbn13 IS NOT NULL",
+                [library_id, json.dumps(list(works))]):
+            works[work_id].add(isbn)
+    scans = {}
+    for isbn, part, digest in db.execute(
+            "SELECT isbn13,part,sha256 FROM manga_scans WHERE isbn13 IN (SELECT value FROM json_each(?)) "
+            "ORDER BY isbn13,part", [json.dumps(sorted(set().union(*works.values())))]):
+        scans.setdefault(isbn, []).append((isbn, part, digest))
+    for item in items:
+        if item["id"] in works:
+            rows = [row for isbn in sorted(works[item["id"]]) for row in scans.get(isbn, [])]
+            item["scanRevision"] = hashlib.sha256(repr(rows).encode()).hexdigest()
+
+
 def enrich(db, payload):
     """Read projection only: scan ids are virtual artwork served by the existing ticket route."""
     if payload.get("type") != "manga":

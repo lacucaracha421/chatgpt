@@ -3,6 +3,8 @@ import { useCallback, useRef } from "react";
 const GESTURE_IDLE_MS = 300;
 
 type HorizontalWheelOptions = {
+  /** Collection rows release the page immediately at either end. Home keeps its gesture latch. */
+  releaseAtEdges?: boolean;
   /** Animated shelves use their pending destination when testing the ends. */
   getLeft?(): number;
   pan?(delta: number): void;
@@ -23,7 +25,7 @@ export function createHorizontalWheelHandler(node: HTMLElement, options: Horizon
     const max = Math.max(0, node.scrollWidth - node.clientWidth);
     const left = Math.max(0, Math.min(max, options.getLeft?.() ?? node.scrollLeft));
     const canScroll = delta < 0 ? left > 1 : left < max - 1;
-    if (!latched && !canScroll) return;
+    if (max <= 1 || (!canScroll && (options.releaseAtEdges || !latched))) return;
     latched = true;
     event.preventDefault();
     event.stopPropagation();
@@ -41,6 +43,7 @@ export function useHorizontalWheel(options: HorizontalWheelOptions = {}) {
   return useCallback((node: HTMLElement | null) => {
     if (!node) return;
     const wheel = createHorizontalWheelHandler(node, {
+      get releaseAtEdges() { return current.current.releaseAtEdges; },
       getLeft: () => current.current.getLeft?.() ?? node.scrollLeft,
       pan: delta => {
         if (current.current.pan) current.current.pan(delta);
@@ -48,7 +51,7 @@ export function useHorizontalWheel(options: HorizontalWheelOptions = {}) {
       },
     });
     const overscroll = node.style.overscrollBehaviorX;
-    node.style.overscrollBehaviorX = "contain";
+    node.style.overscrollBehaviorX = current.current.releaseAtEdges ? "auto" : "contain";
     node.addEventListener("wheel", wheel, { passive: false });
     return () => {
       node.removeEventListener("wheel", wheel);

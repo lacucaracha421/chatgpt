@@ -104,6 +104,14 @@ class MangaScansTests(unittest.TestCase):
         self.assertEqual(self.upload(digest="a" * 64).status_code, 422)
         self.assertEqual(self.puts, [])
 
+    def test_list_scan_revision_changes_only_for_the_affected_work(self):
+        listing = lambda: self.client.get("/v1/collections?type=manga", headers=AUTH).json()["items"][0]
+        before = listing()["scanRevision"]
+        self.assertEqual(self.upload(isbn="9780140328721").status_code, 200)
+        self.assertEqual(listing()["scanRevision"], before)
+        self.assertEqual(self.upload().status_code, 200)
+        self.assertNotEqual(listing()["scanRevision"], before)
+
     def test_storage_failure_does_not_publish_availability(self):
         with patch.object(self.store, "put_object", side_effect=RuntimeError("offline")):
             self.assertEqual(self.upload().status_code, 502)
