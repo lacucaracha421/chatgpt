@@ -988,9 +988,11 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
             (MediaVariant::CollectionSourceThumbnail, None)
         }
         "work-artwork" if segments.next().is_none() => (MediaVariant::WorkArtwork, None),
-        "work-artwork-thumbnail" if segments.next().is_none() => {
-            (MediaVariant::WorkArtworkThumbnail, None)
-        }
+        "work-artwork-thumbnail" => match (segments.next(), segments.next()) {
+            (None, None) => (MediaVariant::WorkArtworkThumbnail, None),
+            (Some("spine"), None) => (MediaVariant::WorkArtworkSpine, None),
+            _ => return None,
+        },
         "mangadex-cover-preview" => {
             let file_name = percent_decode(segments.next()?)?;
             if segments.next().is_some()
@@ -1049,6 +1051,7 @@ fn library_media_cache_control(
             }
         }
         (MediaVariant::Thumbnail, None) => Some("no-store"),
+        (MediaVariant::WorkArtworkSpine, _) => Some(PREVIEW_CACHE_CONTROL),
         _ => None,
     }
 }

@@ -559,6 +559,18 @@ impl Library {
         &self,
         artwork_id: &str,
     ) -> Result<MediaResponse, LibraryError> {
+        self.resolve_work_artwork_thumbnail_size(artwork_id, false)
+    }
+
+    pub fn resolve_work_artwork_spine(&self, artwork_id: &str) -> Result<MediaResponse, LibraryError> {
+        self.resolve_work_artwork_thumbnail_size(artwork_id, true)
+    }
+
+    fn resolve_work_artwork_thumbnail_size(
+        &self,
+        artwork_id: &str,
+        spine: bool,
+    ) -> Result<MediaResponse, LibraryError> {
         if uuid::Uuid::parse_str(artwork_id).is_err() && !is_authority_source_artwork_id(artwork_id) {
             return Err(LibraryError::MediaNotFound);
         }
@@ -572,9 +584,46 @@ impl Library {
             )
             .optional()?
             .ok_or(LibraryError::MediaNotFound)?;
+        let cached = work_artwork_thumbnail_relative_path(&collection_id, artwork_id);
+        let spine_relative = cached.replace(".webp", ".spine.webp");
+        if spine && self.root().join(&spine_relative).exists() {
+            return self.open_library_media(&spine_relative);
+        }
         let thumbnail_relative_path =
             self.ensure_work_artwork_thumbnail(&collection_id, artwork_id, &relative_path)?;
-        self.open_library_media(&thumbnail_relative_path)
+        if !spine {
+            return self.open_library_media(&thumbnail_relative_path);
+        }
+        let media = self.open_library_media(&thumbnail_relative_path)?;
+        let image = image::ImageReader::new(BufReader::new(media.file))
+            .with_guessed_format()
+            .map_err(|_| LibraryError::InvalidWorkArtwork)?
+            .decode()
+            .map_err(|_| LibraryError::InvalidWorkArtwork)?;
+        // Covers are portrait: keep 64px of width and the original aspect ratio.
+        let height = ((u64::from(image.height()) * 64) / u64::from(image.width())).max(1) as u32;
+        let path = self.root().join(&spine_relative);
+        let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let write = || -> Result<(), LibraryError> {
+            let file = fs::File::create(&temporary).map_err(|source| LibraryError::WriteWorkArtwork {
+                path: temporary.clone(), source,
+            })?;
+            image.thumbnail(64, height).write_to(&mut BufWriter::new(file), ImageFormat::WebP)
+                .map_err(|source| LibraryError::WriteWorkArtwork {
+                    path: temporary.clone(), source: std::io::Error::other(source),
+                })
+        };
+        if let Err(error) = write() {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Err(source) = fs::rename(&temporary, &path) {
+            let _ = fs::remove_file(&temporary);
+            if !path.exists() {
+                return Err(LibraryError::WriteWorkArtwork { path, source });
+            }
+        }
+        self.open_library_media(&spine_relative)
     }
 
     pub(crate) fn backfill_missing_work_artwork_thumbnails(&self) -> Result<(), LibraryError> {
@@ -719,9 +768,9 @@ impl Library {
                 .collect();
             let thumbnails = rows
                 .iter()
-                .map(|(id, collection_id, _)| {
-                    self.root()
-                        .join(work_artwork_thumbnail_relative_path(collection_id, id))
+                .flat_map(|(id, collection_id, _)| {
+                    let relative = work_artwork_thumbnail_relative_path(collection_id, id);
+                    [self.root().join(&relative), self.root().join(relative.replace(".webp", ".spine.webp"))]
                 })
                 .collect();
             (artwork, thumbnails)

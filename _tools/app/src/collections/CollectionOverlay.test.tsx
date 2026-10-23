@@ -445,7 +445,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await act(async () => finishSync({completed:1,skipped:2,failed:0}));
     expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toBeNull();
     await settleWorkImages();
-    expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toHaveAttribute("src","http://lakomics.localhost/work-artwork-thumbnail/art-10");
+    expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toHaveAttribute("src","http://lakomics.localhost/work-artwork-thumbnail/art-10/spine");
     await userEvent.click(screen.getByRole("button", {name:"대체판 1 선택"})); await settleWorkImages();
     expect(screen.getByRole("button", {name:"1.1권 보기"})).toBeInTheDocument();
   });

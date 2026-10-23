@@ -9,7 +9,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { displayDate } from "../../shared/displayDate";
 import type { CollectionVolume, CollectionCoverFocus } from "../../library/types";
-import { mangaSpineScanUrl, workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
+import { mangaSpineScanUrl, workArtworkSpineUrl, workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
 import { ShelfScroller } from "../../shared/ui/ShelfScroller";
 import { useWorkImageReady } from "./useWorkImageReady";
@@ -66,7 +66,7 @@ function printZoom(): number {
 export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", title = "", author = null, publisher = null, onPick, onEnlarge, onReady, onPull, pullPending = false, useBack = useShelfBack, range, seriesKey, seriesScan = false }: { seriesScan?: boolean; seriesKey?: string; range?: { start: number; count: number }; pullPending?: boolean; onPull?(id: string): void; useBack?: MangaShelfBack; manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; title?: string; author?: string | null; publisher?: string | null; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
   const volumes = useMemo(() => range ? manga.volumes.slice(range.start, range.start + range.count) : manga.volumes, [manga.volumes, range?.start, range?.count]);
   const viewport = useRef<HTMLDivElement>(null);
-  const [zoom] = useState(printZoom);
+  const [zoom] = useState(() => list && !touchTargets ? 1 : printZoom());
   const [out, setOut] = useState<{ id: string; leaving: boolean } | null>(null);
   const [painted, setPainted] = useState(false);
   const pendingPick = useRef<string | null>(null);
@@ -209,7 +209,8 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     else track.scrollLeft = left;
   }, [manga.activeVolumeId]);
   const { requested, measured } = useSpineImages(viewport, !list, volumes, scanVolume?.id ?? firstOwned?.id);
-  const covers = useMemo(() => new Map(volumes.map(volume => [volume.id, volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null])), [volumes, coverUrl]);
+  const spineCoverUrl = coverUrl === workArtworkThumbnailUrl && !touchTargets ? workArtworkSpineUrl : coverUrl;
+  const covers = useMemo(() => new Map(volumes.map(volume => [volume.id, volume.coverArtworkId ? spineCoverUrl(volume.coverArtworkId) : null])), [volumes, spineCoverUrl]);
   // The colour source is eager even when it is outside the strip's opening viewport.
   const needsImage = (id: string) => requested === null || requested.has(id) || id === (scanVolume?.id ?? firstOwned?.id);
   const sources = Object.fromEntries(volumes.filter(volume => needsImage(volume.id)).map(volume => [`${volume.id}:strip`, privacy ? null : covers.get(volume.id) ?? null]));
@@ -267,7 +268,7 @@ const Spine = memo(function Spine({ title, author, publisher, ink, tablet, onSam
   const description = [
     volume.releaseStatus === "upcoming" ? `${displayDate(volume.localReleaseDate)} 출간 예정`.trim() : missing ? "미보유" : null,
   ].filter(Boolean).join(". ") || undefined;
-  const image = !privacy && src && loadImages ? <StableImage src={src} alt="" draggable={false} decodeFirst crossOrigin={appMedia(src) ? "anonymous" : undefined} onLoad={event => {
+  const image = !privacy && src && loadImages ? <StableImage src={src} alt="" draggable={false} decoding="async" decodeFirst crossOrigin={appMedia(src) ? "anonymous" : undefined} onLoad={event => {
     const element = event.currentTarget;
     onImageLoad?.(`${volume.id}:strip`, event);
     if (element.naturalHeight) setArtRatio(element.naturalWidth / element.naturalHeight);
@@ -303,7 +304,7 @@ const Spine = memo(function Spine({ title, author, publisher, ink, tablet, onSam
 /** Keep the printed fallback until the actual raster has decoded; never reveal a blank scan. */
 function ScanImage({ src, onDecoded }: { src: string; onDecoded(image: HTMLImageElement): void }) {
   const latest = useRef(onDecoded); latest.current = onDecoded;
-  return <img src={src} alt="" draggable={false} crossOrigin={appMedia(src) ? "anonymous" : undefined} onLoad={async event => {
+  return <img src={src} alt="" draggable={false} decoding="async" crossOrigin={appMedia(src) ? "anonymous" : undefined} onLoad={async event => {
     const element = event.currentTarget;
     try { await element.decode?.(); } catch { return; }
     if (element.isConnected && element.getAttribute("src") === src && element.naturalWidth && element.naturalHeight) latest.current(element);
@@ -318,6 +319,7 @@ function MangaPullOut({ volume, viewport, privacy, src, title, author, publisher
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [pose, setPose] = useState<{ left: number; top: number; width: number; height: number; depth: number; from: string } | null>(null);
+  const placement = useRef<typeof pose>(null);
   const [painted, setPainted] = useState(Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
   const faceKey = JSON.stringify([privacy, src, volume.spineScan?.back]);
   const [facesReady, setFacesReady] = useState<string | null>(null);
@@ -338,18 +340,33 @@ function MangaPullOut({ volume, viewport, privacy, src, title, author, publisher
       // Match the case shelf's perspective compensation, keeping the edge on its original slot.
       const near = 2200 / (2200 - width / 2), scale = h / height / near;
       const dx = center - left - width / 2, dy = 12 - scale * height * (near - 1) / 2;
-      setPose({ left, top: box.bottom - 12 - height, width, height, depth: 520 * depth / h,
-        from: `translate(${dx.toFixed(2)}px, calc(${dy.toFixed(2)}px + var(--start-lift, 0px))) scale(${scale.toFixed(4)})` });
+      const next = { left, top: box.bottom - 12 - height, width, height, depth: 520 * depth / h,
+        from: `translate(${dx.toFixed(2)}px, calc(${dy.toFixed(2)}px + var(--start-lift, 0px))) scale(${scale.toFixed(4)})` };
+      const old = placement.current;
+      placement.current = next;
+      if (host.current && old && old.width === next.width && old.height === next.height && old.depth === next.depth && old.from === next.from) {
+        // A pulled book follows its spine without rendering React on page scroll.
+        host.current.style.left = `${next.left}px`;
+        host.current.style.top = `${next.top}px`;
+      } else setPose(next);
     };
     measure();
-    window.addEventListener("scroll", measure, true); window.addEventListener("resize", measure);
+    let frame: number | null = null;
+    const scroll = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => { frame = null; measure(); });
+    };
+    window.addEventListener("scroll", scroll, true); window.addEventListener("resize", measure);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     if (viewport.current) {
       observer?.observe(viewport.current);
       const spine = [...viewport.current.querySelectorAll<HTMLElement>("button[data-volume-id]")].find(node => node.dataset.volumeId === volume.id);
       if (spine) observer?.observe(spine);
     }
-    return () => { window.removeEventListener("scroll", measure, true); window.removeEventListener("resize", measure); observer?.disconnect(); };
+    return () => {
+      window.removeEventListener("scroll", scroll, true); window.removeEventListener("resize", measure); observer?.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, [volume.id, volume.spineScan?.side, viewport, size.height, size.spine, size.width]);
   useEffect(() => {
     const timer = setTimeout(() => setPainted(true), 350);

@@ -1,24 +1,28 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { mangaShelfStyle } from "./mangaDimensions";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { mangaShelfStyle, MANGA_MM, MANGA_PX_PER_MM } from "./mangaDimensions";
 import { MANGA_SHELF_GUTTER, packMangaShelves, type MangaShelfRun } from "./mangaShelfLayout";
 import { ShelfMaterial } from "./ShelfMaterial";
 import "./mangaShelf.css";
 
-function Shelf<W extends { id: string }>({ runs, index, ready, near, renderRun }: {
+const Shelf = memo(function Shelf<W extends { id: string }>({ runs, index, ready, near, renderRun }: {
   runs: MangaShelfRun<W>[]; index: number; ready: Set<string>; near: boolean;
   renderRun(run: MangaShelfRun<W>, near: boolean): ReactNode;
 }) {
-  const visited = useRef(false);
-  if (near) visited.current = true;
   return <div className="manga-shelf-row" role="group" aria-label={`${index + 1}번째 선반`}>
     <div className="manga-shelf-row__board"><ShelfMaterial /></div>
     <div className="manga-shelf-row__runs">
-      {visited.current && runs.map(run => <div key={`${run.work.id}:${run.start}`} className="manga-shelf-row__slot" style={{ width: run.width }}>
-        {ready.has(run.work.id) && renderRun(run, near)}
+      {near && runs.map(run => <div key={`${run.work.id}:${run.start}`} className="manga-shelf-row__slot" style={{ width: run.width }}>
+        {ready.has(run.work.id) && renderRun(run, true)}
       </div>)}
     </div>
   </div>;
-}
+}) as <W extends { id: string }>(props: {
+  runs: MangaShelfRun<W>[]; index: number; ready: Set<string>; near: boolean;
+  renderRun(run: MangaShelfRun<W>, near: boolean): ReactNode;
+}) => ReactNode;
+
+type RowWindow = { start: number; end: number; first: number; last: number };
+const initialWindow: RowWindow = { start: 0, end: 0, first: 0, last: 0 };
 
 /** Estimated runs are addressable immediately; detail reads never depend on a completed prefix. */
 export function PackedMangaShelves<W extends { id: string }>({ items, identity, label, scale, tablet = false, active = true, estimate, cachedCount, prepare, renderRun }: {
@@ -30,52 +34,59 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
   const host = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement | null>(null);
   const [width, setWidth] = useState(800);
-  const initial = () => ({ identity, counts: new Map(items.flatMap(work => {
-    const count = cachedCount(work);
-    return count === undefined ? [] : [[work.id, count] as const];
-  })) });
+  const initial = () => {
+    const counts = new Map(items.flatMap(work => {
+      const count = cachedCount(work);
+      return count === undefined ? [] : [[work.id, count] as const];
+    }));
+    return { identity, counts, packingVersion: 0 };
+  };
   const [state, setState] = useState(initial);
   if (state.identity !== identity) setState(initial());
-  const rows = useMemo(() => packMangaShelves(items, work => state.counts.get(work.id) ?? estimate(work), width, scale, tablet), [items, state.counts, width, scale, tablet, estimate]);
+  // Readiness and geometry are separate: an accurate estimate never causes a re-pack.
+  const countsForPacking = useRef(state.counts);
+  countsForPacking.current = state.counts;
+  const rows = useMemo(() => packMangaShelves(items, work => countsForPacking.current.get(work.id) ?? estimate(work), width, scale, tablet), [items, identity, state.packingVersion, width, scale, tablet, estimate]);
   const ready = useMemo(() => new Set(state.counts.keys()), [state.counts]);
   const incoming = { identity, rows, ready };
   const previous = useRef(incoming);
-  // Retain the old publication until an incoming work is prepared.
   const view = previous.current.identity === identity || ready.size || !items.length ? incoming : previous.current;
-  const [nearRows, setNearRows] = useState<number[]>([0]);
-  const distances = useRef(new Map<number, number>([[0, 0]]));
+  const [rowWindow, setRowWindow] = useState(initialWindow);
+  const currentWindow = useRef(initialWindow);
+  const geometry = useRef({ top: 0, height: 0, step: 1 });
   const anchor = useRef<{ identity: string; id: string; volume: number; top: number } | null>(null);
   const measure = useRef(() => {});
   measure.current = () => {
+    const { top, height, step } = geometry.current;
+    const offset = (root.current?.scrollTop ?? window.scrollY) - top;
+    const limit = Math.max(0, view.rows.length - 1);
+    const clamp = (value: number) => Math.max(0, Math.min(limit, value));
+    const first = clamp(Math.floor(offset / step));
+    const last = clamp(Math.ceil((offset + height) / step) - 1);
+    const overscan = height;
+    const next = { first, last, start: clamp(Math.floor((offset - overscan) / step)), end: clamp(Math.ceil((offset + height + overscan) / step) - 1) };
+    const run = view.rows[first]?.find(run => view.ready.has(run.work.id)) ?? view.rows[first]?.[0];
+    anchor.current = run ? { identity: view.identity, id: run.work.id, volume: run.start, top: first * step - offset } : null;
+    const old = currentWindow.current;
+    if (old.start !== next.start || old.end !== next.end || old.first !== next.first || old.last !== next.last) {
+      currentWindow.current = next;
+      setRowWindow(next);
+    }
+  };
+  const resize = useRef(() => {});
+  resize.current = () => {
     const element = host.current;
     if (!element) return;
     const scroller = root.current;
     const top = scroller ? scroller.getBoundingClientRect().top + scroller.clientTop : 0;
-    const height = scroller?.clientHeight ?? window.innerHeight;
-    const bottom = top + height;
-    const next = new Map<number, number>();
-    let measured = false;
-    let firstVisible = false;
-    anchor.current = null;
-    Array.from(element.children).forEach((child, index) => {
-      const rect = child.getBoundingClientRect();
-      if (height <= 0 || rect.height <= 0) return;
-      measured = true;
-      const distance = rect.bottom <= top ? top - rect.bottom + 1 : rect.top >= bottom ? rect.top - bottom + 1 : 0;
-      if (distance <= 600) next.set(index, distance);
-      if (!firstVisible && rect.height && rect.bottom > top && rect.top < bottom) {
-        firstVisible = true;
-        const run = view.rows[index]?.find(run => view.ready.has(run.work.id)) ?? view.rows[index]?.[0];
-        if (run) anchor.current = { identity: view.identity, id: run.work.id, volume: run.start, top: rect.top - top };
-      }
-    });
-    // A retained empty publication has no rows to measure yet. Zero-sized layouts
-    // also cannot tell us which works are near: read and reveal in list order.
-    if (!measured) rows.forEach((_, index) => next.set(index, 0));
-    const oldDistances = distances.current;
-    distances.current = next;
-    const indices = [...next.keys()];
-    setNearRows(current => current.length === indices.length && current.every((value, index) => value === indices[index] && oldDistances.get(value) === next.get(value)) ? current : indices);
+    const padding = parseFloat(getComputedStyle(element).paddingTop) || 0;
+    geometry.current = {
+      top: element.getBoundingClientRect().top - top + (scroller?.scrollTop ?? window.scrollY) + padding,
+      height: scroller?.clientHeight || window.innerHeight,
+      step: element.firstElementChild?.getBoundingClientRect().height || MANGA_MM.height * MANGA_PX_PER_MM[tablet ? "tablet" : "pc"] * scale + 72,
+    };
+    if (element.clientWidth) setWidth(Math.max(1, element.clientWidth - MANGA_SHELF_GUTTER * 2));
+    measure.current();
   };
   useLayoutEffect(() => {
     const element = host.current;
@@ -87,43 +98,120 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
       scroller = scroller.parentElement;
     }
     root.current = scroller;
-    const resize = () => {
-      if (element.clientWidth) setWidth(Math.max(1, element.clientWidth - MANGA_SHELF_GUTTER * 2));
-      measure.current();
+    let frame: number | null = null;
+    const scroll = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => { frame = null; measure.current(); });
     };
-    const scroll = () => measure.current();
+    const onResize = () => resize.current();
     const target = scroller ?? window;
     target.addEventListener("scroll", scroll, { passive: true });
-    window.addEventListener("resize", resize);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    window.addEventListener("resize", onResize);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(onResize);
     observer?.observe(element);
     if (scroller) observer?.observe(scroller);
-    resize();
-    return () => { target.removeEventListener("scroll", scroll); window.removeEventListener("resize", resize); observer?.disconnect(); };
+    onResize();
+    return () => {
+      target.removeEventListener("scroll", scroll); window.removeEventListener("resize", onResize); observer?.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
   useLayoutEffect(() => {
+    const changed = previous.current.rows !== view.rows || previous.current.identity !== view.identity;
     const saved = anchor.current;
     const scroller = root.current;
-    if (saved?.identity === view.identity && scroller) {
-      const index = view.rows.findIndex(row => row.some(run => run.work.id === saved.id && run.start <= saved.volume && run.start + run.count > saved.volume));
-      const element = host.current?.children[index];
-      if (element) scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop - saved.top;
+    // Only changed packing can move an anchor. Window/readiness updates cannot compensate scroll.
+    if (changed) {
+      resize.current();
+      if (saved?.identity === view.identity) {
+        const index = view.rows.findIndex(row => row.some(run => run.work.id === saved.id && run.start <= saved.volume && run.start + run.count > saved.volume));
+        if (index >= 0) {
+          const delta = index * geometry.current.step - ((scroller?.scrollTop ?? window.scrollY) - geometry.current.top) - saved.top;
+          if (delta) {
+            if (scroller) scroller.scrollTop += delta;
+            else window.scrollBy(0, delta);
+          }
+        }
+      }
+      measure.current();
     }
     previous.current = view;
-    measure.current();
-  }, [rows, view.rows, view.identity]);
+  });
+
+  // Publish at most one heavy row per frame, including newly prepared runs.
+  // Keep published rows through a wider exit band so reversing a wheel gesture reuses DOM.
+  type Publication = { runs: MangaShelfRun<W>[]; ready: Set<string> };
+  const [published, setPublished] = useState(() => new Map<number, Publication>(
+    view.rows[0] ? [[0, { runs: view.rows[0], ready: view.ready }]] : [],
+  ));
+  const publication = useRef(published);
+  const mountFrame = useRef<number | null>(null);
+  const publish = useRef(() => {});
+  publish.current = () => {
+    const { top, height, step } = geometry.current;
+    const offset = (root.current?.scrollTop ?? window.scrollY) - top;
+    const keepStart = Math.floor((offset - height * 3) / step);
+    const keepEnd = Math.ceil((offset + height * 4) / step) - 1;
+    const next = new Map(publication.current);
+    let changed = false;
+    for (const [index, row] of next) {
+      if (index < keepStart || index > keepEnd || !view.rows[index]) {
+        next.delete(index); changed = true;
+      } else if (row.runs !== view.rows[index]) {
+        // Repacking/size changes reconcile existing runs rather than tearing down their books.
+        next.set(index, { ...row, runs: view.rows[index] }); changed = true;
+      }
+    }
+    const wanted = currentWindow.current;
+    const candidates: number[] = [];
+    for (let index = wanted.start; index <= wanted.end; index++) {
+      const runs = view.rows[index];
+      if (!runs?.some(run => view.ready.has(run.work.id))) continue;
+      const old = next.get(index);
+      if (!old || runs.some(run => old.ready.has(run.work.id) !== view.ready.has(run.work.id))) candidates.push(index);
+    }
+    candidates.sort((a, b) => Math.max(wanted.first - a, a - wanted.last, 0) - Math.max(wanted.first - b, b - wanted.last, 0));
+    const index = candidates[0];
+    if (index !== undefined) {
+      next.set(index, { runs: view.rows[index], ready: view.ready }); changed = true;
+    }
+    if (changed) { publication.current = next; setPublished(next); }
+    if (candidates.length > 1) mountFrame.current = requestAnimationFrame(() => { mountFrame.current = null; publish.current(); });
+  };
+  useLayoutEffect(() => {
+    if (mountFrame.current === null) mountFrame.current = requestAnimationFrame(() => { mountFrame.current = null; publish.current(); });
+  }, [rowWindow, view.rows, view.ready]);
+  useEffect(() => () => {
+    if (mountFrame.current !== null) cancelAnimationFrame(mountFrame.current);
+    mountFrame.current = null;
+  }, []);
 
   const jobs = useRef(new Map<string, AbortController>());
-  const [, wake] = useState(0);
-  useEffect(() => () => { for (const controller of jobs.current.values()) controller.abort(); }, []);
-  // Reconsider priority on scroll and each completion. Offscreen work is never queued
-  // ahead of the viewport; started reads finish into the clients' shared caches.
+  const latestEstimate = useRef(estimate);
+  latestEstimate.current = estimate;
+  const completed = useRef<{ key: string; identity: string; work: W; count: number }[]>([]);
+  const completionFrame = useRef<number | null>(null);
+  const [completion, wake] = useState(0);
+  useEffect(() => () => {
+    for (const controller of jobs.current.values()) controller.abort();
+    jobs.current.clear();
+    completed.current = [];
+    if (completionFrame.current !== null) cancelAnimationFrame(completionFrame.current);
+    completionFrame.current = null;
+  }, []);
+  // Priority changes only at row boundaries or after a read/packing change.
   useEffect(() => {
     if (!active || state.identity !== identity) return;
     const candidates = new Map<string, { work: W; distance: number }>();
-    for (const [index, distance] of distances.current) for (const run of rows[index] ?? []) {
-      const hit = candidates.get(run.work.id);
-      if (!hit || distance < hit.distance) candidates.set(run.work.id, { work: run.work, distance });
+    // A retained publication can be much longer than the incoming filtered list.
+    const limit = Math.max(0, rows.length - 1);
+    const first = Math.min(limit, rowWindow.first), last = Math.min(limit, rowWindow.last);
+    for (let index = Math.min(limit, rowWindow.start); index <= Math.min(limit, rowWindow.end); index++) {
+      const distance = Math.max(first - index, index - last, 0);
+      for (const run of rows[index] ?? []) {
+        const hit = candidates.get(run.work.id);
+        if (!hit || distance < hit.distance) candidates.set(run.work.id, { work: run.work, distance });
+      }
     }
     for (const { work } of [...candidates.values()].sort((a, b) => a.distance - b.distance)) {
       if (jobs.current.size >= 2) break;
@@ -132,11 +220,36 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
       const controller = new AbortController();
       jobs.current.set(key, controller);
       void prepare(work, controller.signal).catch(() => estimate(work)).then(count => {
-        if (!controller.signal.aborted) setState(current => current.identity === identity ? { ...current, counts: new Map(current.counts).set(work.id, count) } : current);
-      }).finally(() => { jobs.current.delete(key); wake(value => value + 1); });
+        if (!controller.signal.aborted) completed.current.push({ key, identity, work, count });
+      }).finally(() => {
+        if (controller.signal.aborted) {
+          if (jobs.current.get(key) === controller) jobs.current.delete(key);
+          return;
+        }
+        if (completionFrame.current !== null) return;
+        completionFrame.current = requestAnimationFrame(() => {
+          completionFrame.current = null;
+          // Capture the latest scroll position before publishing changed geometry.
+          measure.current();
+          const arrivals = completed.current.splice(0);
+          for (const arrival of arrivals) jobs.current.delete(arrival.key);
+          setState(current => {
+            const matching = arrivals.filter(arrival => arrival.identity === current.identity);
+            if (!matching.length) return current;
+            const counts = new Map(current.counts);
+            let changedPacking = false;
+            for (const arrival of matching) {
+              if (Math.max(1, counts.get(arrival.work.id) ?? latestEstimate.current(arrival.work)) !== Math.max(1, arrival.count)) changedPacking = true;
+              counts.set(arrival.work.id, arrival.count);
+            }
+            return { ...current, counts, packingVersion: current.packingVersion + Number(changedPacking) };
+          });
+          wake(value => value + 1);
+        });
+      });
     }
-  });
+  }, [active, state, identity, rowWindow, rows, ready, prepare, estimate, completion]);
   return <div ref={host} className="manga-shelf-list" role="group" aria-label={label} style={{ ...mangaShelfStyle(tablet), "--manga-spine-scale": scale, overflowAnchor: "none" } as CSSProperties}>
-    {view.rows.map((runs, index) => <Shelf key={index} runs={runs} index={index} ready={view.ready} near={nearRows.includes(index)} renderRun={renderRun} />)}
+    {view.rows.map((runs, index) => <Shelf key={index} runs={runs} index={index} ready={published.get(index)?.ready ?? view.ready} near={published.has(index)} renderRun={renderRun} />)}
   </div>;
 }

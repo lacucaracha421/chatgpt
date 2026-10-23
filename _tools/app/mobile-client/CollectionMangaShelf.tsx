@@ -91,6 +91,8 @@ function TabletMangaRow({work, run, near, revision, active, privacy, owned, pick
     onEnlarge={volumeId => onOpen(work.id, {volumeId, edition})} onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
 }
 
+const estimateShelfCount = (work: CollectionSummary) => Math.max(1, work.volumes ? shelfEditionVolumes(work.volumes).length : work.releaseSchedule?.kakao?.volumes.length ?? work.releaseSchedule?.mangadex?.volumes.length ?? work.ownedVolumes?.[0]?.count ?? 1);
+
 /** The tablet uses the PC's shared packing, with tablet scale and touch actions. */
 export function TabletMangaShelf({items, label, size = 'normal', revision, active, privacy, owned, pick, onPick, onOpen, onActions}: {
   items: CollectionSummary[]; label: string; size?: SpineSize; revision: string; active: boolean; privacy: boolean;
@@ -101,7 +103,7 @@ export function TabletMangaShelf({items, label, size = 'normal', revision, activ
 }) {
   return <PackedMangaShelves items={items} identity={JSON.stringify([revision, items.map(work => work.id)])} label={label} scale={spineScale('tablet', 'manga', size)} tablet active={active}
     cachedCount={work => { const hit = details.get(detailKey(work, revision)); return hit ? shelfEditionVolumes(hit.item?.volumes ?? []).length : undefined; }}
-    estimate={work => Math.max(1, work.volumes ? shelfEditionVolumes(work.volumes).length : work.releaseSchedule?.kakao?.volumes.length ?? work.releaseSchedule?.mangadex?.volumes.length ?? work.ownedVolumes?.[0]?.count ?? 1)}
+    estimate={estimateShelfCount}
     prepare={async (work, signal) => shelfEditionVolumes((await readDetail(work, revision, signal)).item?.volumes ?? []).length}
     renderRun={(run, near) => <TabletMangaRow work={run.work} run={run} near={near} revision={revision} active={active} privacy={privacy} owned={edition => owned(run.work, edition)} pick={pick} onPick={onPick} onOpen={onOpen} onActions={onActions}/>} />;
 }

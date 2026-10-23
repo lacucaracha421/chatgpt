@@ -110,6 +110,10 @@ export function workArtworkThumbnailUrl(artworkId: string): string {
   return `${mediaOrigin()}/work-artwork-thumbnail/${encodeURIComponent(artworkId)}`;
 }
 
+export function workArtworkSpineUrl(artworkId: string): string {
+  return `${workArtworkThumbnailUrl(artworkId)}/spine`;
+}
+
 export function mangadexCoverPreviewUrl(mangaId: string, fileName: string): string {
   return `${mediaOrigin()}/mangadex-cover-preview/${encodeURIComponent(mangaId)}/${encodeURIComponent(fileName)}`;
 }

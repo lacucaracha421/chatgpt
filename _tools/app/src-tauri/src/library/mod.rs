@@ -243,6 +243,7 @@ pub enum MediaVariant {
     CollectionSourceThumbnail,
     WorkArtwork,
     WorkArtworkThumbnail,
+    WorkArtworkSpine,
     MangaDexCoverPreview,
     IgdbImagePreviewCover,
     IgdbImagePreviewHero,
@@ -869,6 +870,9 @@ impl Library {
                 return unrevisioned(self.manga_page(asset_id, page_index))
             }
             MediaVariant::WorkArtwork => return unrevisioned(self.resolve_work_artwork(asset_id)),
+            MediaVariant::WorkArtworkSpine => {
+                return unrevisioned(self.resolve_work_artwork_spine(asset_id))
+            }
             MediaVariant::WorkArtworkThumbnail => {
                 return unrevisioned(self.resolve_work_artwork_thumbnail(asset_id))
             }
@@ -965,6 +969,7 @@ impl Library {
             | MediaVariant::CollectionSourceThumbnail
             | MediaVariant::WorkArtwork
             | MediaVariant::WorkArtworkThumbnail
+            | MediaVariant::WorkArtworkSpine
             | MediaVariant::MangaDexCoverPreview
             | MediaVariant::IgdbImagePreviewCover
             | MediaVariant::IgdbImagePreviewHero

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { spineScale, type SpineSize } from "./case/caseDimensions";
 import { useLibrary } from "../library/LibraryContext";
 import type { CollectionCoverFocus, CollectionSummary, CollectionVolume, LibraryGateway, ReleaseBoardEntry } from "../library/types";
@@ -99,12 +99,13 @@ export function MangaShelfList({ items, label, size = "normal", board, pick, onP
   const { privacyMode } = usePrivacy();
   const { gateway, library } = useLibrary();
   const scope = library?.root ?? "";
+  const estimate = useCallback((work: CollectionSummary) => {
+    const entry = board?.get(work.id);
+    return Math.max(1, entry?.releaseSchedule.kakao?.volumes.length ?? entry?.releaseSchedule.mangadex?.volumes.length ?? entry?.ownedVolumes[0]?.count ?? 1);
+  }, [board]);
   return <PackedMangaShelves items={items} identity={JSON.stringify([scope, items.map(work => [work.id, work.updatedAt])])} label={label} scale={spineScale("pc", "manga", size)}
     cachedCount={work => loaded.get(shelfKey(scope, work))?.volumes.length}
-    estimate={work => {
-      const entry = board?.get(work.id);
-      return Math.max(1, entry?.releaseSchedule.kakao?.volumes.length ?? entry?.releaseSchedule.mangadex?.volumes.length ?? entry?.ownedVolumes[0]?.count ?? 1);
-    }}
+    estimate={estimate}
     prepare={async work => {
       const key = shelfKey(scope, work);
       return (await readShelf(gateway, key, work.id)).volumes.length;

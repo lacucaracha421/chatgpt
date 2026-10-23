@@ -416,6 +416,30 @@
             assert_eq!(warm.status(), StatusCode::OK);
             assert_eq!(warm.body(), thumbnail.body());
         }
+        // Generate from the cached thumbnail even when the original is unreadable.
+        let spine_path = format!("/work-artwork-thumbnail/{ARTWORK_ID}/spine");
+        let mut spine = media_response(Some(&library), &Method::GET, &spine_path);
+        assert_eq!(spine.status(), StatusCode::OK);
+        assert_eq!(spine.headers()[CONTENT_TYPE], "image/webp");
+        assert_eq!(spine.headers()[CACHE_CONTROL], "private, max-age=86400");
+        let decoded = image::load_from_memory(spine.body()).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (64, 96));
+        crate::collectible_cors::allow_cover_canvas(&mut spine, Some("http://tauri.localhost"), &spine_path);
+        assert_eq!(spine.headers()["access-control-allow-origin"], "http://tauri.localhost");
+        let mut external = media_response(Some(&library), &Method::GET, &spine_path);
+        crate::collectible_cors::allow_cover_canvas(&mut external, Some("https://example.com"), &spine_path);
+        assert!(!external.headers().contains_key("access-control-allow-origin"));
+        library.cleanup_unreferenced_work_artwork().unwrap();
+        let cached_spine = library.root().join(format!("work-artwork-thumbnails/{COLLECTION_ID}/{ARTWORK_ID}.spine.webp"));
+        assert!(cached_spine.exists());
+        // A warm spine read does not decode or recreate either larger source.
+        std::fs::write(library.root().join(format!("work-artwork-thumbnails/{COLLECTION_ID}/{ARTWORK_ID}.webp")), b"not an image").unwrap();
+        let warm = media_response(Some(&library), &Method::GET, &spine_path);
+        assert_eq!(warm.status(), StatusCode::OK);
+        assert_eq!(warm.body(), spine.body());
+        for path in [format!("/work-artwork-thumbnail/not-a-uuid/spine"), format!("{spine_path}/more")] {
+            assert_eq!(media_response(Some(&library), &Method::GET, &path).status(), StatusCode::BAD_REQUEST);
+        }
         eprintln!(
             "w5 fixture: cold={cold_elapsed:?}, 20 warm requests={:?}",
             warm_started.elapsed()
@@ -489,6 +513,11 @@
                 &format!("/work-artwork-thumbnail/{artwork_id}"));
             assert_eq!(warm.status(), StatusCode::OK);
             assert_eq!(warm.body(), thumbnail.body());
+            let spine = media_response(Some(&library), &Method::GET,
+                &format!("/work-artwork-thumbnail/{artwork_id}/spine"));
+            assert_eq!(spine.status(), StatusCode::OK, "{artwork_id}");
+            let decoded = image::load_from_memory(spine.body()).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (64, 96));
         }
     }
 

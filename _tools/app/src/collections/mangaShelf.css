@@ -1,11 +1,11 @@
 /* One shared wall/plank per packed row; work runs own books and a printed paper label. */
 .manga-shelf-list { display: flex; flex-direction: column; padding: var(--space-4) 0 var(--space-8); }
-.manga-shelf-row { position: relative; min-width: 0; height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); flex: none; content-visibility: auto; contain-intrinsic-block-size: auto calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); overflow-clip-margin: 8px; }
+.manga-shelf-row { content-visibility: auto; contain-intrinsic-size: auto calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); position: relative; min-width: 0; height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); flex: none; overflow-clip-margin: 8px; }
 .manga-shelf-row__board { position: absolute; top: var(--space-4); left: var(--space-6); right: var(--space-6); height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
 .manga-shelf-row__runs { position: relative; display: flex; gap: var(--space-3); margin: 0 var(--space-6); padding-top: var(--space-4); }
 .manga-shelf-row__slot { flex: none; min-width: 0; }
 .manga-shelf-list__item, .manga-shelf-run { min-width: 0; width: 100%; }
-.manga-shelf-run { position: relative; animation: manga-run-in 140ms var(--ease-standard); }
+.manga-shelf-run { position: relative; }
 .manga-shelf-row__shelf, .manga-shelf-row__waiting { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
 /* Book widths may settle after a scan decodes. They fit inside the reserved run without moving rows. */
 .manga-bookcase--list { height: 100%; min-width: 0; overflow: visible; }
@@ -21,5 +21,3 @@
 .manga-shelf-row__label:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
 .manga-shelf-run .manga-picked-number, .manga-shelf-run .manga-upcoming-date { top: auto; bottom: calc(100% + var(--space-1)); }
 @media (pointer: coarse) { .manga-shelf-row__label { min-height: 44px; } }
-@keyframes manga-run-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .manga-shelf-run { animation: none; } }

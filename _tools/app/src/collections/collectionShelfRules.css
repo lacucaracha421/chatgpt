@@ -16,13 +16,12 @@
 .collection-shelf-material__back {
   position: absolute; left: calc(var(--bk-gutter, 0px) * -1); right: calc(var(--bk-gutter, 0px) * -1); top: -12px; bottom: 0;
   background:
+    linear-gradient(90deg, var(--color-bg), transparent 3%, transparent 97%, var(--color-bg)),
+    linear-gradient(var(--color-bg), transparent 14px),
     linear-gradient(transparent, var(--bk-shadow)) 0 100% / 100% 10px no-repeat,
     radial-gradient(60% 46px at 50% 0, var(--bk-light), transparent),
     linear-gradient(var(--bk-light), transparent 62%),
     linear-gradient(transparent 82%, rgba(0, 0, 0, .28)), var(--bk-back);
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent), linear-gradient(transparent, #000 14px);
-  mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent), linear-gradient(transparent, #000 14px);
-  -webkit-mask-composite: source-in; mask-composite: intersect;
 }
 .collection-shelf-material__back::before { content: ""; position: absolute; left: 12%; right: 12%; top: 6px; height: 2px; background: linear-gradient(90deg, transparent, var(--bk-lamp) 15%, var(--bk-lamp) 85%, transparent); opacity: .3; }
 .collection-shelf-material__plank {
@@ -48,14 +47,14 @@
     linear-gradient(90deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .12) 11%, rgba(255, 255, 255, .13) 30%, rgba(255, 255, 255, .02) 48%, rgba(0, 0, 0, .05) 74%, rgba(0, 0, 0, .40));
   box-shadow: inset 0 1px rgba(255, 248, 236, .32);
 }
-.collection-spine-light::after { content: ""; position: absolute; inset: 0; opacity: .30; mix-blend-mode: overlay; border-radius: inherit; background-image: var(--bk-print-grain); }
+.collection-spine-light::after { content: ""; position: absolute; inset: 0; opacity: .055; border-radius: inherit; background-image: var(--bk-print-grain); }
 .collection-spine-light--plastic {
   background:
     linear-gradient(rgba(255, 238, 212, .20), transparent 14%, transparent 84%, rgba(0, 0, 0, .30)),
     linear-gradient(90deg, rgba(255, 255, 255, .20), rgba(255, 255, 255, .06) 12%, transparent 40%, rgba(0, 0, 0, .06) 80%, rgba(0, 0, 0, .42));
   box-shadow: inset 0 1px rgba(255, 250, 240, .45), inset 1px 0 rgba(255, 255, 255, .10);
 }
-.collection-spine-light--plastic::after { opacity: .14; }
+.collection-spine-light--plastic::after { opacity: .025; }
 .collection-spine-light--board { background: linear-gradient(rgba(255, 238, 212, .18), transparent 18%, transparent 82%, rgba(0, 0, 0, .3)), linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 14%, transparent 86%, rgba(0, 0, 0, .35)); }
 .collection-spine-light--sleeve::before { content: ""; position: absolute; inset: var(--spine-rim) 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .07) 45%, transparent 60%); }
 
