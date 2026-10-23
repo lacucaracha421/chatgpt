@@ -81,10 +81,10 @@ describe("bookstore scans", () => {
   });
   it("leaves an unscanned back plain and masks every face in privacy mode", () => {
     const noBack = { ...manga, volumes: [{ ...manga.volumes[0], spineScan: { side, back: null } }] };
-    const view = render(<MangaBookcase manga={noBack} privacy={false} onPick={() => {}} />);
+    const view = render(<MangaBookcase list manga={noBack} privacy={false} onPick={() => {}} />);
     fireEvent.click(view.container.querySelector("button[data-volume-id]")!);
     expect(document.querySelector(".paperback-back")).toBeEmptyDOMElement();
-    view.rerender(<MangaBookcase manga={manga} privacy onPick={() => {}} />);
+    view.rerender(<MangaBookcase list manga={manga} privacy onPick={() => {}} />);
     expect(scan(document.body, side)).toBeNull(); expect(scan(document.body, back)).toBeNull();
     expect(document.querySelector(".paperback-front .case-mask")).not.toBeNull();
   });

@@ -1,4 +1,3 @@
-import {useAndroidBack} from "./cards/useAndroidBack";
 import {mangaScanRequests, mangaScanVolumes} from './mangaScans';
 import { mangaShelfStyle } from "../src/collections/mangaDimensions";
 import {usePerformerNames} from "./PerformerName";
@@ -272,11 +271,6 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
 
 function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, onReady}: {shown: MangaShown; privacy: boolean; reset: number; onReset(): void; onPick(id: string): void; onEnlarge(id: string): void; onReady(): void}) {
   const {item, manga} = shown;
-  const [pulled, setPulled] = useState<string | null>(null);
-  const backId = item.volumes?.find(volume => volume.id === pulled)?.spineScan?.back ?? null;
-  const pulledArt = useArtworkSet(item, !privacy && backId ? {back: {id: backId, original: false}} : {}, manga.revision, true);
-  const shelfManga = backId && pulledArt.urls.back ? {...manga, volumes: manga.volumes.map(volume => volume.id === pulled ? {...volume, spineScan: {side: volume.spineScan?.side ?? null, back: pulledArt.urls.back}} : volume)} : manga;
-
   const volume = manga.volumes.find(volume => volume.id === manga.activeVolumeId);
   const index = manga.volumes.findIndex(volume => volume.id === manga.activeVolumeId);
   const swipe = useSwipe(offset => { const next = manga.volumes[(index < 0 ? 0 : index) + offset]; if (next) onPick(next.id); });
@@ -292,7 +286,7 @@ function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, on
           : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook key={shown.book} src={shown.book} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => ready('object')}/></WorkZoomObject></WorkZoomStage>}
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ViewfinderCircleIcon aria-hidden="true"/></Button>
       </div>
-      <MangaBookcase pullPending={!pulledArt.ready} useBack={useAndroidBack} key={item.id} title={item.name} author={item.author} publisher={item.publisher} touchTargets manga={shelfManga} onPull={setPulled} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
+      <MangaBookcase key={item.id} title={item.name} author={item.author} publisher={item.publisher} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={id => {
         // The cover viewer stays shut in privacy mode, and so does the book sound.
         if (!privacy) playCaseSound('book', 'open');
         onEnlarge(id);

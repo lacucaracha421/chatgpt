@@ -76,6 +76,8 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   };
   useBack(dismiss, Boolean(out && !out.leaving));
   const choose = (id: string) => {
+    // The work screen's bookcase is a volume picker: a click switches to that volume at once.
+    if (!list) { onPick(id); return; }
     if (out?.id === id && !out.leaving) {
       if (keyboardPick.current && painted) {
         keyboardPick.current = false;

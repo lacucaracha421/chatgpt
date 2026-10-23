@@ -1011,7 +1011,7 @@ it('keeps the Showcase of games on the turned-case shelf while the library is on
   expect(showcase.querySelector('.spine-shelf')).toBeNull();
 });
 
-it('stands manga on the shared bookcase rows: a tap pulls a volume, a tap on the held book opens the work there',async()=>{
+it('opens a list volume from the held book, then switches work-screen volumes on a single tap',async()=>{
   localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'bookcase',perRow:4}));
   const manga:CollectionDetail={...mangaItem(),showcase:false,ownedVolumes:[{editionIndex:0,count:1}]};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')&&!path.includes('showcase=true')?[manga]:[]}:{revision:'r1',item:manga});
@@ -1059,8 +1059,7 @@ it('stands manga on the shared bookcase rows: a tap pulls a volume, a tap on the
     fireEvent(workTrack,event);
   }
   expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true');
-  const nextHeld=await screen.findByRole('group',{name:'1권 꺼낸 책'});
-  fireEvent.click(within(nextHeld).getByRole('group',{name:'책'}));
+  expect(document.querySelector('.manga-shelf-out')).toBeNull();
   await finishIncomingWork();
   const nextBookcase=screen.getByRole('group',{name:'권별 책장'});
   expect(within(nextBookcase).getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true');

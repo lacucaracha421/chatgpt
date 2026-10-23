@@ -95,7 +95,7 @@ it("keeps the PC pick transition when tablet shelf overrides are also loaded", (
 
 it.each([false, true])("swaps a painted book with its retained slot on put-back (reduced=%s)", async reduced => {
   vi.useFakeTimers(); motion(reduced);
-  const view = render(<MangaBookcase manga={manga} privacy={false} coverUrl={() => "/cover"} onPick={vi.fn()} />);
+  const view = render(<MangaBookcase list manga={manga} privacy={false} coverUrl={() => "/cover"} onPick={vi.fn()} />);
   const button = view.container.querySelector<HTMLElement>("[data-volume-id]")!;
   const strip = button.querySelector(".manga-spine-strip");
   fireEvent.click(button);
@@ -120,7 +120,7 @@ it.each([false, true])("swaps a painted book with its retained slot on put-back 
 
 it("caps preparation and cancels an unpainted pick without hiding the spine", () => {
   vi.useFakeTimers(); motion(false);
-  const view = render(<MangaBookcase manga={manga} privacy={false} coverUrl={() => "/slow"} onPick={vi.fn()} />);
+  const view = render(<MangaBookcase list manga={manga} privacy={false} coverUrl={() => "/slow"} onPick={vi.fn()} />);
   const button = view.container.querySelector<HTMLElement>("[data-volume-id]")!;
   fireEvent.click(button);
   fireEvent.keyDown(window, { key: "Escape" });
@@ -155,23 +155,38 @@ it("opens a held book by click, suppresses the end of a drag, and permits a late
   expect(document.querySelector(".manga-shelf-out")).toBeNull();
 });
 
-it.each(["Enter", " "])("pulls with %s and selects a work-screen volume only from the held book", key => {
+it.each(["Enter", " "])("pulls a list volume with %s and opens it from the held book", key => {
   motion(true);
   const pick = vi.fn(), enlarge = vi.fn();
-  const view = render(<MangaBookcase manga={manga} privacy onPick={pick} onEnlarge={enlarge} />);
+  const view = render(<MangaBookcase list manga={manga} privacy onPick={pick} onEnlarge={enlarge} />);
   fireEvent.keyDown(view.container.querySelector("[data-volume-id]")!, {key});
   expect(document.querySelector(".manga-shelf-out .kase")).toHaveFocus();
-  expect(pick).not.toHaveBeenCalled();
+  expect(pick).toHaveBeenCalledExactlyOnceWith("v1");
+  expect(enlarge).not.toHaveBeenCalled();
   fireEvent.keyDown(document.querySelector(".manga-shelf-out .kase")!, {key: "Enter"});
+  expect(pick).toHaveBeenCalledExactlyOnceWith("v1");
+  expect(enlarge).toHaveBeenCalledExactlyOnceWith("v1");
+  expect(document.querySelector(".manga-shelf-out")).toBeNull();
+});
+
+it.each(["click", "Enter", " "])("switches a work-screen volume immediately with %s without pulling it out", key => {
+  const pick = vi.fn(), enlarge = vi.fn();
+  const view = render(<MangaBookcase manga={manga} privacy onPick={pick} onEnlarge={enlarge} />);
+  const spine = view.container.querySelector<HTMLElement>("[data-volume-id]")!;
+  spine.focus();
+  if (key === "click") fireEvent.click(spine);
+  else fireEvent.keyDown(spine, {key});
   expect(pick).toHaveBeenCalledExactlyOnceWith("v1");
   expect(enlarge).not.toHaveBeenCalled();
   expect(document.querySelector(".manga-shelf-out")).toBeNull();
+  expect(spine).not.toHaveAttribute("data-out");
+  expect(spine).toHaveFocus();
 });
 
 it("puts a held volume back before pulling another from the same row", () => {
   vi.useFakeTimers(); motion(false);
   const volumes = [manga.volumes[0], {...manga.volumes[0], id: "v2", volumeNumber: 2}];
-  const view = render(<MangaBookcase manga={{...manga, volumes}} privacy onPick={vi.fn()} />);
+  const view = render(<MangaBookcase list manga={{...manga, volumes}} privacy onPick={vi.fn()} />);
   const buttons = view.container.querySelectorAll("[data-volume-id]");
   fireEvent.click(buttons[0]);
   act(() => vi.advanceTimersByTime(350));

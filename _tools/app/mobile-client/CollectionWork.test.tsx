@@ -3,6 +3,8 @@ import {useMemo} from 'react';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
+import {MangaBookcase, type MangaWorkData} from '../src/collections/work/MangaBookcase';
+import {useAndroidBack} from './cards/useAndroidBack';
 import type {CollectionDetail} from './collectionModel';
 import {playCaseSound} from '../src/collections/case/caseSounds';
 
@@ -185,14 +187,15 @@ it('pinches the shared book without rotation or volume swipe, resumes one-finger
   expect(zoom()).toBe(1);
 });
 
-it('keeps the manga book, backdrop and shelf until every actual incoming image decodes, settling errors without blocking', async () => {
+it('switches a manga volume on a spine click, keeping the book, backdrop and shelf until incoming images decode', async () => {
   artwork.urls = {c1: '/one', c2: '/two'};
   const view = render(<MangaWork {...props}/>);
   await act(async () => view.container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
   const old = view.container.querySelector<HTMLImageElement>('.work-backdrop .is-painted')!;
   const book = view.container.querySelector<HTMLImageElement>('.manga-bb-front img')!;
   const shelf = view.container.querySelector('.manga-bookcase')!;
-  fireEvent.click(screen.getByRole('button', {name: '다음 권'}));
+  fireEvent.click(screen.getByRole('button', {name: '2권 보기'}));
+  expect(document.querySelector('.manga-shelf-out')).toBeNull();
   const pending = view.container.querySelector('[data-work-pending]')!;
   const next = pending.querySelector<HTMLImageElement>('.work-backdrop img')!;
   let decoded!: () => void;
@@ -203,6 +206,7 @@ it('keeps the manga book, backdrop and shelf until every actual incoming image d
   await act(async () => decoded());
   expect(next).toBeVisible(); expect(next).toHaveClass('is-painted');
   expect(pending.querySelector('.manga-bb-front img')).toBeVisible();
+  expect(screen.getByRole('button', {name: '2권 보기'})).toHaveAttribute('aria-pressed', 'true');
   expect(old).not.toBeVisible(); expect(book).not.toBeVisible();
   view.rerender(<MangaWork {...props} privacy/>); expect(view.container.querySelector('.work-backdrop')).toBeNull();
 });
@@ -370,16 +374,23 @@ it('uses a per-work credit name inside the AV case and the display rule otherwis
  expect(container.querySelector('.case-pola')).toHaveTextContent('작품 속 이름');expect(container.querySelectorAll('.case-pola')[1]).toHaveTextContent('Other Roman');
 });
 
-it('puts a pulled manga volume back on Android Back without opening the viewer', () => {
+it('puts a pulled list volume back on Android Back without opening the viewer', () => {
   vi.useFakeTimers();
   try {
     const onEnlarge = vi.fn();
-    const view = render(<MangaWork {...props} privacy onEnlarge={onEnlarge}/>);
+    const shelf: MangaWorkData = {volumes, activeVolumeId: null, editionIndex: 0, focuses: [], ownedNumbers: [1], scope: '', revision: 'r1', ownership: null, management: null};
+    const onPick = vi.fn();
+    const view = render(<MangaBookcase list touchTargets manga={shelf} privacy useBack={useAndroidBack} onPick={onPick} onEnlarge={onEnlarge}/>);
     fireEvent.click(view.container.querySelector('[data-volume-id="v2"]')!);
     expect(document.querySelector('.manga-shelf-out')).not.toBeNull();
+    expect(onPick).toHaveBeenCalledExactlyOnceWith('v2');
+    act(() => vi.advanceTimersByTime(350));
+    expect(view.container.querySelector('[data-volume-id="v2"]')).toHaveAttribute('data-out');
     fireEvent(window, new Event('lakomics-back'));
     act(() => vi.advanceTimersByTime(440));
     expect(document.querySelector('.manga-shelf-out')).toBeNull();
+    expect(view.container.querySelector('[data-volume-id="v2"]')).not.toHaveAttribute('data-out');
+    expect(onPick).toHaveBeenCalledTimes(1);
     expect(onEnlarge).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });

@@ -109,8 +109,8 @@
 .collection-turnable.is-ready canvas{opacity:1}
 .collection-turnable__status{position:absolute}
 /* Personal fields: my rating, Showcase membership and memo (editable when the server allows). */
-.collection-personal{display:grid;gap:0;border-top:1px solid var(--color-border)}
-.collection-personal-row{display:flex;align-items:center;gap:12px;width:100%;min-height:var(--touch,44px);padding:10px 2px;background:transparent;border:0;border-bottom:1px solid var(--color-border);color:inherit;font:inherit;text-align:left}
+.collection-personal{display:grid;gap:0}
+.collection-personal-row{display:flex;align-items:center;gap:12px;width:100%;min-height:var(--touch,44px);padding:10px 2px;background:transparent;border:0;color:inherit;font:inherit;text-align:left}
 .collection-personal-label{color:var(--color-muted);min-width:5.8em}
 .collection-personal-value{flex:1;min-width:0}
 .collection-personal-row.is-pending .collection-personal-value,.collection-memo-text.is-pending{opacity:.58}
