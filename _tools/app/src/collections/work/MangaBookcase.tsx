@@ -38,8 +38,25 @@ const SCROLL_MARGIN = 64;
  * `coverUrl` resolves a volume cover's thumbnail; each client passes its own (default: the PC's local artwork).
  * `list`: the Collections list row — the same books and plank, left-aligned under the row's label.
  */
+/** Android WebView text zoom (system or 글자 크기) enlarges every font; spine print must stay sized to the book. */
+function printZoom(): number {
+  try {
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:400 100px sans-serif";
+    probe.textContent = "가나다라마바사아";
+    document.body.appendChild(probe);
+    const shown = probe.getBoundingClientRect().width;
+    probe.remove();
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context || !shown) return 1;
+    context.font = "400 100px sans-serif";
+    const ratio = shown / context.measureText("가나다라마바사아").width;
+    return Number.isFinite(ratio) && Math.abs(ratio - 1) > .03 ? Math.min(2, Math.max(.5, 1 / ratio)) : 1;
+  } catch { return 1; }
+}
 export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", title = "", author = null, publisher = null, onPick, onEnlarge, onReady }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; title?: string; author?: string | null; publisher?: string | null; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const [zoom] = useState(printZoom);
   const firstOwned = manga.volumes.find(volume => manga.ownedNumbers === null || manga.ownedNumbers.includes(volume.volumeNumber));
   const scanVolume = !privacy ? manga.volumes.find(volume => volume.spineScan?.side) : undefined;
   const colorKey = scanVolume?.spineScan?.side ?? JSON.stringify([firstOwned?.id, firstOwned?.coverArtworkId]);
@@ -111,7 +128,7 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   return <div ref={viewport} style={mangaShelfStyle(touchTargets)} onPointerDown={pointerDown} onPointerMove={touchTargets ? moved : undefined} onPointerUp={touchTargets ? pointerUp : undefined}
     onScrollCapture={touchTargets ? () => { if (tap.current) tap.current.moved = true; } : undefined}
     onPointerCancel={touchTargets ? () => { tap.current = null; } : undefined}
-    onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller releaseAtEdges previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
+    onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller releaseAtEdges previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board" style={zoom === 1 ? undefined : { "--print-zoom": zoom } as CSSProperties}><div className="manga-bookcase-spines">
     {manga.volumes.map(volume => <Spine key={volume.id} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={(front, event) => void images.loaded(`${volume.id}:${front ? "front" : "strip"}`, event)} onImageError={(front, src) => images.failed(`${volume.id}:${front ? "front" : "strip"}`, src)} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={manga.focuses.find(focus => focus.volumeId === volume.id && focus.coverArtworkId === volume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(volume.volumeNumber)} src={volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null} onPick={() => onPick(volume.id)} onEnlarge={onEnlarge && (() => onEnlarge(volume.id))} />)}
     {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
   </div><ShelfMaterial /></div></ShelfScroller></div>;

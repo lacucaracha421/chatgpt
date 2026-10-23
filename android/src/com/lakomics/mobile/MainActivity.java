@@ -143,6 +143,8 @@ public final class MainActivity extends Activity {
   });
   WebSettings s=web.getSettings();
   // Applied before the page loads, so the first paint already has the chosen text size.
+  // Tiny printed text (manga spines) must keep its size; app UI text never goes below 13px.
+  s.setMinimumFontSize(1);s.setMinimumLogicalFontSize(1);
   systemTextZoom=s.getTextZoom();int textZoom=savedTextZoom();if(textZoom>0)s.setTextZoom(textZoom);
   s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(PerfLog.enabled());
