@@ -408,8 +408,9 @@ class RealAppStatusTests(unittest.TestCase):
                                         "favoriteCharacters"})
         self.assertEqual(signals["cards"], 0)
         self.assertEqual((signals["upcoming"], signals["artists"]), (0, 0))
-        self.assertEqual(signals["collections"],
-                         {"revision": None, "personalEditCursor": None, "appliedPersonalEditCursor": None})
+        collections = dict(signals["collections"])
+        self.assertIsInstance(collections.pop("scanRevision"), str)
+        self.assertEqual(collections, {"revision": None, "personalEditCursor": None, "appliedPersonalEditCursor": None})
         self.assertEqual(signals["bindingRequests"], {"last": 0, "updatedAt": None})
         self.assertEqual(signals["notes"], 0)
 

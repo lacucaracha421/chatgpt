@@ -41,7 +41,7 @@ const SCROLL_MARGIN = 64;
 export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", title = "", author = null, publisher = null, onPick, onEnlarge, onReady }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; title?: string; author?: string | null; publisher?: string | null; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
   const viewport = useRef<HTMLDivElement>(null);
   const firstOwned = manga.volumes.find(volume => manga.ownedNumbers === null || manga.ownedNumbers.includes(volume.volumeNumber));
-  const scanVolume = !touchTargets && !privacy ? manga.volumes.find(volume => volume.spineScan?.side) : undefined;
+  const scanVolume = !privacy ? manga.volumes.find(volume => volume.spineScan?.side) : undefined;
   const colorKey = scanVolume?.spineScan?.side ?? JSON.stringify([firstOwned?.id, firstOwned?.coverArtworkId]);
   const [sample, setSample] = useState<{ key: string; ink: string } | null>(null);
   const ink = sample?.key === colorKey ? sample.ink : (!touchTargets ? sample?.ink : null) ?? mangaSpineColor(colorKey);
@@ -88,7 +88,8 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
       const next = Math.abs(event.clientX - (box.left + box.width / 2));
       if (next < distance) { nearest = spine; distance = next; }
     }
-    if (nearest?.dataset.volumeId) onPick(nearest.dataset.volumeId);
+    nearest?.click();
+    suppressClick.current = true;
   };
   const placed = useRef(false);
   // Scroll only the shelf (never the page) so the current volume stays in view; centred shelves do not move.
@@ -121,8 +122,8 @@ function Spine({ title, author, publisher, ink, tablet, onSample, onScanSample, 
   const size = mangaPixels(volume.id, MANGA_PX_PER_MM[tablet ? "tablet" : "pc"]);
   // Print sizes follow the nominal thickness, so one run shows the same text on every volume.
   const print = MANGA_MM.spine * MANGA_PX_PER_MM[tablet ? "tablet" : "pc"];
-  const sideSrc = !tablet && !privacy && volume.spineScan?.side ? mangaSpineScanUrl(volume.spineScan.side) : null;
-  const backSrc = !tablet && !privacy && volume.spineScan?.back ? mangaSpineScanUrl(volume.spineScan.back) : null;
+  const sideSrc = !privacy && volume.spineScan?.side ? mangaSpineScanUrl(volume.spineScan.side) : null;
+  const backSrc = !privacy && volume.spineScan?.back ? mangaSpineScanUrl(volume.spineScan.back) : null;
   const [scan, setScan] = useState<{ src: string; ratio: number } | null>(null);
   const [backReady, setBackReady] = useState<string | null>(null);
   const [backRequested, setBackRequested] = useState(false);
@@ -197,10 +198,10 @@ function Spine({ title, author, publisher, ink, tablet, onSample, onScanSample, 
       }} /></span>}
       <span className="collection-spine-light" />
     </span>
-    {frontMounted && <span className="manga-spine-front" onTransitionEnd={event => { if (!picked && event.target === event.currentTarget && event.propertyName === "transform") { setFrontMounted(false); setFrontReady(privacy || !src); } }}>{!tablet ? <span className={`manga-spine-turn${backShown ? " is-back" : ""}`}>
+    {frontMounted && <span className="manga-spine-front" onTransitionEnd={event => { if (!picked && event.target === event.currentTarget && event.propertyName === "transform") { setFrontMounted(false); setFrontReady(privacy || !src); } }}><span className={`manga-spine-turn${backShown ? " is-back" : ""}`}>
       <span className="manga-spine-face">{image(true)}</span>
       {backSrc && <span className="manga-spine-face manga-spine-face--back" aria-hidden="true"><span className="manga-scan is-decoded"><ScanImage src={backSrc} onDecoded={() => setBackReady(backSrc)} /></span></span>}
-    </span> : image(true)}</span>}
+    </span></span>}
     {picked && <span className="manga-picked-number">{volume.volumeNumber}</span>}
     {volume.releaseStatus === "upcoming" && !picked && <span className="manga-upcoming-date">{displayDate(volume.localReleaseDate)}</span>}
   </button>;

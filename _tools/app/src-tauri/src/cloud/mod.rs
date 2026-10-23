@@ -1,3 +1,4 @@
+mod manga_scans;
 pub(crate) mod auto_publication;
 pub(crate) mod picker_display;
 mod albums;

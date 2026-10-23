@@ -16,7 +16,28 @@ async function decode(image: HTMLImageElement) {
   image.decode = vi.fn().mockResolvedValue(undefined);
   await act(async () => { fireEvent.load(image); });
 }
-describe("PC bookstore scans", () => {
+describe("bookstore scans", () => {
+  it("uses tablet cache URLs and turns to the decoded back on a touch tap exactly once", async () => {
+    const cacheSide = "https://appassets.androidplatform.net/cache/side.jpg";
+    const cacheBack = "https://appassets.androidplatform.net/cache/back.jpg";
+    const touchManga = {...manga, volumes: [{...manga.volumes[0], spineScan: {side: cacheSide, back: cacheBack}}]};
+    const onPick = vi.fn();
+    const view = render(<MangaBookcase manga={touchManga} privacy={false} touchTargets onPick={onPick}/>);
+    await decode(scan(view.container, cacheSide));
+    await decode(scan(view.container, cacheBack));
+    const button = screen.getByRole("button", {name: /^1/});
+    const track = view.container.querySelector<HTMLElement>(".home-shelf__track")!;
+    Object.defineProperty(button, "getBoundingClientRect", {value: () => ({left: 0, width: 30})});
+    for (const type of ["pointerdown", "pointerup"]) {
+      const event = new Event(type, {bubbles: true});
+      Object.assign(event, {pointerId: 1, clientX: 15, clientY: 10, button: 0, isPrimary: true});
+      fireEvent(track, event);
+    }
+    fireEvent.click(button, {detail: 1});
+    expect(view.container.querySelector(".manga-spine-turn")).toHaveClass("is-back");
+    expect(onPick).not.toHaveBeenCalled();
+    expect(sampleMangaSpineColor).toHaveBeenCalledWith(cacheSide, scan(view.container, cacheSide));
+  });
   it("loads and samples scans through the Linux media origin", async () => {
     const { mockConvertFileSrc, clearMocks } = await import("@tauri-apps/api/mocks");
     Object.defineProperty(window, "isTauri", { configurable: true, value: true });
@@ -62,7 +83,7 @@ describe("PC bookstore scans", () => {
     fireEvent.doubleClick(button);
     expect(onEnlarge).not.toHaveBeenCalled();
   });
-  it("keeps the existing enlarge action without a back and hides scans on tablet or in privacy mode", () => {
+  it("keeps the existing enlarge action without a back and hides scans in privacy mode", () => {
     const onEnlarge = vi.fn();
     const noBack = { ...manga, volumes: [{ ...manga.volumes[0], spineScan: { side: side.replace("http://lakomics.localhost/", ""), back: null } }] };
     const view = render(<MangaBookcase manga={noBack} privacy={false} onPick={() => {}} onEnlarge={onEnlarge} />);
@@ -74,6 +95,6 @@ describe("PC bookstore scans", () => {
     view.rerender(<MangaBookcase manga={manga} privacy onPick={() => {}} />);
     expect(scan(view.container, side)).toBeNull(); expect(scan(view.container, back)).toBeNull();
     view.rerender(<MangaBookcase manga={manga} privacy={false} touchTargets onPick={() => {}} />);
-    expect(scan(view.container, side)).toBeNull(); expect(scan(view.container, back)).toBeNull();
+    expect(scan(view.container, side)).not.toBeNull(); expect(scan(view.container, back)).not.toBeNull();
   });
 });

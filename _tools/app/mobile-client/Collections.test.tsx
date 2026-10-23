@@ -257,6 +257,24 @@ describe('tab return retention',()=>{
     await act(async()=>{});expect(listCalls()).toHaveLength(3);expect(detailCalls()).toHaveLength(2);
   });
 
+  it('refreshes scan availability without requiring a new collection authority revision',async()=>{
+    let scanRevision='scans-1';
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1',scanRevision}:path.startsWith('/v1/collections?')?{...page,scanRevision}:{revision:'r1',item});
+    const props={active:true,paused:false,backRef:{current:null}};
+    const view=render(<Collections {...props}/>);
+    await screen.findByText(item.name);
+    fireEvent.click(screen.getByText(item.name));
+    await screen.findByRole('heading',{level:1,name:item.name});
+    await act(async()=>{});
+    const before=detailCalls().length;
+    scanRevision='scans-2';
+    view.rerender(<Collections {...props} active={false}/>);
+    view.rerender(<Collections {...props}/>);
+    await waitFor(()=>expect(detailCalls().length).toBeGreaterThan(before));
+    expect(screen.getByRole('heading',{level:1,name:item.name})).toBeTruthy();
+    expect(mocks.api.mock.calls.filter(([path])=>path.endsWith('/status')).length).toBeGreaterThan(1);
+  });
+
   it('retries failed artwork on return, and reloads a changed digest, and keeps the image across a revision-only change',async()=>{
     let work={...item,artworkVersions:{cover:{thumbnail:'digest-1'}}},revision='r1';
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision}:{...page,revision,items:[work]});

@@ -68,6 +68,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, String
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import manga_scans
 import collection_artwork_medium
 import collection_authority
 import conditional
@@ -557,7 +558,8 @@ def status_signal(db):
     edits = personal_edits.state(db)
     return {"revision": revision,
             "personalEditCursor": edits["last_sequence"] if edits else None,
-            "appliedPersonalEditCursor": edits["applied_cursor"] if edits else None}
+            "appliedPersonalEditCursor": edits["applied_cursor"] if edits else None,
+            "scanRevision": manga_scans.version(db)}
 
 
 def read_table(active):
@@ -622,6 +624,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             collection_authority.startup_db(db)
             collection_release_checks.startup_db(db)
             collection_artwork_medium.install(db)
+            db.executescript(manga_scans.DDL)
             # Cover refs carry the published portraits (feature ``portraitImage``).
             home_publications.startup_db(db)
             db.commit()
@@ -646,9 +649,10 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         if active is not None:
             collection_authority.finalize_item(db, active["libraryId"], payload, include_review=include_review, av_names=True)
             collection_authority.volume_details(db, active["libraryId"], payload)
-        return payload
+        return manga_scans.enrich(db, payload)
 
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
+    manga_scans.register(app, get_db, publisher, storage, bucket)
     personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
     collection_releases.register(app, get_db, reader, publisher,
                                  collection_source=lambda db: read_table(served(db)))
@@ -913,6 +917,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
             payloads = [json.loads(row["payload"]) for row in rows[:limit]]
             mediums = collection_artwork_medium.digests(db, payloads)
+            scan_revision = manga_scans.version(db)
             review_meta = {}
             if active is not None:
                 collection_authority.finalize_items(db, active["libraryId"], payloads, include_review=kakaoReview, av_names=True)
@@ -927,7 +932,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                     review_meta["kakaoUnlinkedCount"] = sum(not item["kakaoReview"]["bound"] and not item["kakaoReview"]["hideConnectionPrompt"]
                                                           and item["id"] not in waiting for item in manga)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
-        return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
+        return {"ready": revision is not None, "revision": revision, "publishedAt": published, "scanRevision": scan_revision, "filterVersion": 1, "totalCount": total,
                 "items": [public_item(payload, include_review=kakaoReview, medium=mediums) for payload in payloads], "nextCursor": next_cursor, **review_meta}
 
     @app.get("/v1/collections/status")
@@ -938,7 +943,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             active = served(db)
             revision, published = state(db, active)
             advertisement = personal_edits.advertisement(db)
-        return {"revision": revision, "publishedAt": published, **advertisement,
+            scan_revision = manga_scans.version(db)
+        return {"revision": revision, "publishedAt": published, "scanRevision": scan_revision, **advertisement,
                 "collectionTypes": COLLECTION_TYPES,
                 "replicaFeatures": REPLICA_FEATURES,
                 "collectionBindings": collection_bindings.capabilities()}
@@ -981,13 +987,14 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     @app.post("/v1/collections/{collection_id}/artworks/{artwork_id}/media-ticket")
     def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest,
                        authorization: str | None = Header(default=None), fresh_head: bool = Query(default=False)):
-        require_auth(authorization)
+        reader(authorization)
         with get_db() as db:
             db.execute("BEGIN")
             row = db.execute(f"SELECT payload FROM {read_table(served(db))} WHERE id=?", (collection_id,)).fetchone()
             if row is None:
                 raise HTTPException(404, "Collection is not published")
-            art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)
+            payload = finalize(db, served(db), json.loads(row["payload"]))
+            art = next((art for art in payload["artworks"] if art["id"] == artwork_id), None)
             if body.variant == "medium":
                 # Only the copy made from this artwork's current original is served; its object was verified when it was made.
                 copy = None if art is None or art["original"] is None else collection_artwork_medium.lookup(db, art["original"]["sha256"])

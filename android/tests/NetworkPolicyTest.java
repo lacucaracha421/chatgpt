@@ -46,6 +46,11 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.catalogImage("01","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","page",0,"https://siam-cdn.net/p.webp"));reject(()->NetworkPolicy.catalogImage("42","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cover",1,"https://ehgt.org/t.webp"));reject(()->NetworkPolicy.catalogImage("42","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","page",2000,"https://siam-cdn.net/p.webp"));reject(()->NetworkPolicy.catalogImage("42","bad","page",0,"https://siam-cdn.net/p.webp"));
  pass(()->NetworkPolicy.api("/v1/collections?type=manga&limit=48","GET"));
  pass(()->NetworkPolicy.api("/v1/collections/work-1","GET"));
+ // Manga scans reuse Collection artwork tickets and the native artwork media cache.
+ String scanDigest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+ pass(()->NetworkPolicy.api("/v1/collections/work-1/artworks/manga-scan-9780306406157-side-"+scanDigest+"/media-ticket","POST"));
+ pass(()->NetworkPolicy.api("/v1/collections/work-1/artworks/manga-scan-9780306406157-back-"+scanDigest+"/media-ticket","POST"));
+ reject(()->NetworkPolicy.api("/v1/collections/manga-scans/9780306406157/side","PUT"));
  pass(()->NetworkPolicy.api("/v1/collections/work-1/artworks/cover_2/media-ticket","POST"));
  reject(()->NetworkPolicy.api("/v1/collections/replica","PUT"));
  reject(()->NetworkPolicy.api("/v1/collections/artworks/prepare","POST"));

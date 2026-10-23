@@ -615,7 +615,7 @@ fn reinforcement_migration_preserves_history_without_enqueuing_it() {
     let (f, t) = prepared();
     accept(&f, &t, &["asset-7"], DecisionKind::Accepted);
     let c = f.library.connection().unwrap();
-    c.execute_batch("DROP TABLE manga_spine_scans; ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id; ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;  DROP TABLE character_reference_reinforcement_queue; DROP TABLE character_reference_reinforcement_runs; PRAGMA user_version=132;").unwrap();
+    c.execute_batch("DROP TABLE manga_scan_publications; DROP TABLE manga_spine_scans; ALTER TABLE collection_volume_ranges DROP COLUMN restart_numbering; ALTER TABLE character_member_items DROP COLUMN plan_id; ALTER TABLE character_member_control DROP COLUMN recommendations_backfilled;  DROP TABLE character_reference_reinforcement_queue; DROP TABLE character_reference_reinforcement_runs; PRAGMA user_version=132;").unwrap();
     drop(c);
     let f = reopen(f);
     let c = f.library.connection().unwrap();

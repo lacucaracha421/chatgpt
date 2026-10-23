@@ -5,7 +5,7 @@ export type CollectionKind = 'game' | 'manga' | 'movie' | 'av';
 export type CollectionFilters = {sort:'recent'|'media_date'|'name';direction:'asc'|'desc';rating:'all'|'unrated'|number};
 export const defaultCollectionFilters = ():CollectionFilters => ({sort:'media_date',direction:'desc',rating:'all'});
 export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:number; displayLabel:string; coverArtworkId?:string|null; localReleaseDate?:string|null;
-  isbn13?:string|null; contents?:string|null; price?:number|null; publisher?:string|null; releaseStatus?:'released'|'upcoming'|null;
+  spineScan?:{side:string|null;back:string|null}|null; isbn13?:string|null; contents?:string|null; price?:number|null; publisher?:string|null; releaseStatus?:'released'|'upcoming'|null;
   /** From an upgraded PC (`coverFocus`): where the spine strip sits across the current cover, 0–1. */
   coverFocusX?:number|null};
 export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};
@@ -76,7 +76,7 @@ export function personReply(reply:unknown,personId:string, connection = outboxCo
   rememberPersonNames([person], connection);
   return person;
 }
-export type CollectionPage = {kakaoUnlinkedCount?:number;totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
+export type CollectionPage = {scanRevision?:string;kakaoUnlinkedCount?:number;totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
 export function collectionPath(type:CollectionKind, q:string, showcase:boolean, cursor:string|null, filters?:CollectionFilters) {
   const params = new URLSearchParams({type,q,showcase:String(showcase),limit:showcase?'16':'48'});
   if (cursor) params.set('cursor',cursor);

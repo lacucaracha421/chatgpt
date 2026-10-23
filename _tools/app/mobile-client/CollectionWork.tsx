@@ -1,3 +1,4 @@
+import {mangaScanRequests, mangaScanVolumes} from './mangaScans';
 import { mangaShelfStyle } from "../src/collections/mangaDimensions";
 import {usePerformerNames} from "./PerformerName";
 import {performerName} from "../src/collections/av/performerName";
@@ -233,11 +234,11 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
   const requested = volumes.find(volume => volume.id === wanted) ?? volumes[0] ?? null;
   // An edition without volumes still has the work's own cover; the book shows that.
   const book = useArtworkSet(item, privacy ? {} : {book: requested ? {id: requested.coverArtworkId, original: true} : {id: collectionCover(item), original: true, asset: true}}, revision, active);
-  const spines = useArtworkSet(item, privacy ? {} : Object.fromEntries(volumes.flatMap(volume => volume.coverArtworkId ? [[volume.coverArtworkId, {id: volume.coverArtworkId, original: false}]] : [])), revision, active);
+  const spines = useArtworkSet(item, privacy ? {} : {...Object.fromEntries(volumes.flatMap(volume => volume.coverArtworkId ? [[volume.coverArtworkId, {id: volume.coverArtworkId, original: false}]] : [])), ...mangaScanRequests(volumes)}, revision, active);
   const hero = useArtworkSet(item, privacy ? {} : {hero: heroRequest(item)}, revision, active);
   const incoming = useMemo<MangaShown | null>(() => book.ready && spines.ready && hero.ready ? {
     item, book: book.urls.book ?? null, hero: hero.urls.hero ?? null, spines: spines.urls, info,
-    manga: {volumes, activeVolumeId: requested?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: coverFocuses(item.volumes),
+    manga: {volumes: mangaScanVolumes(volumes, spines.urls), activeVolumeId: requested?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: coverFocuses(item.volumes),
       ownedNumbers: owned === null ? null : volumes.filter(volume => volume.volumeNumber <= owned).map(volume => volume.volumeNumber),
       scope: '', revision, ownership: null, management: null},
   } : null, [book.ready, book.urls, spines.ready, spines.urls, hero.ready, hero.urls, item, info, volumes, requested?.id, latestKorean, owned, revision]);

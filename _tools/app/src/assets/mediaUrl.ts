@@ -15,7 +15,7 @@ export function nativeMediaUrl(url: string): string {
 
 /** Library-local scan paths use the current WebView's media origin. */
 export function mangaSpineScanUrl(path: string): string {
-  return `${mediaOrigin()}/${path}`;
+  return path.startsWith("https://") ? path : `${mediaOrigin()}/${path}`;
 }
 
 export function thumbnailUrl(assetId: string, revision?: string | number): string {

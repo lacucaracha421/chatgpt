@@ -2031,6 +2031,16 @@ impl CloudClient {
         Ok(report)
     }
 
+    pub(crate) fn upload_manga_scan(&self, isbn: &str, part: &str, digest: &str, bytes: &[u8], token: &str) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
+        let mut response = self.agent.put(self.endpoint(&format!("/v1/collections/manga-scans/{isbn}/{part}"))?)
+            .header("Authorization", bearer(token)?).header("X-Content-SHA256", digest)
+            .content_type("image/jpeg").send(bytes).map_err(map_upload_error)?;
+        let value: serde_json::Value = read_json_bounded(&mut response, 1024)?;
+        if value.get("sha256").and_then(|v| v.as_str()) != Some(digest) { return Err(LibraryError::InvalidCloudResponse); }
+        Ok(())
+    }
+
     pub(crate) fn upload_collection_artwork(&self, blob: &super::collections::ArtworkBlob, bytes: &[u8], token: &str) -> Result<bool, LibraryError> {
         let _send = self.send_permit()?;
         #[derive(serde::Deserialize)]

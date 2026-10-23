@@ -292,7 +292,8 @@ class CollectionPersonalEditTests(unittest.TestCase):
 
         def mirrored(status):
             return {'revision': status['revision'], 'personalEditCursor': status.get('personalEditCursor'),
-                    'appliedPersonalEditCursor': status.get('appliedPersonalEditCursor')}
+                    'appliedPersonalEditCursor': status.get('appliedPersonalEditCursor'),
+                    'scanRevision': status.get('scanRevision')}
         self.assertEqual(heads(), (0, mirrored(self.status())))
         self.ready()
         self.assertEqual(heads(), (0, mirrored(self.status())))

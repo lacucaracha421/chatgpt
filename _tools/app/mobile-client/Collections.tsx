@@ -405,6 +405,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const columns=useShelfColumns();
   const [picked,setPicked]=useState<string|null>(null),[order,setOrder]=useState<string[]>(()=>directWork?[directWork]:[]);
   // 만화 · 선반: the picked spine, and the volume a shelf opened its work at.
+  const [scanRevision, setScanRevision] = useState<string | undefined>(undefined);
   const [mangaPick,setMangaPick]=useState<MangaShelfPick>(null),[openedVolume,setOpenedVolume]=useState<{id:string;volumeId:string}|null>(null);
   const shelfPutDown=useShelfPutDown(()=>{setPicked(null);setMangaPick(null);});
   const stepping=useRef(false);
@@ -548,7 +549,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     void api<unknown>('/v1/home/upcoming',controller.signal,undefined,'GET',true).then(value=>{if(!controller.signal.aborted)setCalendarReply(normalizeReleaseCalendarReply(value));},()=>{});
     return()=>controller.abort();
   },[browseLive,refresh,tab]);
-  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;bump();setDetailRefresh(n=>n+1);});
+  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);const nextScan=(reply as {scanRevision?:string}).scanRevision;const scansChanged=nextScan!==undefined&&scanRevision!==nextScan;if(scansChanged)setScanRevision(nextScan);if(!changed&&!scansChanged)return;bump();setDetailRefresh(n=>n+1);});
   // A list read under a newer publication than the kept 신간 shelf (read here or by Home) outdates it.
   useEffect(()=>observePublication(main.page?.revision),[main.page?.revision]);
   // Restore the list position when its committed query is shown again, before it is painted.
@@ -707,7 +708,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       render={work=><WorkCard work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} onActions={published=>workActions(published,workRevision)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>}/>;
     if(settings.layout==='bookcase'&&(kind==='game'||kind==='av'||kind==='movie'))return <TabletSpineShelf items={items} grouping={showcaseAll?'sort':settings.grouping??'sort'} size={settings.spineSize??'normal'} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       picked={picked} onPick={setPicked} onOpen={id=>openWork(id,order)} onActions={id=>{const work=items.find(entry=>entry.id===id);if(work)workActions(work,workRevision);}}/>;
-    if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} size={settings.spineSize??'normal'} revision={workRevision} active={visible} privacy={privacyMode}
+    if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} size={settings.spineSize??'normal'} revision={`${workRevision}:scans:${scanRevision??main.page?.scanRevision??''}`} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)} onActions={work=>workActions(work,workRevision)}/>;
     return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':columns(settings.perRow)} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} onActions={published=>workActions(published,workRevision)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
   };

@@ -280,6 +280,7 @@ impl Library {
         self.publication_inputs.character_sources(self);
         let db = self.connection()?;
         let mut due = [false; 12];
+        due[9] = !light && !restricted && !super::super::manga_scans::pending(&db, endpoint, now)?.is_empty();
         for (slot, kind, quiet, cap) in [(0, "collections", 5, 60), (1, "characters", 30, 300)] {
             due[slot] = db
                 .query_row(

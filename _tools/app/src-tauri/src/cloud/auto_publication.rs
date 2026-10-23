@@ -183,7 +183,7 @@ impl Library {
             self.publication_inputs
                 .lanes_to_dispatch(&endpoint, due, std::time::Instant::now());
         let mut dispatched = 0;
-        // Slot 9 is retired. Preserve the remaining lanes' input-signal indices.
+        // Scan publication reuses the formerly retired slot 9.
         for (slot, kind) in [
             (0, "collections"),
             (1, "characters"),
@@ -194,6 +194,7 @@ impl Library {
             (6, "bindings"),
             (7, "metadata"),
             (8, "upcoming"),
+            (9, "mangaScans"),
             (10, "artists"),
             (11, "autoTags"),
         ]
@@ -203,7 +204,7 @@ impl Library {
                 || (self.sync_held(&endpoint)
                     && matches!(
                         kind,
-                        "visibility" | "bindings" | "metadata" | "autoTags"
+                        "visibility" | "bindings" | "metadata" | "autoTags" | "mangaScans"
                     ))
             {
                 continue;
@@ -256,6 +257,7 @@ impl Library {
             return Ok(());
         }
         match kind {
+            "mangaScans" => self.publish_pending_manga_scans(endpoint),
             "upcoming" | "artists" => self
                 .run_due_home_publication(kind, endpoint)
                 .map_err(|error| {
