@@ -3,11 +3,23 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBookcase, type MangaWorkData } from "./MangaBookcase";
 import { mangaPixels, MANGA_PX_PER_MM } from "../mangaDimensions";
+import * as dimensions from "../mangaDimensions";
 import { stripPosition } from "./coverStrip";
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const volumes=[1,2,3].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),coverArtworkId:`a${n}`,localReleaseDate:n===3?"2026-12-01":null,isbn13:null,releaseStatus:n===3?"upcoming" as const:"released" as const}));
 const manga:MangaWorkData={volumes,activeVolumeId:"v1",editionIndex:0,focuses:[],ownedNumbers:[1],scope:"",revision:"",ownership:null,management:null};
 describe("printed-spine bookcase",()=>{
+  it("renders only the old and new picked spine when the selected volume changes", () => {
+    const measure = vi.spyOn(dimensions, "mangaPixels");
+    const many = Array.from({ length: 115 }, (_, index) => ({ ...volumes[0], id: `m${index}`, volumeNumber: index + 1, displayLabel: String(index + 1) }));
+    const data = { ...manga, volumes: many, activeVolumeId: "m0" };
+    const view = render(<MangaBookcase manga={data} privacy onPick={() => undefined} />);
+    measure.mockClear();
+    view.rerender(<MangaBookcase manga={{ ...data, activeVolumeId: "m60" }} privacy onPick={() => undefined} />);
+    expect(screen.getByRole("button", { name: "61권 보기" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "1권 보기" })).toHaveAttribute("aria-pressed", "false");
+    expect(measure).toHaveBeenCalledTimes(2);
+  });
   it("lets the page wheel pass over a short row and at the end of a horizontal run", () => {
     const view=render(<MangaBookcase list manga={manga} privacy={false} onPick={()=>undefined}/>);
     const track=view.container.querySelector<HTMLElement>(".home-shelf__track")!;
