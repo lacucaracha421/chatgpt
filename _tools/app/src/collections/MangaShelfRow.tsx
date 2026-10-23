@@ -1,17 +1,13 @@
-import { useEffect, useRef } from "react";
 import type { CollectionCoverFocus, CollectionVolume } from "../library/types";
 import { useLongPress } from "../shared/useLongPress";
 import { MangaBookcase, type MangaWorkData, type MangaShelfBack } from "./work/MangaBookcase";
 import "./work/collectionWork.css";
 import "./mangaShelf.css";
 import { mangaShelfStyle } from "./mangaDimensions";
-import { ShelfMaterial } from "./ShelfMaterial";
 
 /**
- * The Collections 만화 list as shelves (accepted 2026-09-30, docs/archive/prototypes/pc-collection-detail-20260930/):
- * one row per work — its title and owned count, then the work screen's own bookcase of
- * printed spines on the thin plank. PC and tablet share this row; each client loads the
- * volumes, focuses and cover URLs its own way once the row comes near the viewport.
+ * A contiguous work run on a shared shelf, with its paper label on the plank front.
+ * PC and tablet share this run; shelf rows own observation and each client supplies its media.
  */
 
 /** The one picked spine across a shelf list: the work and its volume. */
@@ -33,25 +29,14 @@ export function mangaShelfData(volumes: CollectionVolume[], focuses: CollectionC
   };
 }
 
-/** The nearest scrolling ancestor, so rows below the fold are observed against the list, not the window. */
-function scrollParent(element: HTMLElement): HTMLElement | null {
-  for (let node = element.parentElement; node; node = node.parentElement) {
-    const overflow = getComputedStyle(node).overflowY;
-    if (overflow === "auto" || overflow === "scroll") return node;
-  }
-  return null;
-}
-
-/** Rows this far beyond the list's visible edge already load, so scrolling meets ready shelves. */
-const NEAR_MARGIN = "600px 0px";
-
-export function MangaShelfRow({ id, title, author = null, publisher = null, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false, useBack, pullPending }: {
+export function MangaShelfRow({ id, title, author = null, publisher = null, owned, manga, privacy, coverUrl, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false, useBack, pullPending, start = 0, count, seriesKey, seriesScan }: {
   id: string; title: string; author?: string | null; publisher?: string | null;
   /** Owned volumes in the shown edition; `null` when none is recorded. */owned: number | null;
   /** `null` until the row's volumes are loaded: the empty plank holds the row's place. */manga: MangaWorkData | null;
   touchTargets?: boolean;
+  start?: number; count?: number;
+  seriesKey?: string; seriesScan?: boolean;
   privacy: boolean; coverUrl(artworkId: string): string | null;
-  /** Called once, when the row first comes near the visible part of the list. */onNear(): void;
   useBack?: MangaShelfBack;
   pullPending?: boolean;
   onPick(volumeId: string): void;
@@ -59,35 +44,23 @@ export function MangaShelfRow({ id, title, author = null, publisher = null, owne
   /** Open the pulled-out book. */onEnlarge?(volumeId: string): void;
   /** Tablet: a long press anywhere on the row asks for the work's action sheet. */onLongPress?(): void;
 }) {
-  const row = useRef<HTMLElement>(null);
   // Owned next to the volumes on the shelf ("1 / 8권"), once the row's volumes are known and the count fits them.
   const total = manga && owned !== null && owned <= manga.volumes.length ? manga.volumes.length : null;
   const press = useLongPress({ enabled: Boolean(onLongPress), onLongPress: () => onLongPress?.() });
-  const near = useRef(onNear); near.current = onNear;
-  useEffect(() => {
-    const element = row.current; if (!element) return;
-    if (typeof IntersectionObserver === "undefined") { near.current(); return; }
-    const observer = new IntersectionObserver(entries => {
-      if (!entries.some(entry => entry.isIntersecting)) return;
-      observer.disconnect(); near.current();
-    }, { root: scrollParent(element), rootMargin: NEAR_MARGIN });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return <section ref={row} className="manga-shelf-row" style={mangaShelfStyle(touchTargets)} aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
+  const countText = owned === null ? "" : total ? `${owned.toLocaleString()} / ${total.toLocaleString()}권` : `${owned.toLocaleString()}권`;
+  return <section className="manga-shelf-run" style={mangaShelfStyle(touchTargets)} aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
     onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}>
-    <div className="manga-shelf-row__label">
-      <button type="button" className="manga-shelf-row__title" data-collection-id={id} onClick={() => onOpen(null)}>{title}</button>
-      {owned !== null && <span className="manga-shelf-row__count numeric" aria-label={total ? `보유 ${owned.toLocaleString()}권 / 전체 ${total.toLocaleString()}권` : `보유 ${owned.toLocaleString()}권`}>{total ? `${owned.toLocaleString()} / ${total.toLocaleString()}권` : `${owned.toLocaleString()}권`}</span>}
-    </div>
     <div className="manga-shelf-row__shelf" onKeyDownCapture={event => {
       const spine = (event.target as Element).closest<HTMLElement>("button[data-volume-id]");
       if (event.key !== "Enter" || spine?.getAttribute("aria-pressed") !== "true") return;
       event.preventDefault(); event.stopPropagation(); onOpen(spine.dataset.volumeId ?? null);
     }}>
       {manga
-        ? <MangaBookcase pullPending={pullPending} useBack={useBack} title={title} author={author} publisher={publisher} touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge ?? onOpen} />
-        : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board"><ShelfMaterial /></div></div></div>}
+        ? <MangaBookcase seriesKey={seriesKey} seriesScan={seriesScan} range={count === undefined ? undefined : { start, count }} pullPending={pullPending} useBack={useBack} title={title} author={author} publisher={publisher} touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge ?? onOpen} />
+        : <div className="manga-shelf-row__waiting" aria-hidden="true" />}
     </div>
+    <button type="button" className="manga-shelf-row__label" data-collection-id={id} aria-label={title} aria-description={[start > 0 ? "앞 선반에서 이어짐" : "", countText].filter(Boolean).join(". ")} title={`${title}${start > 0 ? " ›" : ""}${countText ? ` · ${countText}` : ""}`} onClick={() => onOpen(null)}>
+      <span>{title}{start > 0 ? " ›" : ""}{countText && <> · <span className="numeric" aria-label={total ? `보유 ${owned!.toLocaleString()}권 / 전체 ${total.toLocaleString()}권` : `보유 ${owned!.toLocaleString()}권`}>{countText}</span></>}</span>
+    </button>
   </section>;
 }

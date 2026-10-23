@@ -21,7 +21,8 @@ describe("printed-spine bookcase",()=>{
     expect(measure).toHaveBeenCalledTimes(2);
   });
   it("lets the page wheel pass over a short row and at the end of a horizontal run", () => {
-    const view=render(<MangaBookcase list manga={manga} privacy={false} onPick={()=>undefined}/>);
+    // List shelves wrap now; the work-screen strip is the horizontal run.
+    const view=render(<MangaBookcase manga={manga} privacy={false} onPick={()=>undefined}/>);
     const track=view.container.querySelector<HTMLElement>(".home-shelf__track")!;
     let width=200;
     Object.defineProperties(track,{clientWidth:{value:200},scrollWidth:{get:()=>width}});

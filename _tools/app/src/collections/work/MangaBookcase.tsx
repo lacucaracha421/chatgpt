@@ -19,7 +19,7 @@ import { stripPosition } from "./coverStrip";
 import { volumeLabel } from "../collectionFormat";
 import { ShelfMaterial } from "../ShelfMaterial";
 import { mangaPixels, MANGA_MM, MANGA_PX_PER_MM, mangaShelfStyle, mangaVolumeHash, mangaScanWidth } from "../mangaDimensions";
-import { mangaSpineColor, sampleMangaSpineColor } from "./mangaSpineColor";
+import { mangaSpineColor, sampleMangaSpineColor, useMangaSpineInk } from "./mangaSpineColor";
 import { LONG_PRESS_MS } from "../../shared/useLongPress";
 
 export type MangaWorkData = { volumes: CollectionVolume[]; activeVolumeId: string | null; editionIndex: number; latestKoreanVolume?: number | null; focuses: CollectionCoverFocus[]; ownedNumbers: number[] | null; scope: string; revision: string; ownership: ReactNode; management: ReactNode };
@@ -63,7 +63,8 @@ function printZoom(): number {
     return Number.isFinite(ratio) && Math.abs(ratio - 1) > .03 ? Math.min(2, Math.max(.5, 1 / ratio)) : 1;
   } catch { return 1; }
 }
-export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", title = "", author = null, publisher = null, onPick, onEnlarge, onReady, onPull, pullPending = false, useBack = useShelfBack }: { pullPending?: boolean; onPull?(id: string): void; useBack?: MangaShelfBack; manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; title?: string; author?: string | null; publisher?: string | null; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
+export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", title = "", author = null, publisher = null, onPick, onEnlarge, onReady, onPull, pullPending = false, useBack = useShelfBack, range, seriesKey, seriesScan = false }: { seriesScan?: boolean; seriesKey?: string; range?: { start: number; count: number }; pullPending?: boolean; onPull?(id: string): void; useBack?: MangaShelfBack; manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; title?: string; author?: string | null; publisher?: string | null; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
+  const volumes = useMemo(() => range ? manga.volumes.slice(range.start, range.start + range.count) : manga.volumes, [manga.volumes, range?.start, range?.count]);
   const viewport = useRef<HTMLDivElement>(null);
   const [zoom] = useState(printZoom);
   const [out, setOut] = useState<{ id: string; leaving: boolean } | null>(null);
@@ -141,17 +142,18 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   }, [manga.volumes, manga.focuses]);
   const firstOwned = manga.volumes.find(volume => ownedNumbers === null || ownedNumbers.has(volume.volumeNumber));
   const scanVolume = !privacy ? manga.volumes.find(volume => volume.spineScan?.side) : undefined;
-  const colorKey = scanVolume?.spineScan?.side ?? JSON.stringify([firstOwned?.id, firstOwned?.coverArtworkId]);
+  const colorKey = seriesKey ?? scanVolume?.spineScan?.side ?? JSON.stringify([firstOwned?.id, firstOwned?.coverArtworkId]);
+  const sharedInk = useMangaSpineInk(colorKey);
   const [sample, setSample] = useState<{ key: string; ink: string } | null>(null);
-  const ink = sample?.key === colorKey ? sample.ink : (!touchTargets ? sample?.ink : null) ?? mangaSpineColor(colorKey);
+  const ink = sharedInk ?? (sample?.key === colorKey ? sample.ink : (!touchTargets ? sample?.ink : null) ?? mangaSpineColor(colorKey));
   const sampleCover = useCallback((image: HTMLImageElement) => setSample({ key: colorKey, ink: sampleMangaSpineColor(colorKey, image) }), [colorKey]);
   // Ownership can change while the first owned cover is already mounted and decoded.
   useEffect(() => {
-    if (privacy || scanVolume) return;
+    if (privacy || scanVolume || seriesScan) return;
     const button = [...viewport.current?.querySelectorAll<HTMLButtonElement>("[data-volume-id]") ?? []].find(element => element.dataset.volumeId === firstOwned?.id);
     const image = button?.querySelector<HTMLImageElement>(".manga-print-art img");
     if (image?.complete && image.naturalWidth) setSample({ key: colorKey, ink: sampleMangaSpineColor(colorKey, image) });
-  }, [colorKey, privacy, firstOwned?.id, scanVolume]);
+  }, [colorKey, privacy, firstOwned?.id, scanVolume, seriesScan]);
   // Tablet taps use the whole book area; native scrolling keeps ownership of swipes.
   const tap = useRef<{ id: number; x: number; y: number; left: number; track: HTMLElement; moved: boolean; time: number } | null>(null);
   const suppressClick = useRef(false);
@@ -191,6 +193,7 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   const placed = useRef(false);
   // Scroll only the shelf (never the page) so the current volume stays in view; centred shelves do not move.
   useLayoutEffect(() => {
+    if (list) return;
     const track = viewport.current?.querySelector<HTMLElement>(".home-shelf__track");
     const spine = track?.querySelector<HTMLElement>('[aria-pressed="true"]');
     if (!track || !spine) return;
@@ -205,11 +208,11 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     if (track.scrollTo) track.scrollTo({ left, behavior: smooth ? "smooth" : "auto" });
     else track.scrollLeft = left;
   }, [manga.activeVolumeId]);
-  const { requested, measured } = useSpineImages(viewport, !list, manga.volumes, scanVolume?.id ?? firstOwned?.id);
-  const covers = useMemo(() => new Map(manga.volumes.map(volume => [volume.id, volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null])), [manga.volumes, coverUrl]);
+  const { requested, measured } = useSpineImages(viewport, !list, volumes, scanVolume?.id ?? firstOwned?.id);
+  const covers = useMemo(() => new Map(volumes.map(volume => [volume.id, volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null])), [volumes, coverUrl]);
   // The colour source is eager even when it is outside the strip's opening viewport.
   const needsImage = (id: string) => requested === null || requested.has(id) || id === (scanVolume?.id ?? firstOwned?.id);
-  const sources = Object.fromEntries(manga.volumes.filter(volume => needsImage(volume.id)).map(volume => [`${volume.id}:strip`, privacy ? null : covers.get(volume.id) ?? null]));
+  const sources = Object.fromEntries(volumes.filter(volume => needsImage(volume.id)).map(volume => [`${volume.id}:strip`, privacy ? null : covers.get(volume.id) ?? null]));
   const images = useWorkImageReady(sources, onReady && measured ? onReady : undefined);
   // Event identities stay fixed while selection and parent callbacks change.
   const handlers = useRef({ choose, onEnlarge }); handlers.current = { choose, onEnlarge };
@@ -218,6 +221,10 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     setOut(null); setPainted(false); handlers.current.onEnlarge?.(id);
   }, []);
   const outVolume = manga.volumes.find(volume => volume.id === out?.id);
+  const books = <div className="manga-bookcase-board" style={zoom === 1 ? undefined : { "--print-zoom": zoom } as CSSProperties}><div className="manga-bookcase-spines">
+    {volumes.map(volume => <Spine key={volume.id} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && !seriesScan && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={onReady ? images.loaded : undefined} onImageError={onReady ? images.failed : undefined} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} out={out?.id === volume.id && painted} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={focuses.get(volume.id) ?? null} owned={ownedNumbers === null ? null : ownedNumbers.has(volume.volumeNumber)} src={covers.get(volume.id) ?? null} loadImages={needsImage(volume.id)} onPick={pickSpine} onEnlarge={onEnlarge ? enlargeSpine : undefined} />)}
+    {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
+  </div>{!list && <ShelfMaterial />}</div>;
   return <div ref={viewport} onKeyDown={event => {
     const spine = (event.target as Element).closest<HTMLElement>("button[data-volume-id]");
     if (!spine || (event.key !== "Enter" && event.key !== " ")) return;
@@ -226,10 +233,8 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   }} style={mangaShelfStyle(touchTargets)} onPointerDown={pointerDown} onPointerMove={touchTargets ? moved : undefined} onPointerUp={touchTargets ? pointerUp : undefined}
     onScrollCapture={touchTargets ? () => { if (tap.current) tap.current.moved = true; } : undefined}
     onPointerCancel={touchTargets ? () => { tap.current = null; } : undefined}
-    onClickCapture={touchTargets ? event => { if (!(event.target as Element).closest(".manga-shelf-out") && suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} onClick={event => { if (!touchTargets && !(event.target as Element).closest("button, .manga-shelf-out")) dismiss(); }} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller releaseAtEdges previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board" style={zoom === 1 ? undefined : { "--print-zoom": zoom } as CSSProperties}><div className="manga-bookcase-spines">
-    {manga.volumes.map(volume => <Spine key={volume.id} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={onReady ? images.loaded : undefined} onImageError={onReady ? images.failed : undefined} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} out={out?.id === volume.id && painted} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={focuses.get(volume.id) ?? null} owned={ownedNumbers === null ? null : ownedNumbers.has(volume.volumeNumber)} src={covers.get(volume.id) ?? null} loadImages={needsImage(volume.id)} onPick={pickSpine} onEnlarge={onEnlarge ? enlargeSpine : undefined} />)}
-    {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
-  </div><ShelfMaterial /></div></ShelfScroller>
+    onClickCapture={touchTargets ? event => { if (!(event.target as Element).closest(".manga-shelf-out") && suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} onClick={event => { if (!touchTargets && !(event.target as Element).closest("button, .manga-shelf-out")) dismiss(); }} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}>
+    {list ? <div className="home-shelf__track manga-shelf-run__track">{books}</div> : <ShelfScroller releaseAtEdges previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기">{books}</ShelfScroller>}
     {out && outVolume && <MangaPullOut pending={pullPending} key={out.id} volume={outVolume} viewport={viewport} privacy={privacy} src={outVolume.coverArtworkId ? coverUrl(outVolume.coverArtworkId) : null} title={title} author={author} publisher={publisher} ink={ink} tablet={touchTargets} zoom={zoom} focus={manga.focuses.find(item => item.volumeId === out.id && item.coverArtworkId === outVolume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(outVolume.volumeNumber)} leaving={out.leaving} onPaint={() => {
       setPainted(true);
       if (keyboardPick.current && !out.leaving) {
@@ -325,7 +330,7 @@ function MangaPullOut({ volume, viewport, privacy, src, title, author, publisher
     const measure = () => {
       const spine = [...viewport.current?.querySelectorAll<HTMLElement>("button[data-volume-id]") ?? []].find(node => node.dataset.volumeId === volume.id);
       if (!spine || !viewport.current) return;
-      const box = spine.getBoundingClientRect(), shelf = viewport.current.getBoundingClientRect();
+      const box = spine.getBoundingClientRect(), shelf = (viewport.current.closest(".manga-shelf-row") ?? viewport.current).getBoundingClientRect();
       const h = box.height || size.height, depth = box.width || size.spine;
       const height = Math.round(h * 1.28), width = Math.round(height * size.width / size.height);
       const center = box.left + depth / 2;

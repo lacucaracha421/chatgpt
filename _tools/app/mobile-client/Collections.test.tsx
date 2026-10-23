@@ -1351,10 +1351,27 @@ it('re-reads only the manga row whose scan availability changed', async()=>{
   const props={items:works,label:'만화 작품 목록',revision:'r1',active:true,privacy:false,owned:()=>null,pick:null,onPick:vi.fn(),onOpen:vi.fn()};
   const view=render(<TabletMangaShelf {...props}/>);
   await screen.findByRole('group',{name:'Other 책장'});
+  const shared=screen.getByRole('group',{name:'1번째 선반'});
+  expect(within(shared).getByRole('button',{name:works[0].name})).toBeTruthy();
+  expect(within(shared).getByRole('button',{name:'Other'})).toBeTruthy();
+  expect(within(shared).queryByRole('button',{name:'책장 오른쪽 보기'})).toBeNull();
   expect(mocks.api).toHaveBeenCalledTimes(2);
   view.rerender(<TabletMangaShelf {...props} items={[{...works[0],scanRevision:'s2'},works[1]]}/>);
   await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(3));
   expect(mocks.api.mock.calls.filter(call=>call[0].endsWith('/other'))).toHaveLength(1);
+});
+
+it('wraps a long tablet work and shares one detail read across its continued runs', async()=>{
+  const work={...mangaItem(),scanRevision:'s1',volumes:Array.from({length:100},(_,index)=>({...item.volumes[0],id:`long-${index}`,volumeNumber:index+1,displayLabel:String(index+1),coverArtworkId:null}))};
+  mocks.api.mockResolvedValue({revision:'long',item:work});
+  const props={items:[work],label:'만화 작품 목록',revision:'long',active:true,privacy:false,owned:()=>null,pick:null,onPick:vi.fn(),onOpen:vi.fn()};
+  const view=render(<TabletMangaShelf {...props}/>);
+  await screen.findByRole('button',{name:'100권 보기'});
+  expect(mocks.api).toHaveBeenCalledTimes(1);
+  expect(within(screen.getByRole('group',{name:'1번째 선반'})).getByRole('button',{name:'1권 보기'})).toBeTruthy();
+  expect(within(screen.getByRole('group',{name:'3번째 선반'})).getByRole('button',{name:work.name}).textContent).toContain('›');
+  view.rerender(<TabletMangaShelf {...props} items={[{...work,scanRevision:'s2'}]}/>);
+  await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(2));
 });
 
 it('renders an empty tablet manga shelf when the detail reply has no item', async()=>{

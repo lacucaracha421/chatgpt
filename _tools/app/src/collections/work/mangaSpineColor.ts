@@ -1,6 +1,13 @@
+import { useCallback, useSyncExternalStore } from "react";
+
 export const MANGA_SPINE_INK = "#45423e";
 // One sample of the first owned cover, shared by list/detail and retained between visits.
 const colors = new Map<string, string>();
+const listeners = new Set<() => void>();
+export function useMangaSpineInk(key: string): string | null {
+  const snapshot = useCallback(() => colors.get(key) ?? null, [key]);
+  return useSyncExternalStore(useCallback(notify => { listeners.add(notify); return () => { listeners.delete(notify); }; }, []), snapshot, snapshot);
+}
 export function mangaSpineColor(key: string): string { return colors.get(key) ?? MANGA_SPINE_INK; }
 
 /** The cover's most vivid hue as a print ink dark enough for paper; neutral ink when the cover is grey or unreadable. */
@@ -9,6 +16,7 @@ export function sampleMangaSpineColor(key: string, image: HTMLImageElement): str
   if (cached) return cached;
   const ink = vividInk(image) ?? MANGA_SPINE_INK;
   colors.set(key, ink);
+  listeners.forEach(notify => notify());
   return ink;
 }
 

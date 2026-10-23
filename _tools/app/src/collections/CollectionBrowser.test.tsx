@@ -1214,7 +1214,7 @@ describe("CollectionBrowser manga shelf", () => {
     });
   });
 
-  it("honours stored 책장 and keeps volume picking and opening on each work row", async () => {
+  it("packs works on a shared shelf and keeps volume picking and label opening", async () => {
     const user = userEvent.setup();
     localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "bookcase", perRow: 8, grouping: "device" }));
     const onViewChange = vi.fn();
@@ -1225,6 +1225,10 @@ describe("CollectionBrowser manga shelf", () => {
     } });
     const list = screen.getByRole("group", { name: "만화 작품 목록" });
     const row = await within(list).findByRole("group", { name: "다이의 대모험 책장" });
+    const shared = within(list).getByRole("group", { name: "1번째 선반" });
+    expect(within(shared).getByRole("button", { name: "다이의 대모험" })).toBeInTheDocument();
+    expect(within(shared).getByRole("button", { name: "빈 작품" })).toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: "책장 오른쪽 보기" })).toBeNull();
     // The 기본판 in volume order; the owned count marks volume 2 unowned.
     const spines = within(row).getAllByRole("button");
     expect(spines.map(spine => spine.getAttribute("aria-label"))).toEqual(["1권 보기", "2권 보기"]);

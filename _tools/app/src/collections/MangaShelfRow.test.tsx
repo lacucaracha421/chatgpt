@@ -15,26 +15,24 @@ describe("manga shelf row", () => {
     expect(mangaShelfData([], [], null, null).ownedNumbers).toBeNull();
   });
 
-  it("asks for its volumes only once it comes near the visible list", () => {
-    const observers: { callback: IntersectionObserverCallback; options?: IntersectionObserverInit }[] = [];
-    vi.stubGlobal("IntersectionObserver", class {
-      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) { observers.push({ callback, options }); }
-      observe() {} disconnect() {} unobserve() {} takeRecords() { return []; }
-    });
-    const onNear = vi.fn();
-    const { container } = render(<div style={{ overflowY: "auto" }} className="scroller"><MangaShelfRow id="m1" title="다이의 대모험" owned={null} manga={null} privacy={false} coverUrl={() => null}
-      onNear={onNear} onPick={() => undefined} onOpen={() => undefined} /></div>);
-    expect(onNear).not.toHaveBeenCalled();
-    expect(container.querySelector(".manga-shelf-row__waiting .manga-bookcase-board")).not.toBeNull();
-    expect(observers[0].options?.root).toBe(container.querySelector(".scroller"));
-    observers[0].callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
-    expect(onNear).toHaveBeenCalledOnce();
+  it("shows only the continued part and keeps the label's whole-work count and action", () => {
+    const onOpen = vi.fn();
+    render(<MangaShelfRow id="m1" title="다이의 대모험" owned={2} start={1} count={1} manga={mangaShelfData([volume("a", 1), volume("b", 2), volume("c", 3)], [], 2, null)} privacy={false} coverUrl={() => null}
+      onPick={() => undefined} onOpen={onOpen} />);
+    expect(screen.queryByRole("button", { name: "1권 보기" })).toBeNull();
+    expect(screen.getByRole("button", { name: "2권 보기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "3권 보기" })).toBeNull();
+    const label = screen.getByRole("button", { name: "다이의 대모험" });
+    expect(label).toHaveTextContent("다이의 대모험 ›");
+    expect(screen.getByLabelText("보유 2권 / 전체 3권")).toHaveTextContent("2 / 3권");
+    fireEvent.click(label);
+    expect(onOpen).toHaveBeenCalledWith(null);
   });
 
   it("opens the work at the picked volume on Enter and from its title", () => {
     const onOpen = vi.fn(), onPick = vi.fn();
     render(<MangaShelfRow id="m1" title="다이의 대모험" owned={2} manga={mangaShelfData([volume("a", 1), volume("b", 2)], [], 2, "b")} privacy={false} coverUrl={id => `thumb:${id}`}
-      onNear={() => undefined} onPick={onPick} onOpen={onOpen} />);
+      onPick={onPick} onOpen={onOpen} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "1권 보기" }), { key: "Enter" });
     expect(onOpen).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole("button", { name: "2권 보기" }), { key: "Enter" });
@@ -50,7 +48,7 @@ describe("manga shelf row", () => {
     try {
       const onLongPress = vi.fn(), onPick = vi.fn();
       render(<MangaShelfRow id="m1" title="다이의 대모험" owned={2} manga={mangaShelfData([volume("a", 1), volume("b", 2)], [], 2, null)} privacy={false} coverUrl={id => `thumb:${id}`}
-        onNear={() => undefined} onPick={onPick} onOpen={() => undefined} onLongPress={onLongPress} />);
+        onPick={onPick} onOpen={() => undefined} onLongPress={onLongPress} />);
       const spine = screen.getByRole("button", { name: "1권 보기" });
       fireEvent.pointerDown(spine, { button: 0, clientX: 30, clientY: 30 });
       act(() => { vi.advanceTimersByTime(450); });

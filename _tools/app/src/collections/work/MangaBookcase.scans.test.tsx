@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MangaBookcase, type MangaWorkData } from "./MangaBookcase";
 import { sampleMangaSpineColor } from "./mangaSpineColor";
 
-vi.mock("./mangaSpineColor", () => ({ mangaSpineColor: () => "#45423e", sampleMangaSpineColor: vi.fn(() => "#123456") }));
+vi.mock("./mangaSpineColor", () => ({ useMangaSpineInk: () => null, mangaSpineColor: () => "#45423e", sampleMangaSpineColor: vi.fn(() => "#123456") }));
 const side = "http://lakomics.localhost/manga-spine-scan/9780000000001/side";
 const back = "http://lakomics.localhost/manga-spine-scan/9780000000001/back";
 const manga: MangaWorkData = {

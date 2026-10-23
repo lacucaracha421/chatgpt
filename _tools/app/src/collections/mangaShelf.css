@@ -1,20 +1,25 @@
-/* The Collections 만화 list as shelves: one row per work, the work screen's bookcase (collectionWork.css)
-   left-aligned under the work's title. Spines, the thin plank and the picked cover keep their own look. */
+/* One shared wall/plank per packed row; work runs own books and a printed paper label. */
 .manga-shelf-list { display: flex; flex-direction: column; padding: var(--space-4) 0 var(--space-8); }
-/* Rows below the fold skip style, layout and paint until they near the viewport. The placeholder follows the label and scaled shelf; `auto` keeps a row's real height once seen. content-visibility implies paint containment, so the clip margin keeps the title's focus ring from being cut at the row edge. */
-.manga-shelf-row { min-width: 0; content-visibility: auto; contain-intrinsic-block-size: auto calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 48px + var(--manga-label-height, var(--line-ui))); overflow-clip-margin: 8px; }
-.manga-shelf-row__label { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; padding: 0 var(--space-6); }
-.manga-shelf-row__title { min-width: 0; padding: 0; overflow: hidden; color: var(--color-text); font: inherit; font-size: var(--type-body); font-weight: 600; line-height: var(--line-ui); text-align: left; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; cursor: pointer; }
-.manga-shelf-row__title:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
-.manga-shelf-row__count { flex: none; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); }
-/* 16 above the books leaves room for the picked cover's lift; 32 below holds its number under the plank. */
-/* Size changes reuse the decoded covers and mounted books: all dimensions swap in one layout,
-   without a loading pass or scaling the title, volume numbers and touch controls. */
-.manga-shelf-row__shelf { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 48px); }
-.manga-bookcase--list .manga-bookcase-board, .manga-bookcase--list .manga-spine { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
-.manga-bookcase--list { height: 100%; overflow: hidden; }
-.manga-bookcase.manga-bookcase--list .home-shelf { display: block; height: 100%; margin: 0; padding: 0; overflow: visible; }
-.manga-bookcase.manga-bookcase--list .home-shelf__track, .manga-shelf-row__waiting { box-sizing: border-box; height: 100%; gap: 0; padding: var(--space-4) var(--space-6) var(--space-8); }
-.manga-shelf-row__waiting .manga-bookcase-board { width: 100%; }
-.manga-bookcase.manga-bookcase--list .manga-bookcase-spines { justify-content: flex-start; }
-.manga-bookcase--list .manga-cover-empty { align-self: center; font-size: var(--type-meta); }
+.manga-shelf-row { position: relative; min-width: 0; height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); flex: none; content-visibility: auto; contain-intrinsic-block-size: auto calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1) + 72px); overflow-clip-margin: 8px; }
+.manga-shelf-row__board { position: absolute; top: var(--space-4); left: var(--space-6); right: var(--space-6); height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
+.manga-shelf-row__runs { position: relative; display: flex; gap: var(--space-3); margin: 0 var(--space-6); padding-top: var(--space-4); }
+.manga-shelf-row__slot { flex: none; min-width: 0; }
+.manga-shelf-list__item, .manga-shelf-run { min-width: 0; width: 100%; }
+.manga-shelf-run { position: relative; animation: manga-run-in 140ms var(--ease-standard); }
+.manga-shelf-row__shelf, .manga-shelf-row__waiting { height: calc(var(--manga-height, 200.2px) * var(--manga-spine-scale, 1)); }
+/* Book widths may settle after a scan decodes. They fit inside the reserved run without moving rows. */
+.manga-bookcase--list { height: 100%; min-width: 0; overflow: visible; }
+.manga-bookcase.manga-bookcase--list .manga-shelf-run__track { box-sizing: border-box; display: block; height: 100%; width: 100%; padding: 0; overflow: visible; touch-action: pan-y; }
+.manga-bookcase--list .manga-bookcase-board { width: 100%; height: 100%; }
+.manga-bookcase--list .manga-bookcase-spines { justify-content: flex-start; min-width: 0; }
+.manga-bookcase--list .manga-spine { flex: 0 1 auto; min-width: 0; }
+.manga-bookcase--list .manga-spine-strip { width: 100%; }
+.manga-bookcase--list .manga-cover-empty { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; align-self: center; font-size: var(--type-meta); }
+/* The label overlaps the plank front; its touch area extends below the paper. */
+.manga-shelf-row__label { position: relative; z-index: 2; display: flex; align-items: flex-start; box-sizing: border-box; width: 100%; min-width: 0; min-height: 32px; margin-top: 5px; padding: 0; border: 0; border-radius: 0; background: transparent; color: #242421; font: inherit; font-size: var(--type-meta); line-height: var(--line-meta); text-align: left; cursor: pointer; }
+.manga-shelf-row__label > span { display: block; box-sizing: border-box; width: 100%; overflow: hidden; padding: 0 var(--space-1); background: #e7e2d7; text-overflow: ellipsis; white-space: nowrap; }
+.manga-shelf-row__label:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
+.manga-shelf-run .manga-picked-number, .manga-shelf-run .manga-upcoming-date { top: auto; bottom: calc(100% + var(--space-1)); }
+@media (pointer: coarse) { .manga-shelf-row__label { min-height: 44px; } }
+@keyframes manga-run-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .manga-shelf-run { animation: none; } }
