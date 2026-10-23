@@ -296,7 +296,7 @@ const Spine = memo(function Spine({ bitmap = false, zoom = 1, title, author, pub
   return <Tag type={decorative ? undefined : "button"} className={`manga-spine${sideSrc ? " manga-spine--scanned" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : `${volumeLabel(volume)} 보기`} aria-description={description} aria-pressed={picked} data-volume-id={decorative ? undefined : volume.id} data-out={out || undefined} onClick={decorative ? undefined : () => onPick(volume.id)} onDoubleClick={decorative || !onEnlarge ? undefined : () => onEnlarge(volume.id)} style={{ "--spine-width": `${spineWidth}px`, "--print-nominal": `${print}px`, "--spine-ink": ink, "--number-mix": `${mangaVolumeHash(volume.id) % 13}%`, "--title-font": `${titleFont}px`, "--label-font": `${labelFont}px`, "--author-font": `${authorFont}px`, "--publisher-font": `${publisherFont}px` } as CSSProperties}>
     {/* Printed parts stay in place while the art and series ink arrive. */}
     {latest && !decorative && <span className="manga-latest-label">최신</span>}
-    {bitmap && !decorative ? <MangaSpineBitmap paperWhilePending={!tablet && !sideSrc && !onSample} spec={{
+    {bitmap && !decorative ? <MangaSpineBitmap paperWhilePending={false} spec={{
       id: volume.id, art: loadImages ? src : null, scan: sideSrc, ink, title, author, publisher,
       number: volume.volumeNumber, width: size.spine, height: size.height, print, scale: 1, dpr: 1, zoom,
       privacy, opacity: volume.releaseStatus === "upcoming" ? .16 : missing ? .3 : 1,
