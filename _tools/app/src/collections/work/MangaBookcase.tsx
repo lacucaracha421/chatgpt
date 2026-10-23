@@ -21,6 +21,7 @@ import { ShelfMaterial } from "../ShelfMaterial";
 import { mangaPixels, MANGA_MM, MANGA_PX_PER_MM, mangaShelfStyle, mangaVolumeHash, mangaScanWidth } from "../mangaDimensions";
 import { mangaSpineColor, sampleMangaSpineColor, useMangaSpineInk } from "./mangaSpineColor";
 import { LONG_PRESS_MS } from "../../shared/useLongPress";
+import { MangaSpineBitmap } from "./MangaSpineBitmap";
 
 export type MangaWorkData = { volumes: CollectionVolume[]; activeVolumeId: string | null; editionIndex: number; latestKoreanVolume?: number | null; focuses: CollectionCoverFocus[]; ownedNumbers: number[] | null; scope: string; revision: string; ownership: ReactNode; management: ReactNode };
 export function editionName(index: number) { return index === 0 ? "기본판" : `대체판 ${index}`; }
@@ -223,7 +224,7 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
   }, []);
   const outVolume = manga.volumes.find(volume => volume.id === out?.id);
   const books = <div className="manga-bookcase-board" style={zoom === 1 ? undefined : { "--print-zoom": zoom } as CSSProperties}><div className="manga-bookcase-spines">
-    {volumes.map(volume => <Spine key={volume.id} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && !seriesScan && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={onReady ? images.loaded : undefined} onImageError={onReady ? images.failed : undefined} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} out={out?.id === volume.id && painted} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={focuses.get(volume.id) ?? null} owned={ownedNumbers === null ? null : ownedNumbers.has(volume.volumeNumber)} src={covers.get(volume.id) ?? null} loadImages={needsImage(volume.id)} onPick={pickSpine} onEnlarge={onEnlarge ? enlargeSpine : undefined} />)}
+    {volumes.map(volume => <Spine key={volume.id} bitmap={list} zoom={zoom} title={title} author={author} publisher={volume.publisher ?? publisher} ink={ink} tablet={touchTargets} onSample={!scanVolume && !seriesScan && volume.id === firstOwned?.id ? sampleCover : undefined} onScanSample={volume.id === scanVolume?.id ? sampleCover : undefined} onImageLoad={onReady ? images.loaded : undefined} onImageError={onReady ? images.failed : undefined} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} out={out?.id === volume.id && painted} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={focuses.get(volume.id) ?? null} owned={ownedNumbers === null ? null : ownedNumbers.has(volume.volumeNumber)} src={covers.get(volume.id) ?? null} loadImages={needsImage(volume.id)} onPick={pickSpine} onEnlarge={onEnlarge ? enlargeSpine : undefined} />)}
     {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
   </div>{!list && <ShelfMaterial />}</div>;
   return <div ref={viewport} onKeyDown={event => {
@@ -247,7 +248,7 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
 }
 // The PC media protocol grants CORS to the app origin only when asked, so the series colour can be sampled.
 const appMedia = (src: string) => src.startsWith("http://lakomics.localhost/") || src.startsWith("lakomics://");
-const Spine = memo(function Spine({ title, author, publisher, ink, tablet, onSample, onScanSample, volume, latest, picked, privacy, focus, owned, src, onPick, onEnlarge, onImageLoad, onImageError, loadImages = true, out = false, decorative = false }: { loadImages?: boolean; out?: boolean; decorative?: boolean; title: string; author: string | null; publisher: string | null; ink: string; tablet: boolean; onSample?(image: HTMLImageElement): void; onScanSample?(image: HTMLImageElement): void; volume: CollectionVolume; latest: boolean; picked: boolean; privacy: boolean; focus: number | null; owned: boolean | null; src: string | null; onPick(id: string): void; onEnlarge?(id: string): void; onImageLoad?(key: string, event: import("react").SyntheticEvent<HTMLImageElement>): void; onImageError?(key: string, src: string): void }) {
+const Spine = memo(function Spine({ bitmap = false, zoom = 1, title, author, publisher, ink, tablet, onSample, onScanSample, volume, latest, picked, privacy, focus, owned, src, onPick, onEnlarge, onImageLoad, onImageError, loadImages = true, out = false, decorative = false }: { bitmap?: boolean; zoom?: number; loadImages?: boolean; out?: boolean; decorative?: boolean; title: string; author: string | null; publisher: string | null; ink: string; tablet: boolean; onSample?(image: HTMLImageElement): void; onScanSample?(image: HTMLImageElement): void; volume: CollectionVolume; latest: boolean; picked: boolean; privacy: boolean; focus: number | null; owned: boolean | null; src: string | null; onPick(id: string): void; onEnlarge?(id: string): void; onImageLoad?(key: string, event: import("react").SyntheticEvent<HTMLImageElement>): void; onImageError?(key: string, src: string): void }) {
   const size = mangaPixels(volume.id, MANGA_PX_PER_MM[tablet ? "tablet" : "pc"]);
   // Print sizes follow the nominal thickness, so one run shows the same text on every volume.
   const print = MANGA_MM.spine * MANGA_PX_PER_MM[tablet ? "tablet" : "pc"];
@@ -274,11 +275,7 @@ const Spine = memo(function Spine({ title, author, publisher, ink, tablet, onSam
     if (element.naturalHeight) setArtRatio(element.naturalWidth / element.naturalHeight);
     onSample?.(element);
   }} onPreloadError={() => onImageError?.(`${volume.id}:strip`, src)} onError={() => onImageError?.(`${volume.id}:strip`, src)} style={{ objectPosition: `${stripPosition(focus, size.height * .17 * artRatio, size.spine)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
-  const Tag = decorative ? "span" : "button";
-  return <Tag type={decorative ? undefined : "button"} className={`manga-spine${sideSrc ? " manga-spine--scanned" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : `${volumeLabel(volume)} 보기`} aria-description={description} aria-pressed={picked} data-volume-id={decorative ? undefined : volume.id} data-out={out || undefined} onClick={decorative ? undefined : () => onPick(volume.id)} onDoubleClick={decorative || !onEnlarge ? undefined : () => onEnlarge(volume.id)} style={{ "--spine-width": `${spineWidth}px`, "--print-nominal": `${print}px`, "--spine-ink": ink, "--number-mix": `${mangaVolumeHash(volume.id) % 13}%`, "--title-font": `${titleFont}px`, "--label-font": `${labelFont}px`, "--author-font": `${authorFont}px`, "--publisher-font": `${publisherFont}px` } as CSSProperties}>
-    {/* Printed parts stay in place while the art and series ink arrive. */}
-    {latest && !decorative && <span className="manga-latest-label">최신</span>}
-    <span className={`manga-spine-strip${scanned ? " manga-spine-strip--scanned" : ""}${privacy ? " manga-spine-strip--private" : ""}`} aria-hidden="true">
+  const printFace = <span className={`manga-spine-strip${scanned ? " manga-spine-strip--scanned" : ""}${privacy ? " manga-spine-strip--private" : ""}`} aria-hidden="true">
       {!privacy && <>
         <span className="manga-print-label"><span>{publisher}</span></span>
         <span className={`manga-print-title${latin ? " manga-print-title--latin" : ""}`}><span>{title}</span></span>
@@ -289,13 +286,23 @@ const Spine = memo(function Spine({ title, author, publisher, ink, tablet, onSam
         <span className="manga-print-author"><span style={authorFont < 3 ? { visibility: "hidden" } : undefined}>{author}</span></span>
         <span className="manga-print-publisher"><span style={publisherFont < 3 ? { visibility: "hidden" } : undefined}>{publisher}</span></span>
       </>}
-      {/* Scan aspect ratios determine shelf geometry, so scans keep loading eagerly. */}
       {sideSrc && <span className={`manga-scan${scanned ? " is-decoded" : ""}`}><ScanImage src={sideSrc} onDecoded={element => {
         setScan({ src: sideSrc, ratio: element.naturalWidth / element.naturalHeight });
         onScanSample?.(element);
       }} /></span>}
       <span className="collection-spine-light" />
-    </span>
+    </span>;
+  const Tag = decorative ? "span" : "button";
+  return <Tag type={decorative ? undefined : "button"} className={`manga-spine${sideSrc ? " manga-spine--scanned" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-hidden={decorative || undefined} aria-label={decorative ? undefined : `${volumeLabel(volume)} 보기`} aria-description={description} aria-pressed={picked} data-volume-id={decorative ? undefined : volume.id} data-out={out || undefined} onClick={decorative ? undefined : () => onPick(volume.id)} onDoubleClick={decorative || !onEnlarge ? undefined : () => onEnlarge(volume.id)} style={{ "--spine-width": `${spineWidth}px`, "--print-nominal": `${print}px`, "--spine-ink": ink, "--number-mix": `${mangaVolumeHash(volume.id) % 13}%`, "--title-font": `${titleFont}px`, "--label-font": `${labelFont}px`, "--author-font": `${authorFont}px`, "--publisher-font": `${publisherFont}px` } as CSSProperties}>
+    {/* Printed parts stay in place while the art and series ink arrive. */}
+    {latest && !decorative && <span className="manga-latest-label">최신</span>}
+    {bitmap && !decorative ? <MangaSpineBitmap paperWhilePending={!tablet && !sideSrc && !onSample} spec={{
+      id: volume.id, art: loadImages ? src : null, scan: sideSrc, ink, title, author, publisher,
+      number: volume.volumeNumber, width: size.spine, height: size.height, print, scale: 1, dpr: 1, zoom,
+      privacy, opacity: volume.releaseStatus === "upcoming" ? .16 : missing ? .3 : 1,
+      focus, numberMix: mangaVolumeHash(volume.id) % 13, titleFont, labelFont, authorFont, publisherFont,
+      font: '"Pretendard Variable", "Pretendard", "Yu Gothic UI", "Meiryo", "Segoe UI", "Malgun Gothic", sans-serif',
+    }} onReady={ratio => { if (sideSrc && ratio) setScan(previous => previous?.src === sideSrc && previous.ratio === ratio ? previous : { src: sideSrc, ratio }); }}>{printFace}</MangaSpineBitmap> : printFace}
     {picked && !decorative && <span className="manga-picked-number">{volume.volumeNumber}</span>}
     {volume.releaseStatus === "upcoming" && !picked && !decorative && <span className="manga-upcoming-date">{displayDate(volume.localReleaseDate)}</span>}
   </Tag>;

@@ -3,12 +3,14 @@ import { mangaShelfStyle, MANGA_MM, MANGA_PX_PER_MM } from "./mangaDimensions";
 import { MANGA_SHELF_GUTTER, packMangaShelves, type MangaShelfRun } from "./mangaShelfLayout";
 import { ShelfMaterial } from "./ShelfMaterial";
 import "./mangaShelf.css";
+import { MangaBitmapScale } from "./work/MangaSpineBitmap";
+import { noteMangaShelfScroll } from "./work/mangaSpineBitmaps";
 
 const Shelf = memo(function Shelf<W extends { id: string }>({ runs, index, ready, near, renderRun }: {
   runs: MangaShelfRun<W>[]; index: number; ready: Set<string>; near: boolean;
   renderRun(run: MangaShelfRun<W>, near: boolean): ReactNode;
 }) {
-  return <div className="manga-shelf-row" role="group" aria-label={`${index + 1}번째 선반`}>
+  return <div className="manga-shelf-row" data-mounted={near || undefined} role="group" aria-label={`${index + 1}번째 선반`}>
     <div className="manga-shelf-row__board"><ShelfMaterial /></div>
     <div className="manga-shelf-row__runs">
       {near && runs.map(run => <div key={`${run.work.id}:${run.start}`} className="manga-shelf-row__slot" style={{ width: run.width }}>
@@ -34,6 +36,8 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
   const host = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement | null>(null);
   const [width, setWidth] = useState(800);
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  const bitmapScale = useMemo(() => ({ scale, dpr }), [scale, dpr]);
   const initial = () => {
     const counts = new Map(items.flatMap(work => {
       const count = cachedCount(work);
@@ -63,7 +67,7 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
     const clamp = (value: number) => Math.max(0, Math.min(limit, value));
     const first = clamp(Math.floor(offset / step));
     const last = clamp(Math.ceil((offset + height) / step) - 1);
-    const overscan = height;
+    const overscan = height * 2;
     const next = { first, last, start: clamp(Math.floor((offset - overscan) / step)), end: clamp(Math.ceil((offset + height + overscan) / step) - 1) };
     const run = view.rows[first]?.find(run => view.ready.has(run.work.id)) ?? view.rows[first]?.[0];
     anchor.current = run ? { identity: view.identity, id: run.work.id, volume: run.start, top: first * step - offset } : null;
@@ -85,6 +89,7 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
       height: scroller?.clientHeight || window.innerHeight,
       step: element.firstElementChild?.getBoundingClientRect().height || MANGA_MM.height * MANGA_PX_PER_MM[tablet ? "tablet" : "pc"] * scale + 72,
     };
+    setDpr(current => current === (window.devicePixelRatio || 1) ? current : window.devicePixelRatio || 1);
     if (element.clientWidth) setWidth(Math.max(1, element.clientWidth - MANGA_SHELF_GUTTER * 2));
     measure.current();
   };
@@ -100,6 +105,7 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
     root.current = scroller;
     let frame: number | null = null;
     const scroll = () => {
+      noteMangaShelfScroll();
       if (frame !== null) return;
       frame = requestAnimationFrame(() => { frame = null; measure.current(); });
     };
@@ -249,7 +255,7 @@ export function PackedMangaShelves<W extends { id: string }>({ items, identity, 
       });
     }
   }, [active, state, identity, rowWindow, rows, ready, prepare, estimate, completion]);
-  return <div ref={host} className="manga-shelf-list" role="group" aria-label={label} style={{ ...mangaShelfStyle(tablet), "--manga-spine-scale": scale, overflowAnchor: "none" } as CSSProperties}>
+  return <MangaBitmapScale.Provider value={bitmapScale}><div ref={host} className="manga-shelf-list" role="group" aria-label={label} style={{ ...mangaShelfStyle(tablet), "--manga-spine-scale": scale, overflowAnchor: "none" } as CSSProperties}>
     {view.rows.map((runs, index) => <Shelf key={index} runs={runs} index={index} ready={published.get(index)?.ready ?? view.ready} near={published.has(index)} renderRun={renderRun} />)}
-  </div>;
+  </div></MangaBitmapScale.Provider>;
 }

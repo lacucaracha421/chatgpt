@@ -1239,7 +1239,8 @@ describe("CollectionBrowser manga shelf", () => {
     expect(gateway.startCollectionCoverFocus).not.toHaveBeenCalled();
     fireEvent.click(spines[1]);
     expect(spines[1]).toHaveAttribute("aria-pressed", "true");
-    const image = spines[1].querySelector("img");
+    // The shelf spine is drawn into one bitmap slot; a size change must reuse that element, not load a new one.
+    const image = spines[1].querySelector("img.manga-spine-bitmap");
     const reads = vi.mocked(gateway.listCollectionVolumes).mock.calls.length;
     await user.click(screen.getByRole("button", { name: "보기" }));
     expect(screen.queryByRole("slider", { name: "한 줄에" })).toBeNull();
@@ -1249,7 +1250,7 @@ describe("CollectionBrowser manga shelf", () => {
     expect(JSON.parse(localStorage.getItem("lakomics.collections.view.manga.v1")!)).toMatchObject({ spineSize: "large" });
     expect(localStorage.getItem("lakomics.collections.view.game.v1")).toBeNull();
     expect(within(row).getByRole("button", { name: "2권 보기" })).toBe(spines[1]);
-    expect(spines[1].querySelector("img")).toBe(image);
+    expect(spines[1].querySelector("img.manga-spine-bitmap")).toBe(image);
     expect(spines[1]).toHaveAttribute("aria-pressed", "true");
     expect(gateway.listCollectionVolumes).toHaveBeenCalledTimes(reads);
     await user.click(screen.getByRole("button", { name: "보기" }));
