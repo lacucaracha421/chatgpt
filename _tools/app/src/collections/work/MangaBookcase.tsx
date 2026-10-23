@@ -176,7 +176,9 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
       const next = Math.abs(event.clientX - (box.left + box.width / 2));
       if (next < distance) { nearest = spine; distance = next; }
     }
-    nearest?.click();
+    // The empty wall beside a run is not a book: only a tap on or right next to a spine picks one.
+    const reach = Math.max(24, nearest ? nearest.getBoundingClientRect().width : 0);
+    if (distance <= reach) nearest?.click();
     suppressClick.current = true;
   };
   const placed = useRef(false);
