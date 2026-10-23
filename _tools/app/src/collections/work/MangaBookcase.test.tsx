@@ -84,7 +84,7 @@ function pointer(node: HTMLElement, type: string, x: number, y = 8) {
 }
 function tabletBookcase(touchTargets = true) {
   const onPick = vi.fn();
-  const view = render(<MangaBookcase touchTargets={touchTargets} manga={{ ...manga, activeVolumeId: null }} privacy={false} onPick={onPick} />);
+  const view = render(<MangaBookcase list touchTargets={touchTargets} manga={{ ...manga, activeVolumeId: null }} privacy={false} onPick={onPick} />);
   screen.getAllByRole("button", { name: /권 보기$/ }).forEach((spine, index) => {
     spine.getBoundingClientRect = () => ({ left: 24 + index * 32, width: 30, right: 54 + index * 32, top: 16, bottom: 136, height: 120, x: 24 + index * 32, y: 16, toJSON: () => null });
   });
@@ -116,7 +116,8 @@ describe("tablet book area taps", () => {
     const spine = screen.getByRole("button", { name: "2권 보기" });
     pointer(spine, "pointerdown", 70); pointer(spine, "pointerup", 70); fireEvent.click(spine, { detail: 1 });
     expect(onPick).toHaveBeenCalledExactlyOnceWith("v2");
-    fireEvent.click(spine, { detail: 0 }); expect(onPick).toHaveBeenCalledTimes(2);
+    fireEvent.click(spine, { detail: 0 }); expect(onPick).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll(".manga-shelf-out")).toHaveLength(1);
   });
   it("keeps PC gaps inactive and direct mouse clicks working", () => {
     const { onPick, track } = tabletBookcase(false);

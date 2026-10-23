@@ -1,3 +1,4 @@
+import {useAndroidBack} from "./cards/useAndroidBack";
 import {mangaScanRequests, mangaScanVolumes} from './mangaScans';
 import {useEffect, useState, type CSSProperties} from 'react';
 import {spineScale, type SpineSize} from '../src/collections/case/caseDimensions';
@@ -57,10 +58,10 @@ function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, o
   const edition = volumes[0]?.editionIndex ?? 0;
   const count = owned(edition);
   const manga = shown ? mangaShelfData(mangaScanVolumes(volumes, spines.urls), shown.item ? coverFocuses(shown.item.volumes) : [], count, picked) : null;
-  // A first tap picks the volume (its cover turns forward); a tap on the picked volume opens the work there.
-  return <MangaShelfRow id={work.id} title={work.name} author={shown?.item?.author ?? work.author} publisher={shown?.item?.publisher ?? work.publisher} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets onLongPress={onActions ? () => onActions(work) : undefined}
-    onNear={() => setNear(true)} onPick={volumeId => volumeId === picked ? onOpen(work.id, {volumeId, edition}) : onPick({id: work.id, volumeId})}
-    onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
+  // The shared shelf pulls out on the first tap; the floating book opens the work.
+  return <MangaShelfRow pullPending={!spines.ready} useBack={useAndroidBack} id={work.id} title={work.name} author={shown?.item?.author ?? work.author} publisher={shown?.item?.publisher ?? work.publisher} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets onLongPress={onActions ? () => onActions(work) : undefined}
+    onNear={() => setNear(true)} onPick={volumeId => onPick({id: work.id, volumeId})}
+    onEnlarge={volumeId => onOpen(work.id, {volumeId, edition})} onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
 }
 
 /** The tablet 만화 list as the PC's bookcase rows (shared `MangaShelfRow`), one per work in list order. */

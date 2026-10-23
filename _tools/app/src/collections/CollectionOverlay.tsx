@@ -423,7 +423,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
       {isManga && (mangaData ? <CollectionWorkScreen data={mangaData} pending={volumesCollectionId !== collectionId} actions={{
         onClose: onExit, onStep: offset => { const visible = mangaData.manga?.volumes ?? []; const index = visible.findIndex(volume => volume.id === mangaData.manga?.activeVolumeId); const next = visible[index + offset]; if (next) setSelectedVolumeId(next.id); },
-        onPickVolume: setSelectedVolumeId, onEnlargeManga: () => { const id = mangaData.manga?.activeVolumeId; if (id) openVolume(id); },
+        onPickVolume: setSelectedVolumeId, onEnlargeManga: openVolume,
         onEdit: item => setEditMode({ kind: "edit", collection: item }), onShowcase: () => void toggleShowcase(),
         onSave: async (item, edit) => { const record = await personal.save(item, edit); void onChanged().catch(error => setMessage(commandErrorMessage(error, "기록 화면을 갱신하지 못했습니다."))); return record; },
         onOpenPerson: () => undefined, onOpenCollection, onCopyCode: () => undefined,

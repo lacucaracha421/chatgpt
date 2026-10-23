@@ -31,7 +31,7 @@ import "./collectionWork.css";
 export type CollectionWorkData = { collection: CollectionSummary; record?: CollectionWorkRecord; tmdb?: TmdbConnection | null; providerBusy?: boolean; manga?: MangaWorkData; av: AvDetails | null; covers: AvCoverSet | null; related: AvRelated | null; case: CaseData; artworks: WorkArtworkSummary[]; position: number; total: number; providerConnected: boolean };
 export type WorkActions = {
   onClose(): void; onStep(offset: -1 | 1): void; onEdit(collection: CollectionSummary): void; onShowcase(collection: CollectionSummary): void;
-  onManage(data: CollectionWorkData): MenuItem[]; onSave(collection: CollectionSummary, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>; onPickVolume?(id: string): void; onEnlargeManga?(): void;
+  onManage(data: CollectionWorkData): MenuItem[]; onSave(collection: CollectionSummary, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>; onPickVolume?(id: string): void; onEnlargeManga?(volumeId: string): void;
   onOpenPerson(id: string): void; onOpenCollection?(id: string): void; /** Resolves once the code is on the clipboard, so the copy icon can show it was copied. */
   onCopyCode(code: string | null): Promise<unknown> | void;
   /** PC only: a long press on the AV disc opens this product page in the browser. Without it the disc stays inert. */
@@ -136,7 +136,7 @@ function WorkSurface({ data, active, privacy, info, reset, actions, onReady }: {
     {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={data.collection.id} title={data.collection.name} author={data.collection.author} publisher={data.collection.publisher} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga && (volumeId => {
       // The volume viewer opens only on a volume with a cover; the book sound goes with it.
       if (data.manga?.volumes.some(volume => volume.id === volumeId && volume.coverArtworkId)) playCaseSound("book", "open");
-      actions.onEnlargeManga?.();
+      actions.onEnlargeManga?.(volumeId);
     })} /></> : <>
     <WorkZoomStage stageRef={stage} className={`work-stage${workStripShown(data.collection.type === "av", data.artworks.length) ? "" : " work-stage--no-strip"}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>

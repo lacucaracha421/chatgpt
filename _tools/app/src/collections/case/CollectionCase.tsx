@@ -124,7 +124,9 @@ function onDisc(root: Element, x: number, y: number) {
   return dx * dx + dy * dy <= 1;
 }
 
-export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox, sound, initialAngle = 28, onDiscHold }: {
+export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox, sound, initialAngle = 28, onDiscHold, paperbackSpine }: {
+  /** A closed paperback uses the shelf's own print and paper edges in this same rotation host. */
+  paperbackSpine?: ReactNode;
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
   inside?: ReactNode; note?: ReactNode; backContent?: CaseBackContent; onReady?(): void; large?: boolean; stageBox?: StageBox;
   /** Only the work screen's case sounds; shelves and previews stay silent. */
@@ -145,6 +147,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   const lastReset = useRef(frontReset);
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const suppressBookClick = useRef(false);
   // While a drag turns the case, the angle goes straight onto the case element: no React render per pointer move
   // (the whole model re-rendered every move and stuttered on the tablet). The release commits it once.
   // It goes in as an inline transform, not as the inherited --ry: a changed custom property restyles every face, and the
@@ -213,16 +216,17 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     }} />;
   }
 
-  const faceRatio = data.board ? data.posterRatio ?? 2 / 3 : ratio;
+  const faceRatio = paperbackSpine ? data.posterRatio ?? .71 : data.board ? data.posterRatio ?? 2 / 3 : ratio;
   const fit = stageBox ? fitCollectionCase(stageBox, faceRatio, open) : null;
-  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${data.board ? " collection-case--board" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": faceRatio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
+  return <div className={`collection-case${paperbackSpine ? " collection-case--paperback" : ""}${data.platform === "film" ? " collection-case--film" : ""}${data.board ? " collection-case--board" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": faceRatio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className="collection-case-object">
-    <div ref={kaseRef} className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
-      onPointerDown={event => { if (blocked?.current) { endDrag(); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; discHeld.current = false; if (holdable && ((event.target instanceof Element && event.target.closest(".disc")) || onDisc(event.currentTarget, event.clientX, event.clientY))) press.bind.onPointerDown(event); event.currentTarget.setPointerCapture?.(event.pointerId); }}
+    <div ref={kaseRef} className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label={paperbackSpine ? "책" : "케이스"} aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
+      onPointerDown={event => { if (blocked?.current) { endDrag(); return; } if (event.button !== 0 || drag.current) return; suppressBookClick.current = false; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; discHeld.current = false; if (holdable && ((event.target instanceof Element && event.target.closest(".disc")) || onDisc(event.currentTarget, event.clientX, event.clientY))) press.bind.onPointerDown(event); event.currentTarget.setPointerCapture?.(event.pointerId); }}
       onPointerMove={event => { press.bind.onPointerMove(event); if (blocked?.current) { endDrag(); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved) { const lock = event.pointerType === "touch" ? gesture?.current : null; if (lock === "pending" || (lock !== "turn" && Math.abs(event.clientX - start.x) < 4)) return; start.moved = true; setDragging(true); } follow(start.angle + (event.clientX - start.x) * .6); }}
-      onPointerUp={event => { press.bind.onPointerUp(); if (drag.current?.pointer !== event.pointerId) return; if (discHeld.current) { discHeld.current = false; endDrag(); return; } const click = !blocked?.current && drag.current && !drag.current.moved; endDrag(); if (click) onOpenChange(!open); }} onPointerCancel={() => { press.bind.onPointerCancel(); endDrag(); }} onLostPointerCapture={() => { press.cancel(); setDiscHolding(false); endDrag(); }}
+      onPointerUp={event => { press.bind.onPointerUp(); if (drag.current?.pointer !== event.pointerId) return; if (discHeld.current) { discHeld.current = false; endDrag(); return; } const click = !blocked?.current && drag.current && !drag.current.moved; suppressBookClick.current = !click; endDrag(); if (click && !paperbackSpine) onOpenChange(!open); }} onPointerCancel={() => { press.bind.onPointerCancel(); endDrag(); }} onLostPointerCapture={() => { press.cancel(); setDiscHolding(false); endDrag(); }}
+      onClick={paperbackSpine ? () => { if (!blocked?.current && !suppressBookClick.current) onOpenChange(false); } : undefined}
       onKeyDown={event => {
         if (event.key === "ArrowLeft") turn(angle - 15);
         else if (event.key === "ArrowRight") turn(angle + 15);
@@ -231,7 +235,12 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
         else return;
         event.preventDefault(); event.stopPropagation();
       }}>
-      {data.board ? <>
+      {paperbackSpine ? <>
+        <span className="paperback-front">{face(data.front, "앞면")}</span>
+        <span className="paperback-back">{face(data.back, "뒷면")}</span>
+        <span className="paperback-spine">{paperbackSpine}</span>
+        <span className="paperback-edge" /><span className="paperback-top" /><span className="paperback-bottom" />
+      </> : data.board ? <>
         <span className="poster-board-front"><span className="ins">{face(data.front, "앞면")}</span></span>
         <span className="poster-board-back">{data.privacy && <span className="case-mask" />}</span>
         <span className="poster-board-spine"><span className={spineInsertClass(data)}><CaseSpine data={data} onSettled={url => images.failed("spine", url)} /></span></span>

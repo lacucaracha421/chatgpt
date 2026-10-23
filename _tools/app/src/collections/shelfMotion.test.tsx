@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { LightCase } from "./case/LightCase";
 import { MangaBookcase, type MangaWorkData } from "./work/MangaBookcase";
@@ -93,64 +93,94 @@ it("keeps the PC pick transition when tablet shelf overrides are also loaded", (
   } finally { style.remove(); }
 });
 
-it("paints a selected volume above a settling neighbour in the bookcase", () => {
-  const style = document.createElement("style");
-  style.textContent = readFileSync("src/collections/work/collectionWork.css", "utf8");
-  document.head.append(style);
-  try {
-    const { container } = render(<div><button className="manga-spine" aria-pressed="true" /><button className="manga-spine is-settling" aria-pressed="false" /></div>);
-    const buttons = container.querySelectorAll("button");
-    expect(Number(getComputedStyle(buttons[0]).zIndex)).toBeGreaterThan(Number(getComputedStyle(buttons[1]).zIndex));
-  } finally { style.remove(); }
-});
-
-it.each([false, true])("retains the book strip until its front loads and through put-down (reduced=%s)", async reduced => {
+it.each([false, true])("swaps a painted book with its retained slot on put-back (reduced=%s)", async reduced => {
   vi.useFakeTimers(); motion(reduced);
-  const props = { privacy: false, coverUrl: () => "/cover", onPick: vi.fn() };
-  const view = render(<MangaBookcase {...props} manga={manga} />);
-  const button = screen.getByRole("button", { name: "1권 보기" });
+  const view = render(<MangaBookcase manga={manga} privacy={false} coverUrl={() => "/cover"} onPick={vi.fn()} />);
+  const button = view.container.querySelector<HTMLElement>("[data-volume-id]")!;
   const strip = button.querySelector(".manga-spine-strip");
-  const image = strip?.querySelector("img");
-  view.rerender(<MangaBookcase {...props} manga={{ ...manga, activeVolumeId: "v1" }} />);
-  expect(button).toHaveAttribute("aria-pressed", "true");
-  expect(button).not.toHaveClass("is-fronted");
-  expect(strip?.querySelector("img")).toBe(image);
-  expect(strip).not.toHaveStyle({ visibility: "hidden" });
-  const front = button.querySelector(".manga-spine-front")!;
-  await act(async () => { fireEvent.load(front.querySelector("img")!); });
-  expect(button).toHaveClass("is-fronted");
-  view.rerender(<MangaBookcase {...props} manga={manga} />);
-  expect(button).not.toHaveClass("is-fronted");
-  expect(strip?.querySelector("img")).toBe(image);
-  if (reduced) expect(button.querySelector(".manga-spine-front")).toBeNull();
-  else {
-    expect(button.querySelector(".manga-spine-front")).toBe(front);
-    expect(button).toHaveClass("is-settling");
-    act(() => vi.advanceTimersByTime(420));
-    expect(button.querySelector(".manga-spine-front")).toBeNull();
+  fireEvent.click(button);
+  const out = document.querySelector<HTMLElement>(".manga-shelf-out")!;
+  if (!reduced) {
+    expect(button).not.toHaveAttribute("data-out");
+    expect(out).toHaveClass("is-preparing");
   }
-});
-
-it("keeps the old strip while a picked front decodes", async () => {
-  motion(false);
-  const view = render(<MangaBookcase manga={manga} privacy={false} coverUrl={() => "/decode-cover"} onPick={() => undefined} />);
-  const button = screen.getByRole("button", { name: "1권 보기" });
-  const strip = button.querySelector(".manga-spine-strip");
-  view.rerender(<MangaBookcase manga={{ ...manga, activeVolumeId: "v1" }} privacy={false} coverUrl={() => "/decode-cover"} onPick={() => undefined} />);
-  let decoded!: () => void;
-  const image = button.querySelector<HTMLImageElement>(".manga-spine-front img")!;
-  image.decode = vi.fn(() => new Promise<void>(resolve => { decoded = resolve; }));
-  fireEvent.load(image);
-  expect(button).not.toHaveClass("is-fronted");
+  await act(async () => { fireEvent.load(out.querySelector(".paperback-front img")!); });
+  expect(button).toHaveAttribute("data-out");
   expect(button.querySelector(".manga-spine-strip")).toBe(strip);
-  expect(strip).not.toHaveStyle({ visibility: "hidden" });
-  await act(async () => decoded());
-  expect(button).toHaveClass("is-fronted");
+  fireEvent.keyDown(window, { key: "Escape" });
+  if (!reduced) {
+    expect(out).toHaveClass("is-leaving");
+    expect(button).toHaveAttribute("data-out");
+    act(() => vi.advanceTimersByTime(440));
+  }
+  expect(document.querySelector(".manga-shelf-out")).toBeNull();
+  expect(button).not.toHaveAttribute("data-out");
+  expect(button.querySelector(".manga-spine-strip")).toBe(strip);
 });
 
-it("disables shelf motion for reduced motion", () => {
-  const cases = readFileSync("src/collections/case/LightCase.css", "utf8");
-  const books = readFileSync("src/collections/work/collectionWork.css", "utf8");
-  expect(cases).toMatch(/@media \(prefers-reduced-motion: reduce\).*\.cs-box, \.collection-light-case::after \{ transition: none;/s);
-  expect(books).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.manga-spine-front, \.manga-spine-strip \{ transition: none;/);
+it("caps preparation and cancels an unpainted pick without hiding the spine", () => {
+  vi.useFakeTimers(); motion(false);
+  const view = render(<MangaBookcase manga={manga} privacy={false} coverUrl={() => "/slow"} onPick={vi.fn()} />);
+  const button = view.container.querySelector<HTMLElement>("[data-volume-id]")!;
+  fireEvent.click(button);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(document.querySelector(".manga-shelf-out")).toBeNull();
+  expect(button).not.toHaveAttribute("data-out");
+  fireEvent.click(button);
+  act(() => vi.advanceTimersByTime(350));
+  expect(button).toHaveAttribute("data-out");
+  fireEvent.click(document.body);
+  expect(document.querySelector(".manga-shelf-out")).toHaveClass("is-leaving");
+  act(() => vi.advanceTimersByTime(440));
+  expect(button).not.toHaveAttribute("data-out");
+});
+
+it("opens a held book by click, suppresses the end of a drag, and permits a later tap", () => {
+  motion(true);
+  const open = vi.fn();
+  const view = render(<MangaBookcase list manga={manga} privacy onPick={vi.fn()} onEnlarge={open} />);
+  fireEvent.click(view.container.querySelector("[data-volume-id]")!);
+  const book = document.querySelector<HTMLElement>(".manga-shelf-out .kase")!;
+  function pointer(type: string, x: number) {
+    const event = new MouseEvent(type, { bubbles: true, clientX: x, button: 0 });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" } });
+    fireEvent(book, event);
+  }
+  pointer("pointerdown", 50); pointer("pointermove", 220); pointer("pointerup", 220);
+  fireEvent.click(book);
+  expect(open).not.toHaveBeenCalled();
+  pointer("pointerdown", 220); pointer("pointerup", 220);
+  fireEvent.click(book);
+  expect(open).toHaveBeenCalledExactlyOnceWith("v1");
+  expect(document.querySelector(".manga-shelf-out")).toBeNull();
+});
+
+it.each(["Enter", " "])("pulls with %s and selects a work-screen volume only from the held book", key => {
+  motion(true);
+  const pick = vi.fn(), enlarge = vi.fn();
+  const view = render(<MangaBookcase manga={manga} privacy onPick={pick} onEnlarge={enlarge} />);
+  fireEvent.keyDown(view.container.querySelector("[data-volume-id]")!, {key});
+  expect(document.querySelector(".manga-shelf-out .kase")).toHaveFocus();
+  expect(pick).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.querySelector(".manga-shelf-out .kase")!, {key: "Enter"});
+  expect(pick).toHaveBeenCalledExactlyOnceWith("v1");
+  expect(enlarge).not.toHaveBeenCalled();
+  expect(document.querySelector(".manga-shelf-out")).toBeNull();
+});
+
+it("puts a held volume back before pulling another from the same row", () => {
+  vi.useFakeTimers(); motion(false);
+  const volumes = [manga.volumes[0], {...manga.volumes[0], id: "v2", volumeNumber: 2}];
+  const view = render(<MangaBookcase manga={{...manga, volumes}} privacy onPick={vi.fn()} />);
+  const buttons = view.container.querySelectorAll("[data-volume-id]");
+  fireEvent.click(buttons[0]);
+  act(() => vi.advanceTimersByTime(350));
+  fireEvent.click(buttons[1]);
+  expect(document.querySelectorAll(".manga-shelf-out")).toHaveLength(1);
+  expect(document.querySelector(".manga-shelf-out")).toHaveClass("is-leaving");
+  act(() => vi.advanceTimersByTime(440));
+  expect(document.querySelectorAll(".manga-shelf-out")).toHaveLength(1);
+  expect(buttons[0]).not.toHaveAttribute("data-out");
+  act(() => vi.advanceTimersByTime(350));
+  expect(buttons[1]).toHaveAttribute("data-out");
 });

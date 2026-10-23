@@ -1011,7 +1011,7 @@ it('keeps the Showcase of games on the turned-case shelf while the library is on
   expect(showcase.querySelector('.spine-shelf')).toBeNull();
 });
 
-it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{
+it('stands manga on the shared bookcase rows: a tap pulls a volume, a tap on the held book opens the work there',async()=>{
   localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'bookcase',perRow:4}));
   const manga:CollectionDetail={...mangaItem(),showcase:false,ownedVolumes:[{editionIndex:0,count:1}]};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')&&!path.includes('showcase=true')?[manga]:[]}:{revision:'r1',item:manga});
@@ -1042,8 +1042,11 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
     Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});fireEvent(track,event);
   }
   fireEvent.click(track,{detail:1});expect(second.getAttribute('aria-pressed')).toBe('true');
-  // A second nearest-volume tap opens the already picked volume.
+  // The retained slot does not open the work; the held book does.
   tapGap();
+  expect(detailPane()?.style.display??'none').toBe('none');
+  const held=await screen.findByRole('group',{name:'2권 꺼낸 책'});
+  fireEvent.click(within(held).getByRole('group',{name:'책'}));
   const bookcase=await screen.findByRole('group',{name:'권별 책장'});
   await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true'));
   within(bookcase).getAllByRole('button').forEach((spine,index)=>{
@@ -1055,6 +1058,9 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
     Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});
     fireEvent(workTrack,event);
   }
+  expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true');
+  const nextHeld=await screen.findByRole('group',{name:'1권 꺼낸 책'});
+  fireEvent.click(within(nextHeld).getByRole('group',{name:'책'}));
   await finishIncomingWork();
   const nextBookcase=screen.getByRole('group',{name:'권별 책장'});
   expect(within(nextBookcase).getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true');
@@ -1523,7 +1529,10 @@ describe('collection shortcut overlays',()=>{
     expect(shelf.classList.contains('manga-shelf-list')).toBe(true);
     const row=await within(shelf).findByRole('group',{name:`${item.name} 책장`});
     const volume=await within(row).findByRole('button',{name:/1.*권 보기$/});
-    fireEvent.click(volume);fireEvent.click(volume);
+    fireEvent.click(volume);
+    expect(screen.queryByRole('heading',{level:1,name:item.name})).toBeNull();
+    const held=await screen.findByRole('group',{name:'1권 꺼낸 책'});
+    fireEvent.click(within(held).getByRole('group',{name:'책'}));
     await screen.findByRole('heading',{level:1,name:item.name});
     act(()=>{expect(backRef.current?.()).toBe(true);});
     expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);

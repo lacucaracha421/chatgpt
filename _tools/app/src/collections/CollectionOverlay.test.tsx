@@ -303,6 +303,9 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(within(connect).getByRole("button", { name: "카카오 연결" })).toHaveClass("is-primary");
     await user.click(screen.getByRole("button", { name: "2권 보기" }));
     expect(within(root).getByRole("heading", { name: "던전밥 1권" })).toBeInTheDocument();
+    const held = await screen.findByRole("group", { name: "2권 꺼낸 책" });
+    await act(async () => { held.querySelectorAll("img").forEach(image => fireEvent.load(image)); });
+    await user.click(within(held).getByRole("group", { name: "책" }));
     await settleWorkImages();
     expect(screen.getByRole("article")).toBe(root);
     expect(within(root).getByRole("heading", { name: "던전밥 2권" })).toBeInTheDocument();
@@ -463,6 +466,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await waitFor(()=>expect(screen.getByRole("button",{name:"2권 보기"})).toHaveFocus());
     expect(onExit).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button",{name:"3권 보기"}));
+    await user.click(within(await screen.findByRole("group",{name:"3권 꺼낸 책"})).getByRole("group",{name:"책"}));
     await settleWorkImages();
     await waitFor(()=>expect(within(root).getByRole("heading", { name: "던전밥 3권" })).toBeInTheDocument());
     expect(screen.queryByRole("dialog")).toBeNull();

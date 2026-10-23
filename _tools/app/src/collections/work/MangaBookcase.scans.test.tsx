@@ -17,25 +17,24 @@ async function decode(image: HTMLImageElement) {
   await act(async () => { fireEvent.load(image); });
 }
 describe("bookstore scans", () => {
-  it("uses tablet cache URLs and turns to the decoded back on a touch tap exactly once", async () => {
+  it("uses tablet cache URLs on the pulled-out book after a touch tap", async () => {
     const cacheSide = "https://appassets.androidplatform.net/cache/side.jpg";
     const cacheBack = "https://appassets.androidplatform.net/cache/back.jpg";
     const touchManga = {...manga, volumes: [{...manga.volumes[0], spineScan: {side: cacheSide, back: cacheBack}}]};
     const onPick = vi.fn();
-    const view = render(<MangaBookcase manga={touchManga} privacy={false} touchTargets onPick={onPick}/>);
+    const view = render(<MangaBookcase list manga={touchManga} privacy={false} touchTargets onPick={onPick}/>);
     await decode(scan(view.container, cacheSide));
-    await decode(scan(view.container, cacheBack));
     const button = screen.getByRole("button", {name: /^1/});
     const track = view.container.querySelector<HTMLElement>(".home-shelf__track")!;
-    Object.defineProperty(button, "getBoundingClientRect", {value: () => ({left: 0, width: 30})});
+    Object.defineProperty(button, "getBoundingClientRect", {value: () => ({left: 0, width: 30, height: 120, bottom: 140})});
     for (const type of ["pointerdown", "pointerup"]) {
       const event = new Event(type, {bubbles: true});
       Object.assign(event, {pointerId: 1, clientX: 15, clientY: 10, button: 0, isPrimary: true});
       fireEvent(track, event);
     }
     fireEvent.click(button, {detail: 1});
-    expect(view.container.querySelector(".manga-spine-turn")).toHaveClass("is-back");
-    expect(onPick).not.toHaveBeenCalled();
+    expect(document.querySelector(".manga-shelf-out .paperback-back img")).toHaveAttribute("src", cacheBack);
+    expect(onPick).toHaveBeenCalledOnce();
     expect(sampleMangaSpineColor).toHaveBeenCalledWith(cacheSide, scan(view.container, cacheSide));
   });
   it("loads and samples scans through the Linux media origin", async () => {
@@ -69,32 +68,24 @@ describe("bookstore scans", () => {
     expect(image.closest("button")).toHaveClass("manga-spine--missing");
     expect(sampleMangaSpineColor).toHaveBeenCalledWith(manga.volumes[0].spineScan!.side, image);
   });
-  it("waits for a real back to decode before turning, and toggles back to the front", async () => {
+  it("uses the real back as a face and opens from the held book instead of toggling scans", async () => {
     const onPick = vi.fn(), onEnlarge = vi.fn();
-    const view = render(<MangaBookcase manga={manga} privacy={false} onPick={onPick} onEnlarge={onEnlarge} />);
-    const button = screen.getByRole("button", { name: "1권 보기" });
-    fireEvent.click(button);
-    expect(view.container.querySelector(".manga-spine-turn")).not.toHaveClass("is-back");
-    await decode(scan(view.container, back));
-    expect(view.container.querySelector(".manga-spine-turn")).toHaveClass("is-back");
-    fireEvent.click(button);
-    expect(view.container.querySelector(".manga-spine-turn")).not.toHaveClass("is-back");
-    expect(onPick).not.toHaveBeenCalled();
-    fireEvent.doubleClick(button);
-    expect(onEnlarge).not.toHaveBeenCalled();
+    const view = render(<MangaBookcase list manga={manga} privacy={false} onPick={onPick} onEnlarge={onEnlarge} />);
+    fireEvent.click(view.container.querySelector("button[data-volume-id]")!);
+    const out = document.querySelector<HTMLElement>(".manga-shelf-out")!;
+    expect(scan(out, back)).toBeInTheDocument();
+    await decode(scan(out, back));
+    fireEvent.click(out.querySelector(".kase")!);
+    expect(onEnlarge).toHaveBeenCalledExactlyOnceWith("scan-v1");
+    expect(onPick).toHaveBeenCalledOnce();
   });
-  it("keeps the existing enlarge action without a back and hides scans in privacy mode", () => {
-    const onEnlarge = vi.fn();
-    const noBack = { ...manga, volumes: [{ ...manga.volumes[0], spineScan: { side: side.replace("http://lakomics.localhost/", ""), back: null } }] };
-    const view = render(<MangaBookcase manga={noBack} privacy={false} onPick={() => {}} onEnlarge={onEnlarge} />);
-    const front = view.container.querySelector(".manga-spine-face img");
-    fireEvent.doubleClick(screen.getByRole("button", { name: "1권 보기" }));
-    expect(onEnlarge).toHaveBeenCalledOnce();
-    view.rerender(<MangaBookcase manga={manga} privacy={false} onPick={() => {}} />);
-    expect(view.container.querySelector(".manga-spine-face img")).toBe(front);
+  it("leaves an unscanned back plain and masks every face in privacy mode", () => {
+    const noBack = { ...manga, volumes: [{ ...manga.volumes[0], spineScan: { side, back: null } }] };
+    const view = render(<MangaBookcase manga={noBack} privacy={false} onPick={() => {}} />);
+    fireEvent.click(view.container.querySelector("button[data-volume-id]")!);
+    expect(document.querySelector(".paperback-back")).toBeEmptyDOMElement();
     view.rerender(<MangaBookcase manga={manga} privacy onPick={() => {}} />);
-    expect(scan(view.container, side)).toBeNull(); expect(scan(view.container, back)).toBeNull();
-    view.rerender(<MangaBookcase manga={manga} privacy={false} touchTargets onPick={() => {}} />);
-    expect(scan(view.container, side)).not.toBeNull(); expect(scan(view.container, back)).not.toBeNull();
+    expect(scan(document.body, side)).toBeNull(); expect(scan(document.body, back)).toBeNull();
+    expect(document.querySelector(".paperback-front .case-mask")).not.toBeNull();
   });
 });

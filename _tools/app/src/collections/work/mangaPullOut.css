@@ -1,0 +1,15 @@
+/* The floating book lives outside the horizontal track and content-visibility rows. */
+.manga-shelf-out { z-index: var(--z-dialog-content, 1120); }
+.manga-spine[data-out] .manga-spine-strip { visibility: hidden; }
+.manga-spine[data-out]::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,240,220,.1), transparent 2px), linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.8)); }
+.collection-case--paperback .kase > span { border-radius: 1px; overflow: hidden; }
+.collection-case--paperback .paperback-front { inset: 0; transform: translateZ(calc(var(--cd) / 2)); background: #f4f1e9; }
+.collection-case--paperback .paperback-back { inset: 0; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); background: color-mix(in srgb, var(--paper-ink), #f4f1e9 85%); }
+.collection-case--paperback .paperback-spine { top: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); height: 100%; transform: rotateY(-90deg) translateZ(calc(var(--cw) / 2)); background: #f4f1e9; }
+.collection-case--paperback .paperback-edge { top: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); height: 100%; transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); background: repeating-linear-gradient(90deg, #e9e4d8 0 1px, #f4f1e9 1px 3px); }
+.collection-case--paperback .paperback-top, .collection-case--paperback .paperback-bottom { left: 0; top: calc(50% - var(--cd) / 2); width: var(--cw); height: var(--cd); background: repeating-linear-gradient(#e9e4d8 0 1px, #f4f1e9 1px 3px); }
+.collection-case--paperback .paperback-top { transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case--paperback .paperback-bottom { transform: rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case--paperback .cv { display: block; width: 100%; height: 100%; object-fit: fill; }
+.manga-shelf-out__print { display: block; transform-origin: 0 0; }
+.manga-shelf-out__print .manga-spine { display: block; }

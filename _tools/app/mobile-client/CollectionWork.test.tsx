@@ -369,3 +369,17 @@ it('uses a per-work credit name inside the AV case and the display rule otherwis
  const {container}=render(<CaseWork item={item} revision="credit" active privacy={false} position={1} total={1} score={()=>null} record={()=>[]} onStep={vi.fn()} info={()=>null}/>);
  expect(container.querySelector('.case-pola')).toHaveTextContent('작품 속 이름');expect(container.querySelectorAll('.case-pola')[1]).toHaveTextContent('Other Roman');
 });
+
+it('puts a pulled manga volume back on Android Back without opening the viewer', () => {
+  vi.useFakeTimers();
+  try {
+    const onEnlarge = vi.fn();
+    const view = render(<MangaWork {...props} privacy onEnlarge={onEnlarge}/>);
+    fireEvent.click(view.container.querySelector('[data-volume-id="v2"]')!);
+    expect(document.querySelector('.manga-shelf-out')).not.toBeNull();
+    fireEvent(window, new Event('lakomics-back'));
+    act(() => vi.advanceTimersByTime(440));
+    expect(document.querySelector('.manga-shelf-out')).toBeNull();
+    expect(onEnlarge).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});

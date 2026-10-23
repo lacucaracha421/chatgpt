@@ -1,7 +1,7 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef } from "react";
 import type { CollectionCoverFocus, CollectionVolume } from "../library/types";
 import { useLongPress } from "../shared/useLongPress";
-import { MangaBookcase, type MangaWorkData } from "./work/MangaBookcase";
+import { MangaBookcase, type MangaWorkData, type MangaShelfBack } from "./work/MangaBookcase";
 import "./work/collectionWork.css";
 import "./mangaShelf.css";
 import { mangaShelfStyle } from "./mangaDimensions";
@@ -45,16 +45,18 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 /** Rows this far beyond the list's visible edge already load, so scrolling meets ready shelves. */
 const NEAR_MARGIN = "600px 0px";
 
-export function MangaShelfRow({ id, title, author = null, publisher = null, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false }: {
+export function MangaShelfRow({ id, title, author = null, publisher = null, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, onLongPress, touchTargets = false, useBack, pullPending }: {
   id: string; title: string; author?: string | null; publisher?: string | null;
   /** Owned volumes in the shown edition; `null` when none is recorded. */owned: number | null;
   /** `null` until the row's volumes are loaded: the empty plank holds the row's place. */manga: MangaWorkData | null;
   touchTargets?: boolean;
   privacy: boolean; coverUrl(artworkId: string): string | null;
   /** Called once, when the row first comes near the visible part of the list. */onNear(): void;
+  useBack?: MangaShelfBack;
+  pullPending?: boolean;
   onPick(volumeId: string): void;
   /** Opens the work, at `volumeId` when one is given. */onOpen(volumeId: string | null): void;
-  /** Double-click on a spine (PC); the tablet opens with a second tap instead. */onEnlarge?(volumeId: string): void;
+  /** Open the pulled-out book. */onEnlarge?(volumeId: string): void;
   /** Tablet: a long press anywhere on the row asks for the work's action sheet. */onLongPress?(): void;
 }) {
   const row = useRef<HTMLElement>(null);
@@ -72,21 +74,19 @@ export function MangaShelfRow({ id, title, author = null, publisher = null, owne
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // Enter on the picked spine opens the work there; on any other spine it picks (the button's click).
-  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const spine = (event.target as HTMLElement).closest<HTMLElement>("[data-volume-id]");
-    if (event.key !== "Enter" || !spine || spine.getAttribute("aria-pressed") !== "true") return;
-    event.preventDefault(); onOpen(spine.dataset.volumeId ?? null);
-  };
   return <section ref={row} className="manga-shelf-row" style={mangaShelfStyle(touchTargets)} aria-label={title} onClickCapture={onLongPress ? press.captureClick : undefined}
     onPointerDown={press.bind.onPointerDown} onPointerMove={press.bind.onPointerMove} onPointerUp={press.bind.onPointerUp} onPointerCancel={press.bind.onPointerCancel} onPointerLeave={press.bind.onPointerLeave} onContextMenu={onLongPress ? press.bind.onContextMenu : undefined}>
     <div className="manga-shelf-row__label">
       <button type="button" className="manga-shelf-row__title" data-collection-id={id} onClick={() => onOpen(null)}>{title}</button>
       {owned !== null && <span className="manga-shelf-row__count numeric" aria-label={total ? `보유 ${owned.toLocaleString()}권 / 전체 ${total.toLocaleString()}권` : `보유 ${owned.toLocaleString()}권`}>{total ? `${owned.toLocaleString()} / ${total.toLocaleString()}권` : `${owned.toLocaleString()}권`}</span>}
     </div>
-    <div className="manga-shelf-row__shelf" onKeyDown={keyDown}>
+    <div className="manga-shelf-row__shelf" onKeyDownCapture={event => {
+      const spine = (event.target as Element).closest<HTMLElement>("button[data-volume-id]");
+      if (event.key !== "Enter" || spine?.getAttribute("aria-pressed") !== "true") return;
+      event.preventDefault(); event.stopPropagation(); onOpen(spine.dataset.volumeId ?? null);
+    }}>
       {manga
-        ? <MangaBookcase title={title} author={author} publisher={publisher} touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
+        ? <MangaBookcase pullPending={pullPending} useBack={useBack} title={title} author={author} publisher={publisher} touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge ?? onOpen} />
         : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board"><ShelfMaterial /></div></div></div>}
     </div>
   </section>;
