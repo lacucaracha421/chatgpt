@@ -21,6 +21,7 @@ function memoryStorage(initial = {}) {
   return {memory, writes, local: {
     async get(keys) { await immediate(); return structuredClone(Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => key in memory).map(key => [key, memory[key]]))); },
     async set(values) { await immediate(); writes.push(plain(values)); Object.assign(memory, structuredClone(values)); },
+    async remove(keys) { for (const key of keys) delete memory[key]; },
   }};
 }
 function loadUsage(initial) {
@@ -121,7 +122,7 @@ test('concurrent adds and flushes are serialized: nothing is lost, even with slo
     flushes.push(usage.flush());
   }
   await Promise.all(flushes);
-  const summary = usage.summarize(storage.memory[KEY]);
+  const summary = usage.summarize(await usage.load());
   assert.equal(summary.all.total.requests, 60);
   assert.equal(summary.all.total.input, 600);
   assert.equal(summary.all.total.costUsd, 0.06);
@@ -137,17 +138,79 @@ test('usage writes group X calls across their response interval', async () => {
   }
   assert.ok(storage.writes.length > 0 && storage.writes.length < 3, 'separate X responses are grouped instead of broadcasting each response');
   await usage.flush();
-  assert.equal(storage.memory[KEY].days[usage.localDay()].x.requests, 6);
+  assert.equal((await usage.load()).days[usage.localDay()].x.requests, 6);
 });
 
 test('a failed write keeps the calls for the next try', async () => {
-  const {usage, storage} = loadUsage();
+  const existing = {v: 1, days: {}, jobs: [], legacy: null};
+  const {usage: helpers} = loadUsage();
+  helpers.applyCalls(existing, [call('page', {at: Date.now()})], Date.now());
+  const {usage, storage} = loadUsage({[KEY]: plain(existing)});
   const set = storage.local.set; let fail = true;
   storage.local.set = async values => { if (fail) throw new Error('quota'); return set(values); };
   usage.record('image', {model: 'm', input: 5, output: 5, costUsd: 0.5});
   await assert.rejects(usage.flush());
+  assert.deepEqual(storage.memory[KEY], plain(existing), 'failed migration leaves the original document intact');
   fail = false; await usage.flush();
-  assert.equal(usage.summarize(storage.memory[KEY]).rows.image.total.requests, 1);
+  const summary = usage.summarize(await usage.load());
+  assert.equal(summary.rows.image.total.requests, 1);
+  assert.equal(summary.rows.page.total.requests, 1);
+});
+
+test('migration preserves history and routine X writes broadcast only the changed day and job', async t => {
+  const {usage: helpers} = loadUsage(), now = Date.now(), doc = helpers.readDoc();
+  doc.legacy = {requests: 2, input: 5000, output: 500, costUsd: 0.00075, unknownCostRequests: 0};
+  helpers.applyCalls(doc, Array.from({length: 120}, (_, i) => call('page', {at: now - i * 86400000})), now);
+  helpers.applyCalls(doc, Array.from({length: 49}, (_, i) => call('page', {at: now,
+    job: {id: `page:20261026-${i}`, label: `example.test · Translation ${i}`}})), now);
+  const job = {id: `x:${helpers.localDay(now)}`, label: 'X'};
+  helpers.applyCalls(doc, [call('x', {at: now, job})], now);
+  const {usage, storage} = loadUsage({[KEY]: plain(doc)});
+  const originalBytes = Buffer.byteLength(JSON.stringify(doc));
+  await usage.ensureMigrated();
+  assert.deepEqual(plain(await usage.load()), plain(doc));
+  assert.equal(storage.writes.length, 1, 'migration commits records and indexes together');
+  const restarted = loadUsage(storage.memory);
+  await restarted.usage.ensureMigrated();
+  assert.equal(restarted.storage.writes.length, 0, 'migration is not repeated after worker restart');
+  const before = structuredClone(storage.memory);
+  usage.record('x', {model: 'm', input: 20, output: 3, costUsd: 0.0001}, job, now);
+  await usage.flush();
+  const write = storage.writes.at(-1), bytes = Buffer.byteLength(JSON.stringify(write));
+  const event = Object.fromEntries(Object.entries(write).map(([key, newValue]) => [key, {oldValue: before[key], newValue}]));
+  const broadcastBytes = Buffer.byteLength(JSON.stringify(event));
+  assert.ok(bytes < 2048, `routine write was ${bytes} bytes`);
+  assert.ok(broadcastBytes < 4096, `old/new change event was ${broadcastBytes} bytes`);
+  assert.equal(Object.keys(write).length, 2, 'historical records and unchanged indexes are not rewritten');
+  assert.equal(usage.summarize(await usage.load()).all.total.requests, 173);
+  t.diagnostic(`fixture document ${originalBytes} B; routine write ${bytes} B; old/new event ${broadcastBytes} B`);
+});
+
+test('split records are pruned and reset without counting committed calls again if cleanup fails', async () => {
+  const {usage: helpers} = loadUsage(), now = Date.now(), doc = helpers.readDoc();
+  doc.legacy = null;
+  helpers.applyCalls(doc, Array.from({length: 50}, (_, i) => call('page', {at: now,
+    job: {id: `page:${i}`, label: `Page ${i}`}})), now);
+  // A retained day ages out on a later worker wake.
+  const oldDay = helpers.localDay(now - 401 * 86400000);
+  doc.days[oldDay] = {page: {...doc.days[helpers.localDay(now)].page}};
+  const f = loadUsage({[KEY]: plain(doc)});
+  await f.usage.ensureMigrated();
+  assert.equal(Object.keys(f.storage.memory).some(key => key.endsWith(oldDay)), false);
+  const remove = f.storage.local.remove;
+  f.storage.local.remove = async () => { throw new Error('storage unavailable'); };
+  f.usage.record('page', {model: 'm', input: 1, output: 1, costUsd: 0}, {id: 'page:new', label: 'New'});
+  await f.usage.flush();
+  await f.usage.flush();
+  const summary = f.usage.summarize(await f.usage.load());
+  assert.equal(summary.all.total.requests, 51);
+  assert.equal(summary.jobs.length, 50);
+  assert.equal(summary.jobs.some(job => job.id === 'page:0'), false);
+  f.storage.local.remove = remove;
+  await f.usage.clear();
+  const restarted = loadUsage(f.storage.memory);
+  await restarted.usage.ensureMigrated();
+  assert.deepEqual(plain(await restarted.usage.load()), {v: 1, days: {}, jobs: [], legacy: null});
 });
 
 test('migration: the earlier YouTube total is folded in once as a separate row and keeps growing on its own', async () => {
@@ -158,14 +221,14 @@ test('migration: the earlier YouTube total is folded in once as a separate row a
   storage.memory[TOTAL] = {...total, input_tokens: 9000, videos: 3};
   usage.record('youtube', {model: 'claude-haiku-5-5', input: 10, output: 1, costUsd: 0.1}, {id: 'youtube:a', label: 'a'});
   await usage.flush();
-  const summary = usage.summarize(storage.memory[KEY]);
+  const summary = usage.summarize(await usage.load());
   assert.equal(summary.legacy.input, 5000, 'the snapshot is not refreshed');
   assert.equal(summary.rows.youtube.total.requests, 1, 'new videos are counted in their own row');
   assert.equal(summary.all.total.requests, 3);
   await usage.clear();
-  assert.deepEqual(plain(storage.memory[KEY]), {v: 1, days: {}, jobs: [], legacy: null});
+  assert.deepEqual(plain(await usage.load()), {v: 1, days: {}, jobs: [], legacy: null});
   await usage.flush();
-  assert.equal(usage.summarize(storage.memory[KEY]).legacy, null, 'clearing is not undone by a second migration');
+  assert.equal(usage.summarize(await usage.load()).legacy, null, 'clearing is not undone by a second migration');
 });
 
 test('migration: a model without a price makes the earlier row partly unknown; no total means no row', async () => {
@@ -200,7 +263,7 @@ function worker({stored = {}, replies = []} = {}) {
   for (const script of [usageSource, ...core, service]) vm.runInContext(script, context);
   const usage = context.LakomicsUsage;
   return {calls, memory, usage, handle: (message, who = sender) => context.LakomicsTranslation.handle(message, who),
-    log: async () => { await usage.flush(); return usage.summarize(memory[KEY]); }};
+    log: async () => { await usage.flush(); return usage.summarize(await usage.load()); }};
 }
 
 test('page translation: Anthropic usage is priced, grouped into the page job and reported back for the status line', async () => {
@@ -326,7 +389,7 @@ test('YouTube: each API call of a video is recorded under one job, after the old
     json3: {events: [{tStartMs: 0, dDurationMs: 1000, segs: [{utf8: 'Jeff'}]}]}, meta: {videoId: 'video12', title: 'Jeff talks', author: 'A', shortDescription: '', keywords: []}}, page);
   assert.equal(result.ok, true);
   await globalThis.LakomicsUsage.flush();
-  const log = globalThis.LakomicsUsage.summarize(stored[KEY]);
+  const log = globalThis.LakomicsUsage.summarize(await globalThis.LakomicsUsage.load());
   assert.equal(log.legacy.requests, 2);
   assert.equal(log.legacy.input, 5000);
   assert.deepEqual(plain(log.rows.youtube.total), {requests: 2, input: 2000, output: 200, costUsd: 0.0003, unknownCostRequests: 0});
@@ -374,7 +437,9 @@ test('options: the usage section shows features by today, this month and all tim
   const now = Date.now();
   usage.applyCalls(doc, [call('page', {at: now, input: 12345, output: 678, costUsd: 0.0123, job: {id: 'page:x', label: 'blog.test · 글'}}),
     call('image', {at: now, input: 100, output: 10, costUsd: null})], now);
-  const page = await optionsPage(t, {[KEY]: plain(doc)});
+  const recorder = loadUsage({[KEY]: plain(doc)});
+  await recorder.usage.ensureMigrated();
+  const page = await optionsPage(t, recorder.storage.memory);
   assert.ok(page.w.document.querySelector('.op-nav a[href="#usage-section"]'));
   const cells = name => [...rowText(page, name).querySelectorAll('td')].map(td => td.textContent);
   assert.deepEqual(cells('페이지 번역'), ['$0.0123입력 12.3k / 출력 678', '$0.0123입력 12.3k / 출력 678', '$0.0123입력 12.3k / 출력 678']);
@@ -390,10 +455,13 @@ test('options: the usage section shows features by today, this month and all tim
   assert.match(jobs[0].querySelector('.ja').textContent, /^\$0\.0123 · 입력 12\.3k \/ 출력 678$/);
   assert.equal(page.$('usage-jobs-empty').hidden, true);
   // A write from the worker while the page is open updates it.
-  const more = usage.readDoc(plain(doc)); more.legacy = doc.legacy;
-  usage.applyCalls(more, [call('x', {at: now, input: 10, output: 5, costUsd: 0.5})], now);
-  page.memory[KEY] = plain(more);
-  await page.changed({[KEY]: {newValue: page.memory[KEY]}});
+  recorder.usage.record('x', {model: 'm', input: 10, output: 5, costUsd: 0.5}, null, now);
+  await recorder.usage.flush();
+  const changed = recorder.storage.writes.at(-1);
+  assert.equal(Object.hasOwn(changed, KEY), false, 'routine updates do not need a root-key change');
+  Object.assign(page.memory, plain(changed));
+  assert.deepEqual(cells('X 번역'), ['-', '-', '-'], 'shown content remains until the refreshed data is ready');
+  await page.changed(Object.fromEntries(Object.entries(changed).map(([key, newValue]) => [key, {newValue}])));
   assert.deepEqual(cells('X 번역'), ['$0.5000입력 10 / 출력 5', '$0.5000입력 10 / 출력 5', '$0.5000입력 10 / 출력 5']);
 });
 

@@ -14,6 +14,7 @@ function fakeTimers(w) {
     return id;
   };
   w.clearTimeout = id => timers.delete(id);
+  Object.defineProperty(w, "requestAnimationFrame", { configurable: true, writable: true, value: callback => w.setTimeout(() => callback(now), 16) });
   const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
   async function advance(ms) {
     const end = now + ms;
@@ -52,6 +53,79 @@ function mount(texts, handler, concurrency=2) {
   return {w,clock,elements,positions,messages,observers,scroll,reply,changed:()=>changed({'lakomics:translation:v1':{}},'local'),close:()=>w.close()};
 }
 const card=el=>el.parentElement.querySelector('.lakomics-translation');
+
+test('small scroll reversals reuse the prefetch observer and keep the displayed translation',async()=>{
+  const f=mount(['Stable source <span>with nested text</span>'],(m,cb)=>cb({ok:true,text:'번역문'}));
+  await f.clock.advance(20);
+  const shown=card(f.elements[0]), initialObservers=f.observers.length;
+  let walks=0;
+  const childNodes=Object.getOwnPropertyDescriptor(f.w.Node.prototype,'childNodes').get;
+  Object.defineProperty(f.elements[0],'childNodes',{get(){walks++;return childNodes.call(this);}});
+  for(let i=1;i<=20;i++) {
+    f.scroll(i*100); f.scroll(i*100-2); f.scroll(i*100);
+    await f.clock.advance(60);
+  }
+  assert.equal(f.observers.length-initialObservers,0,'anchoring jitter must not rebuild the prefetch observer');
+  assert.equal(walks,0,'unchanged scroll scans must not walk tweet text again');
+  assert.equal(card(f.elements[0]),shown);
+  assert.equal(f.messages.length,1);
+  f.close();
+});
+
+test('scroll scans reuse unchanged source snapshots',async()=>{
+  const f=mount(['Stable source'],(m,cb)=>cb({ok:true,text:'번역문'}));
+  await f.clock.advance(20);
+  let walks=0;
+  const childNodes=Object.getOwnPropertyDescriptor(f.w.Node.prototype,'childNodes').get;
+  Object.defineProperty(f.elements[0],'childNodes',{get(){walks++;return childNodes.call(this);}});
+  for(let i=1;i<=20;i++) { f.scroll(i*100); await f.clock.advance(60); }
+  assert.equal(walks,0,'unchanged scroll scans must not walk tweet text again');
+  f.close();
+});
+
+test('sustained small reverse steps switch prefetch once and rapid reversals are coalesced',async()=>{
+  const f=mount(['Direction source'],(m,cb)=>cb({ok:true,text:'번역문'}));
+  await f.clock.advance(20);
+  f.scroll(1000); await f.clock.advance(60);
+  const initialObservers=f.observers.length;
+  for(let y=990;y>=800;y-=10) { f.scroll(y); await f.clock.advance(10); }
+  await f.clock.advance(60);
+  assert.equal(f.observers.length-initialObservers,1,'slow reversal accumulates instead of requiring a large single step');
+  const h=f.w.innerHeight;
+  assert.equal(f.observers.at(-1).options.rootMargin,`${h*3}px 0px ${h*.25}px 0px`);
+  const reversedObservers=f.observers.length;
+  for(let i=0;i<10;i++) { f.scroll(1200); f.scroll(800); }
+  assert.equal(f.observers.length,reversedObservers,'the scroll listener does not rebuild observers');
+  f.scroll(1200); await f.clock.advance(60);
+  assert.equal(f.observers.length-reversedObservers,1);
+  assert.equal(f.observers.at(-1).options.rootMargin,`${h*.25}px 0px ${h*3}px 0px`);
+  f.close();
+});
+
+test('cached sources invalidate all changed posts and their text, links, emoji and language',async()=>{
+  const f=mount(['Initial <span>nested text</span><img alt="🙂"><a href="https://example.com/old">link</a>','Other post'],(m,cb)=>{
+    cb(m.items?{ok:true,items:m.items.map(item=>({id:item.id,ok:true,text:'번역 [[LINK_0]]'}))}:{ok:true,text:'번역 [[LINK_0]]'});
+  });
+  await f.clock.advance(20);
+  const first=f.elements[0], second=f.elements[1];
+  first.querySelector('span').firstChild.nodeValue='updated nested text';
+  second.firstChild.nodeValue='Updated other post';
+  await f.clock.advance(400);
+  const texts=f.messages.flatMap(m=>m.items?m.items.map(item=>item.text):[m.text]);
+  assert.ok(texts.some(text=>text.includes('updated nested text')));
+  assert.ok(texts.includes('Updated other post'),'one mutation batch must invalidate both posts');
+  first.querySelector('a').href='https://example.com/new';
+  await f.clock.advance(400);
+  assert.equal(card(first).querySelector('a').href,'https://example.com/new');
+  first.querySelector('img').alt='😀';
+  await f.clock.advance(400);
+  assert.ok((f.messages.at(-1).text || f.messages.at(-1).items[0].text).includes('😀'));
+  const count=f.messages.length;
+  first.lang='ko'; await f.clock.advance(400);
+  assert.equal(card(first),null);
+  assert.equal(f.messages.length,count,'Korean source is no longer translated');
+  f.close();
+});
 
 test('scroll and unchanged text mutations keep translations without measuring completed posts again',async()=>{
   const f=mount(['Already translated'],(m,cb)=>cb({ok:true,text:'번역됨'}));
@@ -222,8 +296,10 @@ test('a detached pending node is cleaned and reattachment is eligible for transl
   await f.clock.advance(500); const article=f.elements[0].parentElement; article.remove();
   await f.clock.advance(400); assert.equal(article.querySelector('.lakomics-translation'),null);
   callbacks[0].cb({ok:true,text:'Detached answer'}); await f.clock.advance(20);
+  f.elements[0].textContent='Edited while detached';
   f.w.document.body.append(article); await f.clock.advance(400);
-  assert.equal(callbacks.length,2); f.reply(callbacks[1].m,callbacks[1].cb); await f.clock.advance(20);
+  assert.equal(callbacks.length,2); assert.equal(callbacks[1].m.text,'Edited while detached');
+  f.reply(callbacks[1].m,callbacks[1].cb); await f.clock.advance(20);
   assert.equal(card(f.elements[0]).textContent,'번역됨'); f.close();
 });
 

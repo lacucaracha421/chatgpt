@@ -2,9 +2,10 @@
   "use strict";
   // AI usage log: every call the extension pays for (X translation, right-click translation,
   // page translation, image text, YouTube subtitles) is recorded with its feature, model,
-  // tokens and cost. One storage key holds per-day buckets (feature x counts), the last jobs
-  // and, once, the YouTube total that existed before this log started.
+  // tokens and cost. Days and jobs are separate keys so a routine write does not
+  // broadcast the entire history to every content-script frame.
   const KEY = "lakomics:usage:v1";
+  const DAY_PREFIX = "lakomics:usage:day:", JOB_PREFIX = "lakomics:usage:job:", JOBS_KEY = "lakomics:usage:jobs";
   const YOUTUBE_TOTAL = "lakomics:youtube:usage:total";
   const FEATURES = Object.freeze(["x", "context", "page", "image", "youtube"]);
   const FEATURE_LABELS = Object.freeze({ x: "X 번역", context: "우클릭 번역", page: "페이지 번역", image: "이미지 글자", youtube: "유튜브 자막" });
@@ -97,7 +98,7 @@
       models: Array.isArray(job.models) ? job.models.filter(model => typeof model === "string") : [], requests: count(job.requests), input: count(job.input), output: count(job.output),
       costUsd: Number.isFinite(job.costUsd) && job.costUsd > 0 ? job.costUsd : 0, unknown: count(job.unknown) }));
     // undefined: the earlier YouTube total has not been folded in yet; null: there was none (or the log was cleared).
-    const legacy = Object.hasOwn(doc, "legacy") ? (doc.legacy ? cellFrom(doc.legacy) : null) : undefined;
+    const legacy = doc.legacy !== undefined ? (doc.legacy ? cellFrom(doc.legacy) : null) : undefined;
     return { v: 1, days, jobs, legacy };
   }
   function pruneDays(days, now) {
@@ -136,6 +137,40 @@
     return doc;
   }
 
+  // The root lists retained days; the small job index preserves recent-job order.
+  // Both indexes and changed records commit in one storage.set, including migration.
+  async function load(stored) {
+    stored ||= await chrome.storage.local.get([KEY, JOBS_KEY]);
+    const root = stored[KEY];
+    if (root?.v !== 2) return readDoc(root);
+    const days = Array.isArray(root.days) ? root.days : [], jobs = Array.isArray(stored[JOBS_KEY]) ? stored[JOBS_KEY] : [];
+    const keys = [...days.map(day => DAY_PREFIX + day), ...jobs.map(id => JOB_PREFIX + id)];
+    const records = await chrome.storage.local.get([KEY, JOBS_KEY, ...keys]);
+    // Options may read while the worker replaces an index and removes old records.
+    // Retry from that same snapshot rather than briefly showing missing history.
+    if (JSON.stringify(root) !== JSON.stringify(records[KEY]) || JSON.stringify(stored[JOBS_KEY]) !== JSON.stringify(records[JOBS_KEY])) return load(records);
+    return readDoc({ days: Object.fromEntries(days.map(day => [day, records[DAY_PREFIX + day]])),
+      jobs: jobs.map(id => records[JOB_PREFIX + id]), legacy: root.legacy });
+  }
+  function storedRecords(doc) {
+    return { [KEY]: { v: 2, days: Object.keys(doc.days), legacy: doc.legacy },
+      [JOBS_KEY]: doc.jobs.map(job => job.id),
+      ...Object.fromEntries(Object.entries(doc.days).map(([day, value]) => [DAY_PREFIX + day, value])),
+      ...Object.fromEntries(doc.jobs.map(job => [JOB_PREFIX + job.id, job])) };
+  }
+  async function save(doc, before, migrated) {
+    const previous = storedRecords(before), next = storedRecords(doc), changed = {};
+    for (const [key, value] of Object.entries(next)) {
+      if (!migrated || JSON.stringify(value) !== JSON.stringify(previous[key])) changed[key] = value;
+    }
+    if (Object.keys(changed).length) await chrome.storage.local.set(changed);
+    const removed = Object.keys(previous).filter(key => !Object.hasOwn(next, key));
+    // Unreferenced records are invisible to readers. Cleanup failure must not retry
+    // already committed calls and count them twice.
+    if (removed.length) await chrome.storage.local.remove(removed).catch(() => {});
+  }
+  const isUsageKey = key => key === KEY || key === JOBS_KEY || key.startsWith(DAY_PREFIX) || key.startsWith(JOB_PREFIX);
+
   // ------------------------------------------------------------------ recording (worker)
   const pending = [];
   let timer = null, chain = Promise.resolve();
@@ -167,12 +202,12 @@
     return serialized(async () => {
       const calls = pending.splice(0);
       try {
-        const keys = [KEY, YOUTUBE_TOTAL], stored = await chrome.storage.local.get(keys);
-        const doc = readDoc(stored[KEY]);
-        if (!calls.length && doc.legacy !== undefined) return;
+        const stored = await chrome.storage.local.get([KEY, JOBS_KEY, YOUTUBE_TOTAL]);
+        const before = await load(stored), doc = readDoc(before), migrated = stored[KEY]?.v === 2;
+        if (!calls.length && doc.legacy !== undefined && migrated) return;
         if (doc.legacy === undefined) doc.legacy = legacyFrom(stored[YOUTUBE_TOTAL]);
         applyCalls(doc, calls, Date.now());
-        await chrome.storage.local.set({ [KEY]: doc });
+        await save(doc, before, migrated);
       } catch (error) {
         pending.unshift(...calls);
         if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING);
@@ -189,7 +224,8 @@
     pending.length = 0;
     return serialized(async () => {
       pending.length = 0;
-      await chrome.storage.local.set({ [KEY]: { v: 1, days: {}, jobs: [], legacy: null } });
+      const before = await load();
+      await save({ v: 1, days: {}, jobs: [], legacy: null }, before, false);
     });
   }
 
@@ -239,6 +275,6 @@
   }
   function describeTokens(cell) { return cell && cell.requests ? `입력 ${formatTokens(cell.input)} / 출력 ${formatTokens(cell.output)}` : ""; }
 
-  globalThis.LakomicsUsage = { KEY, YOUTUBE_TOTAL, FEATURES, FEATURE_LABELS, PRICES, localDay, anthropicCost, measure, record, flush, ensureMigrated, clear,
+  globalThis.LakomicsUsage = { KEY, YOUTUBE_TOTAL, FEATURES, FEATURE_LABELS, PRICES, localDay, anthropicCost, measure, record, flush, ensureMigrated, clear, load, isUsageKey,
     newTally, tallyAdd, summarize, formatCost, formatTokens, describeCost, describeTokens, applyCalls, readDoc, legacyFrom };
 })();

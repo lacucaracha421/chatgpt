@@ -29,7 +29,12 @@
   const nearby = new WeakSet();
   const rendered = new Map(), toggles = new Map();
   const owners = new Map();
-  let scrollDirection = 1, lastScrollY = globalThis.scrollY || 0;
+  let scrollDirection = 1, scrollExtremeY = globalThis.scrollY || 0;
+  // Reading innerHeight or scrollY while X has pending DOM changes forces a layout,
+  // so the height is cached on resize and the scroll position is read once per frame.
+  let viewHeight = globalThis.innerHeight || 0;
+  const snapshots = new WeakMap();
+  let textObserver, onTextMutations;
   // Main-tweet articles whose "Show more" was pressed, with the time to stop waiting.
   const expansions = new WeakMap();
 
@@ -43,6 +48,11 @@
     });
   }
   function source(element) {
+    // A worker reply can arrive before mutation delivery. Consume queued changes
+    // before checking a cached signature, including while translation is paused.
+    if (textObserver) onTextMutations(textObserver.takeRecords());
+    const cached = snapshots.get(element);
+    if (cached) return cached;
     const links = [];
     function walk(node) {
       if (node.nodeType === 3) return node.nodeValue;
@@ -58,7 +68,9 @@
       return [...node.childNodes].map(walk).join("");
     }
     const text = walk(element).trim();
-    return { text, links, signature: JSON.stringify([text, links, element.getAttribute("lang") || ""]) };
+    const snapshot = { text, links, signature: JSON.stringify([text, links, element.getAttribute("lang") || ""]) };
+    if (textObserver) snapshots.set(element, snapshot);
+    return snapshot;
   }
   function needsTranslation(element, text) {
     const lang = (element.getAttribute("lang") || "").split("-")[0].toLowerCase();
@@ -115,7 +127,7 @@
   const AHEAD_SCREENS = 3, BEHIND_SCREENS = 0.25;
   function near(element, rect) {
     if (!rect) return nearby.has(element);
-    return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS) && rect.top < innerHeight * (1 + (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS));
+    return rect.width > 0 && rect.height > 0 && rect.bottom > -viewHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS) && rect.top < viewHeight * (1 + (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS));
   }
   function visible(element) {
     return viewportState.get(element) === true;
@@ -317,9 +329,9 @@
       && source(candidate.element).signature === candidate.snapshot.signature;
   }
   function collectBatch(rects, limit = MAX_BATCH_ITEMS, forceSingle = false) {
-    const center = innerHeight / 2;
-    const lane = rect => rect.bottom > 0 && rect.top < innerHeight ? 0
-      : (scrollDirection > 0 ? rect.top >= innerHeight : rect.bottom <= 0) ? 1 : 2;
+    const center = viewHeight / 2;
+    const lane = rect => rect.bottom > 0 && rect.top < viewHeight ? 0
+      : (scrollDirection > 0 ? rect.top >= viewHeight : rect.bottom <= 0) ? 1 : 2;
     const elements = [...pending].filter(element => rects.has(element) && near(element, rects.get(element)))
       .sort((a, b) => {
         const ar = rects.get(a), br = rects.get(b);
@@ -593,6 +605,19 @@
     for (const node of record.removedNodes) if (touchesTweetText(node)) return true;
     return false;
   }
+  function invalidateSource(record) {
+    const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+    const element = target?.closest(SELECTOR);
+    if (element) snapshots.delete(element);
+    // Invalidate removed/reinserted subtrees too: X can edit a recycled post
+    // while detached, outside the body observer's coverage.
+    if (record.type !== "childList") return;
+    for (const node of [...record.addedNodes, ...record.removedNodes]) {
+      if (node.nodeType !== 1 || node.matches(OWN_NODES)) continue;
+      if (node.matches(SELECTOR)) snapshots.delete(node);
+      for (const text of node.querySelectorAll(SELECTOR)) snapshots.delete(text);
+    }
+  }
   const viewportState = new WeakMap();
   const canRun = () => enabled && hasApiKey && !blocked && !document.hidden;
   // While blocked, cards already shown still need scans to drop them from recycled posts.
@@ -665,6 +690,7 @@
     else updateControlState();
   }
   function mount() {
+    viewHeight = globalThis.innerHeight || 0;
     const style = document.createElement("style");
     style.textContent = `
       .lakomics-translation{white-space:pre-wrap;overflow-wrap:anywhere;font:400 .96em/1.7 "Pretendard Variable",Pretendard,"Malgun Gothic","Segoe UI",sans-serif;margin:8px 0 12px;padding:8px 12px 12px;border:0;border-radius:4px;box-sizing:border-box;background:color-mix(in srgb,currentColor 6%,transparent);interpolate-size:allow-keywords;animation:lakomics-translation-in 140ms cubic-bezier(.2,0,0,1) both}
@@ -787,35 +813,60 @@
       }
       schedule(false, 0);
     });
+    let prefetchDirection;
     function observeWindow() {
       intersection?.disconnect?.();
       // Pixel margins track viewport height; IO percentage margins use viewport width.
-      const above = innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
-      const below = innerHeight * (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
+      const above = viewHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
+      const below = viewHeight * (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS);
       intersection = new IntersectionObserver(onIntersection, { rootMargin: `${above}px 0px ${below}px 0px` });
       for (const element of observed) intersection.observe(element);
+      prefetchDirection = scrollDirection;
     }
     observeWindow();
     let scrollTimer = null;
-    globalThis.addEventListener("scroll", () => {
-      const y = globalThis.scrollY || 0, direction = Math.sign(y - lastScrollY);
-      lastScrollY = y;
-      if (direction && direction !== scrollDirection) { scrollDirection = direction; observeWindow(); }
+    let scrollFrame = false;
+    function onScrollFrame() {
+      scrollFrame = false;
+      const y = globalThis.scrollY || 0;
+      // Measure reversal from the furthest point in the current direction, so
+      // small anchoring corrections cannot flip prefetch back and forth. Switch
+      // within the existing behind margin, even on a small viewport.
+      const movement = (y - scrollExtremeY) * scrollDirection;
+      if (movement >= 0) scrollExtremeY = y;
+      else if (-movement >= Math.min(96, viewHeight * BEHIND_SCREENS / 2)) {
+        scrollDirection *= -1;
+        scrollExtremeY = y;
+      }
+      // A switch needs a sustained reversal, so rebuilding here stays rare.
+      if (prefetchDirection !== scrollDirection) observeWindow();
       if (!needsScan()) return;
       if (scrollTimer !== null) return;
       scrollTimer = setTimeout(() => { scrollTimer = null; scan(true); }, 50);
+    }
+    globalThis.addEventListener("scroll", () => {
+      if (scrollFrame) return;
+      scrollFrame = true;
+      requestAnimationFrame(onScrollFrame);
     }, { passive: true });
-    globalThis.addEventListener("resize", () => { observeWindow(); scan(); });
+    globalThis.addEventListener("resize", () => { viewHeight = globalThis.innerHeight || 0; observeWindow(); scan(); });
     document.addEventListener("visibilitychange", () => {
       if (canRun()) { observeWindow(); scan(true); }
     });
     let scanTimer = null;
-    new MutationObserver(records => {
-      if (!needsScan()) return;
-      if (!records.some(relevantMutation)) return;
+    onTextMutations = records => {
+      let relevant = false;
+      for (const record of records) {
+        if (!relevantMutation(record)) continue;
+        invalidateSource(record);
+        relevant = true;
+      }
+      if (!relevant || !needsScan()) return;
       if (scanTimer !== null) return;
       scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);
-    }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href"] });
+    };
+    textObserver = new MutationObserver(onTextMutations);
+    textObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href", "alt"] });
     const themeObserver = new MutationObserver(() => applyTheme());
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
     themeObserver.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });

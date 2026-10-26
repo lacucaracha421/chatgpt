@@ -19,6 +19,7 @@ function fakeTimers(w) {
     return id;
   };
   w.clearTimeout = id => timers.delete(id);
+  Object.defineProperty(w, "requestAnimationFrame", { configurable: true, writable: true, value: callback => w.setTimeout(() => callback(now), 16) });
   const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
   async function advance(ms) {
     const end = now + ms;

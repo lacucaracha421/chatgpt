@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.68 — 2026-10-26
+
+- Keep X translation prefetch steady while scrolling: small scroll corrections no longer
+  flip the prefetch direction, and unchanged posts are not re-read on every scroll.
+- Store usage history by day and job so a routine usage update sends a few hundred bytes
+  to open tabs instead of the whole history. Existing history moves over once.
+
 ## 3.5.67 — 2026-10-26
 
 - Scrolling no longer makes the text-selection translate chip check the page. It still

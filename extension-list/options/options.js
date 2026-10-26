@@ -505,9 +505,12 @@
     const tr = document.createElement("tr"), head = document.createElement("th");
     head.scope = "row"; head.textContent = name; tr.className = className; tr.append(head, ...cells.map(usageCell)); return tr;
   }
+  let usageRender = 0;
   async function renderUsage() {
     if (!usageApi || !chrome.storage?.local) return;
-    const stored = await chrome.storage.local.get([usageApi.KEY]), data = usageApi.summarize(stored[usageApi.KEY]);
+    const request = ++usageRender;
+    const data = usageApi.summarize(await usageApi.load());
+    if (request !== usageRender) return;
     const rows = usageApi.FEATURES.map(feature => usageRow(usageApi.FEATURE_LABELS[feature], [data.rows[feature].today, data.rows[feature].month, data.rows[feature].total]));
     if (data.legacy) rows.push(usageRow("기록 시작 전 유튜브", [null, null, data.legacy], "legacy"));
     rows.push(usageRow("합계", [data.all.today, data.all.month, data.all.total], "sum"));
@@ -581,7 +584,7 @@
     // Never use raw key-bearing storage documents to render the page.
     if (changes["lakomics:translation:v1"]) void queued("translation", translationSettings).catch(() => {});
     if (changes[contextKey]) void queued("context", contextSettings).catch(() => {});
-    if (usageApi && changes[usageApi.KEY]) void renderUsage().catch(() => {});
+    if (usageApi && Object.keys(changes).some(usageApi.isUsageKey)) void renderUsage().catch(() => {});
     if (Object.keys(changes).some(key => key.startsWith("lakomics:youtube:settings:"))) void queued("youtube", youtubeSettings).catch(() => {});
   });
   const reveal = () => document.body.classList.add("ready"), cap = setTimeout(reveal, 300);
