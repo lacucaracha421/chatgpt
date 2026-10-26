@@ -10,7 +10,9 @@
   const FEATURE_LABELS = Object.freeze({ x: "X 번역", context: "우클릭 번역", page: "페이지 번역", image: "이미지 글자", youtube: "유튜브 자막" });
   const KEEP_DAYS = 400, MAX_JOBS = 50, MAX_PENDING = 2000;
   // Every storage.local write is delivered to every open tab, so writes are coalesced.
-  const FLUSH_DELAY_MS = 1500;
+  // X calls often finish more than 1.5 seconds apart. A ten-second window groups
+  // those calls too, while flushing before the worker's normal idle suspension.
+  const FLUSH_DELAY_MS = 10000;
 
   // Anthropic list prices, verified 2026-10-13 (USD per 1M tokens). A model that is not listed,
   // or a token kind without a listed price (cache writes; cache reads on Haiku), has no cost.

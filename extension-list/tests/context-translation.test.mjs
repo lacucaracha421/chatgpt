@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {memoryCache} from './translation-cache-fixture.mjs';
 import {readFile} from 'node:fs/promises';
 const core=await Promise.all(['korean-rules','korean','terms','deadline'].map(name=>readFile(new URL(`../src/translation/${name}.js`,import.meta.url),'utf8')));
 const source=await readFile(new URL('../src/translate-service.js',import.meta.url),'utf8');
 const sender={id:'test',url:'https://example.test/page',tab:{id:7}};
 function fixture({model='google/gemini-3.1-flash-lite',failure=false,replies=null,userTerms,stored={}}={}) {
   const memory={'lakomics:translation:storage-v4':true,'lakomics:translation:v1':{enabled:false,apiKey:'mock-key',anthropicApiKey:'mock-ant',model,fallbackModel:'google/gemma-4-26b-a4b-it',...(userTerms?{userTerms}:{}),...stored}},calls=[];
-  const ctx=vm.createContext({URL,AbortController,setTimeout,clearTimeout,chrome:{runtime:{id:'test'},storage:{local:{async get(){return memory;},async set(value){Object.assign(memory,value);},async remove(){}}}},fetch:async(url,init)=>{calls.push({url,init,body:JSON.parse(init.body)});return failure&&calls.length===1?{ok:false,status:503,headers:{get:()=>null}}:{ok:true,json:async()=>replies?{choices:[{message:{content:replies[Math.min(calls.length,replies.length)-1]}}]}:JSON.parse(init.body).model!==undefined&&url.includes('anthropic.com')?{content:[{type:'text',text:'번역 결과'}]}:{choices:[{message:{content:'번역 결과'}}]}};}});
-  for(const script of [...core,source])vm.runInContext(script,ctx);return {handle:(message,who=sender)=>ctx.LakomicsTranslation.handle(message,who),calls,memory,rules:ctx.LakomicsTranslationCore.koreanRules};
+  const cacheStore=memoryCache();
+  const ctx=vm.createContext({LakomicsTranslationCacheStore:cacheStore,URL,AbortController,setTimeout,clearTimeout,chrome:{runtime:{id:'test'},storage:{local:{async get(){return memory;},async set(value){Object.assign(memory,value);},async remove(){}}}},fetch:async(url,init)=>{calls.push({url,init,body:JSON.parse(init.body)});return failure&&calls.length===1?{ok:false,status:503,headers:{get:()=>null}}:{ok:true,json:async()=>replies?{choices:[{message:{content:replies[Math.min(calls.length,replies.length)-1]}}]}:JSON.parse(init.body).model!==undefined&&url.includes('anthropic.com')?{content:[{type:'text',text:'번역 결과'}]}:{choices:[{message:{content:'번역 결과'}}]}};}});
+  for(const script of [...core,source])vm.runInContext(script,ctx);return {handle:(message,who=sender)=>ctx.LakomicsTranslation.handle(message,who),calls,memory,cache:cacheStore.cache,rules:ctx.LakomicsTranslationCore.koreanRules};
 }
 test('all context kinds share providers but use new target prompts, independent of automatic X toggle',async()=>{
   for(const [kind,target]of [['translate.ko.inline','Korean'],['replace.ko','Korean'],['translate.ja.copy','Japanese'],['replace.ja','Japanese'],['translate.en.copy','English'],['replace.en','English']]){
@@ -139,10 +141,10 @@ test('context model: the menu needs-setup state follows the context model key, a
 test('context model: changing it keeps the X translation cache and the cache-cleared marker',async()=>{
   const f=fixture();
   const shard='lakomics:translation-cache:v4:3';
-  f.memory[shard]=[['Hello','안녕']];
+  f.cache[shard]=[['Hello','안녕']];
   await f.handle({type:'translation:update',contextModel:'anthropic:claude-sonnet-5-5'},own);
-  assert.deepEqual(f.memory[shard],[['Hello','안녕']]);
+  assert.deepEqual(f.cache[shard],[['Hello','안녕']]);
   assert.equal(f.memory['lakomics:translation-cache-cleared'],undefined);
   await f.handle({type:'translation:update',model:'google/gemma-4-26b-a4b-it'},own);
-  assert.notDeepEqual(f.memory[shard],[['Hello','안녕']],'a main model change still clears it');
+  assert.notDeepEqual(f.cache[shard],[['Hello','안녕']],'a main model change still clears it');
 });

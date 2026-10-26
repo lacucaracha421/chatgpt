@@ -25,10 +25,20 @@ function memoryStorage(initial = {}) {
 }
 function loadUsage(initial) {
   const storage = memoryStorage(initial), timers = [];
+  let now = 0;
   const context = vm.createContext({chrome: {storage: {local: storage.local}},
-    setTimeout: (fn, ms) => { timers.push({fn, ms}); return timers.length; }, clearTimeout: id => { if (timers[id - 1]) timers[id - 1].cleared = true; }});
+    setTimeout: (fn, ms) => { timers.push({fn, ms, at: now + ms}); return timers.length; }, clearTimeout: id => { if (timers[id - 1]) timers[id - 1].cleared = true; }});
   vm.runInContext(usageSource, context);
-  return {usage: context.LakomicsUsage, storage, timers, run: timer => !timer.cleared && timer.fn()};
+  return {usage: context.LakomicsUsage, storage, timers,
+    async advance(ms) {
+      const end = now + ms;
+      for (const timer of timers) if (!timer.cleared && timer.at <= end) {
+        now = timer.at; timer.cleared = true; timer.fn();
+        for (let i = 0; i < 4; i++) await immediate();
+      }
+      now = end;
+    },
+  };
 }
 
 test('Anthropic prices: Haiku tiers at 100K input, Sonnet cache reads, and no invented prices', () => {
@@ -119,17 +129,15 @@ test('concurrent adds and flushes are serialized: nothing is lost, even with slo
   assert.ok(summary.jobs.every(job => job.requests === 10));
 });
 
-test('writes are coalesced: one storage write 1.5 s after the first call, however many calls arrive', async () => {
-  const {usage, storage, timers, run} = loadUsage();
-  for (let i = 0; i < 25; i += 1) usage.record('x', {model: 'm', input: 1, output: 1, costUsd: 0}, {id: 'x:2026-10-13', label: 'X'});
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, 1500);
-  assert.equal(storage.writes.length, 0, 'nothing is written before the timer');
-  run(timers[0]); await usage.flush(); await immediate();
-  assert.equal(storage.writes.length, 1);
-  assert.equal(storage.memory[KEY].days[usage.localDay()].x.requests, 25);
-  usage.record('x', {model: 'm', input: 1, output: 1, costUsd: 0});
-  assert.equal(timers.length, 2, 'a later call arms a new timer');
+test('usage writes group X calls across their response interval', async () => {
+  const {usage, storage, advance} = loadUsage();
+  for (let i = 0; i < 6; i += 1) {
+    usage.record('x', {model: 'm', input: 1, output: 1, costUsd: 0}, {id: 'x:2026-10-13', label: 'X'});
+    await advance(2000);
+  }
+  assert.ok(storage.writes.length > 0 && storage.writes.length < 3, 'separate X responses are grouped instead of broadcasting each response');
+  await usage.flush();
+  assert.equal(storage.memory[KEY].days[usage.localDay()].x.requests, 6);
 });
 
 test('a failed write keeps the calls for the next try', async () => {

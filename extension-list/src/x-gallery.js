@@ -160,7 +160,6 @@
     if (!likeButton) return null;
     const candidates = [
       likeButton.getAttribute?.("aria-label"),
-      likeButton.innerText,
       likeButton.textContent,
     ];
     for (const candidate of candidates) {
@@ -905,10 +904,6 @@
       if (observedArticles.has(article)) return;
       observedArticles.add(article);
       intersectionObserver.observe(article);
-      if (isElementVisible(article)) {
-        visibleArticles.add(article);
-        queueArticle(article);
-      }
     }
 
     function queueArticle(article) {
@@ -947,7 +942,9 @@
       const pathname = location.pathname;
       const routeChanged = pathname !== lastPathname;
       lastPathname = pathname;
-      ui.trigger.hidden = !galleryTriggerEnabled || overlayOpen || !isHomeRoute(pathname);
+      // Runs after every timeline mutation; only touch the attribute when it changes.
+      const triggerHidden = !galleryTriggerEnabled || overlayOpen || !isHomeRoute(pathname);
+      if (ui.trigger.hidden !== triggerHidden) ui.trigger.hidden = triggerHidden;
       if (!isHomeRoute(pathname) && overlayOpen) closeGallery();
       if (harvest?.running && !isForYouTimeline(document)) {
         stopAutoHarvest("추천 탭을 벗어나 자동 수집을 중지했습니다", true);
@@ -1653,12 +1650,6 @@
 
   function delay(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
-
-  function isElementVisible(element) {
-    const rect = element?.getBoundingClientRect?.();
-    if (!rect) return false;
-    return rect.bottom > 0 && rect.top < (globalThis.innerHeight || document.documentElement.clientHeight);
   }
 
   function createGalleryUi() {

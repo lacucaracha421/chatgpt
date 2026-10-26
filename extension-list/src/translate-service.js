@@ -22,14 +22,16 @@
     console.warn("Lakomics: image referer session rules could not be registered.");
   });
   const SETTINGS = "lakomics:translation:v1";
-  // The cache lives in shards so a write (delivered, old and new value, to every open X tab)
-  // carries one shard, and a waking worker reads only the shards a request touches.
+  // Worker-owned IndexedDB avoids broadcasting cache contents to every page frame.
+  // Shards let a waking worker read only what a request touches.
   const CACHE_PREFIX = "lakomics:translation-cache:v4:", CACHE_SHARDS = 16;
   // Written when the cache is emptied; open X tabs drop their shown translations.
   const CACHE_CLEARED = "lakomics:translation-cache-cleared";
   const LEGACY_CACHE = "lakomics:translation-cache:v2", RETIRED_CACHE = "lakomics:translation-cache:v1";
   // Present once the one-time migration (older settings and the single-key cache) ran.
   const MIGRATED = "lakomics:translation:storage-v4";
+  const CACHE_MIGRATED = "lakomics:translation:cache-indexeddb-v1";
+  const CACHE_RESET_PENDING = "lakomics:translation:cache-reset-pending";
   // Translation needs no reasoning: turn it off where the model allows it, and keep it
   // at the minimum where it is mandatory (3.5 Flash Lite).
   const MODELS = Object.freeze([
@@ -49,9 +51,7 @@
   const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
   const DEFAULT_MODEL = MODELS[0].id, DEFAULT_FALLBACK = "google/gemma-4-26b-a4b-it", DEFAULT_IMAGE_MODEL = "anthropic:claude-sonnet-5-5";
   const DEFAULT_CONCURRENCY = 4;
-  // Recently used translations are kept; writes are coalesced because every storage write
-  // is delivered, old and new value, to each open X tab. The character cap keeps the
-  // stored cache (Korean is ~3 bytes a character) well inside the 10 MB storage quota.
+  // Keep recently used translations and coalesce persistence within these memory limits.
   const CACHE_MAX_ITEMS = 1500, CACHE_MAX_CHARS = 1200000, CACHE_PERSIST_DELAY_MS = 1500;
   const SHARD_MAX_ITEMS = Math.ceil(CACHE_MAX_ITEMS / CACHE_SHARDS), SHARD_MAX_CHARS = Math.ceil(CACHE_MAX_CHARS / CACHE_SHARDS);
   const MAX_BATCH_ITEMS = 4;
@@ -72,10 +72,57 @@
   const qualityAttempts = new Set();
   const JOB_BUDGET_MS = 42000;
 
+  function indexedCacheStore() {
+    let opening;
+    function open() {
+      return opening ??= new Promise((resolve, reject) => {
+        let blocked = false;
+        const request = indexedDB.open("lakomics-translation-cache", 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("shards");
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => { blocked = true; reject(new Error("Translation cache database is blocked")); };
+        request.onsuccess = () => {
+          const db = request.result;
+          if (blocked) { db.close(); return; }
+          db.onversionchange = () => db.close();
+          resolve(db);
+        };
+      });
+    }
+    async function transaction(mode, work) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("shards", mode);
+        let result;
+        tx.oncomplete = () => resolve(result?.result);
+        tx.onabort = () => reject(tx.error || new Error("Translation cache transaction aborted"));
+        tx.onerror = () => reject(tx.error);
+        result = work(tx.objectStore("shards"));
+      });
+    }
+    return {
+      read: index => transaction("readonly", store => store.get(index)),
+      write: shards => transaction("readwrite", store => { for (const [index, entries] of shards) store.put(entries, index); }),
+      clear: () => transaction("readwrite", store => store.clear()),
+    };
+  }
+  // Tests inject this same small contract without requiring a browser database.
+  const cacheStore = globalThis.LakomicsTranslationCacheStore || indexedCacheStore();
+  let persistenceAvailable = true, persistenceChain = Promise.resolve(), legacyCachePending = false;
+  function persist(work) {
+    const result = persistenceChain.then(async () => {
+      if (!persistenceAvailable) return false;
+      try { await work(cacheStore); return true; }
+      catch { persistenceAvailable = false; return false; }
+    });
+    persistenceChain = result.then(() => {});
+    return result;
+  }
+
   function init() {
     return initialized ??= (async () => {
       // Only the first run after an update scans all storage for older keys.
-      const known = await chrome.storage.local.get([MIGRATED, SETTINGS]);
+      const known = await chrome.storage.local.get([MIGRATED, CACHE_MIGRATED, CACHE_RESET_PENDING, SETTINGS]);
       const stored = known[MIGRATED] ? known : await chrome.storage.local.get(null);
       const legacy = stored["xtranslate:gm:oit.settings.v2"] || {};
       const current = stored[SETTINGS] || {};
@@ -93,11 +140,31 @@
       };
       settings.fallbackModel = validFallback(Object.hasOwn(current, "fallbackModel") ? current.fallbackModel : DEFAULT_FALLBACK, settings.model);
       if (JSON.stringify(stored[SETTINGS]) !== JSON.stringify(settings)) await chrome.storage.local.set({ [SETTINGS]: settings });
-      if (known[MIGRATED]) return;
-      // Old translations used different Korean rules and must not populate the new cache.
-      await chrome.storage.local.set({ [MIGRATED]: true });
-      const retired = Object.keys(stored).filter(key => key.startsWith("xtranslate:gm:") || key.startsWith("lakomics:translation-cache:v3:") || key === "lakomics:translation:storage-v3" || key === "xTranslateEnabled" || key === RETIRED_CACHE || key === LEGACY_CACHE);
-      if (retired.length) await chrome.storage.local.remove(retired);
+      if (!known[MIGRATED]) {
+        // Old translations used different Korean rules and must not populate the new cache.
+        await chrome.storage.local.set({ [MIGRATED]: true });
+        const retired = Object.keys(stored).filter(key => key.startsWith("xtranslate:gm:") || key.startsWith("lakomics:translation-cache:v3:") || key === "lakomics:translation:storage-v3" || key === "xTranslateEnabled" || key === RETIRED_CACHE || key === LEGACY_CACHE);
+        if (retired.length) await chrome.storage.local.remove(retired);
+      }
+      // A clear requested while IndexedDB was unavailable must survive the worker wake.
+      if (known[CACHE_RESET_PENDING]) {
+        if (!await persist(store => store.clear())) return;
+        await chrome.storage.local.remove([CACHE_RESET_PENDING]);
+      }
+      if (!known[CACHE_MIGRATED]) {
+        const keys = Array.from({ length: CACHE_SHARDS }, (_, index) => CACHE_PREFIX + index);
+        const old = await chrome.storage.local.get(keys);
+        const imported = keys.flatMap((key, index) => Array.isArray(old[key]) ? [[index, old[key]]] : []);
+        if (await persist(store => store.write(imported))) {
+          // Remove only after the import commits; an interrupted migration can safely retry.
+          const present = keys.filter(key => Object.hasOwn(old, key));
+          if (present.length) await chrome.storage.local.remove(present);
+          await chrome.storage.local.set({ [CACHE_MIGRATED]: true });
+        } else {
+          legacyCachePending = keys.some(key => Object.hasOwn(old, key));
+          for (const [index, entries] of imported) shards.set(index, new Map(entries));
+        }
+      }
     })();
   }
   // The sub model answers when the main model fails; "" turns it off.
@@ -342,10 +409,15 @@
   }
   async function shard(index) {
     if (!shards.has(index)) {
-      const key = CACHE_PREFIX + index, epoch = cacheEpoch;
-      const stored = await chrome.storage.local.get(key);
+      const epoch = cacheEpoch;
+      await persistenceChain;
+      let stored;
+      if (persistenceAvailable) {
+        try { stored = await cacheStore.read(index); }
+        catch { persistenceAvailable = false; }
+      }
       // A cache clear while reading leaves this shard empty.
-      if (!shards.has(index)) shards.set(index, new Map(epoch === cacheEpoch && Array.isArray(stored[key]) ? stored[key] : []));
+      if (!shards.has(index)) shards.set(index, new Map(epoch === cacheEpoch && Array.isArray(stored) ? stored : []));
     }
     return shards.get(index);
   }
@@ -375,20 +447,23 @@
     if (persistTimer !== null) return;
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      const writes = {};
-      for (const index of dirtyShards) writes[CACHE_PREFIX + index] = [...(shards.get(index) || [])];
+      const writes = [];
+      for (const index of dirtyShards) writes.push([index, [...(shards.get(index) || [])]]);
       dirtyShards.clear();
-      if (Object.keys(writes).length) void chrome.storage.local.set(writes).catch(() => {});
+      if (writes.length) void persist(store => store.write(writes));
     }, CACHE_PERSIST_DELAY_MS);
   }
-  // Empties every shard and returns the writes that store and announce it.
-  function clearCache() {
+  // Serialize the clear after pending writes so an older flush cannot restore entries.
+  async function clearCache() {
     if (persistTimer !== null) clearTimeout(persistTimer);
     persistTimer = null;
     cacheEpoch += 1; shards = new Map(); dirtyShards.clear();
-    const writes = { [CACHE_CLEARED]: Date.now() };
-    for (let index = 0; index < CACHE_SHARDS; index += 1) writes[CACHE_PREFIX + index] = [];
-    return writes;
+    const cleared = await persist(store => store.clear());
+    if (legacyCachePending) {
+      await chrome.storage.local.remove(Array.from({ length: CACHE_SHARDS }, (_, index) => CACHE_PREFIX + index));
+      legacyCachePending = false;
+    }
+    return { [CACHE_CLEARED]: Date.now(), ...(!cleared ? { [CACHE_RESET_PENDING]: true } : {}) };
   }
   function baseBody(messages, model) {
     return { model, temperature: 0.2, max_tokens: 4096, messages, reasoning: MODEL_BY_ID.get(model)?.reasoning, provider: { sort: "latency" } };
@@ -829,13 +904,13 @@
         dictionaryRevision: dictionaryChanged ? settings.dictionaryRevision + 1 : settings.dictionaryRevision,
         fallbackModel: validFallback(Object.hasOwn(message, "fallbackModel") ? message.fallbackModel : settings.fallbackModel, nextModel),
       };
-      if (modelChanged || dictionaryChanged) await chrome.storage.local.set({ [SETTINGS]: settings, ...clearCache() });
+      if (modelChanged || dictionaryChanged) await chrome.storage.local.set({ [SETTINGS]: settings, ...await clearCache() });
       else await chrome.storage.local.set({ [SETTINGS]: settings });
       return { ok: true, ...publicSettings() };
     }
     if (message.type === "translation:clear") {
       invalidate();
-      await chrome.storage.local.set(clearCache());
+      await chrome.storage.local.set(await clearCache());
       return { ok: true };
     }
     const epoch = generation;

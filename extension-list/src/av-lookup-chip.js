@@ -71,7 +71,8 @@
     function hide({ suppressSelection = false } = {}) {
       if (suppressSelection) hiddenUntilSelectionChange = true;
       selectedText = "";
-      if (chip) chip.hidden = true;
+      // Scrolling calls this constantly; rewriting an unchanged attribute still restyles.
+      if (chip && !chip.hidden) chip.hidden = true;
     }
 
     function update() {

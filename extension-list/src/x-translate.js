@@ -25,7 +25,8 @@
   // requested holds elements whose request (or queued fallback) is outstanding, so the
   // other slot never sends the same post twice.
   const pending = new Set(), observed = new Set(), requested = new Set(), fallbacks = [];
-  let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
+  let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, viewportIntersection, ui;
+  const nearby = new WeakSet();
   const rendered = new Map(), toggles = new Map();
   const owners = new Map();
   let scrollDirection = 1, lastScrollY = globalThis.scrollY || 0;
@@ -112,11 +113,12 @@
   // Prefetch three screens in the scroll direction, keeping a small margin behind.
   // On-screen posts always win, ordered by distance from the viewport centre.
   const AHEAD_SCREENS = 3, BEHIND_SCREENS = 0.25;
-  function near(element, rect = element.getBoundingClientRect()) {
+  function near(element, rect) {
+    if (!rect) return nearby.has(element);
     return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * (scrollDirection < 0 ? AHEAD_SCREENS : BEHIND_SCREENS) && rect.top < innerHeight * (1 + (scrollDirection > 0 ? AHEAD_SCREENS : BEHIND_SCREENS));
   }
-  function visible(element, rect = element.getBoundingClientRect()) {
-    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
+  function visible(element) {
+    return viewportState.get(element) === true;
   }
   function detectTheme() {
     const value = getComputedStyle(document.body).backgroundColor || "";
@@ -300,7 +302,7 @@
     else if (enabled && !hasApiKey) state = "error";
     ui.button.dataset.state = state;
   }
-  function schedule(immediate = false) {
+  function schedule(immediate = false, delay = 120) {
     if (!canRun()) return;
     if (immediate) {
       if (timer !== null) { clearTimeout(timer); timer = null; }
@@ -308,19 +310,17 @@
       return;
     }
     if (timer !== null) return;
-    timer = setTimeout(() => { timer = null; drain(); }, 120);
+    timer = setTimeout(() => { timer = null; drain(); }, delay);
   }
   function current(candidate, requestEpoch) {
     return requestEpoch === epoch && enabled && !blocked && candidate.element.isConnected
       && source(candidate.element).signature === candidate.snapshot.signature;
   }
-  function collectBatch(limit = MAX_BATCH_ITEMS, forceSingle = false) {
+  function collectBatch(rects, limit = MAX_BATCH_ITEMS, forceSingle = false) {
     const center = innerHeight / 2;
     const lane = rect => rect.bottom > 0 && rect.top < innerHeight ? 0
       : (scrollDirection > 0 ? rect.top >= innerHeight : rect.bottom <= 0) ? 1 : 2;
-    const rects = new Map();
-    for (const element of pending) if (element.isConnected) rects.set(element, element.getBoundingClientRect());
-    const elements = [...rects.keys()].filter(element => near(element, rects.get(element)))
+    const elements = [...pending].filter(element => rects.has(element) && near(element, rects.get(element)))
       .sort((a, b) => {
         const ar = rects.get(a), br = rects.get(b);
         return lane(ar) - lane(br) || Math.abs((ar.top + ar.bottom) / 2 - center) - Math.abs((br.top + br.bottom) / 2 - center);
@@ -529,11 +529,21 @@
     if (result?.ok && typeof result.text === "string" && result.text !== text) render(candidate.element, candidate.snapshot, result.text, false, true);
   }
   function drain() {
+    if (inFlight >= maxInFlight || !canRun()) return;
+    // Snapshot all queued geometry before expansion clicks, result removal or busy
+    // indicators can write to the DOM, and reuse it across this drain's slots.
+    const rects = new Map();
+    for (const element of pending) {
+      if (!element.isConnected || requested.has(element)) continue;
+      const snapshot = source(element);
+      if (completed.get(element) === snapshot.signature || failuresFor(element, snapshot.signature)?.nextAttemptAt > Date.now()) continue;
+      rects.set(element, element.getBoundingClientRect());
+    }
     while (inFlight < maxInFlight && canRun()) {
       const requestEpoch = epoch;
       let work = null, batch = [];
-      if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
-      if (!batch.length) batch = collectBatch();
+      if (fastLanePending) { batch = collectBatch(rects, 1, true); fastLanePending = false; }
+      if (!batch.length) batch = collectBatch(rects);
       if (batch.length) {
         for (const candidate of batch) { claim(candidate, requestEpoch); showPending(candidate, requestEpoch); }
         work = () => runGroup(batch, requestEpoch);
@@ -583,7 +593,7 @@
     for (const node of record.removedNodes) if (touchesTweetText(node)) return true;
     return false;
   }
-  let viewportState = new WeakMap();
+  const viewportState = new WeakMap();
   const canRun = () => enabled && hasApiKey && !blocked && !document.hidden;
   // While blocked, cards already shown still need scans to drop them from recycled posts.
   const needsScan = () => canRun() || (!document.hidden && rendered.size > 0);
@@ -592,6 +602,9 @@
     for (const element of observed) {
       if (!element.isConnected) {
         intersection?.unobserve(element);
+        viewportIntersection?.unobserve(element);
+        nearby.delete(element);
+        viewportState.delete(element);
         observed.delete(element);
         pending.delete(element);
         failures.delete(element);
@@ -601,17 +614,11 @@
     for (const element of document.querySelectorAll(SELECTOR)) {
       if (!observed.has(element)) {
         observed.add(element);
+        viewportIntersection?.observe(element);
         intersection?.observe(element);
       }
       const snapshot = source(element);
-      const rect = element.getBoundingClientRect();
-      const onScreen = visible(element, rect), wasOnScreen = viewportState.get(element);
-      viewportState.set(element, onScreen);
-      const previousFailure = failures.get(element);
-      if (onScreen && wasOnScreen === false && previousFailure) {
-        if (isTransientFailure(previousFailure.code)) failures.delete(element);
-        else if (previousFailure.retryOnReentry) { previousFailure.retryOnReentry = false; previousFailure.nextAttemptAt = 0; }
-      }
+      const onScreen = visible(element);
       // Recycled text is a new job even if its previous translation failed.
       const record = failures.get(element);
       const owner = owners.get(element);
@@ -624,7 +631,7 @@
       }
       if (onScreen && !pending.has(element) && !requested.has(element) && completed.get(element) !== snapshot.signature && !failures.has(element)) {
         pending.add(element); fastLanePending = true;
-      } else if (near(element, rect)) pending.add(element);
+      } else if (near(element)) pending.add(element);
     }
     applyTheme();
     schedule(immediate);
@@ -638,7 +645,6 @@
     completed = new WeakMap();
     failures = new WeakMap();
     outsideViewport = new WeakSet();
-    viewportState = new WeakMap();
     for (const element of [...rendered.keys()]) removeResult(element);
   }
   async function refresh() {
@@ -748,9 +754,10 @@
       }
     });
     const onIntersection = entries => {
-      if (!canRun()) return;
       for (const entry of entries) {
-        if (!entry.isIntersecting) { outsideViewport.add(entry.target); continue; }
+        if (!entry.isIntersecting) { nearby.delete(entry.target); outsideViewport.add(entry.target); continue; }
+        nearby.add(entry.target);
+        if (!canRun()) continue;
         const record = failures.get(entry.target);
         if (outsideViewport.has(entry.target) && record) {
           if (isTransientFailure(record.code)) failures.delete(entry.target);
@@ -760,8 +767,26 @@
         if (visible(entry.target) && !pending.has(entry.target) && !requested.has(entry.target) && !completed.has(entry.target)) fastLanePending = true;
         pending.add(entry.target);
       }
-      schedule();
+      schedule(false, 0);
     };
+    // A separate zero-margin observer reports true viewport re-entry even while a
+    // post stays inside the larger prefetch window. Neither callback reads layout.
+    viewportIntersection = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const wasOnScreen = viewportState.get(entry.target);
+        const onScreen = entry.isIntersecting && entry.intersectionRatio > 0;
+        viewportState.set(entry.target, onScreen);
+        if (!onScreen || !canRun()) continue;
+        const record = failures.get(entry.target);
+        if (wasOnScreen === false && record) {
+          if (isTransientFailure(record.code)) failures.delete(entry.target);
+          else if (record.retryOnReentry) { record.retryOnReentry = false; record.nextAttemptAt = 0; }
+        }
+        if (!requested.has(entry.target) && !completed.has(entry.target)) fastLanePending = true;
+        pending.add(entry.target);
+      }
+      schedule(false, 0);
+    });
     function observeWindow() {
       intersection?.disconnect?.();
       // Pixel margins track viewport height; IO percentage margins use viewport width.

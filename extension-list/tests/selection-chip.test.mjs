@@ -62,9 +62,13 @@ test('placement tries handle-safe sides when neither vertical side fits', () => 
 function fixture(t, { coarse = false, blocked = false, settings = { ok: true, hasContextApiKey: true }, reply, html = '<p>Hello world</p>' } = {}) {
   const dom = new JSDOM(html, { url: 'https://example.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window, doc = w.document, roots = new WeakMap(), requests = [];
+  const work = { selection: 0, text: 0, media: 0, bounds: 0, availability: 0 };
+  const getSelection = w.getSelection.bind(w), selectionText = w.Selection.prototype.toString;
+  w.getSelection = () => { work.selection++; return getSelection(); };
+  w.Selection.prototype.toString = function () { work.text++; return selectionText.call(this); };
   let now = 0, serial = 0;
   const timers = new Map();
-  w.matchMedia = query => ({ matches: query === '(pointer: coarse)' && coarse });
+  w.matchMedia = query => { work.media++; return { matches: query === '(pointer: coarse)' && coarse }; };
   w.setTimeout = (fn, delay = 0) => { const id = ++serial; timers.set(id, { at: now + delay, fn }); return id; };
   w.clearTimeout = id => timers.delete(id);
   const attach = w.Element.prototype.attachShadow;
@@ -79,9 +83,9 @@ function fixture(t, { coarse = false, blocked = false, settings = { ok: true, ha
       return typeof value === 'function' ? value.bind(target) : value;
     } })), options);
   };
-  w.Range.prototype.getBoundingClientRect = () => rect;
+  w.Range.prototype.getBoundingClientRect = () => { work.bounds++; return rect; };
   for (const source of sources) w.eval(source);
-  const chip = w.LakomicsSelectionChip.create({ doc, win: w, css, canShow: () => !blocked, send: async message => {
+  const chip = w.LakomicsSelectionChip.create({ doc, win: w, css, canShow: () => { work.availability++; return !blocked; }, send: async message => {
     requests.push(plain(message));
     if (message.type === 'translation:settings') return settings;
     return reply ? reply(message) : { ok: true, text: '안녕하세요' };
@@ -109,8 +113,43 @@ function fixture(t, { coarse = false, blocked = false, settings = { ok: true, ha
     for (let i = 0; i < 12; i++) await Promise.resolve();
   };
   const host = () => doc.querySelector('lakomics-selection-chip');
-  return { w, doc, roots, requests, select, pointer, advance, host, chip };
+  return { w, doc, roots, requests, select, pointer, advance, host, chip, work };
 }
+
+test('idle scrolling does not inspect selection or mutate the document', async t => {
+  const f = fixture(t, { coarse: true });
+  const observer = new f.w.MutationObserver(() => {});
+  observer.observe(f.doc, { subtree: true, childList: true, attributes: true, characterData: true });
+  for (let i = 0; i < 100; i++) f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.deepEqual(f.work, { selection: 0, text: 0, media: 0, bounds: 0, availability: 0 });
+  assert.equal(observer.takeRecords().length, 0);
+  observer.disconnect();
+  f.pointer('pointerdown'); f.pointer('pointerup');
+  f.doc.dispatchEvent(new f.w.Event('selectionchange'));
+  await f.advance(500);
+  assert.equal(f.work.text + f.work.media + f.work.bounds + f.work.availability, 0);
+  assert.equal(f.host(), null);
+});
+
+test('ineligible selections skip text and layout work; touch measures only after settling', async t => {
+  const f = fixture(t, { coarse: true });
+  f.pointer('pointerdown', 'mouse'); f.select(); f.pointer('pointerup', 'mouse');
+  assert.equal(f.work.text + f.work.media + f.work.bounds + f.work.availability, 0);
+  f.pointer('pointerdown', 'touch'); f.select(0, 11);
+  assert.equal(f.work.text + f.work.media + f.work.bounds + f.work.availability, 0);
+  f.pointer('pointerup', 'touch');
+  assert.equal(f.work.bounds, 0);
+  await f.advance(250);
+  assert.ok(f.host());
+  assert.equal(f.work.bounds, 1);
+  const before = { ...f.work };
+  for (let i = 0; i < 100; i++) f.doc.dispatchEvent(new f.w.Event('scroll'));
+  assert.equal(f.host(), null);
+  assert.deepEqual(f.work, before);
+  f.doc.dispatchEvent(new f.w.Event('selectionchange')); await f.advance(500);
+  assert.equal(f.host(), null, 'scroll-dismissed selection must stay dismissed');
+  assert.equal(f.work.bounds, 1);
+});
 
 test('native touch selection settles after release and 250 ms, then uses the existing translation popover', async t => {
   const f = fixture(t);

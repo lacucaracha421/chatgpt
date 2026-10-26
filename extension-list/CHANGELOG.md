@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.5.67 — 2026-10-26
+
+- Scrolling no longer makes the text-selection translate chip check the page. It still
+  appears after a touch selection and hides on scroll as before.
+
+## 3.5.66 — 2026-10-26
+
+- Make X scrolling lighter: the extension no longer forces extra page layouts while
+  watching timeline posts for saved badges and translations.
+- Keep the translation cache in the extension's own database instead of shared extension
+  storage, so saving a translation no longer sends the cache to every open tab. Existing
+  translations move over once; clearing the cache works as before.
+- Group translation usage records into fewer writes.
+
 ## 3.5.65 — 2026-10-22
 
 - Keep the saved checkmark on X photos saved from a quoted post after the page reloads.

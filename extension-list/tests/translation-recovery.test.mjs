@@ -1,3 +1,4 @@
+import { translationObserver } from './translation-observer-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -40,7 +41,7 @@ function mount(texts, handler, concurrency=2) {
   const positions=texts.map((_,i)=>100+i*100), messages=[], observers=[];
   for(const [i,el] of elements.entries()) el.getBoundingClientRect=()=>({width:300,height:60,top:positions[i],bottom:positions[i]+60});
   let changed;
-  w.IntersectionObserver=class { constructor(cb,options){this.cb=cb;this.options=options;observers.push(this);} observe(){} unobserve(){} disconnect(){} };
+  w.IntersectionObserver=translationObserver(w, value => observers.push(value));
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') { callback({ok:true,enabled:true,hasApiKey:true,concurrency}); return; }
     messages.push(message); handler(message,callback,w);
@@ -51,6 +52,22 @@ function mount(texts, handler, concurrency=2) {
   return {w,clock,elements,positions,messages,observers,scroll,reply,changed:()=>changed({'lakomics:translation:v1':{}},'local'),close:()=>w.close()};
 }
 const card=el=>el.parentElement.querySelector('.lakomics-translation');
+
+test('scroll and unchanged text mutations keep translations without measuring completed posts again',async()=>{
+  const f=mount(['Already translated'],(m,cb)=>cb({ok:true,text:'번역됨'}));
+  await f.clock.advance(20);
+  const shown=card(f.elements[0]);
+  let measures=0;
+  const rect=f.elements[0].getBoundingClientRect;
+  f.elements[0].getBoundingClientRect=()=>{measures++;return rect();};
+  f.scroll(100);
+  f.elements[0].append(f.w.document.createElement('span'));
+  await f.clock.advance(500);
+  assert.equal(measures,0);
+  assert.equal(f.messages.length,1);
+  assert.equal(card(f.elements[0]),shown);
+  f.close();
+});
 
 test('disabled, unconfigured and hidden tabs skip scans and resume with current text',async()=>{
   for(const mode of ['disabled','unconfigured','hidden']) {

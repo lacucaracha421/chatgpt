@@ -45,24 +45,29 @@
     const popover = globalThis.LakomicsContextImage.create({ doc, win, send, surfaces, watchSession,
       alive: context => !context.departed && context.href === win.location.href && context.target.isConnected });
     const pointers = new Set(), watcher = watchSession();
-    let pointerType = "", timer = null, current = null, dismissed = null, destroyed = false;
+    let pointerType = "", timer = null, pending = null, current = null, dismissed = null, destroyed = false;
     function hide() {
-      win.clearTimeout(timer); timer = null; watcher.stop();
-      if (current) { surfaces.remove(current.surface, current.button, 0); current = null; }
+      if (timer !== null) { win.clearTimeout(timer); timer = null; }
+      pending = null;
+      if (current) { watcher.stop(); surfaces.remove(current.surface, current.button, 0); current = null; }
     }
-    function read() {
+    function read(measure = false) {
+      if (destroyed || pointers.size || doc.hidden || (pointerType && pointerType !== "touch" && pointerType !== "pen")) return null;
       const selection = win.getSelection?.();
       if (!selection?.rangeCount || selection.isCollapsed) return null;
+      if (!pointerType && !win.matchMedia?.("(pointer: coarse)").matches) return null;
       const range = selection.getRangeAt(0).cloneRange();
       const element = node => node?.nodeType === 1 ? node : node?.parentElement;
       const target = element(range.startContainer), end = element(range.endContainer);
-      const text = selection.toString();
       if (!target?.isConnected || !end?.isConnected || target.closest(model.ownSelector) || end.closest(model.ownSelector)) return null;
-      if (!shouldShow({ text, collapsed: selection.isCollapsed, pointerType, coarse: Boolean(win.matchMedia?.("(pointer: coarse)").matches),
-        editable: Boolean(model.editable(target) || model.editable(end) || model.editable(doc.activeElement)), pointers: pointers.size,
-        blocked: doc.hidden || !canShow({ isTrusted: true, target, composedPath: () => [target] }) })) return null;
-      const rect = range.getBoundingClientRect?.();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      if (model.editable(target) || model.editable(end) || model.editable(doc.activeElement)
+        || !canShow({ isTrusted: true, target, composedPath: () => [target] })) return null;
+      const text = selection.toString();
+      if (!shouldShow({ text, pointerType, coarse: !pointerType })) return null;
+      // Only the settled selection needs geometry. Dismissal and identity checks
+      // must not force layout while the page is scrolling or changing selection.
+      const rect = measure ? range.getBoundingClientRect?.() : null;
+      if (measure && (!rect || rect.width <= 0 || rect.height <= 0)) return null;
       return { text, range, target, rect, href: win.location.href, touch: true };
     }
     function schedule() {
@@ -71,9 +76,10 @@
       hide();
       if (!next) { dismissed = null; return; }
       if (sameSelection(next, dismissed)) return;
+      pending = next;
       timer = win.setTimeout(() => {
-        timer = null;
-        const context = read();
+        timer = null; pending = null;
+        const context = read(true);
         if (destroyed || next.href !== win.location.href || !sameSelection(next, context)) return;
         const view = surfaces.viewport(), position = placement(context.rect, view);
         if (!position) return;
@@ -110,7 +116,9 @@
     }
     function up(event) { if (inside(event)) return; pointers.delete(event.pointerId); schedule(); }
     function cancel(event) { pointers.delete(event.pointerId); hide(); }
-    function dismiss() { dismissed = current?.context || read(); hide(); }
+    // Scroll fires for every frame, including when there has never been a
+    // selection. Keep the known identity rather than querying the live page.
+    function dismiss() { dismissed = current?.context || pending || dismissed; hide(); }
     function depart() { dismiss(); pointers.clear(); popover.close(0); }
     function key(event) { if (event.key === "Escape") dismiss(); else if (!inside(event)) { pointerType = "keyboard"; hide(); } }
     doc.addEventListener("selectionchange", schedule);

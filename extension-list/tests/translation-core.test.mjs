@@ -1,6 +1,8 @@
+import { translationObserver } from './translation-observer-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {memoryCache} from './translation-cache-fixture.mjs';
 import {readFileSync} from 'node:fs';
 import {JSDOM} from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
@@ -10,7 +12,8 @@ const own = {id:'test-id',url:'chrome-extension://test-id/options/options.html'}
 const page = {id:'test-id',url:'https://x.com/home',tab:{id:1}};
 function fixture(answer = () => '깨끗한 번역', clock = {}, stored = {}) {
   const memory = {'lakomics:translation:v1':{apiKey:'test-key',enabled:true,fallbackModel:''},...stored}, calls=[];
-  const context = vm.createContext({AbortController,setTimeout,clearTimeout,...clock,
+  const cacheStore = clock.cacheStore || memoryCache();
+  const context = vm.createContext({AbortController,setTimeout,clearTimeout,...clock,LakomicsTranslationCacheStore:cacheStore,
     chrome:{runtime:{id:own.id},storage:{local:{async get(keys){return clock.storageGet ? clock.storageGet(keys,memory) : structuredClone(memory);},async set(value){Object.assign(memory,structuredClone(value));},async remove(keys){for(const key of keys) delete memory[key];}}}},
     fetch:async(url,init)=>{
       const body=JSON.parse(init.body); calls.push(body);
@@ -21,7 +24,7 @@ function fixture(answer = () => '깨끗한 번역', clock = {}, stored = {}) {
   });
   for(const source of sources) vm.runInContext(source,context);
   vm.runInContext(service,context);
-  return {core:context.LakomicsTranslationCore,memory,calls,handle:(message,sender=page)=>context.LakomicsTranslation.handle(message,sender)};
+  return {core:context.LakomicsTranslationCore,memory,calls,cacheStore,handle:(message,sender=page)=>context.LakomicsTranslation.handle(message,sender)};
 }
 const request = text => ({type:'translation:request',text});
 const batch = items => ({type:'translation:request-batch',items});
@@ -50,7 +53,7 @@ test('worker queue orders visible before prefetch and quality, without exceeding
 test('stalled cache storage and worker queue are bounded and release all caller promises',async()=>{
   let reads=0, budgetTimers=0;
   const f=fixture(()=>assert.fail('no API call for stalled cache'),{
-    storageGet:(keys,memory)=>typeof keys==='string' ? (reads++,new Promise(()=>{})) : structuredClone(memory),
+    cacheStore:{...memoryCache(),read:()=>{reads++; return new Promise(()=>{});}},
     setTimeout:(fn,ms)=>setTimeout(fn,ms>40000 ? (++budgetTimers<=8 && budgetTimers%2===0 ? 40 : 30) : ms),
   });
   const jobs=Array.from({length:8},(_,i)=>f.handle(request(`Storage stall ${i}`)));
@@ -60,15 +63,13 @@ test('stalled cache storage and worker queue are bounded and release all caller 
 });
 
 test('generation invalidation while awaiting a cache hit returns disabled rather than stale success',async()=>{
-  let release, stall=false;
-  const f=fixture(()=> '번역됨',{
-    storageGet:(keys,memory)=>stall && typeof keys==='string' ? new Promise(resolve=>release=()=>resolve(structuredClone(memory))) : structuredClone(memory),
-  });
+  let release;
+  const f=fixture(()=> '번역됨');
   await f.handle(request('Cached post')); await new Promise(resolve=>setTimeout(resolve,1550));
   const g=fixture(()=>assert.fail('stale cached request must not call API'),{
-    storageGet:(keys,memory)=>stall && typeof keys==='string' ? new Promise(resolve=>release=()=>resolve(structuredClone(memory))) : structuredClone(memory),
+    cacheStore:{...f.cacheStore,read:index=>new Promise(resolve=>release=()=>resolve(structuredClone(f.cacheStore.cache['lakomics:translation-cache:v4:'+index])))},
   },structuredClone(f.memory));
-  await g.handle({type:'translation:settings'}); stall=true;
+  await g.handle({type:'translation:settings'});
   const job=g.handle(request('Cached post')); await new Promise(resolve=>setTimeout(resolve,10));
   await g.handle({type:'translation:clear'}); release();
   assert.equal((await job).code,'disabled');
@@ -80,7 +81,7 @@ test('quality is cached, attempted once across worker wakes, and an interrupted 
   const result=await f.handle({type:'translation:quality',text:'Quality cache',previous:first.text});
   assert.equal(result.text,'한글 字');
   await new Promise(resolve=>setTimeout(resolve,1550));
-  const g=fixture(()=>assert.fail('quality must not repeat on worker wake'),{},structuredClone(f.memory));
+  const g=fixture(()=>assert.fail('quality must not repeat on worker wake'),{cacheStore:f.cacheStore},structuredClone(f.memory));
   const cached=await g.handle(request('Quality cache'));
   assert.equal(cached.text,result.text); assert.equal(cached.qualityRetry,false);
   assert.equal((await g.handle({type:'translation:quality',text:'Quality cache',previous:result.text})).text,result.text);
@@ -92,7 +93,7 @@ test('quality is cached, attempted once across worker wakes, and an interrupted 
   await ready; await h.handle({type:'translation:clear'}); release('새 번역');
   assert.equal((await pending).code,'disabled');
   await new Promise(resolve=>setTimeout(resolve,1550));
-  assert.ok(Object.entries(h.memory).filter(([key])=>key.startsWith('lakomics:translation-cache:v4:')).every(([,entries])=>entries.length===0));
+  assert.ok(Object.keys(h.cacheStore.cache).length===0);
 });
 
 test('all shared Korean rendering rules are present in single and batch prompts',async()=>{
@@ -307,7 +308,7 @@ test('X request controls reject synthetic events and act directly on trusted eve
     return add.call(this,type,fn,...rest);
   };
   const el=w.document.querySelector('div'); el.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     messages.push(message);
     callback(message.type==='translation:settings'?{ok:true,enabled:true,hasApiKey:true}:message.type==='settings:open'?{ok:true}:{ok:false,code:'invalid_translation'});

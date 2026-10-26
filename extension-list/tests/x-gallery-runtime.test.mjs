@@ -53,7 +53,7 @@ function article(id, { author = 'artist', photo = 1, likes = '1,234', image = `I
     + `<button data-testid="like" aria-label="${likes} Likes"></button></article>`;
 }
 
-function tab(shared, { articles = [article('100')], messages = [], trigger = true, reply = () => ({ ok: false }) } = {}) {
+function tab(shared, { articles = [article('100')], messages = [], trigger = true, reply = () => ({ ok: false }), intersections } = {}) {
   const dom = new JSDOM(`<body><div data-testid="primaryColumn"><div role="tablist"><div role="tab" aria-selected="true">추천</div><div role="tab" aria-selected="false">팔로잉</div></div><div id="timeline">${articles.join('')}</div></div></body>`,
     { url: 'https://x.com/home', runScripts: 'outside-only' });
   const w = dom.window; windows.push(w);
@@ -65,14 +65,38 @@ function tab(shared, { articles = [article('100')], messages = [], trigger = tru
   const scrolls = [];
   w.scrollTo = options => scrolls.push(typeof options === 'object' ? options.top : arguments[1]);
   w.scrollBy = () => {};
-  w.IntersectionObserver = class { constructor(callback) { this.callback = callback; } observe(target) { w.setTimeout(() => this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }]), 0); } unobserve() {} };
+  let articleMeasurements = 0;
+  const measure = w.HTMLElement.prototype.getBoundingClientRect;
+  w.HTMLElement.prototype.getBoundingClientRect = function() {
+    if (this.matches('article[data-testid="tweet"]')) articleMeasurements++;
+    return measure.call(this);
+  };
+  w.IntersectionObserver = class { constructor(callback) { this.callback = callback; } observe(target) {
+    const enter = () => this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }]);
+    if (intersections) intersections.push(enter); else w.setTimeout(enter, 0);
+  } unobserve() {} };
   w.chrome = { runtime: { sendMessage(message, callback) { messages.push(message.type); w.setTimeout(() => callback(reply(message)), 0); } }, storage: shared.storage(w) };
   // The gallery button ships disabled; these tests exercise it by opting back in.
   if (trigger) w.__LAKOMICS_X_GALLERY_TRIGGER__ = true;
   w.eval(sourceScript); w.eval(galleryScript);
   const root = w.document.getElementById('lakomics-x-recommendation-gallery');
-  return { w, root, scrolls, messages, $: selector => root.querySelector(selector), $$: selector => [...root.querySelectorAll(selector)] };
+  return { w, root, scrolls, messages, articleMeasurements: () => articleMeasurements, $: selector => root.querySelector(selector), $$: selector => [...root.querySelectorAll(selector)] };
 }
+
+test('new timeline articles wait for visibility entries without synchronously measuring layout', async () => {
+  const intersections = [], t = tab(sharedStorage(), { intersections });
+  await wait();
+  assert.equal(t.articleMeasurements(), 0);
+  assert.equal(t.$('.lakomics-x-gallery-summary').textContent, '이미지 0장 · 게시물 0개');
+  intersections.shift()();
+  await until(() => t.$('.lakomics-x-gallery-summary').textContent === '이미지 1장 · 게시물 1개');
+  t.w.document.getElementById('timeline').insertAdjacentHTML('beforeend', article('101'));
+  await until(() => intersections.length === 1);
+  assert.equal(t.articleMeasurements(), 0);
+  assert.equal(t.$('.lakomics-x-gallery-summary').textContent, '이미지 1장 · 게시물 1개');
+  intersections.shift()();
+  await until(() => t.$('.lakomics-x-gallery-summary').textContent === '이미지 2장 · 게시물 2개');
+});
 
 test('photo ordinal comes from the photo link, not from loaded-image order', () => {
   const w = helpers();

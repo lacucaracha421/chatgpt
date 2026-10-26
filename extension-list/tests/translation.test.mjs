@@ -1,6 +1,8 @@
+import { translationObserver } from './translation-observer-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {memoryCache} from './translation-cache-fixture.mjs';
 import {readFile} from 'node:fs/promises';
 import {JSDOM} from '../../_tools/app/node_modules/jsdom/lib/api.js';
 const service = await readFile(new URL('../src/translate-service.js', import.meta.url), 'utf8');
@@ -49,15 +51,15 @@ function translationWindow(html, handleMessage) {
   }},storage:{onChanged:{addListener(fn){listeners.push(fn);}}}};
   return w;
 }
-function fixture(initial={}, fetcher) {
+function fixture(initial={}, fetcher, cacheStore=memoryCache()) {
   const memory = structuredClone(initial), calls = [], gets = [], sets = [];
-  const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ AbortController, setTimeout, clearTimeout, LakomicsTranslationCacheStore: cacheStore,
     chrome:{runtime:{id:ownSender.id},storage:{local:{async get(keys){gets.push(keys); return structuredClone(memory);},async set(v){sets.push(Object.keys(v)); Object.assign(memory,structuredClone(v));},async remove(keys){keys.forEach(k=>delete memory[k]);}}}},
     fetch:async(url,init)=>{calls.push({url,init}); return fetcher ? fetcher(url,init) : {ok:true,json:async()=>({choices:[{message:{content:'안녕하세요 [[LINK_0]]'}}]})};},
   });
   for (const source of coreSources) vm.runInContext(source,context);
   vm.runInContext(service,context);
-  return {memory,calls,gets,sets,handle:(message,sender=ownSender)=>context.LakomicsTranslation.handle(message,sender)};
+  return {memory,calls,gets,sets,cacheStore,cache:cacheStore.cache,handle:(message,sender=ownSender)=>context.LakomicsTranslation.handle(message,sender)};
 }
 const SHARD='lakomics:translation-cache:v4:';
 const shardKeys=memory=>Object.keys(memory).filter(key=>key.startsWith(SHARD));
@@ -228,7 +230,7 @@ test('mounted translator handles initial scan, recycled tweet text, off and on w
   const w = dom.window, element = w.document.querySelector('div'), clock = fakeTimers(dom.window);
   let enabled = true, changed, requests = 0;
   element.getBoundingClientRect = () => ({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver = class { observe() {} unobserve() {} };
+  w.IntersectionObserver = translationObserver(w);
   w.chrome = {runtime:{sendMessage(message, callback) {
     if(message.type==='translation:settings') callback({ok:true,enabled,hasApiKey:true});
     if(message.type==='translation:request') { requests++; callback({ok:true,text:message.text.includes('Changed')?'변경된 글':'안녕하세요'}); return; }
@@ -300,7 +302,7 @@ test('visible tweets use one fast lane request and two-item batches',async()=>{
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   const batches=[]; let singles=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:10+i*50,bottom:50+i*50});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singles+=1; callback({ok:true,text:'빠른 번역'});}
@@ -379,7 +381,7 @@ test('a transient content failure is retried on viewport re-entry but not on unr
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w); let observer;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w, value => { observer=value; });
   w.eval(content); await clock.advance(600);
   assert.equal(requests,1); assert.ok(w.document.querySelector('.lakomics-translation').dataset.error==='true');
   // Unrelated DOM churn alone must not re-offer the unchanged failing post.
@@ -404,7 +406,7 @@ test('repeated unrelated DOM changes cause zero retries of an unchanged failed p
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(600);
   assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
   for(let round=0;round<5;round+=1){
@@ -427,7 +429,7 @@ test('a post edited after a failure is translated again with a fresh attempt',as
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(600);
   assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
   w.document.body.append(w.document.createElement('div')); await clock.advance(600);
@@ -449,7 +451,7 @@ test('re-enabling automatic translation resets failure state and translates once
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
 
   w.eval(content); await clock.advance(600);
   assert.equal(requests,1); assert.ok(w.document.querySelector('.lakomics-translation').dataset.error==='true');
@@ -470,7 +472,7 @@ test('initial intersection delivery and DOM changes during a request cannot retr
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Pending post</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish, observer;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w, value => { observer=value; });
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else { requests++; finish=callback; }
@@ -491,7 +493,7 @@ test('a non-transient failure retries once on viewport re-entry, then stays park
   });
   const clock=fakeTimers(w), element=w.document.querySelector('div');
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w, value => { observer=value; });
   w.eval(content); await clock.advance(400);
   for(let i=0;i<4;i++) {
     observer.cb([{isIntersecting:false,target:element}]);
@@ -510,7 +512,7 @@ test('content rate-limit cooldown survives DOM churn and re-entry and eventually
   });
   const clock=fakeTimers(w), element=w.document.querySelector('div');
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w, value => { observer=value; });
   w.eval(content); await clock.advance(40);
   w.document.body.append(w.document.createElement('aside')); await clock.advance(400);
   observer.cb([{isIntersecting:false,target:element}]);
@@ -533,7 +535,7 @@ test('a cache clear removes parked failures and requests the visible post again'
   });
   const clock=fakeTimers(w), element=w.document.querySelector('div');
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome.storage.onChanged.addListener=fn=>{changed=fn;};
   w.eval(content); await clock.advance(400);
   changed({'lakomics:translation-cache-cleared':{newValue:1}},'local'); await clock.advance(400);
@@ -544,7 +546,7 @@ test('editing a post during an in-flight request translates its new text',async(
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Old post text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(++requests===1) finish=callback;
@@ -559,7 +561,7 @@ test('editing a post during an in-flight request translates its new text',async(
 test('translator uses a compact floating icon popover and themed translation card',async()=>{
   const dom=new JSDOM('<body style="background:rgb(0,0,0)"><div data-testid="tweetText" lang="en">Hello <a href="https://x.com/hashtag/test">#test</a></div></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window);
-  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70}); w.IntersectionObserver=class{observe(){} unobserve(){}};
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70}); w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,model:'google/gemma-4-26b-a4b-it',modelLabel:'Gemma 4 26B A4B'});
     else if(message.type==='translation:request') callback({ok:true,text:'안녕 [[LINK_0]]'});
@@ -589,7 +591,7 @@ test('invalid item in the non-fast-lane batch falls back alone without discardin
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window); let batchCalls=0,singleCalls=0;
   const positions=[[350,390],[10,50],[60,100]];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:positions[i][0],bottom:positions[i][1]});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singleCalls+=1; callback({ok:true,text:message.text==='Fast post'?'빠른 번역':'두 번째 번역'});}
@@ -604,7 +606,7 @@ test('one X tab keeps the fast lane and first batch in flight together',async()=
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let active=0,maxActive=0,batchCalls=0,singleCalls=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); w.setTimeout(()=>{active-=1; callback(result);},120);};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
@@ -618,7 +620,7 @@ test('one X tab keeps the fast lane and first batch in flight together',async()=
 test('runtime mounts as soon as body exists without waiting for DOMContentLoaded',()=>{
   const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window;
   Object.defineProperty(w.document,'readyState',{configurable:true,value:'loading'});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){if(message.type==='translation:settings') callback({ok:true,enabled:false,hasApiKey:true});}},storage:{onChanged:{addListener(){}}}};
   w.eval(content);
   assert.ok(w.document.getElementById('lakomics-translation-controls')); w.close();
@@ -627,7 +629,7 @@ test('runtime mounts as soon as body exists without waiting for DOMContentLoaded
 test('initial visible tweet scan starts a translation without the 120 ms debounce',async()=>{
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Immediate translation text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window; let requests=0;
   const element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window); element.getBoundingClientRect=()=>({width:300,height:50,top:10,bottom:60});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type.startsWith('translation:request')){requests+=1; callback(message.type.endsWith('batch')?{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'즉시 번역'}))}:{ok:true,text:'즉시 번역'});}
@@ -640,7 +642,7 @@ test('first visible tweet uses a single fast lane while the next batch starts co
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let singleCalls=0,batchCalls=0,releaseBatches=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:280+i*45,bottom:320+i*45});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singleCalls+=1; callback({ok:true,text:'가장 먼저 번역'});}
@@ -658,7 +660,7 @@ test('a no-translation result shows no card and is not requested again',async()=
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(400);
   for(let round=0;round<3;round+=1){ w.document.body.append(w.document.createElement('div')); await clock.advance(400); }
   assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation'),null);
@@ -680,7 +682,7 @@ test('a slow batch does not hold the other slot: the next group starts as soon a
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let singles=0; const batches=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singles+=1; w.setTimeout(()=>callback({ok:true,text:'빠른 번역'}),50);}
@@ -700,7 +702,7 @@ test('posts scrolled into view send the one nearest the centre alone first',asyn
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">First screen post</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(dom.window), sent=[]; let observer;
   const first=w.document.querySelector('div'); first.getBoundingClientRect=()=>({width:300,height:40,top:350,bottom:390});
-  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w, value => { observer=value; });
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){sent.push(['single',message.text]); callback({ok:true,text:'단독 번역'});}
@@ -709,7 +711,7 @@ test('posts scrolled into view send the one nearest the centre alone first',asyn
   w.eval(content); await clock.advance(200);
   first.getBoundingClientRect=()=>({width:300,height:40,top:-200,bottom:-160});
   const added=['Edge post','Centre post','Lower post'].map((text,i)=>{const el=w.document.createElement('div'); el.dataset.testid='tweetText'; el.lang='en'; el.textContent=text; const top=[20,360,700][i]; el.getBoundingClientRect=()=>({width:300,height:40,top,bottom:top+40}); w.document.body.append(el); return el;});
-  observer.cb(added.map(target=>({isIntersecting:true,target})));
+  w.dispatchEvent(new w.Event('scroll'));
   await clock.advance(400);
   assert.deepEqual(sent.slice(1)[0],['single','Centre post']);
   assert.equal(sent.slice(1).length,2); w.close();
@@ -719,7 +721,7 @@ test('a slow request shows a quiet pending line that the result replaces, fast a
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Slow post text</div><div data-testid="tweetText" lang="en">Fast post text</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(dom.window), [slow,fast]=w.document.querySelectorAll('[data-testid="tweetText"]'); let release;
   slow.getBoundingClientRect=()=>({width:300,height:20,top:370,bottom:390}); fast.getBoundingClientRect=()=>({width:300,height:20,top:10,bottom:30});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request') release=()=>callback({ok:true,text:'느린 번역'});
@@ -742,7 +744,7 @@ test('a long original folds to two lines behind a toggle that never opens the po
   const w=dom.window, clock=fakeTimers(dom.window), [long,short]=w.document.querySelectorAll('[data-testid="tweetText"]'); let opened=0;
   long.getBoundingClientRect=()=>({width:300,height:80,top:10,bottom:90}); short.getBoundingClientRect=()=>({width:300,height:20,top:100,bottom:120});
   w.document.addEventListener('click',()=>{opened+=1;});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request') callback({ok:true,text:'번역'});
@@ -760,7 +762,7 @@ test('a long original folds to two lines behind a toggle that never opens the po
 
 test('the floating translation button has an accessible name and no hover tooltip',()=>{
   const dom=new JSDOM('<body></body>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window;
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){if(message.type==='translation:settings') callback({ok:true,enabled:false,hasApiKey:true});}},storage:{onChanged:{addListener(){}}}};
   w.eval(content);
   const button=w.document.getElementById('lakomics-translation-controls').shadowRoot.getElementById('translator-button');
@@ -816,7 +818,7 @@ test('posts just below the viewport are translated ahead, after the ones on scre
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window), sent=[];
   const tops=[300, w.innerHeight+400, w.innerHeight*4];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:tops[i],bottom:tops[i]+40});
-  let options; w.IntersectionObserver=class{constructor(cb,opts){options=opts;} observe(){} unobserve(){}};
+  let options; w.IntersectionObserver=translationObserver(w, value => { options=value.options; });
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){sent.push(message.text); callback({ok:true,text:'번역'});}
@@ -830,7 +832,7 @@ test('posts just below the viewport are translated ahead, after the ones on scre
 function showMoreWindow(url, html) {
   const dom=new JSDOM(html,{url,runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(w), sent=[];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:30,top:10+i*40,bottom:40+i*40});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') return callback({ok:true,enabled:true,hasApiKey:true});
     if(message.type==='translation:request'){sent.push(message.text); return callback({ok:true,text:'번역'});}
@@ -981,13 +983,14 @@ test('the prompt revision discards old caches and later wakes read only requeste
   assert.equal(f.memory['lakomics:translation:storage-v4'],true);
   assert.equal(f.memory['lakomics:translation-cache:v3:0'],undefined);
   await new Promise(resolve=>setTimeout(resolve,1700));
-  assert.deepEqual(cachedTexts(f.memory),['old 7']);
+  assert.deepEqual(cachedTexts(f.cache),['old 7']);
   // A restarted worker reads settings and single shards, never the whole storage area.
-  const again=fixture(structuredClone(f.memory));
+  const again=fixture(structuredClone(f.memory),undefined,f.cacheStore);
   assert.equal((await again.handle({type:'translation:request',text:'old 7'})).text,'새 번역');
   assert.equal(again.calls.length,0);
   assert.equal(again.gets.some(keys=>keys===null||keys===undefined),false);
   assert.equal(again.sets.length,0,'unchanged settings are not rewritten');
+  assert.equal(again.cacheStore.reads.length,2,'each worker reads only the requested shard');
 });
 
 test('the cache keeps recently used translations and writes only the touched shard after a burst',async()=>{
@@ -996,17 +999,18 @@ test('the cache keeps recently used translations and writes only the touched sha
   assert.equal((await f.handle({type:'translation:request',text:'new a'})).text,'새 번역');
   assert.equal(f.calls.length,1);
   const before=f.sets.length;
-  assert.deepEqual(cachedTexts(f.memory),[],'not written yet');
+  assert.deepEqual(cachedTexts(f.cache),[],'not written yet');
   await new Promise(resolve=>setTimeout(resolve,1700));
-  assert.deepEqual(f.sets.slice(before),[[shardKeys(f.memory)[0]]]);
-  assert.deepEqual(cachedTexts(f.memory),['new a']);
+  assert.deepEqual(f.sets.slice(before),[], 'cache writes never broadcast through storage.local');
+  assert.equal(f.cacheStore.writes.filter(batch=>batch.length).length,1);
+  assert.deepEqual(cachedTexts(f.cache),['new a']);
 });
 
 test('a full shard evicts its least recently used entry',async()=>{
   // Fill one shard past its limit with texts that hash to the same shard.
   const probe=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'번역'}}]})}));
   await probe.handle({type:'translation:request',text:'seed'}); await new Promise(resolve=>setTimeout(resolve,1700));
-  const target=shardKeys(probe.memory)[0];
+  const target=shardKeys(probe.cache)[0];
   const same=[]; for(let i=0;same.length<96;i++){
     const text=`post ${i}`;
     const key='0\n'+text;
@@ -1018,7 +1022,7 @@ test('a full shard evicts its least recently used entry',async()=>{
   assert.equal((await f.handle({type:'translation:request',text:same[0]})).text,`옛 ${same[0]}`);
   assert.equal((await f.handle({type:'translation:request',text:same[94]})).text,'새 번역');
   await new Promise(resolve=>setTimeout(resolve,1700));
-  const texts=f.memory[target].map(([text])=>text.slice(text.indexOf('\n')+1));
+  const texts=f.cache[target].map(([text])=>text.slice(text.indexOf('\n')+1));
   assert.equal(texts.length,94); assert.equal(texts.includes(same[0]),true); assert.equal(texts.includes(same[1]),false);
   assert.deepEqual(texts.slice(-2),[same[0],same[94]]);
 });
@@ -1028,7 +1032,7 @@ test('clearing the cache cancels a pending write and announces the clear',async(
   assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).ok,true);
   assert.equal((await f.handle({type:'translation:clear'})).ok,true);
   await new Promise(resolve=>setTimeout(resolve,1700));
-  assert.deepEqual(cachedTexts(f.memory),[]);
+  assert.deepEqual(cachedTexts(f.cache),[]);
   assert.equal(typeof f.memory['lakomics:translation-cache-cleared'],'number');
 });
 
@@ -1037,7 +1041,7 @@ test('one X tab uses the request slots the selected model allows',async()=>{
   const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true}); const w=dom.window, clock=fakeTimers(dom.window);
   let active=0,maxActive=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); w.setTimeout(()=>{active-=1; callback(result);},120);};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,concurrency:4});
@@ -1056,7 +1060,7 @@ test('a transient failure retries by itself twice, then waits for re-entry',asyn
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(600);
   assert.equal(requests,1);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 연결 실패 · 곧 자동 재시도');
@@ -1075,7 +1079,7 @@ test('"다시 시도" re-requests a parked failure at once without a reload',asy
   });
   const element=w.document.querySelector('div'), clock=fakeTimers(w);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   let retryHandler;
   const addListener=w.EventTarget.prototype.addEventListener;
   w.EventTarget.prototype.addEventListener=function(type,handler,...args){
@@ -1098,7 +1102,7 @@ test('a reply that never comes frees its slot after the watchdog and retries',as
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Lost reply</div>',{url:'https://x.com',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(++requests>1) callback({ok:true,text:'복구됨',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'복구됨'}))});
@@ -1131,7 +1135,7 @@ test('a long rate-limit cooldown is handed back at once and a sub model answers 
 test('page churn outside post text does not rescan, while new or edited post text does',async()=>{
   const w=translationWindow('<article><div data-testid="tweetText" lang="en">First post</div><time>1m</time></article><div id="feed"></div>',
     ()=>({ok:true,enabled:true,hasApiKey:true}));
-  const clock=fakeTimers(w); w.IntersectionObserver=class{observe(){} unobserve(){}};
+  const clock=fakeTimers(w); w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(400);
   let scans=0; const query=w.document.querySelectorAll.bind(w.document);
   w.document.querySelectorAll=selector=>{ if(selector==='[data-testid="tweetText"]') scans++; return query(selector); };
@@ -1165,7 +1169,7 @@ test('a key rejection blocks the tab, then one quiet recheck resumes translation
   });
   const clock=fakeTimers(w), element=w.document.querySelector('div');
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.IntersectionObserver=translationObserver(w);
   w.eval(content); await clock.advance(400);
   assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation[data-error="false"]'),null);
   await clock.advance(30500);
