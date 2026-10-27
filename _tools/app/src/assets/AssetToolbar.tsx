@@ -10,7 +10,6 @@ import { FolderRegistrationContext } from "../characters/FolderRegistrationConte
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { GalleryViewMenu } from "./GalleryViewMenu";
-import { RecentFolders } from "./RecentFolderChips";
 
 type AssetToolbarProps = {
   scopeControl?: ReactNode;
@@ -92,7 +91,7 @@ export function AssetToolbar({
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />;
 
   return <>
-    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}{filterLabel && <ActiveFilterChip label={filterLabel} onClear={clearViewFilters} />}{workspace && rawView.kind !== "private_vault" && <RecentFolders />}</>} trailingAction={<div className="asset-toolbar__controls" ref={element => { element?.querySelector(".asset-toolbar__quiet-menu")?.setAttribute("aria-description", summary); }}>{trailingAccessory}{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
+    <ViewToolbar title={location} titleContent={titleContent} actions={actions} ariaLabel={ariaLabel} leadingAction={titleLeading} titleAccessory={<>{registration}{titleAccessory}{filterLabel && <ActiveFilterChip label={filterLabel} onClear={clearViewFilters} />}</>} trailingAction={<div className="asset-toolbar__controls" ref={element => { element?.querySelector(".asset-toolbar__quiet-menu")?.setAttribute("aria-description", summary); }}>{trailingAccessory}{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+Q" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
       summary,
       status: privacyMode || nsfwFilter || status ? <>{status}{(privacyMode || nsfwFilter) && <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span>}</> : undefined,
     }} />

@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSort, AssetView, CollectionSummary } from "../library/types";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { AssetToolbar } from "./AssetToolbar";
-import { RecentFoldersContext, recentFolderCatalog, type RecentFoldersState } from "./recentFolders";
 
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() }) }));
 
@@ -19,17 +18,6 @@ const baseProps = {
 };
 
 afterEach(() => { cleanup(); localStorage.clear(); });
-
-it("keeps recent folders reachable in the context bar without hiding them in privacy mode", async () => {
-  const folders = [...recentFolderCatalog(baseProps.classifications, [], []).values()];
-  const history: RecentFoldersState = { folders, currentId: "game", open: vi.fn(), record: vi.fn(), remove: vi.fn(), clear: vi.fn() };
-  renderChrome(<RecentFoldersContext.Provider value={history}><AssetToolbar {...baseProps} privacyMode /></RecentFoldersContext.Provider>);
-  const toolbar = screen.getByRole("toolbar", { name: "자산 도구" });
-  await userEvent.click(within(toolbar).getByRole("button", { name: "게임" }));
-  expect(history.open).toHaveBeenCalledWith(folders[0]);
-  expect(within(toolbar).getByRole("button", { name: "에셋 검색" })).toBeVisible();
-  expect(within(toolbar).getByRole("button", { name: "보기" })).toBeVisible();
-});
 
 it("names the active filter and clears both choices, returning focus to 보기", async () => {
   const onMediaFilterChange = vi.fn(), onAspectFilterChange = vi.fn();

@@ -34,7 +34,6 @@ import { shareAssetSummaries } from "./shareAssetSummaries";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
-import { useRecentFolders } from "./recentFolders";
 import { visibleTileRect, type TileRect } from "../shared/viewer/useViewerMotion";
 import { AssetViewer } from "./AssetViewer";
 import { CharacterAssignToast, markAssignedTiles, type CharacterAssignNoticeState } from "./characterAssignNotice";
@@ -119,7 +118,6 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
 
 export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, classificationOrderIds = [], onReorderFolders, navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], characterSeries = [], characterExtras = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
   const { gateway, library } = useLibrary();
-  const recentFolders = useRecentFolders();
   const previewCache = folderPreviewCache(gateway, library?.root);
   const [assignOpen, setAssignOpen] = useState(false);
   const [directOnlyState, setDirectOnlyState] = useState<{ folderId: string | null; value: boolean }>({ folderId: null, value: true });
@@ -528,9 +526,6 @@ export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, c
     setBatchPending(true); setUndoAssetIds(null); setMessage(null);
     try {
       const moved = await moveAssetsToCharacters(targets.map(target => ({ targetId: target.id, expectedFingerprint: target.fingerprint })), assetIds);
-      if (moved > 0) targets.forEach(target => {
-        if (target.seriesClassificationId) recentFolders?.record({ kind: "classification", classificationId: target.seriesClassificationId, characterId: target.id });
-      });
       const first = targets[0]!.role === "extras" ? { ...targets[0]!, displayName: "기타" } : targets[0]!;
       markAssignedTiles(assetIds, first.displayName);
       setCharacterNotice({ id: ++characterNoticeIdRef.current, count: moved, target: first });
@@ -735,7 +730,7 @@ export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, c
       activeId={viewerAssetId}
       onActiveIdChange={setViewerAssetId}
       onClose={() => { viewerOriginRect.current = undefined; setViewerAssetId(null); onRequestedAssetHandled(); }}
-      onAssetOpened={(asset) => { if (asset.media.kind === "image") recentFolders?.record(); return gateway.recordAssetOpened(asset.id, new Date().toISOString()); }}
+      onAssetOpened={(asset) => gateway.recordAssetOpened(asset.id, new Date().toISOString())}
       onToggleFavorite={toggleFavorite}
       onTrash={trashViewerAsset}
       privacyMode={privacyMode}
