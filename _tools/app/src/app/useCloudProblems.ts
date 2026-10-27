@@ -72,7 +72,7 @@ export function useAuthoritySyncHealth(gateway: LibraryGateway, libraryRoot: str
   const refresh = useCallback(() => {
     if (!gateway.authoritySyncHealth) return;
     const id = ++request.current;
-    void Promise.resolve().then(() => gateway.authoritySyncHealth!()).then(next => {
+    return Promise.resolve().then(() => gateway.authoritySyncHealth!()).then(next => {
       if (id === request.current) setHealth(next);
     }).catch(() => undefined);
   }, [gateway]);

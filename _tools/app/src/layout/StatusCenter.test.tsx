@@ -1,7 +1,8 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import type { AuthoritySyncHealth, CloudBackfillProgress } from "../library/types";
+import type { AuthoritySyncHealth, CloudBackfillProgress, LibraryGateway } from "../library/types";
+import { CloudStatusCenter } from "../app/CloudStatusCenter";
 
 const workload = vi.hoisted(() => ({
   native: false,
@@ -349,6 +350,39 @@ it("hides server sync when every authority count is zero", async () => {
   const user = userEvent.setup();
   render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} authorityHealth={healthy} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
+  expect(screen.queryByRole("region", { name: "서버 동기화" })).not.toBeInTheDocument();
+});
+
+it("acknowledges all drop notes and keeps them until refreshed health arrives", async () => {
+  const dropped: AuthoritySyncHealth = {
+    ...healthy,
+    albums: { ...domain, droppedCount: 19, lastDropReason: "dependencyDropped" },
+    assets: { ...healthy.assets, rejectedCount: 1, rejectedReason: "operationConflict",
+      rejectedAssets: [{ assetId: "asset", name: "photo.jpg", reason: "operationConflict" }] },
+  };
+  let finishRead!: (health: AuthoritySyncHealth) => void;
+  const authoritySyncHealth = vi.fn().mockResolvedValue(dropped);
+  const acknowledgeAuthorityDrops = vi.fn().mockImplementation(async () => {
+    authoritySyncHealth.mockImplementation(() => new Promise<AuthoritySyncHealth>(resolve => { finishRead = resolve; }));
+  });
+  const gateway = { authoritySyncHealth, acknowledgeAuthorityDrops,
+    cloudBackfillProgress: vi.fn().mockResolvedValue(syncedProgress),
+    getOnlineCatalogStatus: vi.fn().mockResolvedValue(null),
+  } as unknown as LibraryGateway;
+  render(<CloudStatusCenter gateway={gateway} libraryRoot="fixture" characterAutomation={idleCharacterAutomation}
+    progress={null} onNavigate={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "상태" }));
+  const note = await screen.findByText(/취소된 변경/);
+  const assetNote = screen.getByText(/휴지통·복원 취소됨/);
+  const buttons = screen.getAllByRole("button", { name: "확인" });
+  expect(buttons).toHaveLength(2);
+  await userEvent.click(buttons[1]);
+  expect(acknowledgeAuthorityDrops).toHaveBeenCalledTimes(1);
+  expect(note).toBeVisible();
+  expect(assetNote).toBeVisible();
+  await act(async () => finishRead(healthy));
+  await waitFor(() => expect(screen.queryByText(/취소된 변경/)).not.toBeInTheDocument());
+  expect(screen.queryByText(/휴지통·복원 취소됨/)).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "서버 동기화" })).not.toBeInTheDocument();
 });
 

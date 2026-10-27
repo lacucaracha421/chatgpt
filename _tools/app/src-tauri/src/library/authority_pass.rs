@@ -199,6 +199,23 @@ impl AuthorityPassOutcome {
 }
 
 impl Library {
+    /// Acknowledge display-only drop history without changing outboxes or replicas.
+    pub(crate) fn acknowledge_authority_drops(&self) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO notes_state(key,value) VALUES('authorityDropsAcknowledgedAt',?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [&now],
+        )?;
+        // These rows accumulate multiple events, so filtering their latest timestamp
+        // alone would bring back the old count when the next intent is dropped.
+        tx.execute("UPDATE authority_intent_drops SET dropped_count=0", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// One coordinated metadata pass with the configured endpoint and OS credentials.
     /// Returns the status it read so the Asset lane can reuse it.
     pub(crate) fn run_authority_pass(
@@ -569,16 +586,20 @@ impl Library {
             ..Default::default()
         };
         let connection = self.connection()?;
+        let acknowledged_at: Option<String> = connection.query_row(
+            "SELECT value FROM notes_state WHERE key='authorityDropsAcknowledgedAt'",
+            [], |row| row.get(0),
+        ).optional()?;
         health.collections.blocked_count = connection.query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='blocked'",[],|r|r.get(0))?;
         // Batch 1 keeps Collection drop evidence in its durable outbox; the shared
         // intent-drop table intentionally only accepts Albums and Classifications.
-        health.collections.dropped_count = connection.query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='dropped'",[],|r|r.get(0))?;
-        if let Some((reason, at)) = connection.query_row("SELECT drop_reason,updated_at FROM collection_authority_outbox WHERE state='dropped' ORDER BY updated_at DESC,seq DESC LIMIT 1",[],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?))).optional()? {
+        health.collections.dropped_count = connection.query_row("SELECT COUNT(*) FROM collection_authority_outbox WHERE state='dropped' AND (?1 IS NULL OR replace(updated_at,'Z','+00:00') > ?1)",[&acknowledged_at],|r|r.get(0))?;
+        if let Some((reason, at)) = connection.query_row("SELECT drop_reason,updated_at FROM collection_authority_outbox WHERE state='dropped' AND (?1 IS NULL OR replace(updated_at,'Z','+00:00') > ?1) ORDER BY updated_at DESC,seq DESC LIMIT 1",[&acknowledged_at],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?))).optional()? {
             health.collections.last_drop_reason = reason;
             health.collections.last_dropped_at = at;
         }
         let mut drops = connection.prepare(
-            "SELECT domain, dropped_count, last_reason, last_dropped_at FROM authority_intent_drops",
+            "SELECT domain, dropped_count, last_reason, last_dropped_at FROM authority_intent_drops WHERE dropped_count>0",
         )?;
         let rows = drops.query_map([], |row| {
             Ok((
@@ -600,10 +621,12 @@ impl Library {
             target.last_dropped_at = at;
         }
         let mut rejected = connection.prepare(
-            "SELECT last_error, COUNT(*) FROM asset_authority_state
-             WHERE last_error LIKE 'lifecycleRejected:%' GROUP BY last_error",
+            "SELECT s.last_error, COUNT(*) FROM asset_authority_state s
+             LEFT JOIN notes_state d ON d.key='authorityDrop:asset:' || s.asset_id
+             WHERE s.last_error LIKE 'lifecycleRejected:%'
+             AND (?1 IS NULL OR d.value > ?1) GROUP BY s.last_error",
         )?;
-        let rows = rejected.query_map([], |row| {
+        let rows = rejected.query_map([&acknowledged_at], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         let mut most = 0;
@@ -623,9 +646,11 @@ impl Library {
         health.assets.rejected_assets = connection.prepare(
             "SELECT s.asset_id, COALESCE(a.original_name, s.asset_id), s.last_error
              FROM asset_authority_state s LEFT JOIN assets a ON a.id = s.asset_id
+             LEFT JOIN notes_state d ON d.key='authorityDrop:asset:' || s.asset_id
              WHERE s.last_error LIKE 'lifecycleRejected:%'
+             AND (?1 IS NULL OR d.value > ?1)
              ORDER BY s.asset_id LIMIT 5",
-        )?.query_map([], |row| {
+        )?.query_map([&acknowledged_at], |row| {
             let error: String = row.get(2)?;
             Ok(AssetIntentRejection {
                 asset_id: row.get(0)?, name: row.get(1)?,
@@ -1104,6 +1129,59 @@ mod tests {
         let health = library.authority_sync_health().unwrap();
         assert_eq!(health.assets.materialization_failures, 2);
         assert_eq!(health.assets.rejected_count, 1);
+    }
+
+    #[test]
+    fn acknowledged_drops_stay_hidden_until_new_drops_arrive() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        {
+            let db = library.connection().unwrap();
+            db.execute_batch(
+                "INSERT INTO authority_intent_drops VALUES('albums',19,'dependencyDropped','old','2026-09-25T00:00:00Z');
+                 INSERT INTO authority_intent_drops VALUES('classifications',3,'assetDeleted','old','2026-09-25T00:00:00Z');
+                 INSERT INTO collection_authority_outbox(operation_id,library_id,epoch,contract_version,command_type,entity_key,payload,state,drop_reason,created_at,updated_at)
+                 VALUES('old','library',1,1,'renameCollection','collection','{}','dropped','dependencyDropped','2026-09-25T00:00:00Z','2026-09-25T00:00:00Z');
+                 INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection,last_error)
+                 VALUES('asset','normal',1,'{}','lifecycleRejected:operationConflict');"
+            ).unwrap();
+        }
+        let before = library.authority_sync_health().unwrap();
+        assert_eq!(before.albums.dropped_count, 19);
+        assert_eq!(before.classifications.dropped_count, 3);
+        assert_eq!(before.collections.dropped_count, 1);
+        assert_eq!(before.assets.rejected_count, 1);
+        library.acknowledge_authority_drops().unwrap();
+        drop(library);
+        let library = Library::open(temp.path()).unwrap();
+        let acknowledged = library.authority_sync_health().unwrap();
+        assert_eq!(acknowledged.albums.dropped_count, 0);
+        assert_eq!(acknowledged.classifications.dropped_count, 0);
+        assert_eq!(acknowledged.collections.dropped_count, 0);
+        assert_eq!(acknowledged.assets.rejected_count, 0);
+        assert!(acknowledged.assets.rejected_assets.is_empty());
+        {
+            let db = library.connection().unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            super::super::album_authority::record_dropped_intents(&db, "albums", 1, "assetDeleted", Some("new"), &now).unwrap();
+            super::super::album_authority::record_dropped_intents(&db, "classifications", 2, "assetDeleted", Some("new"), &now).unwrap();
+            db.execute(
+                "INSERT INTO collection_authority_outbox(operation_id,library_id,epoch,contract_version,command_type,entity_key,payload,state,drop_reason,created_at,updated_at)
+                 VALUES('new','library',1,1,'renameCollection','collection','{}','dropped','revisionConflict',?1,?1)",
+                [&now],
+            ).unwrap();
+            super::super::asset_authority::record_rejection(&db, "asset", "operationConflict").unwrap();
+            assert_eq!(db.query_row("SELECT COUNT(*) FROM collection_authority_outbox", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        }
+        let after = library.authority_sync_health().unwrap();
+        assert_eq!(after.albums.dropped_count, 1);
+        assert_eq!(after.classifications.dropped_count, 2);
+        assert_eq!(after.collections.dropped_count, 1);
+        assert_eq!(after.collections.last_drop_reason.as_deref(), Some("revisionConflict"));
+        assert_eq!(after.assets.rejected_count, 1);
+        assert_eq!(after.assets.rejected_assets.len(), 1);
+        library.acknowledge_authority_drops().unwrap();
+        assert_eq!(library.authority_sync_health().unwrap().assets.rejected_count, 0);
     }
 
     #[test]

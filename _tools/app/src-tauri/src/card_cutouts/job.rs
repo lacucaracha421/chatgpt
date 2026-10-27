@@ -159,6 +159,9 @@ pub(crate) enum Pass {
 }
 
 impl State {
+    pub(crate) fn failed_count(&self) -> u64 {
+        self.failures.len() as u64
+    }
     fn waiting(&self, id: &str, now: Instant) -> bool {
         self.failures.get(id).is_some_and(|(_, at)| *at > now)
             || self.not_local.get(id).is_some_and(|at| *at > now)

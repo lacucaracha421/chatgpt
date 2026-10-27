@@ -5,11 +5,10 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
-import { StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
+import { StarIcon, ArrowPathIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
-import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Switch } from "../shared/ui/Switch";
@@ -23,7 +22,6 @@ import { WorkloadControls } from "../app/WorkloadControls";
 import { usePublicationJobs, publicationProgressText, startPublication, type PublicationJob } from "../library/publicationJobs";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
-import { latestCatalogUpdate } from "../library/catalogStreams";
 import type { CatalogStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, ExtensionPairingLink, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
@@ -31,9 +29,7 @@ import { confirmLeaveVaultRecovery, vaultRecoveryPending } from "../external-vau
 import { modalDialogOpen } from "../layout/modalDialog";
 import { VaultSettings } from "../external-vault/VaultSettings";
 import { AutoTagSettings } from "../autotags/AutoTagSettings";
-import { useAutoTagInbox } from "../autotags/AutoTagInboxSettings";
 import { TaggerReviewSettings } from "../autotags/TaggerReviewSettings";
-import { autoTagInboxResult } from "../autotags/autoTagInbox";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
 import { CharacterRecognitionStatus, RECOGNITION_HELP } from "./CharacterRecognitionStatus";
 import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
@@ -49,6 +45,7 @@ import { SettingsGroup, SettingsRow, StatusWord } from "../shared/ui/SettingsRow
 import { ConfirmLine, CredentialRow, InlineEdit } from "./CredentialRow";
 import { ClaudeSettings } from "./ClaudeSettings";
 import { AnimationSettings } from "./AnimationSettings";
+import { AutoJobsSettings, AutoJobsSummary, useAutoJobs } from "./AutoJobsSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -69,9 +66,10 @@ type SettingsViewProps = {
   appZoomError?: string | null;
 };
 
-export type SettingsSection = "frequent" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced";
+export type SettingsSection = "frequent" | "autoJobs" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced";
 const SECTIONS: { id: SettingsSection; label: string; Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }> }[] = [
   { id: "frequent", label: "자주 쓰는 것", Icon: StarIcon },
+  { id: "autoJobs", label: "자동 작업", Icon: ArrowPathIcon },
   { id: "display", label: "화면", Icon: ComputerDesktopIcon },
   { id: "library", label: "라이브러리", Icon: FolderIcon },
   { id: "connection", label: "연결", Icon: LinkIcon },
@@ -186,9 +184,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const cloud = useCloudSyncStatus(gateway, library?.root ?? "");
   const { health: authorityHealth } = useAuthoritySyncHealth(gateway, library?.root ?? "");
-  const { calendar, busy: calendarBusy, message: calendarMessage, refreshNow: refreshCalendar } = useReleaseCalendarRefresh();
+  const { calendar } = useReleaseCalendarRefresh();
   const connectionRows = useConnectionRows({ gateway, cloud, authorityHealth });
-  const inbox = useAutoTagInbox(false);
+  const autoJobs = useAutoJobs(gateway, section === "autoJobs", library?.root);
   useAutoDismiss(notice, setNotice);
   useAutoDismiss(cloudMessage, setCloudMessage);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
@@ -198,13 +196,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const loadCatalog = section === "frequent" || section === "catalog" || section === "advanced";
 
   useEffect(() => {
-    if (!loadCloud || cloudSettings) return;
+    if (!loadCloud) return;
     let active = true;
     void gateway.getCloudCaptureSettings().then(next => {
       if (active) { setCloudSettings(next); setCloudApiBaseUrl(next.apiBaseUrl ?? ""); }
     }).catch(cause => { if (active) setCloudError(commandErrorMessage(cause, "서버 설정을 확인하지 못했습니다.")); });
     return () => { active = false; };
-  }, [gateway, loadCloud, cloudSettings]);
+  }, [gateway, loadCloud]);
 
   useEffect(() => {
     if (!loadCloud || !gateway.cloudPublisherTokenStatus) return;
@@ -441,22 +439,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
-  async function refreshCatalog() {
-    if (catalogBusy) return;
-    setCatalogBusy(true); setCatalogError(null);
-    try { await gateway.runDueOnlineCatalogUpdate(); setCatalogStatus(await gateway.getOnlineCatalogStatus()); setNotice("온라인 카탈로그를 갱신했습니다"); }
-    catch (cause) { setCatalogError(commandErrorMessage(cause, "온라인 카탈로그를 갱신하지 못했습니다.")); }
-    finally { setCatalogBusy(false); }
-  }
-
-  async function saveCatalogSettings(enabled: boolean, intervalSeconds: number) {
-    if (!catalogStatus || catalogBusy) return;
-    setCatalogBusy(true); setCatalogError(null);
-    try { setCatalogStatus(await gateway.setOnlineCatalogUpdateSettings(enabled, intervalSeconds)); setNotice("자동 갱신 설정을 저장했습니다"); }
-    catch (cause) { setCatalogError(commandErrorMessage(cause, "온라인 카탈로그 설정을 저장하지 못했습니다.")); }
-    finally { setCatalogBusy(false); }
-  }
-
   async function clearCatalogCache() {
     if (catalogCacheBusy) return;
     setCatalogCacheBusy(true); setCatalogError(null);
@@ -490,7 +472,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   </nav>;
   const serverRow = connectionRows.find(row => row.key === "server");
   const tabletRow = connectionRows.find(row => row.key === "tablet");
-  const catalogDbUpdatedAt = catalogStatus ? latestCatalogUpdate(catalogStatus) : null;
 
   return <section className="settings-view" aria-label="설정">
     <ViewToolbar title={sectionLabel} titleContent={workspace ? sectionLabel : undefined} chrome={{ navigation }} />
@@ -512,11 +493,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
           <SettingsGroup title="갱신">
-            <SimpleRow name="온라인 카탈로그" status={catalogStatus?.installed ? `${catalogDbUpdatedAt ? localDateTime(catalogDbUpdatedAt) : "갱신 기록 없음"} · ${intervalLabel(catalogStatus.updateIntervalSeconds)}` : "설치 안 됨"} control={catalogStatus?.installed ? <Button size="sm" variant="quiet" disabled={catalogBusy} onClick={() => void refreshCatalog()}>지금 갱신</Button> : undefined} />
-            <SimpleRow name="발매 캘린더" status={<BusyLabel busy={!calendar} idle={calendar && calendarStatus(calendar)}>확인 중…</BusyLabel>} control={<Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>지금 갱신</Button>} />
-            {inbox.settings?.folder && <SimpleRow name="자동 태그" status={autoTagInboxResult(inbox.settings)} control={<Button size="sm" variant="quiet" disabled={inbox.locked} onClick={() => void inbox.runNow()}>가져오기</Button>} />}
+            <SimpleRow name="자동 작업" status={<AutoJobsSummary jobs={autoJobs.jobs} />} control={<Button size="sm" variant="quiet" onClick={() => openSection("autoJobs")}>자동 작업 ›</Button>} />
           </SettingsGroup>
         </div>}
+        {section === "autoJobs" && <AutoJobsSettings gateway={gateway} model={autoJobs} onConfigure={openSection} privacyMode={privacyMode} />}
         {section === "display" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>화면</h2></header>
           <SettingsGroup title="화면">
@@ -569,7 +549,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <SimpleRow name="연결 상태" status={<BusyLabel busy={!serverRow} idle={serverRow && <ServerStatus row={serverRow} />}>확인 중…</BusyLabel>} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
             {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />
-            <SimpleRow name="클라우드로 복제" control={<Switch aria-label="클라우드로 복제" checked={cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(event.target.checked, cloudSettings?.captureEnabled ?? cloudSettings?.enabled)} />} />
             <SimpleRow name="컬렉션 서버 이전 점검" status={showAuthorityBusy ? "점검 중…" : authorityMessage ?? "이전할 때 빠지는 자료가 있는지 확인합니다"} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={authorityBusy || cloudBusy || !cloudSettings?.enabled || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !cloudPublisherConfigured || !gateway.verifyCollectionAuthorityBaseline} onClick={() => void verifyCollectionAuthority()}><BusyLabel busy={!!(authorityBusy)} idle={"점검하기"}>점검 중…</BusyLabel></Button>{authorityCheck && gateway.openCollectionAuthorityReport && <Button size="sm" variant="quiet" onClick={() => void openAuthorityReport()}>보고서 열기</Button>}</span>} />
           </SettingsGroup>
           <SettingsGroup title="동기화 상태">
@@ -590,7 +569,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </SettingsGroup>
           <SettingsGroup title="발매 캘린더">
             {calendar?.sources.map(source => <SimpleRow key={source.provider} name={SOURCE_LABEL[source.provider]} status={source.errorCode ? "가져오기 실패" : source.fetchedAt ? localDateTime(source.fetchedAt) : "받은 기록 없음"} tone={source.errorCode ? "off" : undefined} />)}
-            <div className="settings-view__group-action"><Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>지금 갱신</Button>{calendarMessage && <span className="settings-view__status">{calendarMessage}</span>}</div>
             <p className="settings-view__status">TMDB 제공: <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a></p>
           </SettingsGroup>
         </div>}
@@ -599,8 +577,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
           <SettingsGroup title="온라인 카탈로그">
             <SimpleRow name="상태" value={<BusyLabel busy={!catalogStatus} idle={catalogStatus && (catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "설치 안 됨")}>확인 중…</BusyLabel>} status={catalogStatus?.lastSuccessAt ? `최근 갱신 ${localDateTime(catalogStatus.lastSuccessAt)}` : "최근 갱신 기록 없음"} />
-            <SimpleRow name="자동 갱신" control={<Switch aria-label="자동 갱신" checked={catalogStatus?.updateEnabled ?? false} disabled={catalogBusy || !catalogStatus?.installed} onChange={event => void saveCatalogSettings(event.target.checked, catalogStatus?.updateIntervalSeconds ?? 3600)} />} />
-            <SimpleRow name="갱신 간격" control={<SegmentedControl label="갱신 간격" value={String(catalogStatus?.updateIntervalSeconds ?? 3600)} options={[{ value: "3600", label: "1시간" }, { value: "21600", label: "6시간" }, { value: "86400", label: "24시간" }]} onChange={value => { if (catalogStatus?.updateEnabled) void saveCatalogSettings(true, Number(value)); }} className={!catalogStatus?.updateEnabled ? "settings-view__control-disabled" : undefined} />} />
           </SettingsGroup>
           <SettingsGroup title="검색 결과 숨김"><CatalogVisibilitySettings /></SettingsGroup>
           <SettingsGroup title="이미지 캐시">
@@ -687,12 +663,7 @@ function LightweightModeRow() {
 function ServerStatus({ row }: { row: { value: string; time?: string; tone?: string } }) {
   return <><StatusWord tone={row.tone}>{row.value}</StatusWord>{row.time && ` · ${row.time}`}</>;
 }
-function intervalLabel(seconds: number) { return seconds === 3600 ? "1시간마다" : seconds === 21600 ? "6시간마다" : "24시간마다"; }
-function calendarStatus(calendar: { sources: { provider: keyof typeof SOURCE_LABEL; fetchedAt: string | null; errorCode?: string | null }[] }) {
-  const fetched = calendar.sources.map(source => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().reverse()[0];
-  const sources = calendar.sources.map(source => SOURCE_LABEL[source.provider]).join(" · ");
-  return <>{`${fetched ? localDateTime(fetched) : "받은 기록 없음"}${sources ? ` · ${sources}` : ""}`}{calendar.sources.some(source => source.errorCode) && <> · <StatusWord tone="off">일부 실패</StatusWord></>}</>;
-}
+
 function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDate(value); }
 function localDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDateTime(value, new Date(), { withTime: true }); }
 function kindLabel(kind: MetadataBackup["kind"]) { return kind === "pre_restore" ? "복구 전 보존" : kind === "pre_migration" ? "이전 전 보존" : "자동"; }

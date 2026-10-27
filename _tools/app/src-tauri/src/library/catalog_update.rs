@@ -179,6 +179,13 @@ pub(crate) async fn execute_catalog_update(
             Err(error)
         }
     };
+    if library.root().join("catalogs/kdata.db").is_file() {
+        if let Err(error) =
+            catalog_checkpoint::record_finished(&library.root().join("catalogs/kdata.db"), language)
+        {
+            eprintln!("catalog run finish: {error}");
+        }
+    }
     activity.complete(&outcome);
     outcome
 }

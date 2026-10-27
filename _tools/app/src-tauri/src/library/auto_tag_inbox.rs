@@ -122,7 +122,16 @@ impl Library {
     }
 
     pub(crate) fn run_auto_tag_inbox(&self) -> Result<RunResult, LibraryError> {
-        self.run_auto_tag_inbox_at(chrono::Utc::now(), crate::workload::is_restricted())
+        // While a manual 지금 실행 waits for the tagger, the 5-minute tick skips quietly
+        // instead of reporting a failure; the manual run imports when the tagger ends.
+        if crate::auto_jobs::running(self, "autoTags") && !crate::auto_jobs::manual(self, "autoTags") {
+            return Ok(RunResult {
+                settings: Settings::default(),
+                processed: vec![],
+                skipped: Some("다른 가져오기가 진행 중입니다.".into()),
+            });
+        }
+        crate::auto_jobs::tracked(self, "autoTags", || self.run_auto_tag_inbox_at(chrono::Utc::now(), crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "autoTags")), |result| (result.settings.last.as_ref().is_none_or(|last| last.values().all(|last| last.error.is_none())), None))
     }
 
     fn run_auto_tag_inbox_at(
@@ -161,7 +170,7 @@ impl Library {
             if name == FILES[2] && !super::nl_search::enabled() {
                 continue;
             }
-            if crate::workload::is_restricted() {
+            if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "autoTags") {
                 result.skipped = Some("절약 모드 또는 복구 대기 중에는 가져오지 않습니다.".into());
                 break;
             }
@@ -181,7 +190,7 @@ impl Library {
             let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
             let previous = result.settings.last.as_ref().and_then(|last| last.get(name));
             if previous.is_some_and(|last| {
-                let retry_waiting = chrono::DateTime::parse_from_rfc3339(&last.imported_at)
+                let retry_waiting = !crate::auto_jobs::manual(self,"autoTags") && chrono::DateTime::parse_from_rfc3339(&last.imported_at)
                     .is_ok_and(|at| now.signed_duration_since(at).num_seconds() < RETRY_SECONDS);
                 last.file_modified == stamp
                     && last.file_size == size

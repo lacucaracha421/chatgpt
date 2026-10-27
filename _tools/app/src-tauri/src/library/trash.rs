@@ -184,7 +184,10 @@ impl Library {
     }
 
     pub fn purge_expired_trash(&self, now: DateTime<Utc>) -> Result<PurgeSummary, LibraryError> {
-        if crate::workload::is_restricted() { return Ok(PurgeSummary { deleted_count: 0, failed_asset_ids: Vec::new() }); }
+        if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "trash") { return Ok(PurgeSummary { deleted_count: 0, failed_asset_ids: Vec::new() }); }
+        crate::auto_jobs::tracked(self, "trash", || self.purge_expired_trash_inner(now), |result| (result.failed_asset_ids.is_empty(), Some(result.deleted_count)))
+    }
+    fn purge_expired_trash_inner(&self, now: DateTime<Utc>) -> Result<PurgeSummary, LibraryError> {
         // App start: finish any purge whose tombstone was accepted before a crash, and
         // settle purge-pending rows that lost their queued intent.
         self.settle_purge_pending()?;

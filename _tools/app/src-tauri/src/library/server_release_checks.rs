@@ -117,7 +117,24 @@ impl Library {
 
     pub(super) fn fetch_release_checks_status(&self) -> Result<Option<Value>, LibraryError> {
         match self.authority_client()? {
-            Some((client, token)) => client.release_checks_status(token.expose()),
+            Some((client, token)) => {
+                let status = client.release_checks_status(token.expose())?;
+                if let Some(status) = &status {
+                    let endpoint = self
+                        .cloud_sync_config()?
+                        .api_base_url
+                        .ok_or(LibraryError::InvalidCloudSyncConfig)?;
+                    let key = format!(
+                        "serverReleaseChecksCache:{}",
+                        crate::cloud::status_watch::endpoint_key(&endpoint)
+                    );
+                    self.connection()?.execute(
+                        "INSERT INTO notes_state(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        rusqlite::params![key, status.to_string()],
+                    )?;
+                }
+                Ok(status)
+            }
             None => Ok(None),
         }
     }

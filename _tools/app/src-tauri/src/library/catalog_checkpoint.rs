@@ -20,11 +20,23 @@ pub(super) struct Checkpoint {
 
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct RunStatus {
+    #[serde(default)]
+    pub last_finished_at: Option<String>,
     pub last_attempt_at: Option<String>,
     pub last_progress_at: Option<String>,
     pub last_completed_at: Option<String>,
     pub last_added: u64,
     pub last_error: Option<String>,
+}
+
+pub(super) fn record_finished(path: &Path, language: CatalogLanguage) -> Result<(), LibraryError> {
+    let mut db = Connection::open(path)?;
+    let tx = db.transaction()?;
+    let mut status = run_status(&tx, language)?;
+    status.last_finished_at = Some(chrono::Utc::now().to_rfc3339());
+    save_status(&tx, language, &status)?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn key(language: CatalogLanguage, kind: &str) -> String {

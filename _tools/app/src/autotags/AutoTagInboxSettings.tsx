@@ -45,7 +45,7 @@ export function useAutoTagInbox(disabled: boolean) {
 }
 
 export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
-  const { settings, busy, message, locked, chooseFolder, disable, runNow, setApplyTaggerReview } = useAutoTagInbox(disabled);
+  const { settings, message, locked, chooseFolder, disable, setApplyTaggerReview } = useAutoTagInbox(disabled);
   return <>
     <dl className="settings-view__property">
       <dt>매일 가져오기 폴더</dt>
@@ -62,7 +62,6 @@ export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
     <dl className="settings-view__property">
       <dt>최근 자동 가져오기</dt>
       {settings && <dd className="settings-view__status">{autoTagInboxResult(settings)}</dd>}
-      <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void runNow()}><BusyLabel busy={!!(busy)} idle={"가져오기"}>처리 중…</BusyLabel></Button></dd>
     </dl>
     {message && <p className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</p>}
   </>;

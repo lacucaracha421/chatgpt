@@ -15,7 +15,7 @@ import { type NavigationEntry } from "../shared/findEntries";
 export { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "../shared/findEntries";
 
 type SettingsSection = NonNullable<Extract<AssetView, { kind: "settings" }>["section"]>;
-const SETTINGS_SECTIONS = ["frequent", "display", "library", "connection", "catalog", "vault", "advanced"] as const satisfies readonly SettingsSection[];
+const SETTINGS_SECTIONS = ["frequent", "autoJobs", "display", "library", "connection", "catalog", "vault", "advanced"] as const satisfies readonly SettingsSection[];
 
 const ARTIST_KINDS: AssetView["kind"][] = ["artists", "creator"];
 const noSubscription = () => () => {};

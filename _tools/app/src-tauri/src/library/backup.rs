@@ -71,7 +71,27 @@ impl Library {
         &self,
         now: DateTime<Utc>,
     ) -> Result<Option<MetadataBackup>, LibraryError> {
-        if crate::workload::is_restricted() { return Ok(None); }
+        if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "backup") {
+            return Ok(None);
+        }
+        crate::auto_jobs::tracked(
+            self,
+            "backup",
+            || self.daily_backup_inner(now, false),
+            |result| (true, result.as_ref().map(|b| b.byte_size)),
+        )
+    }
+    pub(crate) fn force_daily_backup(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<Option<MetadataBackup>, LibraryError> {
+        self.daily_backup_inner(now, true)
+    }
+    fn daily_backup_inner(
+        &self,
+        now: DateTime<Utc>,
+        force: bool,
+    ) -> Result<Option<MetadataBackup>, LibraryError> {
         let _backup_guard = self
             .backup_lock
             .lock()
@@ -104,7 +124,9 @@ impl Library {
                 covered = true;
             }
         }
-        if covered { return Ok(None); }
+        if covered && !force {
+            return Ok(None);
+        }
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
         let temporary = path.with_extension("sqlite.tmp");
@@ -448,10 +470,25 @@ fn rotate_daily_backups(root: &Path, created_path: &Path) -> Result<(), LibraryE
             .then_with(|| right.metadata.created_at.cmp(&left.metadata.created_at))
             .then_with(|| right.metadata.id.cmp(&left.metadata.id))
     });
-    // Empty/corrupt owned daily files count toward retention too. Never inspect or rotate
-    // other backup kinds, unowned names, or unfinished files with a `.part` suffix.
-    for entry in daily.into_iter().skip(DAILY_BACKUP_LIMIT) {
-        remove_file_if_exists(&entry.path)?;
+    // Count distinct dates, not files: manual runs must not evict another day's
+    // restore point. Keep each day's original daily snapshot and newest extra.
+    let mut days = Vec::<(String, Vec<BackupEntry>)>::new();
+    for entry in daily {
+        let date = entry.metadata.created_at[..10].to_owned();
+        if let Some((_, entries)) = days.iter_mut().find(|(day, _)| *day == date) {
+            entries.push(entry);
+        } else {
+            days.push((date, vec![entry]));
+        }
+    }
+    // Empty/corrupt owned files still count; other backup kinds remain untouched.
+    for (index, (_, entries)) in days.into_iter().enumerate() {
+        let last = entries.len() - 1;
+        for (extra, entry) in entries.into_iter().enumerate() {
+            if index >= DAILY_BACKUP_LIMIT || (extra != 0 && extra != last) {
+                remove_file_if_exists(&entry.path)?;
+            }
+        }
     }
     Ok(())
 }
@@ -871,6 +908,34 @@ mod tests {
                 "2026-08-08",
             ]
         );
+    }
+
+    #[test]
+    fn forced_backups_preserve_seven_distinct_days_and_trim_same_day_extras() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let first = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
+        for day in 0..8 {
+            library
+                .ensure_daily_backup(first + chrono::Duration::days(day))
+                .unwrap();
+        }
+        let daily = library.list_backups().unwrap();
+        let today = first + chrono::Duration::days(7);
+        let mut newest = None;
+        for hour in 1..=9 {
+            newest = library
+                .force_daily_backup(today + chrono::Duration::hours(hour))
+                .unwrap();
+        }
+        let retained = library.list_backups().unwrap();
+        assert_eq!(retained.len(), 8);
+        for backup in daily {
+            assert!(retained.iter().any(|entry| entry.id == backup.id));
+        }
+        assert!(retained
+            .iter()
+            .any(|entry| entry.id == newest.as_ref().unwrap().id));
     }
 
     #[test]

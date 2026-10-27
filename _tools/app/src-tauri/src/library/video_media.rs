@@ -362,7 +362,12 @@ impl Library {
         &self,
         limit: u32,
     ) -> Result<VideoPreparationProgress, LibraryError> {
-        self.prepare_pending_videos_with(&ProcessVideoTool, limit)
+        crate::auto_jobs::tracked(
+            self,
+            "videos",
+            || self.prepare_pending_videos_with(&ProcessVideoTool, limit),
+            |result| (result.failed == 0, Some(result.processed as u64)),
+        )
     }
 
     pub(crate) fn prepare_pending_videos_with<T: VideoTool>(
@@ -381,7 +386,7 @@ impl Library {
             changed_asset_ids: Vec::new(),
         };
         for _ in 0..limit.clamp(1, 10) {
-            if crate::workload::is_restricted() {
+            if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "videos") {
                 break;
             }
             let Some(video) = self.reserve_pending_video(None)? else {

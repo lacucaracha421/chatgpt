@@ -363,7 +363,7 @@ it("opens the 찾기 palette with Ctrl+Q, filters by name and navigates with Ent
   await user.clear(field);
   await user.type(field, "설정");
   expect(within(palette).getAllByRole("option")[0]).toHaveTextContent("설정");
-  expect(within(palette).getByText("메뉴 2개 더 보기")).toBeVisible();
+  expect(within(palette).getByText("메뉴 3개 더 보기")).toBeVisible();
   const connectionIndex = within(palette).getAllByRole("option").findIndex(option => option.textContent === "설정 › 연결");
   for (let at = 0; at < connectionIndex; at += 1) await user.keyboard("{ArrowDown}");
   expect(within(palette).getByRole("option", { name: "설정 › 연결" })).toHaveAttribute("aria-selected", "true");

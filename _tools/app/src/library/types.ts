@@ -1,3 +1,24 @@
+export type AutoJobId = "catalog" | "releaseCalendar" | "releaseWatch" | "launchbox" | "autoTags" | "characters" | "similarity" | "videos" | "mangaSpines" | "cardCutouts" | "cloudBackfill" | "backup" | "trash";
+export type AutoJobState = "idle" | "running" | "waiting" | "failed" | "unconfigured" | "off";
+export interface AutoJobStatus {
+  id: AutoJobId;
+  state: AutoJobState;
+  waitingReason: "lightweight" | "busy" | null;
+  unconfiguredReason: "noServer" | "noFolder" | "noProviderKey" | "noLibraryContent" | null;
+  enabled: boolean | null;
+  lastRunAt: string | null;
+  overdueSince: string | null;
+  lastOk: boolean | null;
+  lastError: string | null;
+  lastCount: number | null;
+  nextRunAt: string | null;
+  intervalSeconds: number | null;
+  progress: { done: number; total: number } | null;
+  pending: number | null;
+  failed: number | null;
+  canStop: boolean;
+}
+
 import type { AccountRole, ClueKey, Clues } from "../similarity/clues";
 import type {ProfilePerson} from "../collections/av/personProfileFields";
 import type { AvPortrait } from "../collections/avTypes";
@@ -463,7 +484,7 @@ export type AssetView =
   | { kind: "notes"; noteId?: string }
   | { kind: "exchange" }
   | { kind: "private_vault" }
-  | { kind: "settings"; section?: "frequent" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced" }
+  | { kind: "settings"; section?: "frequent" | "autoJobs" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean; kakaoReview?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
@@ -1503,6 +1524,10 @@ export type ImageTextLine = {
 export type AssetImageText = { lines: ImageTextLine[]; digest: string };
 
 export interface LibraryGateway {
+  autoJobsStatus?(): Promise<AutoJobStatus[]>;
+  runAutoJob?(id: AutoJobId): Promise<AutoJobStatus>;
+  stopAutoJob?(id: AutoJobId): Promise<AutoJobStatus>;
+  setCharacterAutomationEnabled?(enabled: boolean): Promise<void>;
   assetImageText?(assetId: string): Promise<AssetImageText | null>;
   refreshAssetImageText?(assetId: string): Promise<AssetImageText | null>;
   descriptionSearchStatus?: () => Promise<DescriptionSearchStatus>;
@@ -1551,6 +1576,7 @@ export interface LibraryGateway {
   flushAlbumOutbox?(): Promise<AlbumOutboxFlushResult>;
   albumSyncStatus?(): Promise<AlbumSyncStatus>;
   authoritySyncHealth?(): Promise<AuthoritySyncHealth>;
+  acknowledgeAuthorityDrops?(): Promise<void>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
   resetJapaneseCatalogCheckpoint(): Promise<CatalogStatus>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;

@@ -1304,12 +1304,26 @@ impl Library {
         today: NaiveDate,
         server: &dyn Fn() -> Result<ReleaseCalendar, LibraryError>,
     ) -> Result<ReleaseCalendar, LibraryError> {
+        crate::auto_jobs::tracked(self, "releaseCalendar", || self.refresh_release_calendar_job(transport,mode,now,today,server), |calendar| (calendar.sources.iter().all(|s| s.error_code.is_none()), Some(calendar.entries.len() as u64)))
+    }
+    fn refresh_release_calendar_job(&self, transport: &dyn ReleaseTransport, mode: RefreshMode, now: DateTime<Utc>, today: NaiveDate, server: &dyn Fn() -> Result<ReleaseCalendar, LibraryError>) -> Result<ReleaseCalendar, LibraryError> {
         // Every caller, including Settings and the hourly wishlist runner, follows the gate.
         if self.server_release_calendar_enabled_at(now.timestamp())? {
             return server();
         }
         let (start, end) = window(today);
         for provider in ["igdb", "tmdb", "tmdb_tv"] {
+            if crate::auto_jobs::manual(self, "releaseCalendar") {
+                let connection = self.connection()?;
+                let cache = read_cache(&connection, provider, now)?;
+                if cache.error_code.is_some()
+                    && cache.attempted_at.is_some_and(|at| {
+                        now - at < Duration::minutes(RETRY_AFTER_FAILURE_MINUTES)
+                    })
+                {
+                    continue;
+                }
+            }
             let due = mode == RefreshMode::Immediate || self.local_calendar_fetch_due(provider, now)? || {
                 let connection = self.connection()?;
                 let cache = read_cache(&connection, provider, now)?;

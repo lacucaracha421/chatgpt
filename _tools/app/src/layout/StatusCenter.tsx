@@ -2,7 +2,8 @@ import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { ChartBarIcon, ChevronRightIcon, InboxIcon, Square2StackIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button } from "../shared/ui/Button";
 import type { AssetBrowserStatus } from "../assets/AssetBrowser";
 import { tabletWaitText, type CloudSyncStatus } from "../app/useCloudProblems";
 import { displayCount } from "../shared/displayDate";
@@ -36,6 +37,7 @@ export type StatusCenterProps = {
   cloud?: CloudSyncStatus;
   /** Local server-sync health; null until read or when the gateway has none. */
   authorityHealth?: AuthoritySyncHealth | null;
+  onAcknowledgeAuthorityDrops?: () => Promise<void>;
   reviewCount?: number;
   /** Null until the count has been read; it is refreshed whenever the panel opens. */
   unsortedCount?: number | null;
@@ -61,6 +63,7 @@ export function StatusCenter({
   openExisting = noop,
   cloud,
   authorityHealth = null,
+  onAcknowledgeAuthorityDrops,
   reviewCount = 0,
   unsortedCount = null,
   onOpenChange,
@@ -147,7 +150,7 @@ export function StatusCenter({
         </div>
         <div className="ui-anchored-panel__body status-center__body">
           {cloud && <SyncBlock cloud={cloud} onOpenSettings={() => go({ kind: "settings", section: "connection" })} />}
-          <AuthoritySyncBlock summary={authority} />
+          <AuthoritySyncBlock summary={authority} onAcknowledge={onAcknowledgeAuthorityDrops} />
           {connections?.(go)}
           <StatusBlock title="작업">
             <ActivityList sections={activities} />
@@ -245,6 +248,7 @@ export type AuthoritySyncSummary = {
   problemCount: number;
   problems: string[];
   notes: string[];
+  dropNotes: string[];
 };
 
 /**
@@ -252,7 +256,7 @@ export type AuthoritySyncSummary = {
  * informational (they resolve or were settled by the server state).
  */
 export function authoritySyncSummary(health: AuthoritySyncHealth | null): AuthoritySyncSummary {
-  if (!health) return { problemCount: 0, problems: [], notes: [] };
+  if (!health) return { problemCount: 0, problems: [], notes: [], dropNotes: [] };
   const problems: string[] = [];
   let problemCount = 0;
   const blocked = health.albums.blockedCount + health.classifications.blockedCount + (health.collections?.blockedCount ?? 0);
@@ -275,6 +279,7 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
   problemCount += failures.size;
 
   const notes: string[] = [];
+  const dropNotes: string[] = [];
   if (health.assets.held || health.authorityHeld) notes.push("보내기 보류 중 · 이 PC의 변경은 보류를 풀면 보냄");
   const tabletWait = health.syncHold?.held ? health.syncHold.tabletWait : null;
   if (tabletWait && tabletWait.count > 0) notes.push(tabletWaitText(tabletWait.count));
@@ -287,32 +292,61 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
       .sort((a, b) => (b.lastDroppedAt ?? "").localeCompare(a.lastDroppedAt ?? ""))[0]?.lastDropReason
       ?? health.assets.rejectedReason;
     const reason = latest ? DROP_REASON_TEXT[latest] ?? DROP_REASON_FALLBACK : null;
-    notes.push(`취소된 변경 ${displayCount(dropped, "개")}${reason ? ` · ${reason}` : ""}`);
+    dropNotes.push(`취소된 변경 ${displayCount(dropped, "개")}${reason ? ` · ${reason}` : ""}`);
   }
   for (const asset of health.assets.rejectedAssets ?? []) {
-    notes.push(`휴지통·복원 취소됨 · ${asset.name} · ${DROP_REASON_TEXT[asset.reason] ?? DROP_REASON_FALLBACK}`);
+    dropNotes.push(`휴지통·복원 취소됨 · ${asset.name} · ${DROP_REASON_TEXT[asset.reason] ?? DROP_REASON_FALLBACK}`);
   }
+  notes.push(...dropNotes);
   const skipped = health.characterExclusions?.skippedCount ?? 0;
   if (skipped > 0) {
     const code = health.characterExclusions.lastSkipReason;
     const reason = code ? EXCLUSION_SKIP_TEXT[code] : undefined;
     notes.push(`태블릿의 캐릭터 제외 ${displayCount(skipped, "개")} 적용 안 됨${reason ? ` · ${reason}` : ""}`);
   }
-  return { problemCount, problems, notes };
+  return { problemCount, problems, notes, dropNotes };
 }
 
-function AuthoritySyncBlock({ summary }: { summary: AuthoritySyncSummary }) {
-  if (summary.problems.length === 0 && summary.notes.length === 0) return null;
+function AuthoritySyncBlock({ summary, onAcknowledge }: { summary: AuthoritySyncSummary; onAcknowledge?: () => Promise<void> }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+  const [displayed, setDisplayed] = useState(summary.notes);
+  const exiting = displayed.filter(text => !summary.notes.includes(text));
+  const signature = JSON.stringify(summary.notes);
+  useEffect(() => {
+    if (!exiting.length || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayed(summary.notes);
+      return;
+    }
+    const timer = window.setTimeout(() => setDisplayed(summary.notes), 140);
+    return () => window.clearTimeout(timer);
+  }, [signature, exiting.length]);
+  const acknowledge = async () => {
+    if (!onAcknowledge || pending) return;
+    setPending(true);
+    setError(false);
+    try { await onAcknowledge(); }
+    catch { setError(true); }
+    finally { setPending(false); }
+  };
+  if (summary.problems.length === 0 && summary.notes.length === 0 && exiting.length === 0 && !error) return null;
   return <StatusBlock title="서버 동기화">
     <div className="status-center__sync-list" role="status">
       {summary.problems.map((text) => <div key={text} className="status-center__sync" data-tone="problem">
         <span className="status-center__dot" aria-hidden="true" />
         <span>{text}</span>
       </div>)}
-      {summary.notes.map((text) => <div key={text} className="status-center__sync" data-tone="note">
-        <span className="status-center__dot" aria-hidden="true" />
-        <span>{text}</span>
+      {[...summary.notes, ...exiting].map((text) => <div key={text} className="status-center__note"
+        data-exiting={exiting.includes(text) || undefined} aria-hidden={exiting.includes(text) || undefined} inert={exiting.includes(text) || undefined}>
+        <div className="status-center__note-clip">
+          <div className="status-center__sync" data-tone="note">
+            <span className="status-center__dot" aria-hidden="true" />
+            <span>{text}</span>
+            {onAcknowledge && summary.dropNotes.includes(text) && <Button variant="quiet" size="sm" disabled={pending} onClick={() => void acknowledge()}>확인</Button>}
+          </div>
+        </div>
       </div>)}
+      {error && <div role="alert">취소된 변경을 확인 처리하지 못했습니다. 다시 시도해 주세요.</div>}
     </div>
   </StatusBlock>;
 }

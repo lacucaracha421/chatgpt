@@ -146,7 +146,21 @@ pub(crate) fn runtime_paths(
     ))
 }
 
-pub(super) fn start_incremental_if_configured(
+pub(crate) fn wake_auto_characters(
+    app: &tauri::AppHandle,
+    library: &crate::library::Library,
+) -> Result<(), CommandError> {
+    let (script, settings) = runtime_paths(app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)
+        .map_err(|_| CommandError {
+            code: "character_runtime_failed",
+            message: "분석 환경을 확인해 주세요".into(),
+        })?;
+    library.start_character_incremental(config);
+    if library.wake_auto_characters() { Ok(()) }
+    else { Err(CommandError { code: "character_runtime_failed", message: "캐릭터 분석을 시작하지 못했습니다".into() }) }
+}
+pub(crate) fn start_incremental_if_configured(
     app: &tauri::AppHandle,
     library: &crate::library::Library,
 ) {

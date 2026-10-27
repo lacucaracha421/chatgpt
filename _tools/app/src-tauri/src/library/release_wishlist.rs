@@ -531,6 +531,14 @@ impl Library {
 
     /// Check the watched titles that are due. Network requests run without the database lock.
     pub fn run_due_release_watchlist(&self) -> Result<WatchRunResult, LibraryError> {
+        crate::auto_jobs::tracked(
+            self,
+            "releaseWatch",
+            || self.run_due_release_watchlist_job(),
+            |result| (result.stop_reason.is_none(), Some(result.changed as u64)),
+        )
+    }
+    fn run_due_release_watchlist_job(&self) -> Result<WatchRunResult, LibraryError> {
         let transport = self.release_transport();
         self.run_due_release_watchlist_with(
             &transport,
@@ -545,19 +553,33 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<WatchRunResult, LibraryError> {
-        let _guard = self.release_wishlist_authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = self
+            .release_wishlist_authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.server_release_wishlist_blocked()? {
-            return Ok(WatchRunResult { checked:0, changed:0, remaining:0, stop_reason:None });
+            return Ok(WatchRunResult {
+                checked: 0,
+                changed: 0,
+                remaining: 0,
+                stop_reason: None,
+            });
         }
         let due: Vec<String> = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
                 "SELECT id FROM release_watch_items
-                 WHERE muted = 0 AND next_check_at IS NOT NULL AND next_check_at <= ?1
+                 WHERE muted = 0 AND (next_check_at IS NOT NULL AND next_check_at <= ?1 OR ?2)
                  ORDER BY next_check_at, id",
             )?;
             let ids = statement
-                .query_map([now.to_rfc3339()], |row| row.get(0))?
+                .query_map(
+                    params![
+                        now.to_rfc3339(),
+                        crate::auto_jobs::manual(self, "releaseWatch")
+                    ],
+                    |row| row.get(0),
+                )?
                 .collect::<Result<_, _>>()?;
             ids
         };

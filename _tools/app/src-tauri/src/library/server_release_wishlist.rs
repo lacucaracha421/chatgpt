@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 #[serde(default)]
 struct Ownership {
     server: bool,
+    status: Option<Value>,
     seed: Option<Value>,
     display: Vec<WatchItem>,
     projection_revision: Option<i64>,
@@ -118,6 +119,7 @@ fn observe(state: &mut Ownership, status: &Value) -> Result<(), LibraryError> {
     if status["mode"] == "server" {
         state.server = true;
     }
+    state.status = Some(status.clone());
     Ok(())
 }
 
@@ -289,6 +291,17 @@ fn reconcile(state: &mut Ownership, document: &Value) {
 }
 
 impl Library {
+    pub(crate) fn request_server_release_wishlist_now(
+        &self,
+    ) -> Result<crate::cloud::client::CalendarRun, LibraryError> {
+        let endpoint = self
+            .cloud_sync_config()?
+            .api_base_url
+            .ok_or(LibraryError::InvalidCloudSyncConfig)?;
+        let client = self.cloud_client(&endpoint)?;
+        let token = super::credential::read_cloud_api_token_os()?;
+        client.wishlist_run(token.expose())
+    }
     /// A definitive unowned rejection resumes edits queued after the seed snapshot.
     /// This is transport recovery before ownership, not a reverse handover/import.
     fn resume_local_wishlist_outbox(

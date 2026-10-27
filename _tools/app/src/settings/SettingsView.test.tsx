@@ -17,6 +17,7 @@ beforeEach(() => { vi.mocked(open).mockResolvedValue(null); });
 function createGateway(overrides: Partial<LibraryGateway> = {}) {
   return {
     ...libraryGateway,
+    autoJobsStatus: vi.fn().mockResolvedValue([]),
     getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: true, workCount: 12, updateEnabled: true, updateIntervalSeconds: 21600, lastAttemptAt: "2026-09-29T06:00:00Z", lastSuccessAt: "2026-09-29T06:00:00Z", lastAdded: 2, lastError: null, streams: [] }),
     getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: true, captureEnabled: true, apiBaseUrl: "https://cloud.test", tokenConfigured: true }),
     cloudPublisherTokenStatus: vi.fn().mockResolvedValue({ configured: true }),
@@ -125,12 +126,13 @@ it("includes people and image differences and labels capped work samples as a mi
   expect(await screen.findByText("차이 26건 이상")).toBeInTheDocument();
 });
 
-it("starts on frequent and uses the seven approved section ids without a search box", async () => {
+it("opens automatic jobs from frequent settings", async () => {
   const gateway = createGateway();
   renderSettings(gateway);
   expect(await within(screen.getByRole("toolbar")).findByRole("heading", { name: "자주 쓰는 것" })).toBeInTheDocument();
   expect(screen.queryByPlaceholderText("설정 찾기")).not.toBeInTheDocument();
-  expect(screen.getByRole("navigation", { name: "설정 구역" })).toHaveTextContent("자주 쓰는 것화면라이브러리연결카탈로그보관함고급");
+  await userEvent.click(screen.getByRole("button", { name: "자동 작업 ›" }));
+  expect(await within(screen.getByRole("toolbar")).findByRole("heading", { name: "자동 작업" })).toBeVisible();
   expect(screen.queryByText("일반")).not.toBeInTheDocument();
   expect(screen.queryByText("정보·도움말")).not.toBeInTheDocument();
 });
@@ -286,7 +288,7 @@ it("uses the shared fetched timestamp and backup date", async () => {
   try {
     const gateway = createGateway();
     gateway.releaseCalendar!.calendar = vi.fn().mockResolvedValue({ generatedAt: "", rangeStart: "", rangeEnd: "", entries: [], sources: [{ provider: "igdb", fetchedAt: "2026-09-30T15:07:40", attemptedAt: null, errorCode: null, due: false }] });
-    renderSettings(gateway, { initialSection: "frequent" });
+    renderSettings(gateway, { initialSection: "connection" });
     expect(await screen.findByText(/어제 15:07/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "고급" }));
     expect(await screen.findByText("9.28")).toBeInTheDocument();

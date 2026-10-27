@@ -13,7 +13,7 @@ export const MORE_KEYWORDS: Partial<Record<string, string[]>> = {
 
 /** Settings section names for Find's "설정 › …" entries; each client registers only the sections it has. */
 export const SETTINGS_SECTION_LABELS = {
-  frequent: "자주 쓰는 것", display: "화면", library: "라이브러리", connection: "연결",
+  frequent: "자주 쓰는 것", autoJobs: "자동 작업", display: "화면", library: "라이브러리", connection: "연결",
   catalog: "카탈로그", vault: "보관함", advanced: "고급", storage: "저장 공간",
 } as const;
 

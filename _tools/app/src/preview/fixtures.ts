@@ -1,4 +1,4 @@
-import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
+import type { AutoJobId, AutoJobStatus, AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
 import type { ArtistSummary } from "../artists/types.ts";
 import { PREVIEW_CHARACTER_SERIES_ID, previewCharacterBrowse, previewCharacterGroups, previewCharacterSuggestions, previewCharacterSidebarCounts, previewCharacterTargets, previewConfirmCounts, previewExtrasSuggestions, previewS36Readiness, previewShadowReviewPage, previewShadowReviewSummary, previewTaggerCounts, previewTaggerReviewItems, previewUnregisterPreview } from "./characterFixtures.ts";
 
@@ -214,8 +214,61 @@ function catalogWorks() {
   }));
 }
 
+const previewJobIds: AutoJobId[] = ["catalog", "releaseCalendar", "releaseWatch", "launchbox", "autoTags", "characters", "similarity", "videos", "mangaSpines", "cardCutouts", "cloudBackfill", "backup", "trash"];
+const previewAutoJobs: AutoJobStatus[] = previewJobIds.map((id, index) => ({
+  id, state: id === "releaseWatch" ? "failed" : id === "launchbox" ? "running" : "idle",
+  waitingReason: null, unconfiguredReason: null,
+  overdueSince: id === "autoTags" ? new Date(Date.now() - 27 * 3600_000).toISOString() : null,
+  enabled: ["catalog", "characters", "cloudBackfill"].includes(id) ? true : null,
+  lastRunAt: new Date(Date.now() - (index + 1) * 600_000).toISOString(), lastOk: id !== "releaseWatch",
+  lastError: id === "releaseWatch" ? "MangaDex 응답 없음" : null,
+  lastCount: id === "backup" ? 19_293_798 : [32, 9, 0, 2981, 48, 23, 23, 5, 17, 12, 46, 0, 7][index]!,
+  nextRunAt: ["catalog", "releaseWatch", "autoTags"].includes(id) ? new Date(Date.now() + 900_000).toISOString() : null,
+  intervalSeconds: id === "catalog" ? 3600 : null,
+  progress: id === "launchbox" ? { done: 1204, total: 3000 } : null,
+  pending: id === "trash" ? 4 : id === "cloudBackfill" ? 12 : id === "videos" ? 3 : ["characters", "similarity", "mangaSpines", "cardCutouts"].includes(id) ? 0 : null,
+  failed: id === "cloudBackfill" ? 4 : null, canStop: id === "launchbox",
+}));
+const previewJobFinishes = new Map<AutoJobId, number>();
+let previewLightweight = false;
+function settlePreviewJobs() {
+  for (const [id, at] of previewJobFinishes) {
+    if (Date.now() < at) continue;
+    const job = previewAutoJobs.find(item => item.id === id)!;
+    Object.assign(job, { overdueSince: null, state: job.enabled === false ? "off" : "idle", lastOk: true, lastRunAt: new Date().toISOString(), lastError: null, lastCount: id === "backup" ? 19_293_798 : id === "trash" ? job.pending : 4, progress: null, pending: job.pending === null ? null : 0, canStop: false });
+    previewJobFinishes.delete(id);
+  }
+}
+
 export function dispatchPreviewCommand(command: string, args: Record<string, unknown>): unknown {
+  settlePreviewJobs();
   switch (command) {
+    case "auto_jobs_status": return previewAutoJobs.map(job => previewLightweight && ["launchbox", "characters", "similarity", "videos", "cardCutouts"].includes(job.id) && job.state === "idle" ? { ...job, state: "waiting", waitingReason: "lightweight" } : { ...job });
+    case "run_auto_job": {
+      const job = previewAutoJobs.find(item => item.id === args.id)!;
+      if (job.state !== "running") { Object.assign(job, { overdueSince: null, state: "running", waitingReason: null, canStop: true }); previewJobFinishes.set(job.id, Date.now() + 1800); }
+      return { ...job };
+    }
+    case "stop_auto_job": {
+      const job = previewAutoJobs.find(item => item.id === args.id)!;
+      previewJobFinishes.delete(job.id);
+      Object.assign(job, { overdueSince: null, state: "waiting", waitingReason: "busy", canStop: false });
+      return { ...job };
+    }
+    case "set_online_catalog_update_settings": {
+      Object.assign(previewAutoJobs[0]!, { enabled: args.enabled, intervalSeconds: args.intervalSeconds, state: args.enabled ? "idle" : "off" });
+      return dispatchPreviewCommand("get_online_catalog_status", {});
+    }
+    case "set_cloud_capture_settings": {
+      const job = previewAutoJobs.find(item => item.id === "cloudBackfill")!;
+      job.enabled = Boolean(args.enabled);
+      return { enabled: job.enabled, captureEnabled: args.captureEnabled ?? true, apiBaseUrl: args.apiBaseUrl, tokenConfigured: true };
+    }
+    case "pause_character_automation": {
+      const job = previewAutoJobs.find(item => item.id === "characters")!;
+      job.enabled = !args.paused; job.state = job.enabled ? "idle" : "off";
+      return;
+    }
     case "asset_image_text":
     case "refresh_asset_image_text": return args.assetId === "asset-001" ? { digest: "preview-image-text-001", lines: [
       { original: "ねえ、今日の放課後ひま？", korean: "있잖아, 오늘 방과 후에 시간 있어?", box: { x0: 690, y0: 50, x1: 910, y1: 179 } },
@@ -223,7 +276,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
       { original: "…また漫画ばっかり買うんでしょ", korean: "…또 만화만 잔뜩 사겠지." },
     ] } : null;
     case "open_library": return { root: "/preview/library" };
-    case "workload_profile": return { lightweight: false, autoEnterMinutes: null, closeToTray: false, restricted: false, hidden: false, trayAvailable: false };
+    case "workload_profile": { if (args.settings) previewLightweight = Boolean((args.settings as { lightweight: boolean }).lightweight); return { lightweight: previewLightweight, autoEnterMinutes: null, closeToTray: false, restricted: false, hidden: false, trayAvailable: false }; }
     case "list_classifications": return previewClassifications;
     case "list_albums": return previewAlbums;
     case "list_collections": return previewCollections;
@@ -332,7 +385,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_other_machine_manga_root": return null;
     case "scan_manga": return 0;
     case "list_manga_series": return Array.from({ length: 18 }, (_, index) => ({ id: `manga-${index + 1}`, title: ["해질녘의 기록", "유리별", "작은 정원", "비 오는 오후", "그 여름의 지도", "달빛 우체국"][index % 6] + (index > 5 ? ` ${Math.floor(index / 6) + 1}` : ""), author: creatorNames[index % creatorNames.length]!, galleryId: String(9000 + index), pageCount: 80 + index * 7 }));
-    case "get_online_catalog_status": return { installed: true, workCount: 24863, updateEnabled: true, updateIntervalSeconds: 86400, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastSuccessAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null, streams: [{ provider: "kHentai", language: "korean", hasState: true, initialComplete: true, watermark: 24863, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastProgressAt: "2026-09-29T03:00:00.000Z", lastCompletedAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null }, { provider: "kHentai", language: "japanese", hasState: true, initialComplete: true, watermark: 12000, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-28T03:00:00.000Z", lastProgressAt: "2026-09-28T03:00:00.000Z", lastCompletedAt: "2026-09-28T03:00:00.000Z", lastAdded: 12, lastError: null }] };
+    case "get_online_catalog_status": return { installed: true, workCount: 24863, updateEnabled: previewAutoJobs[0]!.enabled, updateIntervalSeconds: previewAutoJobs[0]!.intervalSeconds, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastSuccessAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null, streams: [{ provider: "kHentai", language: "korean", hasState: true, initialComplete: true, watermark: 24863, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastProgressAt: "2026-09-29T03:00:00.000Z", lastCompletedAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null }, { provider: "kHentai", language: "japanese", hasState: true, initialComplete: true, watermark: 12000, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-28T03:00:00.000Z", lastProgressAt: "2026-09-28T03:00:00.000Z", lastCompletedAt: "2026-09-28T03:00:00.000Z", lastAdded: 12, lastError: null }] };
     case "run_due_online_catalog_update": return null;
     case "cancel_catalog_search": return null;
     case "search_catalog_groups": {
@@ -355,7 +408,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_catalog_visibility_policy": return { hiddenCategories: [], blockedTags: [] };
     case "get_remote_reading_progress": return null;
     case "notes_request": return notesRequest(args);
-    case "get_cloud_capture_settings": return { enabled: true, captureEnabled: true, apiBaseUrl: "https://preview.lakomics.local", tokenConfigured: true };
+    case "get_cloud_capture_settings": return { enabled: previewAutoJobs.find(job => job.id === "cloudBackfill")!.enabled, captureEnabled: true, apiBaseUrl: "https://preview.lakomics.local", tokenConfigured: true };
     case "cloud_publisher_token_status": return { configured: true };
     case "verify_collection_authority_baseline": return { reportPath: "preview/collection-authority/verify-fixture.json", report: {
       version: 1, verdict: "lossless", checkedAt: "2026-10-04T00:00:00Z", validation: null,
@@ -375,6 +428,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_tmdb_credential_status":
     case "get_stashdb_credential_status": return { configured: true };
     case "cloud_backfill_progress": return { activity: [{ direction: "capture", lastAttemptAt: "2026-09-29T06:00:00.000Z", lastSuccessAt: "2026-09-29T06:00:00.000Z", lastError: null, processed: 3, problems: 0 }], replicationEnabled: true, controlState: "idle", totalAssets: 300, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 300, failed: 0, activeWorkers: 0, lastError: null };
+    case "acknowledge_authority_drops": return null;
     case "authority_sync_health": return { albums: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, classifications: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null }, assets: { rejectedCount: 0, rejectedReason: null, stopped: false }, characterExclusions: { skippedCount: 0, lastSkipReason: null, lastSkippedAt: null }, authorityPassFailure: null, assetLaneFailure: null };
     case "encrypted_vault_status": return { state: "absent", vaultId: null, root: null, itemCount: null, trashedCount: null, remembered: false };
     case "exchange_snapshot": return { availability: { state: "ready", message: null, needsToken: false }, selfName: "Preview PC", devices: [{ deviceId: "tablet-preview", name: "Galaxy Tab Preview", kind: "tablet" }], outgoing: previewOutgoing(), incoming: [], received: [], unseen: 0, folder: "/preview/exchange", tokenConfigured: true };
@@ -421,7 +475,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_image_similarity_scan": return null;
     case "list_similarity_reviews": return { items: [], nextCursor: null, totalCount: 2 };
     case "similarity_review_inbound_status": return { applied: 0 };
-    case "list_trash": return { items: [], nextCursor: null, totalCount: 4, totalBytes: 8_400_000 };
+    case "list_trash": return { items: previewAutoJobs.find(job => job.id === "trash")!.pending ? previewAssets.slice(0, 2).map(asset => ({ asset, trashedAt: new Date(Date.now() - 40 * 86400000).toISOString(), purgeAt: new Date(Date.now() - 10 * 86400000).toISOString() })) : [], nextCursor: null, totalCount: 41 + (previewAutoJobs.find(job => job.id === "trash")!.pending ?? 0), totalBytes: 8_400_000 };
     case "purge_expired_trash": return { deletedCount: 0, failedAssetIds: [] };
     case "get_trash_policy": return { retentionDays: 30 };
     case "prepare_pending_videos": return { processed: 0, remaining: 0, failed: 0, changedAssetIds: [] };

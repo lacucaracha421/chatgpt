@@ -129,6 +129,28 @@ pub(crate) fn set_manga_root_identity(
     write_file(path, &file)
 }
 
+pub(crate) fn set_auto_job_last(
+    path: &Path,
+    library: &str,
+    id: &str,
+    last: Option<&crate::auto_jobs::LastRun>,
+) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    let extra = &mut file.libraries.entry(library.into()).or_default().extra;
+    if let Some(last) = last {
+        extra.insert(
+            format!("autoJob:{id}"),
+            serde_json::to_value(last).map_err(|e| error(path, io::Error::other(e)))?,
+        );
+    } else if extra.remove(&format!("autoJob:{id}")).is_none() {
+        return Ok(());
+    }
+    write_file(path, &file)
+}
+
 fn write_file(path: &Path, file: &MachineSettingsFile) -> Result<(), LibraryError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|source| error(path, source))?;

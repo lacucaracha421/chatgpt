@@ -8,6 +8,10 @@ export function CloudStatusCenter({ gateway, libraryRoot, onOpenChange, ...props
   const authority = useAuthoritySyncHealth(gateway, libraryRoot);
   const cloud = useCloudSyncStatus(gateway, libraryRoot);
   return <StatusCenter {...props} cloud={cloud} authorityHealth={authority.health}
+    onAcknowledgeAuthorityDrops={gateway.acknowledgeAuthorityDrops ? async () => {
+      await gateway.acknowledgeAuthorityDrops!();
+      await authority.refresh();
+    } : undefined}
     connections={(go) => <ConnectionStatusBlock gateway={gateway} cloud={cloud} authorityHealth={authority.health} onNavigate={go} />}
     onOpenChange={(open) => { if (open) authority.refresh(); onOpenChange?.(open); }} />;
 }

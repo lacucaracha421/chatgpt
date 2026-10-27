@@ -101,10 +101,18 @@ impl CloudClient {
     }
 
     pub(crate) fn calendar_run(&self, token: &str) -> Result<CalendarRun, LibraryError> {
+        self.release_job_run("/v1/home/upcoming/calendar/run", token)
+    }
+
+    pub(crate) fn wishlist_run(&self, token: &str) -> Result<CalendarRun, LibraryError> {
+        self.release_job_run("/v1/home/upcoming/wishlist/run", token)
+    }
+
+    fn release_job_run(&self, path: &str, token: &str) -> Result<CalendarRun, LibraryError> {
         let _permit = self.send_permit()?;
         let mut response = self
             .coded_agent()?
-            .post(self.endpoint("/v1/home/upcoming/calendar/run")?)
+            .post(self.endpoint(path)?)
             .header("Authorization", bearer(token)?)
             .send_json(&json!({"version":1}))
             .map_err(|_| LibraryError::CloudRequestUnavailable)?;

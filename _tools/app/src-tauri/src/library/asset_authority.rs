@@ -473,10 +473,16 @@ fn resolve_tombstone_conflict(
 /// stick, so the count and reasons stay queryable:
 /// `SELECT asset_id,last_error FROM asset_authority_state WHERE last_error LIKE 'lifecycleRejected:%'`.
 pub(crate) const LIFECYCLE_REJECTED: &str = "lifecycleRejected:";
-fn record_rejection(db: &Connection, id: &str, reason: &str) -> Result<(), LibraryError> {
+pub(super) fn record_rejection(db: &Connection, id: &str, reason: &str) -> Result<(), LibraryError> {
     db.execute(
         "UPDATE asset_authority_state SET last_error=? WHERE asset_id=?",
         params![format!("{LIFECYCLE_REJECTED}{reason}"), id],
+    )?;
+    // Display history has its own clock; projection updates are not new rejections.
+    db.execute(
+        "INSERT INTO notes_state(key,value) VALUES(?1,?2)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![format!("authorityDrop:asset:{id}"), chrono::Utc::now().to_rfc3339()],
     )?;
     Ok(())
 }

@@ -582,9 +582,12 @@ impl Library {
     /// 않는다. 재시도 가능 오류는 해당 워커가 잠시 대기 후 다음 자산을
     /// 계속 가져간다.
     pub fn run_cloud_backfill_cycle(&self) -> Result<BackfillRunSummary, LibraryError> {
+        crate::auto_jobs::tracked(self, "cloudBackfill", || self.run_cloud_backfill_cycle_inner(), |r| (r.permanent_failures + r.retry_scheduled == 0, Some(r.committed)))
+    }
+    fn run_cloud_backfill_cycle_inner(&self) -> Result<BackfillRunSummary, LibraryError> {
         self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
-        if !config.enabled {
+        if !config.enabled && !crate::auto_jobs::manual(self, "cloudBackfill") {
             return Ok(BackfillRunSummary::default());
         }
         let new_ingests = self.new_ingest_json();
@@ -593,7 +596,8 @@ impl Library {
             Self::cloud_backfill_tick_on(
                 &connection,
                 &new_ingests,
-                crate::workload::is_restricted(),
+                crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "cloudBackfill"),
+                crate::auto_jobs::manual(self,"cloudBackfill"),
             )?
         };
         if !eligible {
@@ -617,6 +621,7 @@ impl Library {
         connection: &rusqlite::Connection,
         new_ingests: &str,
         restricted: bool,
+        manual: bool,
     ) -> Result<bool, LibraryError> {
         // A fully drained queue needs no UPDATE statement (nor its write lock).
         let outstanding: bool = connection.query_row(
@@ -642,10 +647,10 @@ impl Library {
              WHERE a.status='normal' AND q.entity_type='asset' AND q.operation='upsert' AND q.status='pending'
              AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue busy WHERE busy.entity_type='asset' AND busy.entity_id=q.entity_id AND busy.status IN ('processing','preparing','uploading','committing'))
              AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue newer WHERE newer.entity_type='asset' AND newer.entity_id=q.entity_id AND newer.operation='upsert' AND newer.revision>q.revision)
-             AND NOT EXISTS(SELECT 1 FROM cloud_backfill_control WHERE singleton=1 AND state='paused')
+             AND (?3 OR NOT EXISTS(SELECT 1 FROM cloud_backfill_control WHERE singleton=1 AND state='paused'))
              AND ((?1 AND q.entity_id IN (SELECT value FROM json_each(?2))) OR
                   (NOT ?1 AND (NOT EXISTS(SELECT 1 FROM cloud_backfill_scope) OR q.entity_id IN (SELECT asset_id FROM cloud_backfill_scope)))))",
-            params![restricted, new_ingests], |r| r.get::<_, bool>(0))?;
+            params![restricted, new_ingests, manual], |r| r.get::<_, bool>(0))?;
         if !eligible {
             let running: bool = connection.query_row(
                 "SELECT state='running' FROM cloud_backfill_control WHERE singleton=1",
@@ -674,7 +679,10 @@ impl Library {
         let token = crate::library::credential::read_cloud_publisher_token_os()?;
         let token = token.expose();
         let client = self.cloud_client(&base_url)?;
-        self.run_cloud_backfill_cycle_with_workload(&client, &token, BackfillWorkload::current)
+        let manual = crate::auto_jobs::manual(self, "cloudBackfill");
+        self.run_cloud_backfill_cycle_with_workload(&client, &token, || {
+            if manual { BackfillWorkload { restricted: false, prepare_videos: false } } else { BackfillWorkload::current() }
+        })
     }
 
     #[cfg(test)]
@@ -999,7 +1007,7 @@ impl Library {
                  FROM cloud_sync_queue AS queue
                  JOIN assets AS asset ON asset.id = queue.entity_id
                  WHERE queue.status = 'pending'
-                   AND EXISTS (SELECT 1 FROM library_settings WHERE singleton = 1 AND cloud_sync_enabled = 1)
+                   AND (?3 OR EXISTS (SELECT 1 FROM library_settings WHERE singleton = 1 AND cloud_sync_enabled = 1))
                    AND queue.entity_type = 'asset'
                    AND queue.operation = 'upsert'
                    AND NOT EXISTS (SELECT 1 FROM cloud_sync_queue busy
@@ -1014,11 +1022,11 @@ impl Library {
                         OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))))
                    AND NOT EXISTS (
                        SELECT 1 FROM cloud_backfill_control
-                       WHERE singleton = 1 AND state = 'paused'
+                       WHERE singleton = 1 AND state = 'paused' AND NOT ?3
                    )
                  ORDER BY queue.updated_at DESC, queue.id
                  LIMIT 1",
-                params![restricted, new_ingests],
+                params![restricted, new_ingests, crate::auto_jobs::manual_active(self, "cloudBackfill")],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1303,7 +1311,7 @@ fn drained_replication_tick_is_read_only() {
     let c = library.connection().unwrap();
     c.execute_batch("PRAGMA query_only=ON").unwrap();
     for restricted in [false, true, false] {
-        assert!(!Library::cloud_backfill_tick_on(&c, "[]", restricted).unwrap());
+        assert!(!Library::cloud_backfill_tick_on(&c, "[]", restricted, false).unwrap());
     }
     assert_eq!(c.total_changes(), 0);
     c.execute_batch(
@@ -1314,7 +1322,7 @@ fn drained_replication_tick_is_read_only() {
     )
     .unwrap();
     let before = c.total_changes();
-    assert!(!Library::cloud_backfill_tick_on(&c, "[]", false).unwrap());
+    assert!(!Library::cloud_backfill_tick_on(&c, "[]", false, false).unwrap());
     assert_eq!(
         c.total_changes(),
         before,

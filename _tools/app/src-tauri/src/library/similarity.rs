@@ -576,8 +576,25 @@ impl Library {
     }
 
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
-        let result = self.index_missing_similarity_hashes_with_budget(crate::performance::budgets());
-        if let Err(error) = &result { crate::activities::finish("similarity-hashes", Some(error.to_string())); }
+        let before = crate::auto_jobs::similarity_counts(self);
+        crate::auto_jobs::tracked(
+            self,
+            "similarity",
+            || self.index_missing_similarity_hashes_inner(),
+            |result| {
+                let failed = before.map_or(0, |(_,failed)|result.failed.saturating_sub(failed));
+                (failed==0, before.map(|(pending,_)|pending.saturating_sub(result.remaining).saturating_sub(failed)))
+            },
+        )
+    }
+    fn index_missing_similarity_hashes_inner(
+        &self,
+    ) -> Result<SimilarityIndexProgress, LibraryError> {
+        let result =
+            self.index_missing_similarity_hashes_with_budget(crate::performance::budgets());
+        if let Err(error) = &result {
+            crate::activities::finish("similarity-hashes", Some(error.to_string()));
+        }
         result
     }
 
@@ -609,15 +626,27 @@ impl Library {
         let workers = budget
             .indexing_workers(std::thread::available_parallelism().map_or(1, |count| count.get()));
         if !asset_ids.is_empty() {
-            crate::activities::report("similarity-hashes", "similarity", "유사 이미지 준비", "running", 0, None, Some(format!("{}개 처리 중", asset_ids.len())), None, None, None);
+            crate::activities::report(
+                "similarity-hashes",
+                "similarity",
+                "유사 이미지 준비",
+                "running",
+                0,
+                None,
+                Some(format!("{}개 처리 중", asset_ids.len())),
+                None,
+                None,
+                None,
+            );
         }
+        let manual = crate::auto_jobs::manual(self, "similarity");
         std::thread::scope(|scope| {
             let handles: Vec<_> = asset_ids
                 .chunks(asset_ids.len().div_ceil(workers).max(1))
                 .map(|chunk| {
                     scope.spawn(move || {
                         chunk.iter().try_for_each(|id| {
-                            if crate::workload::is_restricted() {
+                            if crate::workload::is_restricted() && !manual {
                                 Ok(())
                             } else {
                                 self.index_similarity_asset(id)

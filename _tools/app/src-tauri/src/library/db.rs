@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 140;
+pub(crate) const SCHEMA_VERSION: i64 = 141;
 
 #[cfg(test)]
 #[path = "db_character_folder_perf_migration_tests.rs"]
@@ -19,6 +19,10 @@ mod character_claude_migration_tests;
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP INDEX IF EXISTS auto_jobs_similarity_pending;
+    DROP INDEX IF EXISTS auto_jobs_similarity_failed;
+    DROP INDEX IF EXISTS auto_jobs_trash_expired;
+    DROP INDEX IF EXISTS auto_jobs_spine_status;
     DROP TABLE IF EXISTS manga_scan_publications;
     DROP TABLE IF EXISTS manga_spine_scans;
     DROP TABLE character_member_exclusion_state;
@@ -847,6 +851,10 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version < 140 {
             transaction.execute_batch(include_str!("../../migrations/0140_manga_scan_publications.sql"))?;
+        }
+        if version < 141 {
+            transaction
+                .execute_batch(include_str!("../../migrations/0141_auto_jobs_counters.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

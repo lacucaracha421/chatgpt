@@ -55,6 +55,10 @@
 .status-center__sync[data-tone="problem"] .status-center__dot { background: var(--color-danger); }
 .status-center__sync[data-tone="note"] { color: var(--color-muted); }
 .status-center__sync-list { display: grid; }
+.status-center__note { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 140ms var(--ease-standard), opacity 140ms var(--ease-standard); }
+.status-center__note[data-exiting] { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.status-center__note-clip { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .status-center__note { transition: none; } }
 
 .status-center__list { display: grid; gap: 0; }
 .status-center__empty { padding: 0; }

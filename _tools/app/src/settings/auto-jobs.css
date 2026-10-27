@@ -1,0 +1,74 @@
+.settings-view__property.auto-job {
+  grid-template-columns: minmax(0, 1fr) 176px 40px 120px;
+  gap: 0 var(--space-2);
+}
+.auto-job > dt { grid-column: 1; grid-row: 1; min-width: 0; }
+.auto-job > dt > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-view__property.auto-job > .settings-view__status {
+  grid-column: 1; grid-row: 2;
+  display: flex; align-items: center; gap: var(--space-1);
+  overflow: hidden; white-space: nowrap; color: var(--color-faint);
+}
+.auto-job .settings-view__status > .auto-job__text { overflow: hidden; text-overflow: ellipsis; }
+.auto-job > .auto-job__cadence, .auto-job > .auto-job__next {
+  grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--type-meta); line-height: var(--line-meta);
+}
+.auto-job > .auto-job__cadence { grid-row: 1; color: var(--color-muted); }
+.auto-job > .auto-job__next { grid-row: 2; margin-top: var(--space-1); color: var(--color-faint); }
+.auto-job > .auto-job__switch { grid-column: 3; grid-row: 1 / span 2; justify-self: end; display: flex; }
+.auto-job > .auto-job__action { grid-column: 4; grid-row: 1 / span 2; justify-self: end; display: flex; }
+/* A quiet button's text ends flush at the column edge, as in the real Settings rows. */
+.auto-job__action > .ui-button--quiet { margin-inline-end: calc(var(--space-2) * -1); white-space: nowrap; }
+.auto-job { font-variant-numeric: tabular-nums; }
+/* The interval of the one job that has a choice (온라인 카탈로그): a compact text trigger, no face until hover. */
+.auto-job__interval { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--line-meta); padding: 0 var(--space-1); margin-left: calc(var(--space-1) * -1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.auto-job__interval:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.auto-job__interval svg { width: 12px; height: 12px; }
+/* Progress: the status panel's 48×4 grey bar, only when the total is known. Never accent. */
+.auto-job__bar { flex: none; width: 48px; height: 4px; background: var(--color-border); overflow: hidden; }
+.auto-job__bar > i { display: block; height: 100%; background: var(--color-muted); transition: width 200ms var(--ease-standard); }
+/* Waiting (절약 모드, 꺼짐, 설정 필요): the cadence line names the reason, in the normal muted colour. */
+.auto-job[data-state="off"] > dt { color: var(--color-muted); }
+/* Success after a manual run: the row tints toward success and a check fades (DESIGN §12 Toasts). */
+.auto-job.is-done { animation: auto-job-done 1600ms var(--ease-standard) both; }
+@keyframes auto-job-done { 0%, 35% { background: color-mix(in srgb, var(--color-success) 9%, transparent); } 100% { background: transparent; } }
+.auto-job__check { width: 14px; height: 14px; color: var(--color-success); animation: auto-job-check 200ms var(--ease-standard) both; }
+@keyframes auto-job-check { from { opacity: 0; } }
+/* A failed row that rises into the 실패 group eases in (height + opacity, 140 ms) instead of popping. */
+.auto-job[data-state="failed"] { animation: auto-job-rise 140ms var(--ease-standard) both; }
+@keyframes auto-job-rise { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .auto-job.is-done, .auto-job__check, .auto-job[data-state="failed"] { animation: none; } }
+
+/* The 절약 모드 line at the top of the section (only while 절약 모드 is on). */
+.auto-jobs__saver { margin-bottom: var(--space-8); }
+
+/* Confirm dialog for 만료분 비우기: up to two overlapping thumbnails beside a short title. */
+.auto-job-confirm { display: flex; gap: var(--space-4); align-items: flex-start; }
+.auto-job-confirm__thumbs { position: relative; flex: none; width: 60px; height: 52px; }
+.auto-job-confirm__thumbs > span { position: absolute; width: 44px; height: 44px; border-radius: var(--radius-sm); overflow: hidden; outline: 2px solid var(--color-surface-raised); }
+.auto-job-confirm__thumbs > span:first-child { left: 0; top: 0; }
+.auto-job-confirm__thumbs > span:last-child { left: 16px; top: 8px; }
+.auto-job-confirm { font-size: var(--type-body); line-height: var(--line-copy); }
+
+.auto-jobs { animation: auto-jobs-enter 200ms var(--ease-standard) both; }
+.auto-jobs__groups { animation: auto-jobs-enter 200ms var(--ease-standard) both; }
+.auto-jobs__failures { animation: auto-jobs-enter 140ms var(--ease-standard) both; }
+.auto-jobs__skeleton { height: 720px; }
+.auto-job__interval { justify-content: flex-start; }
+.auto-job-confirm__thumbs img { width: 100%; height: 100%; object-fit: cover; }
+.auto-job-confirm__scope { color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); }
+.auto-job > .settings-view__row-message { grid-column: 1 / -1; grid-row: 3; }
+@keyframes auto-jobs-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 1000px) {
+  .settings-view__property.auto-job { grid-template-columns: minmax(0, 1fr) 140px 32px 100px; }
+}
+@media (max-width: 800px) {
+  .settings-view__property.auto-job { grid-template-columns: minmax(0, 1fr) 32px 100px; }
+  .auto-job > .auto-job__cadence { grid-column: 1; grid-row: 3; margin-top: var(--space-2); }
+  .auto-job > .auto-job__next { grid-column: 1; grid-row: 4; }
+  .auto-job > .auto-job__switch { grid-column: 2; }
+  .auto-job > .auto-job__action { grid-column: 3; }
+  .auto-job > .settings-view__row-message { grid-row: 5; }
+}
+@media (prefers-reduced-motion: reduce) { .auto-jobs, .auto-jobs__groups, .auto-jobs__failures { animation: none; } }

@@ -16,6 +16,7 @@ mod performance;
 mod motion;
 mod window_size;
 mod workload;
+mod auto_jobs;
 pub use cloud::backfill::BackfillControlState;
 pub use cloud::thumbnail_refresh::{
     refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
@@ -273,6 +274,9 @@ pub fn run() {
             });
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
+            auto_jobs::auto_jobs_status,
+            auto_jobs::run_auto_job,
+            auto_jobs::stop_auto_job,
             manga_scans::manga_spine_scan_progress,
             activities::activity_snapshot,
             brave_link::open_in_brave,
@@ -696,6 +700,7 @@ pub fn run() {
             commands::flush_album_outbox,
             commands::album_sync_status,
             commands::authority_sync_health,
+            commands::acknowledge_authority_drops,
             commands::push_cloud_characters,
             commands::run_due_mobile_publications,
             commands::restore_cloud_metadata_backup,

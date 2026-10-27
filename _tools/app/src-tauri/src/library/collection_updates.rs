@@ -75,10 +75,11 @@ fn due(
     connection: &rusqlite::Connection,
     provider: &str,
     now: &str,
+    force: bool,
 ) -> Result<Vec<String>, LibraryError> {
-    let mut statement=connection.prepare("SELECT b.collection_id FROM collection_external_bindings b JOIN collections c ON c.id=b.collection_id LEFT JOIN collection_update_attempts a ON a.collection_id=b.collection_id AND a.provider=b.provider WHERE c.type='manga' AND b.provider=?1 AND (b.last_synced_at IS NULL OR julianday(b.last_synced_at) IS NULL OR julianday(b.last_synced_at)<=julianday(?2)-1) AND (a.retry_at IS NULL OR julianday(a.retry_at)<=julianday(?2)) ORDER BY COALESCE(b.last_synced_at,''),b.collection_id")?;
+    let mut statement=connection.prepare("SELECT b.collection_id FROM collection_external_bindings b JOIN collections c ON c.id=b.collection_id LEFT JOIN collection_update_attempts a ON a.collection_id=b.collection_id AND a.provider=b.provider WHERE c.type='manga' AND b.provider=?1 AND (?3 OR b.last_synced_at IS NULL OR julianday(b.last_synced_at) IS NULL OR julianday(b.last_synced_at)<=julianday(?2)-1) AND (a.retry_at IS NULL OR julianday(a.retry_at)<=julianday(?2)) ORDER BY COALESCE(b.last_synced_at,''),b.collection_id")?;
     let rows = statement
-        .query_map(params![provider, now], |row| row.get(0))?
+        .query_map(params![provider, now, force], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -105,7 +106,7 @@ impl Library {
                 ..Default::default()
             });
         status.remaining =
-            due(&connection, provider, &chrono::Utc::now().to_rfc3339())?.len() as u64;
+            due(&connection, provider, &chrono::Utc::now().to_rfc3339(), crate::auto_jobs::manual(self, "releaseWatch"))?.len() as u64;
         // Old status JSON used a one-hour cooldown for every transport error.
         // Reinterpret only that legacy temporary cooldown, without a DB migration
         // or relaxing previously saved quota/authentication restrictions.
@@ -132,7 +133,7 @@ impl Library {
         provider: &str,
         key: Result<String, LibraryError>,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
-        self.run_collection_updates_gated(provider, key, &|| self.fetch_release_checks_status())
+        crate::auto_jobs::tracked(self, "releaseWatch", || self.run_collection_updates_gated(provider, key, &|| self.fetch_release_checks_status()), |result| (result.failed == 0, Some(result.changed_collections)))
     }
 
     pub(super) fn run_collection_updates_gated(
@@ -146,7 +147,7 @@ impl Library {
         if let Some(status) = self.server_collection_update_status_with(provider, fetch)? {
             return Ok(status);
         }
-        if crate::workload::is_restricted() {
+        if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "releaseWatch") {
             return self.local_collection_update_status(provider);
         }
         self.run_collection_updates_with(provider, |id| {
@@ -217,7 +218,7 @@ impl Library {
         {
             return Ok(status);
         }
-        let pending = due(&*self.connection()?, provider, &now_text)?;
+        let pending = due(&*self.connection()?, provider, &now_text, crate::auto_jobs::manual(self, "releaseWatch"))?;
         if pending.is_empty() {
             return Ok(status);
         }
@@ -239,7 +240,7 @@ impl Library {
         for id in pending.iter().take(BATCH_SIZE) {
             let checked = status.checked - initial_checked;
             activity.progress(checked, Some(total), Some(format!("{} · {checked}개 확인 · {}개 남음", if provider == "kakao" { "카카오" } else { "MangaDex" }, status.remaining)));
-            if crate::workload::is_restricted() {
+            if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "releaseWatch") {
                 break;
             }
             if started.elapsed().as_secs() >= BATCH_SECONDS {
@@ -355,6 +356,7 @@ impl Library {
             &*self.connection()?,
             provider,
             &chrono::Utc::now().to_rfc3339(),
+            false,
         )?
         .len() as u64;
         if status.remaining == 0 {

@@ -112,6 +112,8 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                 sleep(Duration::from_secs(1));
             }
             while !stopped() {
+                let library=env.state.current_library();
+                let _manual_scope=library.as_ref().map(|library| crate::auto_jobs::ManualScope::owner(library,"cardCutouts"));
                 let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     job::run_pass(&mut env, &mut job)
                 }))
@@ -125,6 +127,17 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                 ) {
                     // Idle: the model process is not kept around (it holds several GB).
                     env.worker = None;
+                }
+                if let Some(library)=&library {
+                    let done=if let job::Pass::Worked {done,..}=pass { done } else { 0 };
+                    crate::auto_jobs::progress(library,"cardCutouts",done,done+job.pending,Some(job.pending),Some(job.failed_count()));
+                    match pass {
+                        job::Pass::Worked { done, failed, .. } => crate::auto_jobs::finish_owner(library,"cardCutouts",failed==0,done),
+                        job::Pass::Idle => { if crate::auto_jobs::manual_active(library,"cardCutouts") { crate::auto_jobs::finish_owner(library,"cardCutouts",true,0); } },
+                        job::Pass::Failed => crate::auto_jobs::finish_owner(library,"cardCutouts",false,0),
+                        job::Pass::Closed if crate::auto_jobs::stopped(library,"cardCutouts") => crate::auto_jobs::finish_owner(library,"cardCutouts",true,0),
+                        _ => {}
+                    }
                 }
                 let delay = job.delay(&pass, Instant::now());
                 sleep(delay);
@@ -197,8 +210,8 @@ impl RealEnv {
         let config = library.cloud_sync_config().map_err(|e| e.to_string())?;
         let endpoint = config
             .api_base_url
-            .filter(|_| config.enabled)
-            .ok_or("cloud off")?;
+            .filter(|endpoint| !endpoint.trim().is_empty())
+            .ok_or("no server")?;
         let client = library.cloud_client(&endpoint).map_err(|e| e.to_string())?;
         let token = credential::read_cloud_publisher_token_os().map_err(|e| e.to_string())?;
         self.session = Some(Session {
@@ -210,7 +223,8 @@ impl RealEnv {
     }
 
     fn abort(&self) -> impl Fn() -> bool {
-        || stopped() || crate::workload::is_restricted()
+        let state=self.state.clone();
+        move || stopped() || state.current_library().is_none_or(|library| crate::auto_jobs::stopped(&library,"cardCutouts") || crate::workload::is_restricted() && !crate::auto_jobs::manual(&library,"cardCutouts"))
     }
 
     fn model_path(&mut self) -> Result<PathBuf, JobError> {
@@ -223,7 +237,7 @@ impl RealEnv {
         let mut last = Instant::now() - Duration::from_secs(1);
         let mut progress = |done: u64, total: u64| {
             // The 작업 row shows the download; at most a few updates per second.
-            if stopped() || crate::workload::is_restricted() {
+            if stopped() || self.state.current_library().is_none_or(|library| crate::auto_jobs::stopped(&library,"cardCutouts") || crate::workload::is_restricted() && !crate::auto_jobs::manual(&library,"cardCutouts")) {
                 cancel.store(true, Ordering::Release);
             }
             if last.elapsed() >= Duration::from_millis(500) || done == total {
@@ -297,12 +311,12 @@ fn gate_inputs(env: &mut RealEnv) -> GateInputs {
         env.session = None;
     }
     GateInputs {
-        restricted: crate::workload::is_restricted(),
+        restricted: crate::workload::is_restricted() && !library.as_ref().is_some_and(|library|crate::auto_jobs::manual(library,"cardCutouts")),
         has_library: library.is_some(),
         cloud_ready: session_ok
             || library.as_ref().is_some_and(|l| {
                 l.cloud_sync_config()
-                    .is_ok_and(|c| c.enabled && c.api_base_url.is_some())
+                    .is_ok_and(|c| c.api_base_url.is_some_and(|url| !url.trim().is_empty()))
             }),
         has_token: session_ok,
         runtime_ready: env.runtime.is_some() || env.runtime().is_some(),
@@ -322,8 +336,30 @@ impl Env for RealEnv {
                 visible: false,
             };
         }
+        if self.state.current_library().is_some_and(|library|crate::auto_jobs::stopped(&library,"cardCutouts")) {
+            return Gate::Closed { reason: "일시 정지됨", visible: true };
+        }
         let inputs = gate_inputs(self);
-        job::decide(inputs)
+        if let Some(library)=self.state.current_library() {
+            let unconfigured=if !inputs.cloud_ready { Some("noServer") } else if !inputs.has_token || !inputs.runtime_ready { Some("noProviderKey") } else { None };
+            crate::auto_jobs::owner_wait(&library,"cardCutouts",if inputs.restricted {Some("lightweight")} else if inputs.character_busy {Some("busy")} else {None},unconfigured);
+        }
+        let gate = job::decide(inputs);
+        if gate == Gate::Open
+            && self.state.current_library().is_some_and(|library| {
+                !crate::auto_jobs::manual(&library, "cardCutouts")
+                    && !library
+                        .cloud_sync_config()
+                        .is_ok_and(|config| config.enabled)
+            })
+        {
+            Gate::Closed {
+                reason: "서버 복제가 꺼져 있음",
+                visible: false,
+            }
+        } else {
+            gate
+        }
     }
 
     fn candidates(&mut self) -> Result<Vec<String>, JobError> {
@@ -425,6 +461,13 @@ impl Env for RealEnv {
     }
 
     fn report(&mut self, report: Report) {
+        if let Some(library)=self.state.current_library() {
+            match &report {
+                Report::Running { done,total } => { crate::auto_jobs::owner_started(&library,"cardCutouts"); crate::auto_jobs::progress(&library,"cardCutouts",*done,*total,Some(total.saturating_sub(*done)),None); },
+                Report::Queued { remaining } | Report::Paused { remaining,.. } => crate::auto_jobs::progress(&library,"cardCutouts",0,*remaining,Some(*remaining),None),
+                _ => {}
+            }
+        }
         match report {
             Report::Running { done, total } => activities::report(
                 job::KEY,

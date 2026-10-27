@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AutoTagSettings } from "./AutoTagSettings";
 import { autoTagInboxResult, type AutoTagInbox } from "./autoTagInbox";
 import { useAutoTagInboxStatus } from "./useAutoTagInboxStatus";
+import { useAutoTagInbox } from "./AutoTagInboxSettings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -37,7 +38,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("renders the nightly result and chooses the folder, review toggle and manual trigger", async () => {
+it("renders the nightly result and saves the folder and review toggle", async () => {
   const user = userEvent.setup();
   render(<AutoTagSettings disabled={false} />);
   expect(await screen.findByText(/자동 태그 판단 12건 반영.*그림체 8,960장.*내용 검색 색인 9,103장/)).toBeTruthy();
@@ -48,31 +49,27 @@ it("renders the nightly result and chooses the folder, review toggle and manual 
   await user.click(screen.getByRole("button", { name: "폴더 선택" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: "/tmp/daily", applyTaggerReview: false });
-  await user.click(screen.getByRole("button", { name: "가져오기" }));
-  expect(invoke).toHaveBeenCalledWith("run_auto_tag_inbox_now");
-  expect(await screen.findByText("새로 가져올 파일이 없습니다.")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "사용 안 함" }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: null, applyTaggerReview: false });
 });
 
 it("shows failed file results and preserves configuration when a run is busy", async () => {
-  const user = userEvent.setup();
   settings.last!["auto-tags-latest.sqlite"].error = "자동 태그 파일 형식이 아닙니다";
   expect(autoTagInboxResult(settings)).toContain("자동 태그 가져오기 실패 · 자동 태그 파일 형식이 아닙니다");
   vi.mocked(invoke).mockImplementation(async command => command === "run_auto_tag_inbox_now"
     ? { settings: { folder: null, applyTaggerReview: true, last: null }, processed: [], skipped: "다른 가져오기가 진행 중입니다." }
     : settings);
-  render(<AutoTagSettings disabled={false} />);
-  await screen.findByText(/자동 태그 가져오기 실패/);
-  await user.click(screen.getByRole("button", { name: "가져오기" }));
-  expect(await screen.findByText("다른 가져오기가 진행 중입니다.")).toBeTruthy();
-  expect(screen.getByText("/tmp/inbox")).toBeTruthy();
+  const hook = renderHook(() => useAutoTagInbox(false));
+  await waitFor(() => expect(hook.result.current.settings?.folder).toBe("/tmp/inbox"));
+  await act(async () => { await hook.result.current.runNow(); });
+  expect(hook.result.current.message?.text).toBe("다른 가져오기가 진행 중입니다.");
+  expect(hook.result.current.settings?.folder).toBe("/tmp/inbox");
 });
 
 it("refreshes settings after a background completion and disables actions while unavailable", async () => {
   const view = render(<AutoTagSettings disabled />);
   await screen.findByText("/tmp/inbox");
-  expect((screen.getByRole("button", { name: "가져오기" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "폴더 선택" })).toBeDisabled();
   settings = { folder: "/tmp/new", applyTaggerReview: false, last: null };
   const handler = vi.mocked(listen).mock.calls[0][1];
   await act(async () => { handler({ event: "library://auto-tag-inbox", id: 1, payload: {} }); });

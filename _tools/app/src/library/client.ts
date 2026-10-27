@@ -209,6 +209,10 @@ type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
 >>;
 
 export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
+  autoJobsStatus: () => invoke("auto_jobs_status"),
+  runAutoJob: id => invoke("run_auto_job", { id }),
+  stopAutoJob: id => invoke("stop_auto_job", { id }),
+  setCharacterAutomationEnabled: enabled => invoke("pause_character_automation", { paused: !enabled }),
   assetImageText: (assetId) => invoke<AssetImageText | null>("asset_image_text", { assetId }),
   refreshAssetImageText: (assetId) => invoke<AssetImageText | null>("refresh_asset_image_text", { assetId }),
   descriptionSearchStatus: () => invoke<import("./types").DescriptionSearchStatus>("description_search_status"),
@@ -353,6 +357,7 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   flushAlbumOutbox: () => invoke<AlbumOutboxFlushResult>("flush_album_outbox"),
   albumSyncStatus: () => invoke<AlbumSyncStatus>("album_sync_status"),
   authoritySyncHealth: () => invoke<AuthoritySyncHealth>("authority_sync_health"),
+  acknowledgeAuthorityDrops: () => invoke<void>("acknowledge_authority_drops"),
   updateOnlineCatalog: (language, maxPages) =>
     language === undefined && maxPages === undefined
       ? invoke<CatalogUpdateResult>("update_online_catalog")

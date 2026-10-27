@@ -45,6 +45,11 @@ pub(crate) fn wake() {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
     control().changed.notify_all();
 }
+pub(crate) fn cached_progress(library: &Library) -> Option<Progress> {
+    let current = control().progress.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    (library.root().to_string_lossy() == current.0).then(|| current.1.clone())
+}
 pub(crate) fn stop() {
     control().stop.store(true, Ordering::Release);
     wake();
@@ -64,6 +69,7 @@ fn wait(duration: Duration) {
 }
 fn active(state: &AppState, library: &Library) -> bool {
     !control().stop.load(Ordering::Acquire)
+        && !crate::auto_jobs::stopped(library, "mangaSpines")
         && state
             .current_library()
             .is_some_and(|current| current.same_runtime(library))
@@ -198,7 +204,27 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                     wait(Duration::from_secs(1));
                     continue;
                 };
-                if !crate::workload::startup_background_ready() {
+                if crate::auto_jobs::stopped(&library, "mangaSpines") {
+                    crate::auto_jobs::owner_wait(&library, "mangaSpines", None, None);
+                    wait(Duration::from_secs(30));
+                    continue;
+                }
+                if crate::workload::is_restricted()
+                    && !crate::auto_jobs::manual_active(&library, "mangaSpines")
+                {
+                    crate::auto_jobs::owner_wait(
+                        &library,
+                        "mangaSpines",
+                        Some("lightweight"),
+                        None,
+                    );
+                    wait(Duration::from_secs(30));
+                    continue;
+                }
+                crate::auto_jobs::owner_wait(&library, "mangaSpines", None, None);
+                if !crate::workload::startup_background_ready()
+                    && !crate::auto_jobs::manual_active(&library, "mangaSpines")
+                {
                     wait(Duration::from_secs(1));
                     continue;
                 }
@@ -214,9 +240,11 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                         Progress::default(),
                     );
                     runtime = Some(library.clone());
-                    if !pause_until(Instant::now() + Duration::from_secs(15), || {
-                        active(&state, &library)
-                    }) {
+                    if !crate::auto_jobs::manual_active(&library, "mangaSpines")
+                        && !pause_until(Instant::now() + Duration::from_secs(15), || {
+                            active(&state, &library)
+                        })
+                    {
                         continue;
                     }
                 }
@@ -224,11 +252,17 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                     Ok(due) => due,
                     Err(_) => {
                         eprintln!("[manga scans] due query failed");
+                        if crate::auto_jobs::manual_active(&library, "mangaSpines") {
+                            crate::auto_jobs::finish_owner(&library, "mangaSpines", false, 0);
+                        }
                         wait(Duration::from_secs(30));
                         continue;
                     }
                 };
                 if due.is_empty() {
+                    if crate::auto_jobs::manual_active(&library, "mangaSpines") {
+                        crate::auto_jobs::finish_owner(&library, "mangaSpines", true, 0);
+                    }
                     wait(Duration::from_secs(30));
                     continue;
                 }
@@ -239,6 +273,12 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     current.1.queued = due.len();
                 }
+                crate::auto_jobs::owner_started(&library, "mangaSpines");
+                let total = due.len() as u64;
+                crate::auto_jobs::progress(&library, "mangaSpines", 0, total, Some(total), None);
+                let mut done = 0;
+                let mut errors = 0;
+                let mut real = 0;
                 for isbn in due {
                     if !active(&state, &library) {
                         break;
@@ -299,10 +339,24 @@ pub(crate) fn start(app: tauri::AppHandle, state: AppState) {
                             _ => progress.errors += 1,
                         }
                     }
+                    done += 1;
+                    if matches!(result,Ok("real")) { real += 1; }
+                    if result.is_err() {
+                        errors += 1;
+                    }
+                    crate::auto_jobs::progress(
+                        &library,
+                        "mangaSpines",
+                        done,
+                        total,
+                        Some(total.saturating_sub(done)),
+                        Some(errors),
+                    );
                     // Separate from collections-changed: refresh scan projections without
                     // acknowledging notifications or changing authoritative Work metadata.
                     let _ = app.emit("library://manga-scans-changed", &isbn);
                 }
+                crate::auto_jobs::finish_owner(&library, "mangaSpines", errors == 0, real);
                 let current = control()
                     .progress
                     .lock()

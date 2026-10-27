@@ -288,6 +288,12 @@ impl Library {
         }
         self.publish_shadow_backfill_activity(false);
     }
+    pub(crate) fn wake_auto_characters(&self) -> bool {
+        let running = self.character_incremental.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner).running;
+        if running { self.character_wake.notify(); }
+        running
+    }
     pub fn start_character_incremental(&self, config: RuntimeConfig) {
         let mut engine = self
             .character_incremental
@@ -522,10 +528,12 @@ impl Library {
             }
         };
         while !stop.load(Ordering::Acquire) && Arc::strong_count(&self.lease) > 1 {
+            let _manual_scope = crate::auto_jobs::ManualScope::owner(self, "characters");
+            let manual = crate::auto_jobs::manual(self, "characters");
             self.publish_character_activities();
             let seen = wake.generation();
             OWNER_WROTE.with(|wrote| wrote.set(false));
-            let restricted = crate::workload::is_restricted();
+            let restricted = crate::workload::is_restricted() && !manual;
             if restricted {
                 self.character_worker_pool.release();
                 let mut engine = self
@@ -549,10 +557,10 @@ impl Library {
                     [],
                     |row| row.get(0),
                 )?;
-                if worker_paused {
+                if worker_paused && !manual || crate::auto_jobs::stopped(self, "characters") {
                     return Ok(false);
                 }
-                if !crate::workload::is_restricted() {
+                if !manual && !crate::workload::is_restricted() {
                     match self.advance_character_reference_reinforcement() {
                         Ok(true) => return Ok(true),
                         Ok(false) => {}
@@ -567,6 +575,9 @@ impl Library {
                     }
                 }
                 let Some(job) = self.claim_character_autotag()? else {
+                    if manual || crate::auto_jobs::manual_active(self, "characters") {
+                        return Ok(false);
+                    }
                     if crate::workload::is_restricted() {
                         return Ok(false);
                     }
@@ -621,6 +632,7 @@ impl Library {
                     e.total = 0;
                     e.compared = 0;
                 }
+                crate::auto_jobs::owner_started(self, "characters");
                 let mut job_config = config.clone();
                 if crate::workload::is_restricted() {
                     job_config.augmentation_model = None;
@@ -628,6 +640,11 @@ impl Library {
                 }
                 self.publish_character_activities();
                 let outcome = self.compare_incremental_asset(&job, &job_config, stop.clone());
+                if !crate::auto_jobs::manual_active(self, "characters") {
+                    crate::auto_jobs::finish_owner(self, "characters", outcome.is_ok(), 1);
+                } else {
+                    crate::auto_jobs::character_item(self, outcome.is_ok());
+                }
                 if let Err(error) = outcome {
                     let stopped = stop.load(Ordering::Acquire);
                     let retry = stopped || job.attempts < 3;
@@ -663,6 +680,11 @@ impl Library {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 e.turns += 1;
                 e.idle_turns += u64::from(!matches!(attempt, Ok(true)));
+            }
+            if (manual || crate::auto_jobs::stopped(self, "characters"))
+                && !matches!(attempt, Ok(true))
+            {
+                crate::auto_jobs::finish_characters(self, attempt.is_ok());
             }
             let deadline = match attempt {
                 Ok(true) => continue,

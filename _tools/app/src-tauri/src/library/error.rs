@@ -301,6 +301,8 @@ pub enum LibraryError {
     CatalogTransportTimedOut,
     #[error("온라인 카탈로그의 다른 요청이 처리 중입니다")]
     CatalogTransportBusy,
+    #[error("다른 실행이 진행 중입니다")]
+    AutoJobBusy,
     #[error("온라인 카탈로그에 연결할 수 없습니다")]
     CatalogTransportUnavailable,
     #[error("일본어 수집에는 언어별 수집을 지원하는 VPS 연결이 필요합니다. VPS 배포와 연결 설정을 확인해 주세요")]

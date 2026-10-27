@@ -564,6 +564,14 @@ fn cached_index(
     Ok(index)
 }
 fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Result<Arc<Index>> {
+    ensure_index_mode(cache, io, cancel, false)
+}
+fn ensure_index_mode(
+    cache: &Path,
+    io: &impl Transport,
+    cancel: &AtomicBool,
+    force: bool,
+) -> Result<Arc<Index>> {
     fs::create_dir_all(cache)?;
     let lease_dir = cache.join("refresh-lease");
     fs::create_dir_all(&lease_dir)?;
@@ -580,7 +588,7 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
         BulkState::default()
     };
     // An index upgrade uses the existing ZIP even when its weekly refresh is due.
-    if let Some(generation) = state.generation.as_deref() {
+    if let Some(generation) = state.generation.as_deref().filter(|_| !force) {
         uuid::Uuid::parse_str(generation).map_err(|_| Error::InvalidMetadata)?;
         let index_path = cache.join(format!("index-{generation}.json"));
         if cache.join(format!("Metadata-{generation}.zip")).is_file()
@@ -590,7 +598,7 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
             return cached_index(cache, &state, cancel, true);
         }
     }
-    if within(io.now_ms(), state.downloaded_at, WEEK_MS) {
+    if !force && within(io.now_ms(), state.downloaded_at, WEEK_MS) {
         return cached_index(cache, &state, cancel, true);
     }
     if within(io.now_ms(), state.last_attempt_at, RETRY_MS) {
@@ -698,6 +706,20 @@ pub fn refresh_due(cache: &Path, now: u64) -> bool {
     needs_index
         || (!within(now, state.downloaded_at, WEEK_MS)
             && !within(now, state.last_attempt_at, RETRY_MS))
+}
+pub(crate) fn refresh_now(cache: &Path, cancel: &AtomicBool) -> Result<u64> {
+    let before: BulkState = read_json(&cache.join("bulk-state.json"), 4096).unwrap_or_default();
+    let index = ensure_index_mode(cache, &Http::default(), cancel, true)?;
+    let after: BulkState = read_json(&cache.join("bulk-state.json"), 4096)?;
+    if before.downloaded_at == after.downloaded_at {
+        return Err(Error::Http("bulk_download_cooldown_or_failed".into()));
+    }
+    Ok(index.games.len() as u64)
+}
+pub(crate) fn last_bulk_download(cache: &Path) -> Option<u64> {
+    read_json::<BulkState>(&cache.join("bulk-state.json"), 4096)
+        .ok()?
+        .downloaded_at
 }
 pub fn refresh(cache: &Path, cancel: &AtomicBool) -> Result<()> {
     ensure_index(cache, &Http::default(), cancel).map(|_| ())

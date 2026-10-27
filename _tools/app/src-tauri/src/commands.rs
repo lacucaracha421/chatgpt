@@ -395,6 +395,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCatalogTransportResponse => "invalid_catalog_transport_response",
             LibraryError::CatalogTransportTimedOut => "catalog_transport_timed_out",
             LibraryError::CatalogTransportBusy => "catalog_transport_busy",
+            LibraryError::AutoJobBusy => "auto_job_busy",
             LibraryError::CatalogTransportUnavailable => "catalog_transport_unavailable",
             LibraryError::InvalidCatalogUpdateInterval => "invalid_catalog_update_interval",
             LibraryError::CatalogJapaneseTransportRequired => "catalog_japanese_transport_required",
@@ -2662,12 +2663,14 @@ async fn run_online_catalog_update(
                 .and_then(|stream| stream.last_progress_at),
         });
     };
+    let mut auto_job_run =
+        crate::auto_jobs::Run::begin(&library, "catalog").map_err(CommandError::from)?;
     let vps_base_url = library
         .cloud_sync_config()
         .ok()
         .and_then(|config| config.api_base_url);
     // VPS base url이 설정된 경우 PC는 k-hentai 직접 연결 없이 VPS를 경유한다.
-    catalog_update::execute_catalog_update(
+    let result = catalog_update::execute_catalog_update(
         library,
         &transport,
         &app,
@@ -2675,8 +2678,9 @@ async fn run_online_catalog_update(
         language,
         max_pages,
     )
-    .await
-    .map_err(CommandError::from)
+    .await;
+    auto_job_run.finish(result.is_ok(), result.as_ref().ok().map(|r| r.added));
+    result.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -3063,6 +3067,15 @@ pub async fn authority_sync_health(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn acknowledge_authority_drops(state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.acknowledge_authority_drops())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

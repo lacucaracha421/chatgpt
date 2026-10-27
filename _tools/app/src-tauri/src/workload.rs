@@ -732,10 +732,17 @@ fn start_timers(app: tauri::AppHandle) {
                     if crate::library::launchbox::refresh_due(&cache, now)
                         && !LAUNCHBOX_BUSY.swap(true, Ordering::AcqRel)
                     {
+                        let library = library.clone();
                         std::thread::spawn(move || {
                             let _reset = Reset(&LAUNCHBOX_BUSY);
-                            let _ =
-                                crate::library::launchbox::refresh(&cache, &AtomicBool::new(false));
+                            if let Ok(mut run) = crate::auto_jobs::Run::begin(&library, "launchbox")
+                            {
+                                let result = crate::library::launchbox::refresh(
+                                    &cache,
+                                    &AtomicBool::new(false),
+                                );
+                                run.finish(result.is_ok(), None);
+                            }
                         });
                     }
                 }

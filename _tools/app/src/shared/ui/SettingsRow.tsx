@@ -25,8 +25,9 @@ export function StatusWord({ tone, children }: { tone?: string; children: ReactN
 
 /** `help` is the ⓘ text: one paragraph, or several. */
 export function SettingsGroup({ title, help, children }: { title: string; help?: string | readonly string[]; children: ReactNode }) {
-  return <section className="settings-view__group" aria-labelledby={`settings-group-${title}`}>
-    <SectionLabel as="h3" id={`settings-group-${title}`} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
+  const headingId = `settings-group-${title.replace(/\s+/g, "-")}`;
+  return <section className="settings-view__group" aria-labelledby={headingId}>
+    <SectionLabel as="h3" id={headingId} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
     {children}
   </section>;
 }
