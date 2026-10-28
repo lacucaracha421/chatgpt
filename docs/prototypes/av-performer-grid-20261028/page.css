@@ -1,0 +1,122 @@
+/* Mockup only: the document around the frames, the stand-in app chrome (rail, top bar, tablet bars) and the
+   stand-in portraits. Nothing here is part of the proposal; that is performer-grid.css. */
+html, body, #root { height: auto !important; overflow: visible !important; overflow-y: auto !important; user-select: text; -webkit-user-select: text; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0f10; color: var(--color-text); font: 400 15px / 1.6 var(--font-ui); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, p { margin: 0; }
+.doc { width: 1520px; max-width: 100%; margin: 0 auto; padding: 32px 32px 96px; display: flex; flex-direction: column; gap: 56px; word-break: keep-all; overflow-wrap: break-word; }
+.doc-head { display: flex; flex-direction: column; gap: 12px; }
+.doc-head h1 { font-size: 26px; font-weight: 600; letter-spacing: -.3px; }
+.lead { color: var(--color-muted); max-width: 1100px; line-height: 1.75; }
+.lead b, .note b, .doc li b, td b, .cap b { color: var(--color-text); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.toc a { color: var(--color-muted); text-decoration: none; display: inline-flex; min-height: 32px; align-items: center; }
+.toc a:hover { color: var(--color-text); }
+.toc a b { color: var(--color-text); margin-right: 6px; }
+.variant { display: flex; flex-direction: column; gap: 16px; padding-top: 24px; border-top: 1px solid #2a2b2d; scroll-margin-top: 16px; }
+.variant > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: 21px; font-weight: 600; line-height: 1.35; }
+.variant > h2 .key { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; align-self: center; background: var(--color-accent); color: var(--color-on-accent); border-radius: 2px; font-size: 15px; }
+.variant > h2 small { color: var(--color-faint); font-size: 14px; font-weight: 400; }
+.variant h3 { font-size: 16px; font-weight: 600; margin-top: 8px; }
+.note { max-width: 1100px; color: var(--color-muted); font-size: 14.5px; line-height: 1.8; }
+.cap { color: var(--color-faint); font-size: 13.5px; line-height: 1.7; max-width: 1100px; }
+.doc ul.plain { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.85; max-width: 1100px; font-size: 14.5px; display: grid; gap: 2px; }
+.doc code { font-size: 13px; color: var(--color-text); }
+.row { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+.row > figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.tag { display: inline-block; padding: 0 6px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--color-text); font-size: 12px; font-weight: 600; line-height: 20px; }
+.tag.is-rec { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+table.decide { border-collapse: collapse; width: 100%; max-width: 1440px; font-size: 14px; line-height: 1.6; }
+table.decide th, table.decide td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid #2a2b2d; }
+table.decide th { color: var(--color-faint); font-weight: 400; font-size: 12px; }
+table.decide td { color: var(--color-muted); }
+table.decide td:first-child { color: var(--color-text); font-weight: 600; white-space: nowrap; }
+
+/* Annotation pins (mockup only, deliberately not an app colour). */
+.pin { position: absolute; z-index: 30; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; background: #c9a24a; color: #1a1408; font: 700 12px/1 var(--font-ui); box-shadow: 0 0 0 2px #0e0f10; }
+.legend { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px 10px; max-width: 1100px; margin: 0; padding: 0; list-style: none; color: var(--color-muted); font-size: 14.5px; line-height: 1.7; }
+.legend li { display: contents; }
+.legend .pin { position: static; box-shadow: none; margin-top: 2px; }
+
+/* ---------- Frames ---------- */
+.frame { position: relative; overflow: hidden; background: var(--color-bg); outline: 1px solid #2a2b2d; color: var(--color-text); font-size: var(--type-body); line-height: var(--line-ui); flex: none; user-select: none; }
+.frame--pc { width: 1440px; height: 900px; }
+.frame--pc.tall { height: 1180px; }
+.frame--pc.short { height: 330px; }
+.frame--pc.end { height: 830px; }
+.frame--tab { width: 800px; height: 1280px; zoom: .6;
+  --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px; --line-meta: 20px; --line-ui: 24px;
+  --control-height: 44px; --control-height-compact: 36px; --control-height-menu: 48px; --badge-height: 24px; --icon-md: 24px; }
+svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: 16px; height: 16px; }
+svg.i.solid { fill: currentColor; stroke: none; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* PC shell stand-in: rail + top bar (the real app puts the list toolbar in the window chrome's header slot). */
+.pc { display: grid; grid-template-columns: 56px minmax(0, 1fr); height: 100%; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding-top: var(--space-3); background: var(--color-sidebar); border-right: 1px solid var(--color-border); color: var(--color-muted); }
+.rail span { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-control); }
+.rail span.on { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+.rail .push { margin-top: auto; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--toolbar-height); padding: 0 0 0 var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.topbar .ttl { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: 600; }
+.topbar .ttl svg { width: 16px; height: 16px; color: var(--color-faint); }
+.topbar .grow { flex: 1; }
+.topbar .count { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.winctl { display: flex; align-self: stretch; align-items: center; gap: 24px; padding: 0 16px 0 12px; color: var(--color-faint); font-size: 13px; }
+.status-chip { color: var(--color-faint); font-size: 12px; }
+.ibtn { display: inline-grid; place-items: center; width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); cursor: pointer; }
+.ibtn svg { width: 16px; height: 16px; }
+.quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); font: inherit; white-space: nowrap; cursor: pointer; }
+.quiet-menu svg { width: 16px; height: 16px; }
+.quiet-menu[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text); }
+.scroll { position: relative; flex: 1; min-height: 0; overflow: hidden; padding: 0 var(--space-3); }
+.ui-section-bar { margin: 0 calc(-1 * var(--space-3)); }
+
+/* Static 보기 menu (the app's is a Radix portal anchored to the button). */
+.mock-menu { position: absolute; z-index: 20; display: block; }
+.mock-menu .ui-view-options__content { gap: var(--space-6); }
+.sub { display: grid; gap: var(--space-1); }
+.sub > span { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; }
+.ui-view-options .ui-segmented { height: var(--control-height); }
+.ui-per-row .ui-slider { display: flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--type-meta); }
+
+/* Stand-in portraits: a soft tinted field with a faint head-and-shoulders shape. No real photos. */
+.ph { background:
+  radial-gradient(circle at 50% 40%, var(--sil) 0 14.5%, transparent 15%),
+  radial-gradient(ellipse 52% 30% at 50% 100%, var(--sil) 0 98%, transparent 100%),
+  linear-gradient(165deg, hsl(var(--h) 22% 40%), hsl(calc(var(--h) + 24) 18% 20%)); --sil: rgb(255 255 255 / 10%); }
+
+/* Hover stand-in for one card (the real one is :hover). */
+.performer-card.is-hover .performer-card__portrait { filter: brightness(1.08); }
+
+/* ---------- Tablet stand-in ---------- */
+.tab { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tab-top { display: flex; align-items: center; gap: var(--space-2); flex: none; height: 64px; padding: 0 var(--space-3) 0 var(--space-6); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab-top .mark { width: 22px; height: 24px; background: var(--color-accent); clip-path: polygon(0 0, 100% 0, 100% 72%, 50% 100%, 0 72%); margin-right: var(--space-2); }
+.tab-top .ttl { font-size: var(--type-title); font-weight: 600; }
+.tab-top .cnt { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; margin-left: var(--space-2); }
+.tab-top .grow { flex: 1; }
+.tab .ibtn { width: 44px; height: 44px; }
+.tab .ibtn svg { width: 24px; height: 24px; }
+.tab-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.tab-bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6); border-bottom: 1px solid var(--color-border); }
+.tab-bar .ui-segmented { height: 44px; }
+.tab-bar .ui-segmented__cell { min-width: 88px; }
+.tab-bar .grow { flex: 1; }
+.tab-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 44px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--color-muted); }
+.tab-tool svg { width: 24px; height: 24px; }
+.tab-div { width: 1px; height: 20px; margin-inline: var(--space-1); background: var(--color-border); }
+.tab .ui-tabs__tab { min-width: 44px; }
+.tab .performer-grid { padding: var(--space-4) var(--space-6) var(--space-8); }
+.tab-nav { display: flex; justify-content: center; gap: 4px; align-items: center; flex: none; height: 64px; padding: 7px 24px; border-top: 1px solid var(--color-border); background: var(--color-sidebar); }
+.tab-nav span { display: grid; place-items: center; width: 140px; height: 48px; border-radius: var(--radius-selection); color: var(--color-muted); font-size: 15px; }
+.tab-nav span.on { background: var(--color-accent); color: var(--color-on-accent); }
+.t-dim { position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, .5); }
+.t-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: grid; gap: var(--space-6); padding: var(--space-2) var(--space-6) var(--space-8); background: var(--color-surface-raised, var(--color-surface)); border-top: 1px solid var(--color-border); border-radius: 8px 8px 0 0; box-shadow: var(--shadow-dialog); }
+.t-sheet .grab { width: 40px; height: 4px; margin: 4px auto 0; border-radius: 2px; background: var(--color-border-strong); }
+.t-sheet h3 { font-size: var(--type-title); font-weight: 600; margin: 0; }
+.t-sheet .ui-segmented { height: 44px; }
+.t-sheet .ui-per-row output { font-size: 15px; }
+.t-sheet .ui-view-options__content { padding: 0; gap: var(--space-6); }

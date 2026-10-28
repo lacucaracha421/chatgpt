@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AV 배우 보기</title>
+<!-- The app's real CSS, copied under app-css/ in the repository layout on 2026-10-28 (relative imports keep
+     working): tokens.css (→ fonts.css → Pretendard), shared-base/surfaces/states/toolbars, controls.css
+     (→ surface-motion.css), chrome.css, collectionSpines.css, collections/CollectionBrowser.css and
+     collectionViewSections.css. performer-grid.css = the PROPOSED CSS. page.css = this document and the
+     stand-in chrome. Portraits are stand-in gradients; names are invented. -->
+<link rel="stylesheet" href="app-css/src/styles/tokens.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-base.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-surfaces.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-toolbars.css">
+<link rel="stylesheet" href="app-css/src/styles/shared-states.css">
+<link rel="stylesheet" href="app-css/src/styles/controls.css">
+<link rel="stylesheet" href="app-css/src/styles/chrome.css">
+<link rel="stylesheet" href="app-css/src/styles/collectionSpines.css">
+<link rel="stylesheet" href="app-css/src/collections/CollectionBrowser.css">
+<link rel="stylesheet" href="app-css/src/collections/collectionViewSections.css">
+<link rel="stylesheet" href="performer-grid.css">
+<link rel="stylesheet" href="page.css">
+<style>
+/* 작품 tab stand-in jackets (front covers), mockup only. */
+.cgrid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.ccard { display: grid; gap: var(--space-2); min-width: 0; }
+.cv { display: block; aspect-ratio: 800 / 1135; border-radius: var(--radius-mark); background: linear-gradient(165deg, hsl(var(--h) 30% 46%), hsl(calc(var(--h) + 30) 26% 20%)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.ccard strong { overflow: hidden; color: var(--color-muted); font-size: var(--type-meta); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.works-head { margin: var(--space-2) var(--space-6) 0; }
+.strip { display: grid; grid-template-columns: repeat(6, 205px); gap: var(--space-4); align-items: start; }
+.strip > div { display: grid; gap: var(--space-2); }
+.strip > div > .k { color: var(--color-faint); font-size: 12px; }
+.strip .performer-grid { padding: 0; grid-template-columns: minmax(0, 1fr); }
+</style>
+</head>
+<body>
+<div class="doc" id="doc"></div>
+<script>
+const P = {
+  home: 'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  photo: 'm2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z',
+  stack: 'M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  doc: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+  search: 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  dots: 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  down: 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  plus: 'M12 4.5v15m7.5-7.5h-15',
+  spark: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  users: 'M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z',
+  grid: 'M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z',
+  star: 'M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z',
+  x: 'M6 18 18 6M6 6l12 12',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+const pin = (n, style) => `<i class="pin" style="${style}">${n}</i>`;
+
+/* Invented performers (no real people). Sizes are the display values (stored in inches, shown in cm).
+   birth: full date → age on 2026-10-28; year only → "1998년생". last = the newest work's date (displayDate). */
+const PEOPLE = [
+  { ko: '츠키시마 카에데', ja: '月島 楓', age: 32, h: 170, b: 95, w: 62, hip: 92, cup: 'H', n: 66, last: '10.21', ph: 20 },
+  { ko: '키리시마 레나', ja: '霧島 玲奈', age: 30, h: 167, b: 92, w: 60, hip: 90, cup: 'G', n: 51, last: '9.30', ph: 340 },
+  { ko: '아마노 하루카', ja: '天野 遥', age: 27, h: 158, b: 88, w: 58, hip: 86, cup: 'F', n: 38, last: '10.14', ph: 30, fav: true },
+  { ko: '타카미 시오리', ja: '高見 栞', age: 29, h: 164, b: 90, w: 59, hip: 88, cup: 'G', n: 29, last: '8.2', ph: null },
+  { ko: '시라이시 미오', ja: '白石 澪', age: 25, h: 152, b: 83, w: 56, hip: 84, cup: 'D', n: 24, last: '10.25', ph: 210, fav: true },
+  { ko: '나루세 미유키', ja: '成瀬 美雪', age: 30, h: 161, b: 87, w: 59, hip: 87, cup: 'E', n: 21, last: '7.19', ph: 280 },
+  { ko: '하야세 유이', ja: '早瀬 結衣', year: 1998, h: 155, cup: 'F', n: 17, last: '2025.12.5', ph: 15 },
+  { ko: '오토나시 유즈', ja: '音無 柚', age: 26, h: 156, cup: 'D', n: 15, last: '9.12', ph: 150 },
+  { ko: '카미야 리오', ja: '神谷 莉緒', age: 28, h: 168, b: 89, w: 60, hip: 89, cup: 'F', n: 14, last: '10.3', ph: 0 },
+  { ko: '사쿠라기 나나', ja: '桜木 なな', age: 25, h: 149, b: 80, w: 55, hip: 82, cup: 'C', n: 12, last: '6.28', ph: 350 },
+  { ko: '세토 아카리', ja: '瀬戸 あかり', age: 24, h: 150, b: 82, w: 56, hip: 83, cup: 'C', n: 11, last: '10.9', ph: 320 },
+  { ko: '후지사와 마나', ja: '藤沢 茉奈', h: 158, b: 91, w: 60, hip: 88, cup: 'G', n: 10, last: '5.30', ph: 230 },
+  { ko: '미즈키 아오이', ja: '水城 葵', age: 23, h: 160, b: 85, w: 57, hip: 85, cup: 'E', n: 9, last: '10.18', ph: 190 },
+  { ko: '하스미 쿄코', ja: '蓮見 京子', age: 36, h: 165, b: 90, w: 61, hip: 89, n: 8, last: '2024.3.8', ph: 45 },
+  { ko: '이즈미 사나', ja: '泉 紗奈', age: 24, b: 86, w: 58, hip: 85, cup: 'F', n: 7, last: '8.27', ph: 40, fav: true },
+  { ko: '아사기리 메이', ja: '朝霧 芽衣', h: 162, n: 4, last: '4.11', ph: 260 },
+  { ko: '코노하 린', ja: '木葉 凛', n: 3, last: '2025.7.1', ph: null },
+  { ko: '히나타 코하루', ja: '日向 小春', age: 22, h: 154, b: 84, w: 57, hip: 83, cup: 'E', n: 2, last: '10.26', ph: 25 },
+];
+const CUPS = 'ABCDEFGHIJK';
+const byCount = (a, b) => b.n - a.n;
+const byCup = (a, b) => CUPS.indexOf(b.cup) - CUPS.indexOf(a.cup) || byCount(a, b);
+const sep = '<span class="performer-card__sep"> · </span>';
+const k = (on, text) => on ? `<span class="is-key">${text}</span>` : text;
+
+/* One card: portrait, name + 작품 수, then up to two stat lines (missing values are left out). */
+function card(p, key = 'count', { hover = false } = {}) {
+  const portrait = p.ph == null
+    ? `<span class="performer-card__portrait is-initial" aria-hidden="true">${[...p.ko][0]}</span>`
+    : `<span class="performer-card__portrait ph" style="--h:${p.ph}" aria-hidden="true"></span>`;
+  const count = key === 'recent' ? `${p.n}편${sep}${k(true, p.last)}` : k(key === 'count', `${p.n}편`);
+  const line1 = [p.age != null ? k(key === 'age', `만 ${p.age}세`) : p.year ? k(key === 'age', `${p.year}년생`) : null, p.h ? k(key === 'height', `${p.h}cm`) : null].filter(Boolean).join(sep);
+  const size = p.b
+    ? [`B${p.b}${p.cup ? ` ${k(key === 'cup', `(${p.cup})`)}` : ''}`, p.w ? `W${p.w}` : '', p.hip ? `H${p.hip}` : ''].filter(Boolean).join(' ')
+    : p.cup ? k(key === 'cup', `${p.cup}컵`) : '';
+  const lines = [line1, size].filter(Boolean).map(t => `<span>${t}</span>`).join('');
+  return `<button type="button" class="performer-card${hover ? ' is-hover' : ''}" aria-label="${p.ko}">${portrait}
+    <span class="performer-card__text"><span class="performer-card__name"><b>${p.ko}</b>${p.fav ? `<svg class="performer-card__favorite" viewBox="0 0 24 24" role="img" aria-label="즐겨찾기"><path d="${P.star}"/></svg>` : ''}<span class="performer-card__count">${count}</span></span>
+    <span class="performer-card__stats">${lines}</span></span></button>`;
+}
+const MISSING = { age: '나이 정보 없음', height: '키 정보 없음', cup: '컵 정보 없음' };
+const HAS = { age: p => p.age != null || p.year, height: p => p.h, cup: p => p.cup };
+function grid(list, { key = 'count', cols = 6, hoverIndex = -1, cls = '', tail = true } = {}) {
+  const has = HAS[key];
+  const present = has ? list.filter(has) : list, missing = has ? list.filter(p => !has(p)) : [];
+  const label = missing.length && tail ? `<div class="ui-section-label performer-grid__missing"><span class="ui-section-label__title">${MISSING[key]}</span> <span class="ui-section-label__count">${missing.length}명</span><span class="ui-section-label__rule" aria-hidden="true"></span></div>` : '';
+  return `<div class="performer-grid ${cls}" ${key !== 'count' && key !== 'name' ? `data-key="${key}"` : ''} style="--columns:${cols}" role="list" aria-label="AV 배우 목록">
+    ${present.map((p, i) => card(p, key, { hover: i === hoverIndex })).join('')}${tail ? label + missing.map(p => card(p, key)).join('') : ''}</div>`;
+}
+
+function segmented(cells, active, extra = '') {
+  return `<div class="ui-segmented ${extra}" role="radiogroup"><span class="ui-segmented__thumb ui-segmented__thumb--initial"></span>${cells.map((c, i) =>
+    `<button type="button" class="ui-segmented__cell" ${i === active ? 'data-segmented-active="true"' : ''}><span class="ui-segmented__content"><span class="ui-segmented__label">${c}</span></span></button>`).join('')}</div>`;
+}
+function placeThumbs(root = document) {
+  root.querySelectorAll('.ui-segmented').forEach(seg => {
+    const cell = seg.querySelector('[data-segmented-active]'), th = seg.querySelector('.ui-segmented__thumb');
+    if (!cell || !th) { if (th) th.style.display = 'none'; return; }
+    th.style.left = cell.offsetLeft + 'px'; th.style.width = cell.offsetWidth + 'px';
+  });
+}
+const label = t => `<div class="ui-section-label"><span class="ui-section-label__title">${t}</span><span class="ui-section-label__rule" aria-hidden="true"></span></div>`;
+const tabs = (on = 1) => `<span class="av-view-switch__divider" aria-hidden="true"></span><div class="av-view-switch"><div class="ui-tabs ui-tabs--inline" role="tablist" aria-label="AV 보기">
+  <button type="button" class="ui-tabs__tab" role="tab" aria-selected="${on === 0}">작품</button><button type="button" class="ui-tabs__tab" role="tab" aria-selected="${on === 1}">배우</button></div></div>`;
+
+/* ---------- PC chrome ---------- */
+const rail = () => `<nav class="rail">${['home', 'photo', 'stack', 'book', 'doc'].map((n, i) => `<span class="${i === 2 ? 'on' : ''}">${ic(n)}</span>`).join('')}<span class="push">${ic('search')}</span><span>${ic('dots')}</span></nav>`;
+const topBar = (title, count) => `<header class="topbar"><span class="ttl">${title}${ic('down', 's')}</span><span class="count num">${count}</span><span class="grow"></span>
+  <button class="ibtn" type="button" aria-label="${title.includes('배우') ? '배우 이름 검색' : '제목 검색'}">${ic('search')}</button><button class="ibtn" type="button" aria-label="새 컬렉션">${ic('plus')}</button>
+  <span class="status-chip">동기화됨</span><span class="winctl"><span>—</span><span>☐</span><span>✕</span></span></header>`;
+const bar = (open = false, view = 1) => `<div class="ui-section-bar">${segmented(['게임', '만화', '영화', 'AV'], 3)}${tabs(view)}
+  <div class="ui-section-bar__trailing"><div class="collection-shortcuts">
+    <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('spark', 's')}<span class="collection-shortcuts__label">쇼케이스</span></button>
+    <button class="ui-button ui-button--quiet ui-button--sm" type="button">${ic('users', 's')}<span class="collection-shortcuts__label">캐릭터</span></button></div>
+    <span class="collection-shortcuts__divider"></span>
+    <button class="quiet-menu" type="button" aria-expanded="${open}">${ic('grid', 's')}<span>보기</span></button></div></div>`;
+const pc = (inner, cls = '') => `<div class="frame frame--pc ${cls}"><div class="pc">${rail()}<div class="main">${inner}</div></div></div>`;
+
+const SORTS = [['count', '작품 수'], ['name', '이름'], ['age', '나이'], ['height', '키'], ['cup', '컵'], ['recent', '최근 작품']];
+const ORDER = { count: ['많은순', '적은순'], name: ['가나다순', '역순'], age: ['어린순', '많은순'], height: ['큰순', '작은순'], cup: ['큰순', '작은순'], recent: ['최신순', '오래된순'] };
+const sortRows = key => `<div class="performer-sort" role="radiogroup" aria-label="정렬 기준">${SORTS.map(([v, t]) => `<button type="button" class="performer-sort__row" role="radio" aria-checked="${v === key}"><span>${t}</span></button>`).join('')}</div>`;
+function viewSections(key, perRow, min = 3, max = 10) {
+  return `<section class="ui-view-options__section">${label('배치')}<div class="ui-per-row"><label class="ui-slider"><span>한 줄에</span><input type="range" min="${min}" max="${max}" step="1" value="${perRow}" aria-label="한 줄에"></label><output>${perRow}개</output></div></section>
+    <section class="ui-view-options__section">${label('정렬')}
+      <div class="sub"><span>기준</span>${sortRows(key)}</div>
+      <div class="sub"><span>순서</span>${segmented(ORDER[key], 0, 'ui-segmented--full-width')}</div></section>`;
+}
+const menu = (key, style) => `<div class="ui-menu ui-view-options mock-menu" style="${style}" role="dialog" aria-label="보기"><div class="ui-view-options__content">${viewSections(key, 6)}</div></div>`;
+
+/* ---------- Tablet ---------- */
+function tablet({ key = 'count', sheet = false } = {}) {
+  const list = [...PEOPLE].sort(key === 'cup' ? byCup : byCount);
+  return `<div class="frame frame--tab"><div class="tab">
+    <header class="tab-top"><span class="mark" aria-hidden="true"></span><span class="ttl">컬렉션</span><span class="grow"></span><button class="ibtn" aria-label="찾기">${ic('search')}</button><button class="ibtn" aria-label="더보기">${ic('dots')}</button></header>
+    <div class="tab-body">
+      <div class="tab-bar">${segmented(['게임', '만화', '영화', 'AV'], 3)}${tabs(1)}<span class="grow"></span>
+        <button class="tab-tool" aria-label="쇼케이스">${ic('spark')}</button><button class="tab-tool" aria-label="캐릭터">${ic('users')}</button>
+        <span class="tab-div"></span><button class="tab-tool" aria-label="보기">${ic('grid')}</button></div>
+      ${grid(list, { key, cols: 3, tail: false })}
+      ${sheet ? `<div class="t-dim"></div><div class="t-sheet" role="dialog" aria-label="보기"><span class="grab"></span><h3>보기</h3>
+        <div class="ui-view-options__content">${viewSections(key, 3, 2, 5)}</div></div>` : ''}
+    </div>
+    <nav class="tab-nav"><span>홈</span><span>에셋</span><span class="on">컬렉션</span><span>망가</span><span>메모</span></nav>
+  </div></div>`;
+}
+
+const byCountList = [...PEOPLE].sort(byCount), byCupList = [...PEOPLE].sort(byCup);
+const harukaIdx = PEOPLE.findIndex(p => p.ko === '아마노 하루카');
+const covers = n => Array.from({ length: n }, (_, i) => `<div class="ccard"><span class="cv" style="--h:${(i * 47 + 12) % 360}"></span><strong>ABCD-${(812 - i * 37 + 1000) % 1000}</strong></div>`).join('');
+
+document.getElementById('doc').innerHTML = `
+<header class="doc-head">
+  <h1>AV 배우 보기</h1>
+  <p class="lead">AV 컬렉션 화면에 <b>작품 | 배우</b> 전환을 두고, 배우 쪽은 <b>큰 프로필 카드를 격자로</b> 놓는다. 카드 아래에는 나이·키·사이즈·작품 수를 짧게 적고, <b>보기 → 정렬</b>에서 작품 수·이름·나이·키·컵·최근 작품 순으로 바꾼다. 고른 기준의 값은 카드에서 밝게, 나머지는 한 단계 흐리게 보인다. 값이 없는 배우는 늘 맨 뒤다.</p>
+  <p class="lead">앱의 실제 토큰·컨트롤·컬렉션 CSS를 그대로 읽는다(<code>app-css/</code>, 2026-10-28 사본). 새로 제안하는 CSS는 <code>performer-grid.css</code> 하나다. 사진 자리는 임시 그라데이션이고, 배우 이름은 모두 지어낸 것이다. PC 화면은 1440 × 900 창, 태블릿은 800 × 1280 세로 화면을 0.6배로 줄여 보인다.</p>
+  <ul class="toc">
+    <li><a href="#a"><b>1</b>PC 배우 격자</a></li>
+    <li><a href="#b"><b>2</b>정렬 = 컵</a></li>
+    <li><a href="#c"><b>3</b>카드 한 장</a></li>
+    <li><a href="#d"><b>4</b>작품 탭</a></li>
+    <li><a href="#e"><b>5</b>태블릿</a></li>
+    <li><a href="#f"><b>6</b>정할 것</a></li>
+  </ul>
+</header>
+
+<section class="variant" id="a">
+  <h2><span class="key">1</span>PC · 배우 격자 <small>기본 정렬: 작품 수 많은순 · 한 줄에 6명</small></h2>
+  <div style="position:relative;width:1440px">
+    ${pc(`${topBar('AV 배우', 18)}<div class="scroll">${bar()}${grid(byCountList, { hoverIndex: 2 })}</div>`)}
+    ${pin(1, 'left:494px;top:30px')}${pin(2, 'left:240px;top:10px')}${pin(3, 'left:1416px;top:50px')}${pin(4, 'left:582px;top:76px')}${pin(5, 'left:142px;top:452px')}${pin(6, 'left:628px;top:360px')}
+  </div>
+  <ol class="legend">
+    <li><i class="pin">1</i><span><b>작품 | 배우</b>는 섹션 바, 유형 분할 컨트롤(게임·만화·영화·AV) 바로 뒤에 둔다(AV에서만). 두 단계가 같은 모양으로 붙어 보이지 않게 <b>1px 세로 구분선 + 면 없는 글자 탭</b>으로 한다: 유형은 아이보리 슬랩(위치 표시)이 있는 분할 컨트롤, 하위 보기는 고른 쪽만 밝고 굵어지는 글자다(DESIGN §12 Controls의 탭 모양, 아래 선 없는 변형). 고른 쪽은 이 라이브러리에 기억한다. 목록 첫 줄의 '전체' 제목은 배우 쪽에서는 없어지고 격자가 바로 시작한다.</span></li>
+    <li><i class="pin">2</i><span>상단 바 제목은 탭을 따라 <b>AV 배우</b>가 되고, 수는 배우 수(18)를 센다. 섹션 바도 목록 첫머리에 있어 스크롤하면 위로 지나가므로(DESIGN §3, 상단 바에 올리면 다시 내려옴) 제목이 지금 보기를 알려 준다. 돋보기는 배우 이름 검색이 된다.</span></li>
+    <li><i class="pin">3</i><span>정렬은 <b>보기</b> 메뉴 안이다(2절). 섹션 바와 버튼 자리는 작품 탭과 같다. 내 별점은 작품 필터라 배우 탭의 보기에는 없다.</span></li>
+    <li><i class="pin">4</i><span>카드를 누르면 <b>지금의 배우 페이지</b>(<code>AvPerformerPage</code>, 태블릿 <code>AvPerformerScreen</code>)가 열린다. 배우 페이지는 바꾸지 않는다. 마우스를 올리면 사진만 살짝 밝아진다(크기·그림자 변화 없음). 키보드 초점은 사진 둘레의 파란 선.</span></li>
+    <li><i class="pin">5</i><span>값이 없으면 그 값만 빠진다. 하야세 유이는 생년만 있어 <b>1998년생</b>, 사이즈 없이 컵만 있어 <b>F컵</b>. 오토나시 유즈는 <b>D컵</b>만, 후지사와 마나는 나이 없이 키만 남는다(3절에 더 있음). 나이는 배우 페이지와 같은 <b>만 27세</b>. 글 두 줄 높이는 늘 비워 두어 줄이 들쭉날쭉하지 않다. 사진이 없으면(타카미 시오리) 지금 <code>AvPortrait</code>처럼 이름 첫 글자를 보인다(비공개 모드도 같음).</span></li>
+    <li><i class="pin">6</i><span><b>즐겨찾기 배우</b>는 이름 뒤 작은 별(속이 찬 별, 강조색)로 표시한다. 배우 페이지의 즐겨찾기 버튼이 켜졌을 때와 같은 모양·색(<code>StarIcon</code> solid, <code>--color-accent</code>)이다. 표시만 하고 앞으로 끌어올리지 않으며, 카드에서 켜고 끄지는 않는다(배우 페이지에서).</span></li>
+  </ol>
+</section>
+
+<section class="variant" id="b">
+  <h2><span class="key">2</span>정렬 = 컵 · 큰순 <small>보기 메뉴를 연 상태</small></h2>
+  <div style="position:relative;width:1440px">
+    ${pc(`${topBar('AV 배우', 18)}<div class="scroll">${bar(true)}${grid(byCupList, { key: 'cup' })}${menu('cup', 'right:16px;top:44px')}</div>`)}
+  </div>
+  <ul class="plain">
+    <li><b>보기 메뉴를 그대로 쓴다.</b> 2026-10-22 결정("보기 하나가 정렬·별점·배치를 맡는다")과 작품 탭·태블릿 시트가 같은 자리라 새 버튼을 만들지 않는다. 한 기능을 두 곳에 두지 않는다(DESIGN §11).</li>
+    <li>기준이 6개라 분할 컨트롤(2–4칸)에 넣지 않고, <b>메뉴 항목 모양의 줄</b>로 둔다. 고른 줄은 600 굵기와 오른쪽 5px 사각(메뉴 규칙 그대로). 아래 <b>순서</b>는 지금처럼 분할 컨트롤이고, 말은 기준을 따른다: 작품 수 <b>많은순/적은순</b>, 이름 <b>가나다순/역순</b>, 나이 <b>어린순/많은순</b>, 키·컵 <b>큰순/작은순</b>, 최근 작품 <b>최신순/오래된순</b>. 기준을 바꾸면 그 기준의 첫 말(왼쪽)로 시작한다.</li>
+    <li>카드에서는 <b>고른 값만 밝게(본문 색, 600)</b>, 같은 줄의 다른 값은 한 단계 흐리게 바뀐다. 색 띠·배지 없이 글자 굵기와 밝기만 쓴다. 컵이 같으면 작품 수가 많은 쪽이 먼저.</li>
+    <li>목록 위치를 끄는 스크러버의 말풍선은 정렬 값(예: <b>F컵</b>, <b>160cm</b>, <b>만 27세</b>, <b>38편</b>)을 보인다. 지금 날짜를 보이는 그 자리.</li>
+    <li>필터(컵·키 범위)는 이번 범위가 아니다. 나중에 붙인다면 보기 맨 위(내 별점이 있는 자리)에 넣고, 켜진 필터는 목록 첫머리에 지금의 회색 칩(<code>collection-filter-chip</code>)으로 보이게 하면 된다(작품 탭의 내 별점 칩과 같은 방식).</li>
+  </ul>
+  <h3>목록 끝 — 컵 값이 없는 배우</h3>
+  <div style="position:relative;width:1440px">
+    ${pc(`${topBar('AV 배우', 18)}<div class="scroll"><div style="margin-top:-738px">${grid(byCupList, { key: 'cup' })}</div></div>`, 'end')}
+  </div>
+  <p class="cap">끝까지 내린 상태(섹션 바는 위로 지나감, 제목 AV 배우는 남음). 정렬 값이 없는 배우는 오름차순·내림차순 어느 쪽이든 <b>맨 뒤</b>에, 조용한 구역 이름 <b>컵 정보 없음 3명</b> 아래에 모인다. 이 구역 안은 작품 수 순서다. 작품 수·이름 정렬에는 빠진 값이 없어 이 줄이 생기지 않는다.</p>
+</section>
+
+<section class="variant" id="c">
+  <h2><span class="key">3</span>카드 한 장 <small>기준별 강조 · 빈 값</small></h2>
+  <h3>기준마다 밝아지는 값 (아마노 하루카)</h3>
+  <div class="strip">${SORTS.map(([key, t]) => `<div><span class="k">${t}</span>${grid([PEOPLE[harukaIdx]], { key, cols: 1 })}</div>`).join('')}</div>
+  <p class="cap">이름 정렬은 이름이 이미 가장 굵어 따로 밝히지 않는다. 최근 작품은 카드에 원래 없는 값이라, 정렬했을 때만 작품 수 옆에 가장 최근 작품 날짜(<b>38편 · 10.14</b>, 날짜 규칙 <code>displayDate</code>)가 붙는다.</p>
+  <h3>빈 값</h3>
+  <div class="strip">${['하야세 유이', '이즈미 사나', '오토나시 유즈', '하스미 쿄코', '아사기리 메이', '코노하 린'].map(n => `<div>${grid([PEOPLE.find(p => p.ko === n)], { cols: 1 })}</div>`).join('')}</div>
+  <p class="cap">왼쪽부터: 생년만 있음(<b>1998년생</b>) + 사이즈 없이 컵만(<b>F컵</b>) · 키 없음 · 사이즈 없이 컵만 · 컵 없이 사이즈만(<b>B90 W61 H89</b>) · 키만 · 아무것도 없음. 빈칸·대시·"정보 없음"을 카드에 쓰지 않는다. 사이즈 줄은 배우 페이지와 같은 모양(<b>B88 (F) W58 H86</b>, 인치 → cm 반올림)을 쓰고, 나이는 배우 페이지와 같은 <b>만 27세</b>, 생년만 있으면 <b>1998년생</b>. 사진은 세로 3:4(저장된 자르기 그대로), 한 줄 수는 보기 → 배치(PC 3–10, 기본 6).</p>
+</section>
+
+<section class="variant" id="d">
+  <h2><span class="key">4</span>작품 탭 <small>지금 화면 그대로 — 섹션 바에 전환만 생김</small></h2>
+  <div style="position:relative;width:1440px">
+    ${pc(`${topBar('AV', 184)}<div class="scroll">${bar(false, 0)}<div class="collection-browser__section collection-browser__section--all works-head"><h3>전체</h3></div><div class="cgrid">${covers(16)}</div></div>`, 'short')}
+  </div>
+  <p class="cap">작품 탭은 지금의 AV 목록과 같다: 격자·선반·책장, 묶기 <b>안 묶음 | 배우</b>, 내 별점, 정렬 모두 그대로. 목록 첫 줄 '전체'(검색 중 '검색 결과')와 켜진 내 별점 칩도 지금 그대로다. 상단 바 제목은 지금처럼 <b>AV</b>.</p>
+</section>
+
+<section class="variant" id="e">
+  <h2><span class="key">5</span>태블릿 · 세로 <small>같은 카드와 보기 조각, 크기 토큰만 다름</small></h2>
+  <div class="row">
+    <figure>${tablet()}<figcaption class="cap">기본: 한 줄에 3명, 작품 수 많은순.</figcaption></figure>
+    <figure>${tablet({ key: 'cup', sheet: true })}<figcaption class="cap">보기 시트(아래에서 올라옴), 정렬 = 컵.</figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li>전환 위치(섹션 바, 유형 뒤 구분선 + 글자 탭)·카드·강조·즐겨찾기 별은 PC와 같다. 글자는 태블릿 크기(이름 17, 값 13), 작품 | 배우는 36 높이에 44 터치 영역, 기준 줄은 48 높이다.</li>
+    <li>카드를 탭하면 지금의 배우 화면(<code>AvPerformerScreen</code>)이 열리고, 뒤로 가면 같은 스크롤 위치로 돌아온다. 길게 누르기와 쓸기는 새로 만들지 않는다.</li>
+    <li>보기는 지금처럼 아래 시트다. PC 메뉴와 <b>같은 조각</b>(배치 → 정렬)을 담는다. 지금 태블릿의 동그란 라디오(<code>sheet-option</code>) 대신 PC와 같은 기준 줄을 써서 한 벌로 맞춘다.</li>
+    <li>한 줄 수는 태블릿 범위 2–5, 기본 3. 섹션 바는 지금처럼 당겨 내리는 그늘 안에 있으므로 작품 | 배우도 그늘에서 함께 내려온다. 태블릿 상단 바는 지금처럼 <b>컬렉션</b>이다(유형도 상단 바에 쓰지 않으므로 그대로 둔다).</li>
+  </ul>
+</section>
+
+<section class="variant" id="f">
+  <h2><span class="key">6</span>정해진 것 <small>사용자 결정 2026-10-28</small></h2>
+  <table class="decide">
+    <thead><tr><th>항목</th><th>결정</th><th>버린 길</th></tr></thead>
+    <tbody>
+      <tr><td>작품 | 배우 위치</td><td>섹션 바, 유형 분할 컨트롤 뒤 구분선 + 글자 탭 (AV만)</td><td>목록 첫 줄의 탭 (스크롤로 사라짐)</td></tr>
+      <tr><td>상단 바 제목</td><td>탭을 따름: AV / AV 배우, 수도 따라감</td><td>늘 AV</td></tr>
+      <tr><td>정렬 자리</td><td>보기 메뉴 안 (작품 탭·태블릿과 같은 자리)</td><td>목록 위 "컵 · 큰순 ⌄" 버튼</td></tr>
+      <tr><td>카드 모양</td><td>세로 3:4, PC 한 줄 6명</td><td>정사각 8명</td></tr>
+      <tr><td>일본어 이름</td><td>카드에는 안 씀 (배우 페이지에 있음)</td><td>이름 아래 한 줄 더</td></tr>
+      <tr><td>나이 표기</td><td>"만 27세" (배우 페이지와 같음), 생년만 있으면 "1998년생"</td><td>"27세"</td></tr>
+      <tr><td>컵 정렬 때 구역</td><td>값 없는 배우 앞에만 "컵 정보 없음 N명"</td><td>컵마다 구역</td></tr>
+      <tr><td>즐겨찾기 배우</td><td>이름 뒤 속 찬 별(강조색) 표시만, 순서는 그대로</td><td>정렬 맨 앞으로</td></tr>
+    </tbody>
+  </table>
+</section>`;
+placeThumbs();
+/* Review helper: ?only=b shows one section (used for headless screenshots). */
+const only = new URLSearchParams(location.search).get('only');
+const frame = new URLSearchParams(location.search).get('tablet');
+if (frame) { document.getElementById('doc').innerHTML = tablet(frame === 'cup' ? { key: 'cup', sheet: true } : {}); document.querySelector('.frame--tab').style.zoom = 1; document.getElementById('doc').style.padding = 0; placeThumbs(); }
+if (only) document.querySelectorAll('.doc > *').forEach(el => { if (el.id !== only) el.style.display = 'none'; });
+</script>
+</body>
+</html>

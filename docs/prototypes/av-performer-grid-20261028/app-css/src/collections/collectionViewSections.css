@@ -1,0 +1,21 @@
+/* 내 별점 filter: a stepped slider (전체, 0.5 … 5.0) with the value and a separate 미평가 toggle.
+   The section label already names it, so the slider's own label is only spoken. */
+.collection-rating-filter { display: grid; gap: var(--space-1); }
+.collection-rating-filter .ui-slider > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.collection-rating-filter .ui-slider input { width: 100%; }
+.collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
+.collection-rating-filter__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-left: 0; }
+.collection-rating-filter__value { font-size: var(--type-meta); color: var(--color-text); font-variant-numeric: tabular-nums; }
+.collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }
+
+/* 정렬: a small label over each segmented row (묶기, 기준, 순서). */
+.collection-view-sort__row { display: grid; gap: var(--space-1); }
+.collection-view-sort__label { color: var(--color-faint); font-size: var(--type-meta); line-height: 16px; }
+
+/* 관리 (PC): 책등 받기 as one row; while it runs, the progress and 취소 take its place. */
+.collection-view-manage__row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--control-height-menu); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.collection-view-manage__row:hover { background: var(--color-surface-hover); }
+.collection-view-manage__row svg { flex: none; width: 16px; height: 16px; color: var(--color-muted); stroke-width: 1.5; }
+.collection-view-manage__run { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height-menu); padding: 0 0 0 var(--space-2); color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.collection-view-manage__run .collection-view-manage__grow { flex: 1; }
+.collection-view-manage__status { white-space: nowrap; }

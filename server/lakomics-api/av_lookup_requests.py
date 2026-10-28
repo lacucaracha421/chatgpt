@@ -63,6 +63,18 @@ class LookupRequest(BaseModel):
         return value
 
 
+class OwnedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    codes: list[str] = Field(max_length=200)
+
+    @field_validator("codes")
+    @classmethod
+    def code_bytes(cls, values):
+        if any(len(value.encode('utf-8')) > 40 for value in values):
+            raise ValueError("codes must be at most 40 bytes each")
+        return values
+
+
 class RateLimiter:
     """Sliding window per authenticated credential, local to this API process."""
 
@@ -161,6 +173,21 @@ def register(app, get_db, require_capture_client, require_publisher, require_cli
         except ValidationError:
             raise HTTPException(422, detail={"code": "invalidAvLookupRequest"})
         return await run_in_threadpool(insert, get_db, body, wake_inbox)
+
+    @app.post("/v1/av-owned")
+    async def owned(request: Request, authorization: str | None = Header(default=None)):
+        await run_in_threadpool(require_av_lookup_client, authorization)
+        raw = bytearray()
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > 65536:
+                raise HTTPException(413, detail={"code": "avOwnedRequestTooLarge"})
+            raw.extend(chunk)
+        try:
+            body = OwnedRequest.model_validate_json(bytes(raw))
+        except (ValidationError, ValueError):
+            raise HTTPException(422, detail={"code": "invalidAvOwnedRequest"})
+        import av_inbox
+        return {"owned": await run_in_threadpool(av_inbox.owned_codes, get_db, body.codes)}
 
     @app.get("/v1/av-lookups")
     def listing(after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=100),

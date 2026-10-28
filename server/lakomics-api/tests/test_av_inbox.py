@@ -89,6 +89,70 @@ class AvInboxSignalTests(unittest.TestCase):
         db.close()
 
 
+class AvOwnedTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(':memory:')
+        self.db.row_factory = sqlite3.Row
+        self.addCleanup(self.db.close)
+
+        @contextmanager
+        def get_db():
+            yield self.db
+
+        self.get_db = get_db
+        ca.startup(get_db)
+        av.authority.startup(get_db)
+        self.db.execute("INSERT INTO authority_domains VALUES(?,'collections',1,1,0,?,NULL,'2026')",
+                        (fixtures.LIBRARY, 'a' * 64))
+        self.app = FastAPI()
+
+        def capture_auth(value):
+            if value != 'Bearer collector':
+                raise HTTPException(401)
+            return 'collector'
+
+        intake.register(self.app, get_db, capture_auth, capture_auth)
+        self.endpoint = next(r.endpoint for r in self.app.routes if getattr(r, 'path', None) == '/v1/av-owned')
+        patch = mock.patch.object(intake, 'run_in_threadpool', inline)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def add_work(self, id_, code, lifecycle='live', type_='av', library=fixtures.LIBRARY):
+        self.db.execute("INSERT INTO collection_authority_works "
+                        "(library_id,work_id,type,name,fields,showcase,selection,details,derived,lifecycle,"
+                        "entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,0,?,?,?,?,1,'2026','2026')",
+                        (library, id_, type_, id_, '{}', '{}', json.dumps({'av': {'productCode': code}}),
+                         '{}', lifecycle))
+        self.db.commit()
+
+    def query(self, body, authorization='Bearer collector'):
+        return asyncio.run(self.endpoint(request(body), authorization))
+
+    def test_owned_normalized_live_av_codes_in_active_library_only(self):
+        self.add_work('owned', 'mida703')
+        self.add_work('trashed', 'DLDSS-467', lifecycle='trashed')
+        self.add_work('other-type', 'ABW-100', type_='movie')
+        self.add_work('other-library', 'SSIS-001', library='other')
+        statements = []
+        self.db.set_trace_callback(statements.append)
+        self.assertEqual(self.query({'codes': ['mida703', 'MIDA-703', 'DLDSS-467', 'ABW-100', 'SSIS-001', 'MIDA-704']}),
+                         {'owned': ['MIDA-703']})
+        self.assertEqual(sum('SELECT * FROM collection_authority_works' in sql for sql in statements), 1)
+        self.assertEqual(av.matches(self.db, 'MIDA-703')[0]['workId'], 'owned')
+        self.db.execute("DELETE FROM authority_domains WHERE domain='collections'")
+        self.assertEqual(self.query({'codes': ['MIDA-703']}), {'owned': []})
+
+    def test_collector_auth_and_request_limits(self):
+        with self.assertRaises(HTTPException) as denied:
+            self.query({'codes': ['MIDA-703']}, 'Bearer wrong')
+        self.assertEqual(denied.exception.status_code, 401)
+        for body in ({'codes': ['MIDA-703'] * 201}, {'codes': ['x' * 41]}, {'codes': ['한' * 14]}):
+            with self.subTest(body=body), self.assertRaises(HTTPException) as rejected:
+                self.query(body)
+            self.assertEqual(rejected.exception.status_code, 422)
+        self.assertEqual(self.query({'codes': ['MIDA-703'] * 200}), {'owned': []})
+
+
 class AvInboxTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.CollectionAuthorityTests()

@@ -23,16 +23,29 @@
     if (!PRODUCT_CODE_EXACT_RE.test(text)) return "";
     const match = text.match(/^(.+?)[-\s]?(\d{2,7})([A-Z]?)$/);
     if (!match) return "";
-    return `${canonicalPrefix(match[1])}-${match[2]}${match[3]}`;
+    let prefix = canonicalPrefix(match[1]);
+    let digits = match[2];
+    if (!match[3]) {
+      // Use the inbox's canonical code for numeric provider prefixes and padding.
+      if (/^\d+[A-Z]+$/.test(prefix) && !/^\d+(?:LUXU|GANA|MAAN|ARA|MIUM|PRESTIGE)$/.test(prefix)) {
+        prefix = prefix.replace(/^\d+/, "");
+      }
+      if (!text.includes("-")) digits = digits.replace(/^0+/, "") || "0";
+      digits = digits.padStart(3, "0");
+    }
+    return `${prefix}-${digits}${match[3]}`;
   }
 
   function productCodeFromText(value) {
     const text = collapseWhitespace(value);
-    for (const match of text.matchAll(PRODUCT_CODE_RE)) {
-      const code = normalizeProductCode(match[1]);
-      if (code) return code;
-    }
-    return "";
+    return productCodesInText(text)[0]?.code || "";
+  }
+
+  function productCodesInText(value) {
+    const text = String(value ?? "");
+    return Array.from(text.matchAll(PRODUCT_CODE_RE), match => ({
+      code: normalizeProductCode(match[1]), start: match.index, end: match.index + match[1].length,
+    })).filter(match => match.code);
   }
 
   function normalizeQuery(value) {
@@ -64,5 +77,6 @@
     normalizeProductCode,
     normalizeQuery,
     productCodeFromText,
+    productCodesInText,
   };
 })();

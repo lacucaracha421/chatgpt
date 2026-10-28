@@ -660,9 +660,7 @@ def summary(row):
                 titleJa=candidate['fields']['titleJa'] if candidate else None)
 
 
-def matches(db, code):
-    if code is None:
-        return []
+def live_av_works(db):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE name='authority_domains'").fetchone():
         return []
     state = authority.active_domain(db, ca.DOMAIN)
@@ -670,8 +668,27 @@ def matches(db, code):
         return []
     rows = db.execute("SELECT * FROM collection_authority_works WHERE library_id=? AND type='av' "
                       "AND lifecycle='live' ORDER BY work_id", (state['libraryId'],)).fetchall()
-    return [dict(libraryId=state['libraryId'], workId=r['work_id'], name=r['name'], entityRevision=r['entity_revision'])
-            for r in rows if normalize_code((json.loads(r['details']).get('av') or {}).get('productCode')) == code]
+    return rows
+
+
+def work_product_code(row):
+    return normalize_code((json.loads(row['details']).get('av') or {}).get('productCode'))
+
+
+def owned_codes(get_db, codes):
+    requested = {code for value in codes if (code := normalize_code(value)) is not None}
+    if not requested:
+        return []
+    with get_db() as db:
+        owned = {work_product_code(row) for row in live_av_works(db)}
+    return sorted(requested & owned)
+
+
+def matches(db, code):
+    if code is None:
+        return []
+    return [dict(libraryId=r['library_id'], workId=r['work_id'], name=r['name'], entityRevision=r['entity_revision'])
+            for r in live_av_works(db) if work_product_code(r) == code]
 
 
 def detail(get_db, id_):

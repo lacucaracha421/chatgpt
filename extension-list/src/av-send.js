@@ -6,7 +6,7 @@
   function pageCodeElement(doc, href) {
     let url;
     try { url = new URL(href); } catch { return null; }
-    if (url.protocol !== "https:" || url.hostname !== "www.javlibrary.com") return null;
+    if (!["http:", "https:"].includes(url.protocol) || url.hostname !== "www.javlibrary.com") return null;
     if (!url.searchParams.get("v") && !/\/vl_searchbyid\.php$/.test(url.pathname)) return null;
     const direct = doc.querySelector("#video_id .text");
     if (direct) return direct;
@@ -31,6 +31,7 @@
     sendMessage = runtimeRequest } = {}) {
     const operations = new Map();
     const buttons = new Map();
+    const owned = new Set();
     let toast = null;
     let timer = null;
 
@@ -65,9 +66,9 @@
 
     function renderButtons() {
       for (const [button, { code, label }] of buttons) {
-        const state = operations.get(code)?.state || "idle";
+        const state = owned.has(code) ? "owned" : operations.get(code)?.state || "idle";
         button.dataset.state = state;
-        button.textContent = state === "sending" ? "보내는 중" : state === "sent" ? "보냄" : label;
+        button.textContent = state === "owned" ? "보유" : state === "sending" ? "보내는 중" : state === "sent" ? "보냄" : label;
         button.disabled = state !== "idle";
       }
     }
@@ -102,10 +103,11 @@
 
     function send(value) {
       const code = lookup.productCodeFromText(value);
-      if (!code) return;
+      if (!code || owned.has(code)) return;
       let operation = operations.get(code);
       if (!operation) {
-        operation = { request: lookup.createSendRequest(code, win.location.href), state: "idle" };
+        const sourceUrl = win.location.protocol === "https:" ? win.location.href : null;
+        operation = { request: lookup.createSendRequest(code, sourceUrl), state: "idle" };
         operations.set(code, operation);
       }
       return attempt(operation);
@@ -126,12 +128,19 @@
       return button;
     }
 
-    return { send, receive, setButton, injectPageButton, destroy() {
-      if (timer !== null) win.clearTimeout(timer);
-      toast?.remove();
-      doc.getElementById(PAGE_BUTTON_ID)?.remove();
-      buttons.clear(); operations.clear();
-    } };
+    return {
+      send, receive, setButton, injectPageButton,
+      setOwned(codes) {
+        for (const code of codes) owned.add(code);
+        renderButtons();
+      },
+      destroy() {
+        if (timer !== null) win.clearTimeout(timer);
+        toast?.remove();
+        doc.getElementById(PAGE_BUTTON_ID)?.remove();
+        buttons.clear(); operations.clear(); owned.clear();
+      },
+    };
   }
 
   if (globalThis.__LAKOMICS_TEST__) globalThis.LakomicsAvSend = { createController, pageCodeElement };

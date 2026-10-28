@@ -7,6 +7,36 @@ importScripts("picker/model.js", "picker/background.js");
   "use strict";
   const AV_LOOKUP_MENU_ID = "lakomics-av-lookup";
   const AV_SEND_MENU_ID = "lakomics-av-send";
+  let ownedConnection = null, ownedCache = new Map();
+
+  async function avOwned(values) {
+    if (!Array.isArray(values) || values.length > 200 || values.some(value => typeof value !== "string" || value.length > 40)) {
+      return { ok: false, code: "invalid_query" };
+    }
+    const api = globalThis.LakomicsListApi;
+    const connection = await api.readConnection();
+    if (!connection) return { ok: false, code: "unpaired" };
+    const identity = api.connectionIdentity(connection);
+    if (ownedConnection !== identity) {
+      ownedConnection = identity;
+      ownedCache = new Map();
+    }
+    const cache = ownedCache;
+    const now = Date.now();
+    for (const [code, entry] of cache) if (entry.expires <= now) cache.delete(code);
+    const codes = [...new Set(values.map(value => globalThis.LakomicsAvLookup.normalizeProductCode(value)).filter(Boolean))];
+    const missing = codes.filter(code => !cache.has(code));
+    if (missing.length) {
+      const result = await api.request("/v1/av-owned", {
+        method: "POST", body: { codes: missing }, expectedConnection: identity,
+      });
+      if (!result.ok) return { ok: false, code: result.code || "lookup_failed" };
+      if (!Array.isArray(result.data?.owned)) return { ok: false, code: "invalid_response" };
+      const owned = new Set(result.data.owned);
+      for (const code of missing) cache.set(code, { owned: owned.has(code), expires: Date.now() + 300000 });
+    }
+    return { ok: true, owned: codes.filter(code => cache.get(code)?.owned) };
+  }
 
   async function sendAvLookup(request) {
     const productCode = globalThis.LakomicsAvLookup.normalizeProductCode(request?.productCode);
@@ -126,6 +156,8 @@ importScripts("picker/model.js", "picker/background.js");
         return openAvLookup(message.selectionText, sender.tab);
       case "av-send":
         return sendAvLookup(message.request);
+      case "av-owned":
+        return avOwned(message.codes);
       default:
         return { ok: false, code: "unknown_message" };
     }

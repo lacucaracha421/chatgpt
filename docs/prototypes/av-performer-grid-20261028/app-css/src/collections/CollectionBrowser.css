@@ -1,0 +1,72 @@
+/* One right group in the section bar, shared by PC and tablet. */
+.collection-shortcuts { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.collection-shortcuts .ui-button { gap: var(--space-2); white-space: nowrap; }
+.collection-shortcuts .ui-button[aria-pressed="true"] { color: var(--color-accent); background: var(--color-filter-selected); }
+.collection-shortcuts svg { flex: none; width: 16px; height: 16px; stroke-width: 1.5; }
+.collection-shortcuts__count { color: var(--color-faint); font-family: var(--font-numeric); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.collection-shortcuts__count.is-new { color: var(--color-accent); font-weight: 600; }
+.collection-shortcuts__divider { flex: none; width: 1px; height: 16px; margin-inline: var(--space-2); background: var(--color-border); }
+@media (max-width: 1100px) { .collection-shortcuts__label { display: none; } }
+
+/* Library: the 전체 heading follows the single section row. */
+.collection-browser__section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 40px; }
+.collection-browser__section h3 { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--color-text); font-size: var(--type-body); font-weight: 600; }
+.collection-browser__section--all { border-top: 1px solid var(--color-border); padding-top: var(--space-2); justify-content: flex-start; }
+/* The 내 별점 filter that is on: one quiet grey chip beside the heading; its X takes the filter off. */
+.collection-filter-chip { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-height-compact); padding: 0 var(--space-1) 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: var(--color-filter-selected); color: var(--color-filter-text, var(--color-text)); font: 600 var(--type-meta) / 1 var(--font-ui); font-variant-numeric: tabular-nums; cursor: pointer; animation: collection-filter-chip-in 140ms var(--ease-standard); }
+.collection-filter-chip:hover { background: var(--color-filter-hover); }
+.collection-filter-chip > svg { flex: none; width: 14px; height: 14px; }
+.collection-filter-chip__star { color: var(--color-muted); }
+.collection-filter-chip__x { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; color: var(--color-muted); }
+.collection-filter-chip:hover .collection-filter-chip__x { color: var(--color-text); }
+@keyframes collection-filter-chip-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .collection-filter-chip { animation: none; } }
+
+/* Shelf height derives from this width; a scrollbar must not feed back into the row size. */
+.collection-browser__list-scroll { overflow: auto; flex: 1; min-height: 0; padding: 0 var(--space-3) var(--space-4); }
+.collection-list { display: grid; position: relative; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: var(--space-4) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.collection-list__cell { min-width: 0; position: relative; }
+.collection-list__cell .collection-card { width: 100%; }
+.collection-list__plank { display: none; }
+.collection-card__light { display: none; }
+/* A shelf card is as wide as its case's front cover (capped at the column), so the title under it and the
+   picked title's plate line up with the book instead of spanning the column. The light case keeps the
+   column-based perspective origin it had when it filled the cell. 80 below the case: the plank, then the
+   title up to two lines, then clear space before the next row's covers. */
+.collection-list--shelf .collection-card { position: relative; overflow: visible; width: fit-content; height: calc(var(--case-height) + 80px); background: transparent; }
+.collection-list--shelf .collection-card__light { display: block; }
+.collection-list--shelf .collection-light-case { width: min(var(--cell-width), calc(var(--lead) + var(--W))); perspective-origin: calc(var(--cell-width) * .35) 30%; }
+.collection-list--shelf .collection-card__object { display: none; }
+/* The title sits right under the plank's front edge. Keep its text origin and width when a case lifts;
+   the selected plate grows by its padding on both sides. */
+.collection-list--shelf .collection-card__meta { position: absolute; top: calc(var(--case-height) + 24px + var(--space-2)); left: 0; right: 0; padding: 0; }
+.collection-list--shelf .collection-card__credit, .collection-list--shelf .collection-card__line { display: none; }
+.collection-list--shelf .collection-card__name { display: -webkit-box; }
+/* An item title in the body role and text colour, up to two lines, then an ellipsis; picked = 600.
+   The selector also wins over the tablet's one-line card names, so both clients share it. */
+.collection-list--shelf .collection-card .collection-card__name { overflow: hidden; white-space: normal; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; word-break: keep-all; overflow-wrap: anywhere;
+  font-size: var(--type-body); line-height: var(--line-ui); font-weight: 400; color: var(--color-text); }
+.collection-list--shelf .collection-card[aria-selected="true"] .collection-card__meta { top: calc(var(--case-height) + 24px + var(--space-1)); left: calc(var(--space-2) * -1); right: calc(var(--space-2) * -1); z-index: 3; padding: var(--space-1) var(--space-2); background: var(--color-surface); border-radius: var(--radius-tile); }
+.collection-list--shelf .collection-card[aria-selected="true"] .collection-card__name { font-weight: 600; }
+.collection-list--shelf .collection-list__plank { display: block; pointer-events: none; align-self: start; position: relative; height: 36px; margin-top: calc(var(--case-height) - 12px); margin-left: calc(var(--space-6) * -1); margin-right: calc(var(--space-6) * -1); }
+.collection-list__plank::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 25px; clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 100%, 0 100%); background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 4%, var(--color-bg)), color-mix(in srgb, var(--color-text) 15%, var(--color-bg))); }
+.collection-list__plank::after { content: ""; position: absolute; left: 0; right: 0; top: 25px; height: 10px; border-radius: 0 0 2px 2px; background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 38%, var(--color-bg)) 0 1px, color-mix(in srgb, var(--color-text) 19%, var(--color-bg)) 1px, color-mix(in srgb, var(--color-text) 9%, var(--color-bg))); box-shadow: 0 16px 20px -8px rgba(0,0,0,.7); }
+.collection-list--grid .collection-card__object { width: 100%; }
+.collection-toolbar__count { font-size: var(--type-meta); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.collection-toolbar__controls { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.collection-toolbar__rating { width: 264px; padding: var(--space-3); }
+
+.collection-list--showcase { grid-template-columns: repeat(var(--columns), var(--cell-width)); grid-auto-columns: var(--cell-width); overflow-x: auto; scrollbar-width: thin; }
+
+/* The section row belongs to the list; its dropped copy reserves no space. */
+.workspace-content .collection-browser__stage:has(.ui-section-bar--inline) { padding-top: 0; }
+.collection-browser__list-scroll > .ui-section-bar { margin-inline: calc(-1 * var(--space-3)); }
+.collection-browser__showcase-scroll { flex: 1; min-height: 0; overflow: auto; }
+.collection-exhibition > .ui-section-drop-slot { margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-3)) var(--space-2); }
+
+/* 격자 for games, AV and manga: the front cover alone, flat, standing on the bottom of the row's cover band.
+   The band is as tall as the tallest common cover (a Switch case), so wider covers keep their own height. */
+.collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: 105 / 170; background: transparent; outline: none; overflow: hidden; border-radius: 0; }
+.collection-card--manga .collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: 256 / 368; }
+.collection-card__cover--flat > .collection-cover-image { background: transparent; object-fit: contain; object-position: center bottom; }
+.collection-card--exhibition .collection-card__object .collection-card__cover.collection-card__cover--flat { aspect-ratio: auto; }

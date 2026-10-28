@@ -22,6 +22,9 @@ test('AV selection normalization extracts and canonicalizes product codes', () =
     [' SSIS-123 ', 'SSIS-123'],
     ['ssis123', 'SSIS-123'],
     ['SSIS 123', 'SSIS-123'],
+    ['ssis00001', 'SSIS-001'],
+    ['118abw00001', 'ABW-001'],
+    ['300MIUM 12', '300MIUM-012'],
     ['FC2PPV 1234567', 'FC2-PPV-1234567'],
     ['FC2-PPV-1234567', 'FC2-PPV-1234567'],
     ['300MIUM 12A', '300MIUM-12A'],
@@ -45,6 +48,16 @@ test('AV lookup URL building keeps the configured site order and encodes the que
   assert.deepEqual(plain(lookup.buildLookupUrls('Actress & Name')), [
     'https://www.javlibrary.com/ja/vl_searchbyid.php?keyword=Actress%20%26%20Name',
   ]);
+});
+
+test('code finder returns every occurrence with offsets in the original text', () => {
+  const lookup = loadLookup();
+  const text = '  배우\n mida703 / DLDSS-467, mida703 · FC2-PPV-1234567';
+  const found = lookup.productCodesInText(text);
+  assert.deepEqual(plain(found.map(match => match.code)), ['MIDA-703', 'DLDSS-467', 'MIDA-703', 'FC2-PPV-1234567']);
+  assert.deepEqual(Array.from(found, match => text.slice(match.start, match.end)),
+    ['mida703', 'DLDSS-467', 'mida703', 'FC2-PPV-1234567']);
+  assert.deepEqual(plain(lookup.productCodesInText('ordinary title A123')), []);
 });
 
 function backgroundFixture() {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Companion",
-  "version": "3.5.68",
+  "version": "3.5.69",
   "description": "Collect images and videos into Lakomics, translate X posts, YouTube subtitles and web pages, and use the Lakomics right-click menu.",
   "permissions": [
     "storage",
@@ -134,6 +134,18 @@
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true
+    },
+    {
+      "matches": [
+        "http://www.javlibrary.com/*",
+        "https://www.javlibrary.com/*",
+        "http://www.avdbs.com/*",
+        "https://www.avdbs.com/*"
+      ],
+      "js": [
+        "src/av-owned.js"
+      ],
+      "run_at": "document_idle"
     },
     {
       "matches": [
