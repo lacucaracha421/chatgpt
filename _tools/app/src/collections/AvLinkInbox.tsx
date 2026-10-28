@@ -1,5 +1,7 @@
 import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, ClockIcon, ExclamationTriangleIcon, MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { displayTime } from "../shared/displayDate";
@@ -51,6 +53,15 @@ export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", 
       window.removeEventListener("focus", visibleRefresh);
       document.removeEventListener("visibilitychange", visibleRefresh);
     };
+  }, [enabled, refresh]);
+
+  useEffect(() => {
+    if (!enabled || !isTauri()) return;
+    let stopped = false, unlisten: (() => void) | undefined;
+    void listen("cloud://av-inbox-changed", () => { void refresh(); })
+      .then(stop => { if (stopped) stop(); else unlisten = stop; })
+      .catch(() => undefined);
+    return () => { stopped = true; unlisten?.(); };
   }, [enabled, refresh]);
 
   const hasActive = items.some(item => activeStatus(item) || applying(item));

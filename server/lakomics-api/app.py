@@ -1042,6 +1042,7 @@ def status_signals(db):
             "notes": notes.status_signal(db),
             "upcoming": home_upcoming.status_signal(db),
             "cards": cards.status_signal(db),
+            "avInbox": av_inbox.status_signal(db),
             "artists": library_artists.status_signal(db),
             "folderPins": folder_pins.status_signal(db),
             "favoriteCharacters": favorite_characters.status_signal(db)}

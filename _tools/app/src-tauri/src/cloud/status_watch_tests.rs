@@ -6,6 +6,32 @@ use crate::cloud::client::{CapturesHead, ReleaseReadsHead};
 use serde_json::{json, Value};
 use std::sync::{Condvar, Mutex};
 
+pub(crate) static AV_SIGNAL_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn av_inbox_signal_wakes_on_revision_and_requires_a_live_watcher() {
+    let _guard = AV_SIGNAL_TEST_LOCK.lock().unwrap();
+    let endpoint = "https://av-inbox-signal.invalid/";
+    let now = unix_now();
+    observe(endpoint, &status_with(None), now, Source::Watcher);
+    let _ = take_av_inbox_signal();
+    observe_av_inbox_signal(endpoint, br#"{"signals":{"avInbox":1}}"#);
+    assert!(take_av_inbox_signal());
+    assert!(!av_inbox_live(endpoint, now));
+    set_live(endpoint, 777, true);
+    assert!(av_inbox_live(endpoint, now));
+    let _ = take_av_inbox_signal();
+    observe_av_inbox_signal(endpoint, br#"{"signals":{"avInbox":1}}"#);
+    assert!(!take_av_inbox_signal());
+    observe_av_inbox_signal(endpoint, br#"{"signals":{"avInbox":2}}"#);
+    assert!(take_av_inbox_signal());
+    assert!(!take_av_inbox_signal());
+    assert!(!av_inbox_live(endpoint, now + TRUST_WINDOW + 1));
+    observe_av_inbox_signal(endpoint, br#"{"signals":{}}"#);
+    assert!(!av_inbox_live(endpoint, now));
+    set_live(endpoint, 777, false);
+}
+
 /// A status document with only `publisherLogs` of interest (no active domain).
 pub(crate) fn status_with(logs: Option<PublisherLogs>) -> SyncStatus {
     SyncStatus {

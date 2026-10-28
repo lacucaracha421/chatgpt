@@ -487,6 +487,42 @@ fn routed_mode_never_runs_the_local_provider_worker() {
 // ---- list and candidate -----------------------------------------------------------
 
 #[test]
+fn mirror_poll_relaxes_only_with_a_live_av_signal() {
+    let _guard = crate::cloud::status_watch::tests::AV_SIGNAL_TEST_LOCK
+        .lock()
+        .unwrap();
+    let (_temp, library, _) = routed(json!({"works":[]}));
+    let endpoint = "https://av-mirror-cadence.invalid/";
+    let c = library.connection().unwrap();
+    c.execute(
+        "UPDATE library_settings SET cloud_api_base_url=?1 WHERE singleton=1",
+        [endpoint],
+    )
+    .unwrap();
+    let now = chrono::Utc::now().timestamp();
+    routed::set_note(&c, "avInbox:mirrorAt", &now.to_string()).unwrap();
+    assert_eq!(Library::mirror_due_at(&c, false).unwrap(), now + 15);
+    assert_eq!(Library::mirror_due_at(&c, true).unwrap(), now + 60);
+    routed::set_note_json(&c, "avInbox:item:searching", &json!({"status":"fetching"})).unwrap();
+    assert_eq!(Library::mirror_due_at(&c, false).unwrap(), now + 5);
+
+    use crate::cloud::status_watch::{self, Source};
+    status_watch::observe(
+        endpoint,
+        &status_watch::tests::status_with(None),
+        now,
+        Source::Watcher,
+    );
+    status_watch::set_live(endpoint, 778, true);
+    // A live older server without avInbox must keep polling.
+    assert_eq!(Library::mirror_due_at(&c, false).unwrap(), now + 5);
+    status_watch::observe_av_inbox_signal(endpoint, br#"{"signals":{"avInbox":1}}"#);
+    assert_eq!(Library::mirror_due_at(&c, false).unwrap(), now + 300);
+    status_watch::set_live(endpoint, 778, false);
+    assert_eq!(Library::mirror_due_at(&c, false).unwrap(), now + 5);
+}
+
+#[test]
 fn list_maps_server_states_and_matches() {
     let mut a = av_work("av-a", 1, Some("SSIS-001"));
     a["name"] = json!("A 작품");

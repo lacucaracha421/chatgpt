@@ -7,6 +7,7 @@ They do not establish the ASGI HTTP/threadpool integration gate.
 import asyncio
 import io
 import json
+import sqlite3
 import threading
 import time
 import unittest
@@ -58,6 +59,34 @@ def request(body):
     async def receive():
         return {'type':'http.request','body':data,'more_body':False}
     return Request({'type':'http', 'headers':[]}, receive)
+
+
+class AvInboxSignalTests(unittest.TestCase):
+    def test_signal_moves_for_intake_status_actions_and_deletion(self):
+        with sqlite3.connect(':memory:') as db:
+            db.row_factory = sqlite3.Row
+
+            @contextmanager
+            def get_db():
+                yield db
+
+            intake.startup(get_db)
+            previous = av.status_signal(db)
+            id_ = str(uuid.uuid4())
+            intake.insert(get_db, intake.LookupRequest(requestId=id_, productCode='SSIS-001'))
+            self.assertGreater(av.status_signal(db), previous)
+            # These all update the same row: a row count or request sequence misses them.
+            for status in ('fetching', 'found', 'queued', 'dismissed', 'applied'):
+                previous = av.status_signal(db)
+                db.execute('UPDATE av_inbox SET status=? WHERE request_id=?', (status, id_))
+                db.commit()
+                self.assertGreater(av.status_signal(db), previous)
+            previous = av.status_signal(db)
+            db.execute('DELETE FROM av_lookup_requests WHERE request_id=?', (id_,))
+            db.commit()
+            self.assertGreater(av.status_signal(db), previous)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM av_inbox').fetchone()[0], 0)
+        db.close()
 
 
 class AvInboxTests(unittest.TestCase):

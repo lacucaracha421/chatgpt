@@ -26,6 +26,12 @@ use std::{
 };
 static WORKER: Mutex<()> = Mutex::new(());
 static TICK_RUNNING: AtomicBool = AtomicBool::new(false);
+static MIRROR_WAKE: AtomicBool = AtomicBool::new(false);
+static MIRROR_CHANGED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn take_mirror_changed() -> bool {
+    MIRROR_CHANGED.swap(false, Ordering::AcqRel)
+}
 static TICK_WORKER: crate::cloud::auto_publication::Worker =
     crate::cloud::auto_publication::Worker::new();
 static WORK_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -673,8 +679,14 @@ impl Library {
         let c = self.connection()?;
         match routed::route_on(&c)? {
             // The server owns the inbox: the local worker has nothing to schedule.
-            routed::Route::Server => Ok(routed_apply::routed_due_at(&c, restricted)?
-                .map(|due| due.max(routed::retry_at(&c)))),
+            routed::Route::Server => {
+                let due = if MIRROR_WAKE.load(Ordering::Acquire) {
+                    Some(0)
+                } else {
+                    routed_apply::routed_due_at(&c, restricted)?
+                };
+                Ok(due.map(|due| due.max(routed::retry_at(&c))))
+            }
             routed::Route::OldServer => {
                 let probe = routed::route_probe_due_at(&c)?;
                 let legacy = Self::legacy_due_at(&c, restricted)?;
@@ -767,8 +779,13 @@ impl Library {
             .ok()
             .and_then(|c| Self::mirror_due_at(&c, restricted).ok())
             .is_none_or(|due| due <= now);
-        if mirror_due {
-            healthy &= self.refresh_av_mirror_with(server, now).is_ok();
+        let signalled = MIRROR_WAKE.swap(false, Ordering::AcqRel);
+        if mirror_due || signalled {
+            let refreshed = self.refresh_av_mirror_with(server, now).is_ok();
+            if !refreshed && signalled {
+                MIRROR_WAKE.store(true, Ordering::Release);
+            }
+            healthy &= refreshed;
         }
         let _ = self.migrate_local_av_inbox_with(server, now);
         healthy
@@ -790,6 +807,10 @@ impl Library {
 pub(crate) fn tick(library: Library, restricted: bool) {
     if TICK_RUNNING.swap(true, Ordering::AcqRel) {
         return;
+    }
+    if crate::cloud::status_watch::take_av_inbox_signal() {
+        MIRROR_WAKE.store(true, Ordering::Release);
+        note_work();
     }
     if !TICK_SCHEDULE
         .lock()

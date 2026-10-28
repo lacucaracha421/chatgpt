@@ -373,6 +373,10 @@ impl Library {
         };
         let mut c = self.connection()?;
         let tx = c.transaction()?;
+        let before: BTreeMap<_, _> = mirror_values(&tx)?
+            .into_iter()
+            .map(|value| (value["requestId"].as_str().unwrap_or("").to_owned(), value))
+            .collect();
         tx.execute(
             "DELETE FROM notes_state WHERE key LIKE 'avInbox:item:%'",
             [],
@@ -380,8 +384,15 @@ impl Library {
         for item in &items {
             store_item(&tx, item)?;
         }
+        let after: BTreeMap<_, _> = mirror_values(&tx)?
+            .into_iter()
+            .map(|value| (value["requestId"].as_str().unwrap_or("").to_owned(), value))
+            .collect();
         set_note(&tx, MIRROR_AT_KEY, &now.to_string())?;
         tx.commit()?;
+        if before != after {
+            MIRROR_CHANGED.store(true, Ordering::Release);
+        }
         Ok(())
     }
 
@@ -390,6 +401,14 @@ impl Library {
         let last: i64 = note(c, MIRROR_AT_KEY)?
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+        if configured_endpoint(c)?.is_some_and(|endpoint| {
+            crate::cloud::status_watch::av_inbox_live(
+                &endpoint,
+                crate::cloud::status_watch::unix_now(),
+            )
+        }) {
+            return Ok(last + 5 * 60);
+        }
         let searching = mirror_values(c)?
             .iter()
             .any(|v| matches!(v["status"].as_str(), Some("queued" | "fetching")));

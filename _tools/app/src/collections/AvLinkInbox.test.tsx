@@ -4,6 +4,34 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AvLinkInbox, useAvLinkInbox, useAvLinkPendingCount, type AvLinkApi } from "./AvLinkInbox";
 import type { AvLinkInboxItem } from "./avLinkClient";
 
+const events = vi.hoisted(() => ({ changed: undefined as (() => void) | undefined, stop: vi.fn() }));
+vi.mock("@tauri-apps/api/core", async importOriginal => ({
+  ...await importOriginal<typeof import("@tauri-apps/api/core")>(),
+  isTauri: () => true,
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn((name: string, changed: () => void) => {
+    if (name === "cloud://av-inbox-changed") events.changed = changed;
+    return Promise.resolve(events.stop);
+  }),
+}));
+
+it("refreshes an idle inbox on the native event and preserves unchanged rows", async () => {
+  const listInbox = vi.fn().mockResolvedValue([]);
+  const client = api({ listInbox });
+  const { result, unmount } = renderHook(() => useAvLinkInbox({ api: client }));
+  await act(async () => {});
+  listInbox.mockResolvedValue([item("new", "found")]);
+  await act(async () => { events.changed?.(); });
+  expect(result.current.items.map(row => row.id)).toEqual(["new"]);
+  const previous = result.current.items;
+  await act(async () => { events.changed?.(); });
+  expect(result.current.items).toBe(previous);
+  expect(listInbox).toHaveBeenCalledTimes(3);
+  unmount();
+  expect(events.stop).toHaveBeenCalled();
+});
+
 const item = (id: string, status: AvLinkInboxItem["status"], extra: Partial<AvLinkInboxItem> = {}): AvLinkInboxItem => ({
   id, requestId: `request-${id}`, productCode: `CODE-${id}`, normalizedCode: `CODE-${id}`, sourceUrl: null,
   receivedAt: "2026-09-27T05:02:00Z", status, attempts: 0, lastError: null, fetchedAt: null,

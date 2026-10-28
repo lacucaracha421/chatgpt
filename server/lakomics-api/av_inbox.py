@@ -55,12 +55,26 @@ CREATE TABLE IF NOT EXISTS av_inbox (
  applied_library_id TEXT
 );
 CREATE INDEX IF NOT EXISTS av_inbox_due ON av_inbox(status,next_attempt_at);
+CREATE TABLE IF NOT EXISTS av_inbox_state (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO av_inbox_state VALUES(1,0);
+CREATE TRIGGER IF NOT EXISTS av_inbox_signal_insert AFTER INSERT ON av_inbox
+BEGIN UPDATE av_inbox_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER IF NOT EXISTS av_inbox_signal_update AFTER UPDATE ON av_inbox
+BEGIN UPDATE av_inbox_state SET revision=revision+1 WHERE singleton=1; END;
+CREATE TRIGGER IF NOT EXISTS av_inbox_signal_delete AFTER DELETE ON av_inbox
+BEGIN UPDATE av_inbox_state SET revision=revision+1 WHERE singleton=1; END;
 CREATE TRIGGER IF NOT EXISTS av_lookup_inbox_delete AFTER DELETE ON av_lookup_requests
 BEGIN DELETE FROM av_inbox WHERE request_id=OLD.request_id; END;
 CREATE TABLE IF NOT EXISTS av_inbox_name_cache (
  name_ja TEXT PRIMARY KEY, mapping TEXT NOT NULL, fetched_at REAL NOT NULL
 );
 """
+
+
+def status_signal(db):
+    return db.execute('SELECT revision FROM av_inbox_state WHERE singleton=1').fetchone()[0]
 
 
 def normalize_code(value):

@@ -1185,6 +1185,7 @@ impl CloudClient {
             status: {
                 let status = parse_sync_status(&body)?;
                 super::status_watch::observe_card_signal(self.base(), &body);
+                super::status_watch::observe_av_inbox_signal(self.base(), &body);
                 status
             },
             etag,

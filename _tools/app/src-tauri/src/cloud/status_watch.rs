@@ -39,6 +39,34 @@ static AUTHORITY_WAKE: AtomicBool = AtomicBool::new(false);
 static CAPTURES_SIGNAL: AtomicBool = AtomicBool::new(false);
 static CARDS_SIGNAL: AtomicBool = AtomicBool::new(false);
 
+static AV_INBOX_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+/// Reuse the cards watch response; a missing signal keeps older servers on polling.
+pub(crate) fn observe_av_inbox_signal(endpoint: &str, body: &[u8]) {
+    let revision = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("signals")?.get("avInbox")?.as_i64())
+        .filter(|n| *n >= 0);
+    let mut hub = hub();
+    let entry = hub.entry(endpoint_key(endpoint)).or_default();
+    if entry.av_inbox_revision != revision {
+        entry.av_inbox_revision = revision;
+        AV_INBOX_SIGNAL.store(true, Ordering::Release);
+    }
+}
+
+pub(crate) fn take_av_inbox_signal() -> bool {
+    AV_INBOX_SIGNAL.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn av_inbox_live(endpoint: &str, now: i64) -> bool {
+    hub().get(&endpoint_key(endpoint)).is_some_and(|entry| {
+        entry.live_owner.is_some()
+            && now - entry.confirmed_at <= TRUST_WINDOW
+            && entry.av_inbox_revision.is_some()
+    })
+}
+
 /// Reuse the existing held status request; no card-specific poller.
 pub(crate) fn observe_card_signal(endpoint: &str, body: &[u8]) {
     static HEADS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
@@ -268,6 +296,7 @@ pub(crate) enum Source {
 
 #[derive(Default)]
 struct Entry {
+    av_inbox_revision: Option<i64>,
     status: Option<SyncStatus>,
     confirmed_at: i64,
     revision: u64,
@@ -378,6 +407,12 @@ pub(crate) fn set_live(endpoint: &str, owner: u64, live: bool) {
         // the pass (and the capture poll) back to their own cadence right away.
         AUTHORITY_WAKE.store(true, Ordering::Release);
         CAPTURES_SIGNAL.store(true, Ordering::Release);
+        if hub()
+            .get(&endpoint_key(endpoint))
+            .is_some_and(|entry| entry.av_inbox_revision.is_some())
+        {
+            AV_INBOX_SIGNAL.store(true, Ordering::Release);
+        }
     }
 }
 
