@@ -37,7 +37,12 @@ export interface AvLinkCurrentCollection {
  * For a portrait candidate x1=x2=0, so only front has pixels. useSpine is false
  * outside the 1–12% estimate; the UI may explicitly choose a nonempty spine.
  */
+export interface AvLinkJacket {
+  key: string; width: number; height: number; hasSpine: boolean; chosen: boolean;
+  defaultSplit: AvLinkCandidate["defaultSplit"]; spineSource?: AvLinkSpineSource | null;
+}
 export interface AvLinkCandidate {
+  jackets?: AvLinkJacket[]; jacketKey?: string;
   inbox: AvLinkInboxItem; matches?: AvLinkMatch[]; metadata: AvLinkMovie; fields: AvLinkFields;
   jacketUrl: string; jacketWidth: number; jacketHeight: number;
   defaultSplit: { x1: number; x2: number; isWrap: boolean; useSpine: boolean };
@@ -59,6 +64,7 @@ export type AvLinkApplyRequest = (
   | { collectionId: string; expectedRevision: string; newCollectionName?: never }
   | { newCollectionName: string; collectionId?: never; expectedRevision?: never }
 ) & {
+  jacketKey?: string;
   split: { x1: number; x2: number };
   surfaces: { front: AvLinkSurfaceChoice; spine: AvLinkSurfaceChoice; back: AvLinkSurfaceChoice };
   fields: AvLinkFields; performers: AvLinkPersonChoice[];
@@ -78,6 +84,7 @@ export const avLinkClient = {
       spineSource: result.spineSource ? { ...result.spineSource, url: nativeMediaUrl(result.spineSource.url) } : null,
     };
   },
+  jacketPreview: (inboxId: string, jacketKey: string, spine = false) => invoke<string>("get_av_link_jacket", { inboxId, jacketKey, spine }),
   retry: (inboxId: string) => invoke<void>("retry_av_link", { inboxId }),
   fixCode: (inboxId: string, code: string) => invoke<void>("fix_av_link_code", { inboxId, code }),
   dismiss: (inboxId: string) => invoke<void>("dismiss_av_link", { inboxId }),

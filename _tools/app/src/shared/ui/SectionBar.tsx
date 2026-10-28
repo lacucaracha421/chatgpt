@@ -19,6 +19,8 @@ export type SectionBarProps<T extends string> = {
   onChange: (value: T) => void;
   /** View controls at the bar's right end (sort, filters, 보기). */
   trailing?: ReactNode;
+  /** A subordinate view switch immediately after the section control. */
+  afterSwitch?: ReactNode;
   /** Optional second row of shortcuts, shared by the inline and dropped copies. */
   extra?: ReactNode;
   onExtraClick?: () => void;
@@ -30,9 +32,10 @@ export type SectionBarProps<T extends string> = {
 };
 
 /** One thin bar holding a tab's sections, shared by the PC and the tablet. */
-export function SectionBar<T extends string>({ label, options, value, onChange, trailing, extra, onExtraClick, placement = "pinned", fullWidth = false, className, ref }: SectionBarProps<T>) {
+export function SectionBar<T extends string>({ label, options, value, onChange, trailing, afterSwitch, extra, onExtraClick, placement = "pinned", fullWidth = false, className, ref }: SectionBarProps<T>) {
   return <div ref={ref} className={["ui-section-bar", `ui-section-bar--${placement}`, className].filter(Boolean).join(" ")}>
     <SegmentedControl label={label} options={options} value={value} onChange={onChange} fullWidth={fullWidth} />
+    {afterSwitch}
     {trailing && <div className="ui-section-bar__trailing">{trailing}</div>}
     {extra && <div className="ui-section-bar__extra" onClick={onExtraClick}>{extra}</div>}
   </div>;

@@ -11,7 +11,7 @@ import './sectionShade.css';
  * tapping that title) drops a second copy from under the top bar like Android's notification
  * shade. Section picks keep it open; a tap outside, Back, Escape or 64px of user scroll closes it.
  */
-export type SectionShadeBar<T extends string>={label:string;options:readonly SegmentedOption<T>[];value:T;onChange(value:T):void;trailing?:ReactNode;extra?:ReactNode};
+export type SectionShadeBar<T extends string>={label:string;options:readonly SegmentedOption<T>[];value:T;onChange(value:T):void;trailing?:ReactNode;afterSwitch?:ReactNode;extra?:ReactNode};
 export type SectionShade={
   /** The bar as the list's first row. */
   inline:ReactNode;
@@ -172,10 +172,10 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   const lifted=away||open;
   return {
     away,open,barRef,
-    inline:bar.extra?<div ref={inlineRef} className="section-shade-rows section-shade-rows--inline"><SectionBar className="section-bar-row" placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>{bar.extra}</div>:<SectionBar className="section-bar-row" ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} trailing={bar.trailing}/>,
+    inline:bar.extra?<div ref={inlineRef} className="section-shade-rows section-shade-rows--inline"><SectionBar className="section-bar-row" placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} afterSwitch={bar.afterSwitch} trailing={bar.trailing}/>{bar.extra}</div>:<SectionBar className="section-bar-row" ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange} afterSwitch={bar.afterSwitch} trailing={bar.trailing}/>,
     shade:lifted?<div className="section-shade-anchor">
       <div ref={shade} id={id} className={`section-shade${open?' is-open':''}${dragging?' is-dragging':''}`} aria-hidden={!open||undefined} inert={!open||undefined}>
-        <SectionBar className="section-bar-row" placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick} trailing={bar.trailing}/>{bar.extra&&<div className="section-shade-extra" onClick={close}>{bar.extra}</div>}
+        <SectionBar className="section-bar-row" placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick} afterSwitch={bar.afterSwitch} trailing={bar.trailing}/>{bar.extra&&<div className="section-shade-extra" onClick={close}>{bar.extra}</div>}
       </div>
     </div>:null,
     title:base=>lifted

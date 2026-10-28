@@ -61,6 +61,94 @@ def request(body):
     return Request({'type':'http', 'headers':[]}, receive)
 
 
+class AvJacketChoiceTests(unittest.TestCase):
+    def setUp(self):
+        self.mono = 'https://pics.dmm.co.jp/mono/movie/adult/1start649/1start649pl.jpg'
+        self.hires = av.HIRES_URL.format(cid='1start00649')
+        self.raw = dict(cover_image_url=self.mono, sample_image_urls=[
+            'https://pics.dmm.co.jp/digital/video/1start00649/1start00649jp-1.jpg'])
+
+    def jacket(self, size, *, matching=True, jpeg=False, brightness=0):
+        """A patterned front at the actual split, with unrelated artwork on the back."""
+        split = av.wrap_spine(*size)
+        x2 = split[1] if split else av.default_split(*size)['x2']
+        with Image.new('RGB', size, (120, 40, 80)) as image:
+            width, height = size[0] - x2, size[1]
+            # Relative blocks survive a change of resolution and JPEG encoding.
+            for row in range(4):
+                for col in range(3):
+                    value = 35 if (row + col) % 2 else 210
+                    if not matching:
+                        value = 245 - value
+                    value += brightness
+                    image.paste((value, value, value),
+                                (x2 + col * width // 3, row * height // 4,
+                                 x2 + (col + 1) * width // 3, (row + 1) * height // 4))
+            out = io.BytesIO()
+            image.save(out, 'JPEG' if jpeg else 'PNG')
+        return out.getvalue(), 'image/jpeg' if jpeg else 'image/png'
+
+    def choose(self, images):
+        self.asked = []
+        def outbound(address, **kwargs):
+            self.asked.append(address)
+            if address in images:
+                return images[address]
+            raise wp.UpstreamStatus(404)
+        with mock.patch.object(wp, 'outbound', side_effect=outbound):
+            return av.choose_jacket('START-649', self.raw, time.monotonic() + 30)
+
+    def test_matching_digital_front_keeps_hires_and_borrows_spine(self):
+        chosen = self.choose({self.hires: self.jacket((1699, 1200), jpeg=True, brightness=10),
+                              self.mono: self.jacket((800, 538))})
+        self.assertEqual(chosen['address'], self.hires)
+        self.assertEqual(chosen['spine']['address'], self.mono)
+        self.assertEqual((chosen['spine']['x1'], chosen['spine']['x2']), av.wrap_spine(800, 538))
+
+    def test_different_digital_front_uses_dvd_wrap_with_own_spine(self):
+        for size in ((1699, 1200), (1600, 1076)):
+            with self.subTest(size=size):
+                chosen = self.choose({self.hires: self.jacket(size, matching=False),
+                                      self.mono: self.jacket((800, 538))})
+                self.assertEqual(chosen['address'], self.mono)
+                self.assertIsNone(chosen['spine'])
+                self.assertTrue(av.default_split(chosen['width'], chosen['height'])['useSpine'])
+
+    def test_no_dvd_wrap_keeps_digital(self):
+        chosen = self.choose({self.hires: self.jacket((1699, 1200), matching=False)})
+        self.assertEqual(chosen['address'], self.hires)
+        self.assertIsNone(chosen['spine'])
+        self.assertEqual(self.asked.count(self.mono), 1)
+
+    def test_cover_without_a_spine_is_reused_as_an_alternative(self):
+        cover = self.jacket((800, 600))
+        chosen = self.choose({self.hires: self.jacket((1699, 1200)), self.mono: cover})
+        self.assertEqual(chosen['address'], self.hires)
+        self.assertIsNone(chosen['spine'])
+        alternative = next(image for image in chosen['alternatives'] if image['address'] == self.mono)
+        self.assertEqual(alternative['data'], cover[0])
+        self.assertIsNone(alternative['spine'])
+        self.assertEqual(self.asked.count(self.mono), 1)
+
+    def test_separate_optional_cover_failure_keeps_digital(self):
+        self.raw['cover_image_url'] = 'https://pics.dmm.co.jp/jacket.jpg'
+        for status in (404, 503):
+            with self.subTest(status=status):
+                def outbound(address, **kwargs):
+                    if address == self.hires:
+                        return self.jacket((1000, 672))
+                    raise wp.UpstreamStatus(status if address == self.raw['cover_image_url'] else 404)
+                with mock.patch.object(wp, 'outbound', side_effect=outbound):
+                    chosen = av.choose_jacket('START-649', self.raw, time.monotonic() + 30)
+                self.assertEqual(chosen['address'], self.hires)
+
+    def test_no_digital_or_wrap_falls_back_to_cover(self):
+        self.raw['cover_image_url'] = 'https://pics.dmm.co.jp/jacket.jpg'
+        chosen = self.choose({self.raw['cover_image_url']: self.jacket((800, 538))})
+        self.assertEqual(chosen['address'], self.raw['cover_image_url'])
+        self.assertIsNone(chosen['spine'])
+
+
 class AvInboxSignalTests(unittest.TestCase):
     def test_signal_moves_for_intake_status_actions_and_deletion(self):
         with sqlite3.connect(':memory:') as db:
@@ -299,7 +387,9 @@ class AvInboxTests(unittest.TestCase):
         raw=lambda:Response({**movie(),'normalized_id':'STARS-100','sample_image_urls':samples})
         # none (404) -> same 800 px image (not wider) -> wide jacket: the third address wins.
         id_=self.new('stars100')
-        self.open.side_effect=[raw(),Response({},status=404),Response(png(),'image/png'),Response(png((1000,672)),'image/png'),Response(wiki())]
+        self.open.side_effect=[raw(),Response({},status=404),Response(png(),'image/png'),Response(png((1000,672)),'image/png'),
+                               # Three wrap probes and the separate optional LibreDMM cover.
+                               *[Response({},status=404) for _ in range(4)],Response(wiki())]
         self.assertTrue(self.worker.process_one())
         asked=[call.args[0].full_url for call in self.open.call_args_list]
         self.assertEqual([u.rsplit('/',1)[1] for u in asked[1:4]],['stars00100pl.jpg','1stars00100pl.jpg','118stars00100pl.jpg'])
@@ -379,7 +469,12 @@ class AvInboxTests(unittest.TestCase):
         record=dict(cover_image_url=mono,sample_image_urls=['https://pics.dmm.co.jp/digital/video/snos00130/snos00130jp-1.jpg'])
         hires=av.HIRES_URL.format(cid='snos00130')
         id_=self.new('snos130')
-        self.serve('SNOS-130',record,{hires:png((2184,1638)),mono:png((800,438))})
+        # The digital front must depict the same blue front as the DVD fixture.
+        with Image.open(io.BytesIO(png((2184,1638)))) as digital:
+            digital.paste('blue',(1092,0,2184,1638))
+            out=io.BytesIO()
+            digital.save(out,'PNG')
+        self.serve('SNOS-130',record,{hires:out.getvalue(),mono:png((800,438))})
         self.assertTrue(self.worker.process_one())
         candidate=json.loads(self.row(id_)['candidate'])
         self.assertEqual((candidate['jacketWidth'],candidate['jacketHeight']),(2184,1638))
@@ -429,12 +524,13 @@ class AvInboxTests(unittest.TestCase):
         self.assertEqual(candidate['defaultSplit'],dict(x1=1092,x2=1092,isWrap=True,useSpine=False))
         fn=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
         self.code(lambda:asyncio.run(fn(id_,request(dict(x1=1092,x2=1092,surfaces=['spine'])),self.auth)),'invalidAvSplit',422)
-        # A wide jacket with its own spine borrows nothing and asks for no second image.
+        # A wide jacket with its own spine still checks for a matching DVD wrap.
         id_=self.new('snos130')
         self.serve('SNOS-130',record,{hires:png((2184,1468))})
         self.assertTrue(self.worker.process_one())
         self.assertNotIn('spineSource',json.loads(self.row(id_)['candidate']))
-        self.assertEqual([u for u in self.asked if u.endswith('.jpg')],[hires])
+        self.assertEqual([u for u in self.asked if u.endswith('.jpg')],
+                         [hires,*av.wrap_addresses('SNOS-130',record,with_cover=True)])
 
     def test_name_mapping_escaping_ambiguity_and_cache(self):
         values = wiki(['日本名'])
@@ -931,6 +1027,111 @@ class AvInboxTests(unittest.TestCase):
                                       providerImageId=None,width=1,height=1,language='ja',thumbnail=None,
                                       original={'sha256':'f'*64,'sizeBytes':10,'contentType':'image/jpeg'}),
                   'artworkBlobUnconfirmed',409)
+
+
+class AvJacketStorageTests(unittest.TestCase):
+    def setUp(self):
+        self.db=sqlite3.connect(':memory:')
+        self.db.row_factory=sqlite3.Row
+        self.addCleanup(self.db.close)
+        @contextmanager
+        def get_db():
+            yield self.db
+        self.get_db=get_db
+        intake.startup(get_db)
+        self.db.execute('CREATE TABLE mobile_collection_artwork (sha256 TEXT PRIMARY KEY, size_bytes INTEGER, content_type TEXT)')
+        self.app=FastAPI()
+        self.worker=av.register(self.app,get_db,lambda auth:None,lambda:fake_s3,lambda:'test-bucket')
+        self.worker.pace=mock.Mock()
+        self.worker.names=lambda names,deadline:{name:av.japanese(name) for name in names}
+        self.auth='Bearer fixture'
+        fake_s3.objects.clear()
+        patch=mock.patch.object(fake_s3,'get_object',side_effect=lambda **kw:dict(
+            Body=io.BytesIO(fake_s3.objects[kw['Key']]['body']),
+            ContentLength=len(fake_s3.objects[kw['Key']]['body']),
+            ContentType=fake_s3.objects[kw['Key']]['content_type']),create=True)
+        patch.start();self.addCleanup(patch.stop)
+        patch=mock.patch.object(av,'run_in_threadpool',inline)
+        patch.start();self.addCleanup(patch.stop)
+
+    def endpoint(self,path,method):
+        return next(r.endpoint for r in self.app.routes if getattr(r,'path',None)==path and method in r.methods)
+
+    def new(self,code='SSIS-001'):
+        return intake.insert(self.get_db,intake.LookupRequest(requestId=str(uuid.uuid4()),productCode=code))['requestId']
+
+    def row(self,id_):
+        return av.get_row(self.db,id_)
+
+    def fetch(self,id_=None):
+        id_=id_ or self.new()
+        with mock.patch.object(wp,'outbound',side_effect=lambda address,**kw:
+                (json.dumps(movie()).encode(),'application/json') if address.endswith('.json') else (png(),'image/png')):
+            candidate=self.worker.fetch(self.row(id_)['normalized_code'],time.monotonic()+30)
+        self.db.execute("UPDATE av_inbox SET status='found',candidate=? WHERE request_id=?",(json.dumps(candidate),id_))
+        self.db.commit()
+        return id_
+
+    def serve(self,code,record,images):
+        def outbound(address,**kw):
+            if address.endswith('.json'):
+                return json.dumps({**movie(),'normalized_id':code,**record}).encode(),'application/json'
+            if address in images:
+                return images[address],'image/png'
+            raise wp.UpstreamStatus(404)
+        patch=mock.patch.object(wp,'outbound',side_effect=outbound)
+        patch.start();self.addCleanup(patch.stop)
+
+    def post(self,id_,action):
+        return av.change(self.get_db,id_,action,{})
+
+    def test_alternatives_are_stored_listed_and_apply_their_own_spine(self):
+        mono='https://pics.dmm.co.jp/mono/movie/adult/k9snos130/k9snos130pl.jpg'
+        cover=mono.replace('pl.jpg','ps.jpg')
+        hires=av.HIRES_URL.format(cid='snos00130')
+        raw=dict(cover_image_url=cover,sample_image_urls=['https://pics.dmm.co.jp/digital/video/snos00130/snos00130jp-1.jpg'])
+        id_=self.new('snos130')
+        images={hires:png((2184,1638)),mono:png((800,438)),cover:png((147,200))}
+        self.serve('SNOS-130',raw,images)
+        self.assertTrue(self.worker.process_one())
+        saved=json.loads(self.row(id_)['candidate'])
+        choices=av.detail(self.get_db,id_)['candidate']['jackets']
+        self.assertEqual(len(choices),3)
+        self.assertEqual(sum(j['chosen'] for j in choices),1)
+        self.assertEqual(next(j['key'] for j in choices if j['chosen']),saved['jacket']['sha256'])
+        jacket_route=self.endpoint(av.PREFIX+'/{id_}/jacket','GET')
+        artwork=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
+        for choice in choices:
+            stored=av.selected_jacket(saved,choice['key'])
+            self.assertEqual(jacket_route(id_,self.auth,choice['key']).body,
+                             av.stored_jacket(stored,lambda:fake_s3,lambda:'test-bucket',time.monotonic()+30)[0])
+            split=choice['defaultSplit']
+            surfaces=['front','spine','back'] if split['isWrap'] else ['front']
+            body=dict(x1=split['x1'],x2=split['x2'],surfaces=surfaces,jacketKey=choice['key'])
+            result=asyncio.run(artwork(id_,request(body),self.auth))['items']
+            self.assertTrue(all(f":{choice['sha256']}:" in item['providerImageId'] for item in result))
+            if choice['width']==2184:
+                spine=next(i for i in result if i['surface']=='spine')
+                self.assertEqual((spine['width'],spine['height']),(135,1638))
+            elif choice['width']==800:
+                spine=next(i for i in result if i['surface']=='spine')
+                self.assertEqual((spine['width'],spine['height']),(36,438))
+
+    def test_legacy_candidate_applies_and_found_can_be_relooked_up(self):
+        id_=self.fetch()
+        saved=json.loads(self.row(id_)['candidate'])
+        saved.pop('jackets',None)
+        with self.get_db() as db:
+            db.execute('UPDATE av_inbox SET candidate=? WHERE request_id=?',(json.dumps(saved),id_))
+            db.commit()
+        artwork=self.endpoint(av.PREFIX+'/{id_}/artwork','POST')
+        result=asyncio.run(artwork(id_,request(dict(x1=378,x2=422,surfaces=['front'])),self.auth))
+        self.assertEqual(result['items'][0]['width'],378)
+        generation=self.row(id_)['generation']
+        reply=self.post(id_,'retry')
+        self.assertEqual(reply['inbox']['status'],'queued')
+        self.assertIsNone(reply['candidate'])
+        self.assertGreater(self.row(id_)['generation'],generation)
 
 
 if __name__ == '__main__':

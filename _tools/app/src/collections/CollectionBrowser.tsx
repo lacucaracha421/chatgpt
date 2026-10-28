@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon, UserGroupIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
 import { SparklesIcon as SparklesSolidIcon, StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
@@ -59,6 +59,13 @@ import { avGateway } from "./avClient";
 import type { AvGateway } from "./avTypes";
 import { AvPerformerPage } from "./av/AvPerformerPage";
 import { useAvPerformerGroups } from "./av/useAvPerformerGroups";
+import { PerformerGrid, PerformerViewSwitch } from "./av/PerformerGrid";
+import { PerformerViewOptions } from "./av/PerformerViewOptions";
+import { usePerformerView, type PerformerView } from "./av/usePerformerView";
+import { usePerformerGridData } from "./av/usePerformerGridData";
+import { performerName } from "./av/performerName";
+import { PERFORMER_SORTS, performerDirections, performerSortLabel, sortPerformerEntries } from "./av/performerGridModel";
+import { AvPortrait } from "./av/AvPortrait";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import "./CollectionBrowser.css";
 import "./work/collectionWork.css";
@@ -145,6 +152,10 @@ export function CollectionBrowser({
   const spineBatch = useLaunchBoxSpineBatch(gateway, library?.root ?? "");
   useAutoDismiss(spineBatch.message, spineBatch.dismiss);
   const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
+  const [performerView, patchPerformerView] = usePerformerView(library?.root ?? "");
+  const avLibrary = typeFilter === "av" && !showcase && !releaseProvider && !releaseCalendar && !kakaoReview;
+  const performerGrid = avLibrary && performerView.view === "performers";
+  const [pendingPerformers, setPendingPerformers] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [mangaPick, setMangaPick] = useState<MangaShelfPick>(null);
   // Another type tab starts with every case on the shelf.
@@ -187,7 +198,7 @@ export function CollectionBrowser({
   const typeSwap = useRef({}).current;
   useEffect(() => () => cancelSegmentSwap(typeSwap), [typeSwap]);
   const [pageMemory] = useState<{ scope: string; page: number } | null>(null);
-  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar, kakaoReviewOpen]);
+  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar, kakaoReviewOpen, ...(performerGrid ? [performerView.view, performerView.sort, performerView.direction, performerView.columns] : [])]);
   useCollectionCoverPerf(stageRef, scope, collections);
   // A return from the work screen puts its case back out once: the mark is read when the scope first shows, then spent.
   const returnPick = useRef<{ scope: string; pick: boolean } | null>(null);
@@ -206,7 +217,7 @@ export function CollectionBrowser({
     let timeout: ReturnType<typeof setTimeout> | undefined;
     if (remembered?.focusId) {
       const focus = () => {
-        const card = [...stage.querySelectorAll<HTMLElement>("[data-collection-id]")].find(item => item.dataset.collectionId === remembered.focusId);
+        const card = [...stage.querySelectorAll<HTMLElement>("[data-collection-id], [data-performer-id]")].find(item => (item.dataset.collectionId ?? item.dataset.performerId) === remembered.focusId);
         if (!card) return;
         card.focus({ preventScroll: true }); observer?.disconnect(); clearTimeout(timeout);
       };
@@ -221,12 +232,25 @@ export function CollectionBrowser({
   const showcaseItems = useMemo(() => collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)), [collections, typeFilter]);
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
   // 책장 for games and AV: the spine-only shelf. Showcase keeps the turned-case shelf.
-  const spineBookcase = !showcase && (typeFilter === "game" || typeFilter === "av" || typeFilter === "movie") && viewSettings.layout === "bookcase";
+  const spineBookcase = !performerGrid && !showcase && (typeFilter === "game" || typeFilter === "av" || typeFilter === "movie") && viewSettings.layout === "bookcase";
   // 배우 묶기 (AV, 선반 and 격자): one group per performer; a work with several performers stands under each.
   // Back from a work opened on a performer page shows that page again, as on the tablet.
   const [performer, setPerformer] = useState<string | null>(() => returnPick.current?.pick ? navigationMemory?.get(scope)?.performer ?? null : null);
   useBackHandler(() => setPerformer(null), 20, Boolean(performer));
-  const performerGrouping = typeFilter === "av" && !showcase && viewSettings.grouping === "performer" && viewSettings.layout !== "bookcase";
+  const gridData = usePerformerGridData(avApi, gateway, library?.root ?? "", collections, avLibrary && !performer);
+  const gridEntries = useMemo(() => sortPerformerEntries((gridData.entries ?? []).filter(entry => performerName(entry.person).primary.toLocaleLowerCase().includes(libraryState.query.trim().toLocaleLowerCase())), performerView.sort, performerView.direction), [gridData.entries, libraryState.query, performerView.sort, performerView.direction]);
+  const changePerformerView = (patch: Partial<PerformerView>) => {
+    if (patch.view === "performers" && !gridData.entries) { setPendingPerformers(true); return; }
+    setPendingPerformers(false);
+    const stage = stageRef.current;
+    swapSegment(typeSwap, { forward: patch.view ? patch.view === "performers" : undefined, target: stage, still: stage?.querySelector<HTMLElement>(":scope > .ui-section-bar"), commit: () => patchPerformerView(patch) });
+  };
+  useEffect(() => { if (pendingPerformers && gridData.entries && avLibrary) changePerformerView({ view: "performers" }); }, [pendingPerformers, gridData.entries, avLibrary]);
+  const openGridPerformer = (id: string) => {
+    navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: id });
+    setPerformer(id);
+  };
+  const performerGrouping = !performerGrid && typeFilter === "av" && !showcase && viewSettings.grouping === "performer" && viewSettings.layout !== "bookcase";
   const performerList = useAvPerformerGroups({ api: avApi, root: library?.root ?? "", enabled: performerGrouping, items: libraryItems, refreshKey: collections, onOpenPerformer: setPerformer });
   const listGroups = performerGrouping ? performerList.groups : undefined;
   // A list already on screen for this type stays (ungrouped) until the first credits read lands; a type opened
@@ -238,10 +262,11 @@ export function CollectionBrowser({
   const listCells = useMemo(() => listGroups?.flatMap(group => group.items), [listGroups]);
   const visible = useMemo(() => showcase ? showcaseItems : listCells ? [...new Set(listCells)] : (viewSettings.layout === "shelf" || spineBookcase) && (typeFilter === "game" || typeFilter === "movie") ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, listCells, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems, spineBookcase]);
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
-  const sectionLabel = TYPE_LABEL[typeFilter];
+  const sectionLabel = performerGrid ? "AV 배우" : TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
 
   function setTypeFilter(next: CollectionType) {
+    setPendingPerformers(false);
     if (next === typeFilter && !releaseProvider && !releaseCalendar && !kakaoReviewOpen) return;
     const commit = () => onViewChange({ kind: "collections", typeFilter: next, showcase });
     // These views keep their own motion; a type switch retains Showcase and closes releases.
@@ -421,7 +446,7 @@ export function CollectionBrowser({
   // AV groups by performer on 선반 and 격자; its 책장 packs each work once, so it offers no grouping.
   const groupable = typeFilter === "game" || typeFilter === "movie" || (typeFilter === "av" && viewSettings.layout !== "bookcase");
   // 보기, in the shared order (DESIGN.md §12): 내 별점 → 배치 → 정렬 → 관리.
-  const viewControls = libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
+  const viewControls = libraryView && performerGrid ? <Menu label="보기" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><Squares2X2Icon aria-hidden="true"/><span>보기</span></>} contentClassName="ui-view-options" content={<div className="ui-view-options__content" onKeyDown={event=>event.stopPropagation()}><PerformerViewOptions value={performerView} onChange={changePerformerView}/></div>}/> : libraryView ? <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }, ...(hasBookcase(typeFilter) ? [{ value: "bookcase" as const, label: "책장" }] : [])]}
     onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })}
     sizeControl={spineBookcase || mangaBookcase ? <SpineSizeRow value={viewSettings.spineSize ?? "normal"} av={typeFilter === "av" || typeFilter === "movie"} onChange={spineSize => patchViewSettings({ spineSize })} /> : undefined}
     leading={<CollectionRatingSection rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />}>
@@ -432,7 +457,7 @@ export function CollectionBrowser({
   const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
     <Menu label="컬렉션 검색" align="end" trigger={<MagnifyingGlassIcon aria-hidden="true" />}
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
-        <TextInput type="search" aria-label="제목 검색" placeholder="작품 제목 검색" autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
+        <TextInput type="search" aria-label={performerGrid ? "배우 이름 검색" : "제목 검색"} placeholder={performerGrid ? "배우 이름 검색" : "작품 제목 검색"} autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
       </div>} />
     {typeFilter === "game" && spineBatch.running && <span className="collection-toolbar__spine-progress">
       <span role="status" className="collection-toolbar__spine-status">
@@ -444,19 +469,19 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
-  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox && !(charactersOpen && charactersReady), "컬렉션");
+  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, afterSwitch: avLibrary ? <PerformerViewSwitch value={performerView.view} onChange={view=>changePerformerView({view})}/> : undefined, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox && !(charactersOpen && charactersReady), "컬렉션", performerGrid ? sectionLabel : undefined);
 
   const chrome: ViewChromeSpec = {
     actions: collectionActions,
-    summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
-    search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
+    summary: performerGrid ? `${PERFORMER_SORTS.find(option=>option.value===performerView.sort)!.label} ${performerDirections(performerView.sort).find(option=>option.value===performerView.direction)!.label}` : `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
+    search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: performerGrid ? "배우 이름 검색" : "제목 검색", placeholder: performerGrid ? "배우 이름 검색" : "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
   };
 
-  const scrubberSort = useMemo<ScrubberSort>(() => listCells ? { kind: "fallback" } : libraryState.sort === "name"
+  const scrubberSort = useMemo<ScrubberSort>(() => performerGrid ? { kind: "value", values: gridEntries.map(entry=>performerSortLabel(entry,performerView.sort)) } : listCells ? { kind: "fallback" } : libraryState.sort === "name"
     ? {kind: "name", values: visible.map(work => work.name)}
     : {kind: "date", values: visible.map(work => libraryState.sort === "recent" ? work.createdAt : work.releaseDate ?? work.createdAt)},
-  [visible, listCells, libraryState.sort]);
-  const listScrubber = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
+  [performerGrid, gridEntries, performerView.sort, visible, listCells, libraryState.sort]);
+  const listScrubber = useScrubberList(stageRef, performerGrid ? ".performer-card" : mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
   // The spine shelf mounts only a window of rows, so it seeks by its own packing.
   const spineSeek = useCallback((index: number) => spineControl.current?.seek(index), []);
   const spineIndexAtScroll = useCallback(() => spineControl.current?.indexAtScroll() ?? 0, []);
@@ -471,7 +496,7 @@ export function CollectionBrowser({
       {!kakaoReviewOpen && (!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
-        titleAccessory={<>{!inbox && <span className="collection-toolbar__count" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span>}{toolbarControls}<BusyLabel busy={charactersOpen && !charactersReady} delay={400}>캐릭터 확인 중</BusyLabel></>}
+        titleAccessory={<>{!inbox && <span className="collection-toolbar__count" aria-label={performerGrid ? `배우 ${gridEntries.length}명` : `작품 ${visible.length.toLocaleString()}개`}>{(performerGrid ? gridEntries.length : visible.length).toLocaleString()}</span>}{toolbarControls}<BusyLabel busy={pendingPerformers && !gridData.error}>배우 확인 중</BusyLabel><BusyLabel busy={charactersOpen && !charactersReady} delay={400}>캐릭터 확인 중</BusyLabel></>}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ArrowLeftIcon aria-hidden="true" /></Button>}
         chrome={chrome}
@@ -490,7 +515,7 @@ export function CollectionBrowser({
           className="collection-browser__content-final"
           data-search-results=""
           onContextMenu={(event) => {
-            if (inbox || (event.target as HTMLElement).closest(".collection-card, .manga-shelf-row, .ui-section-bar, .spine, .spine-shelf__out")) return;
+            if (inbox || (event.target as HTMLElement).closest(".collection-card, .performer-card, .manga-shelf-row, .ui-section-bar, .spine, .spine-shelf__out")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
@@ -507,16 +532,18 @@ export function CollectionBrowser({
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__showcase-scroll">{sectionDrop.inline}<div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션 없음">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div></div>}
           {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
             {sectionDrop.inline}
-            {leading}
-            {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
+            {gridData.error && (performerGrid || pendingPerformers) && <p role="alert">{gridData.error}<Button variant="ghost" onClick={gridData.retry}>다시 시도</Button></p>}
+            {!performerGrid && leading}
+            {performerGrid ? gridData.entries ? <PerformerGrid entries={gridEntries} sort={performerView.sort} columns={performerView.columns} onOpen={openGridPerformer} renderPortrait={({person})=><AvPortrait portrait={person.portrait} name={performerName(person).primary} size="performer" stable/>}/> : <BusyLabel busy>배우 확인 중</BusyLabel>
+              : mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
               : spineBookcase ? spineData.settled && libraryItems.length > 0 && <SpineShelf key={typeFilter} groups={spineGroups} scale={shelfScale} label={`${sectionLabel} 작품 목록`}
                 pickedId={pickedId} onPick={setPickedId} onOpen={openSpine} privacy={privacyMode} menu={spineMenu} onWindow={spineData.onWindow} prepare={spineData.prepare} controlRef={spineControl}
                 restoredFocusId={navigationMemory?.get(scope)?.focusId} restorePick={returnPick.current.pick} entrance={spineEntrance} />
               : holdList ? null
               : <CollectionList items={libraryItems} groups={listGroups} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
-            {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
+            {(performerGrid ? !!gridData.entries && gridEntries.length === 0 : visible.length === 0) && <div className="collection-browser__empty">{performerGrid ? <EmptyState title="조건에 맞는 배우가 없습니다"/> : emptyLibrary}</div>}
           </div>}
-          {!inbox && !showcase && <Scrubber key={`${typeFilter}:${viewSettings.layout}`} input="pointer" scrollRef={stageRef} total={listCells?.length ?? visible.length} sort={scrubberSort} {...scrubberList} />}
+          {!inbox && !showcase && <Scrubber key={`${typeFilter}:${performerGrid ? 'performers' : viewSettings.layout}`} input="pointer" scrollRef={stageRef} total={performerGrid ? gridEntries.length : listCells?.length ?? visible.length} sort={scrubberSort} {...scrubberList} />}
 
         </div>
       </div>

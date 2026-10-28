@@ -151,6 +151,7 @@ fn routed(entities: Value) -> (tempfile::TempDir, Library, CollectionAuthoritySt
 
 fn request_new() -> ApplyRequest {
     ApplyRequest {
+        jacket_key: None,
         collection_id: None,
         new_collection_name: Some("".into()),
         expected_revision: None,
@@ -1669,6 +1670,7 @@ fn artwork_selections_expect_pending_inbox_choices_for_every_slot() {
                 &item_server(ID, json!([])),
                 ID,
                 ApplyRequest {
+                    jacket_key: None,
                     collection_id: Some("av-1".into()),
                     new_collection_name: None,
                     expected_revision: Some(library.get_av_cover_set("av-1").unwrap().revision),
@@ -1852,5 +1854,42 @@ fn a_cycle_that_meets_a_running_apply_skips_it_and_keeps_its_claim() {
         "skipping must not release the running apply's claim"
     );
     drop(running);
-    assert!(ApplyGuard::claim(key).is_some(), "released when the apply ends");
+    assert!(
+        ApplyGuard::claim(key).is_some(),
+        "released when the apply ends"
+    );
+}
+
+#[test]
+fn selected_jacket_is_listed_and_persisted_for_artwork_preparation() {
+    let (_temp, library, _) = routed(json!({"works":[]}));
+    let fallback = item_server(ID, json!([]));
+    let server = Mock::new(move |method, path, body| {
+        if path == format!("/v1/av-inbox/{ID}") {
+            let mut value = detail(ID, json!([]));
+            value["candidate"]["jackets"] = json!([{"key":SHA,"width":2184,"height":1638,
+                "hasSpine":true,"chosen":false,"defaultSplit":{"x1":1092,"x2":1092,"isWrap":true,"useSpine":true},
+                "spineSource":{"width":800,"height":538,"x1":378,"x2":422}}]);
+            reply(200, value)
+        } else {
+            fallback.request(method, path, body, 1024 * 1024).unwrap()
+        }
+    });
+    let candidate = library.routed_candidate(&server, ID, None).unwrap();
+    assert_eq!(candidate.jackets[0].key, SHA);
+    assert!(candidate.jackets[0].spine_source.is_some());
+    let mut request = request_new();
+    request.jacket_key = Some(SHA.into());
+    request.split = Split { x1: 1092, x2: 1093 };
+    library
+        .apply_av_link_routed_with(&server, ID, request)
+        .unwrap();
+    assert_eq!(
+        server.bodies("/artwork"),
+        vec![json!({"jacketKey":SHA,"x1":1092,"x2":1093,"surfaces":["front","spine","back"]})]
+    );
+    let progress = super::routed_apply::read_progress(&library.connection().unwrap(), ID)
+        .unwrap()
+        .unwrap();
+    assert_eq!(progress.jacket_key.as_deref(), Some(SHA));
 }

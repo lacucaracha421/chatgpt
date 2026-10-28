@@ -71,7 +71,15 @@ import {api, errorText} from './transport';
 import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkMissing, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
-import {AvCast, AvRelatedWorks, useTabletPerformerGroups} from './AvCollections';
+import {AvCast, AvRelatedWorks, PersonPortrait, useTabletPerformerGroups} from './AvCollections';
+import {PerformerGrid, PerformerViewSwitch} from '../src/collections/av/PerformerGrid';
+import {PerformerViewOptions} from '../src/collections/av/PerformerViewOptions';
+import {usePerformerView, type PerformerView} from '../src/collections/av/usePerformerView';
+import {performerName} from '../src/collections/av/performerName';
+import {performerSortLabel, sortPerformerEntries} from '../src/collections/av/performerGridModel';
+import {useTabletPerformerGrid} from './useTabletPerformerGrid';
+import {outboxConnection} from './outboxConnection';
+import {useScrubberList} from '../src/shared/ui/scrubber/useScrubberList';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import './library.css';
 import './Collections.css';
@@ -434,7 +442,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const warming=prefetch&&!privacyMode&&!paused&&!directWork;
   const browseLive=live&&!directWork;
   useEffect(()=>{if(privacyMode)setCoverIndex(null);},[privacyMode]);
-  useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
   const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null);
   const overlayOpen=showcaseAll||inboxOpen||calendarOpen||kakaoReviewOpen||favoritesOpen;
@@ -444,6 +451,12 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // Covers decoded on this screen; a list swap readies the new first screen's covers first.
   const [artworks]=useState(()=>new ArtworkMemory());
   const prepareCovers=useCallback((page:CollectionPage,signal:AbortSignal)=>artworks.preload(page.items.slice(0,FIRST_SCREEN_COVERS),page.revision??'',signal),[artworks]);
+  const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
+  const performerLibrary=JSON.stringify([outboxConnection(),edits.authority.identity?.libraryId??'']);
+  const [performerView,patchPerformerView]=usePerformerView(performerLibrary,true);
+  useEffect(()=>{if(privacyMode&&tab==='av'&&performerView.view!=='performers'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab,performerView.view]);
+  const [performerQuery,setPerformerQuery]=useState('');
+  const [pendingPerformers,setPendingPerformers]=useState(false);
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
   // A type switch is a segment switch: the shared view swap moves the new list in from the side of
   // the chosen type once it commits (covers prepared first); the section bar stays still.
@@ -457,8 +470,21 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,browseLive||warming,
     {slot:type,allowMore:live,warm:!live,prepare:live?prepareCovers:undefined,present:live?presentType:undefined,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
   const wantShowcase=browseLive;
+  const performerGrid=main.slot==='av'&&performerView.view==='performers';
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
+  const gridSource=useMemo(()=>main.slot==='av'&&main.committed&&!main.busy&&!main.next&&!search&&filters.rating==='all'&&main.page?{...main.page,items:main.items,nextCursor:null}:null,[main.slot,main.committed,main.busy,main.next,main.page,main.items,search,filters.rating]);
+  const gridData=useTabletPerformerGrid(performerLibrary,browseLive&&!performer&&tab==='av'&&(!!gridSource||!!search||filters.rating!=='all'),gridSource,refresh);
+  const gridEntries=useMemo(()=>sortPerformerEntries((gridData.data?.entries??[]).filter(entry=>performerName(entry.person).primary.toLocaleLowerCase().includes(performerQuery.trim().toLocaleLowerCase())),performerView.sort,performerView.direction),[gridData.data,performerQuery,performerView.sort,performerView.direction]);
+  const gridScrubberSort=useMemo<ScrubberSort>(()=>({kind:'value',values:gridEntries.map(entry=>performerSortLabel(entry,performerView.sort))}),[gridEntries,performerView.sort]);
+  const gridScrubber=useScrubberList(listRef,'.performer-card');
+  const changePerformerView=(patch:Partial<PerformerView>)=>{
+    if(patch.view==='performers'&&!gridData.data){setPendingPerformers(true);return;}
+    setPendingPerformers(false);
+    const list=listRef.current;
+    swapSegment(swapOwner,{forward:patch.view?patch.view==='performers':undefined,target:list,still:list?.querySelector<HTMLElement>(':scope > .ui-section-bar'),commit:()=>{listScroll.current=0;if(list)list.scrollTop=0;patchPerformerView(patch);}});
+  };
+  useEffect(()=>{if(pendingPerformers&&gridData.data&&tab==='av')changePerformerView({view:'performers'});},[pendingPerformers,gridData.data,tab]);
   // Refreshes retain this type's painted exhibition; a different type loads within the overlay.
   const shownShowcase=showcase.committed||showcase.items[0]?.type===type;
   const showcaseItems=shownShowcase?showcase.items:[];
@@ -466,8 +492,6 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||overlayOpen||!!performer);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>{detailCache.current.clear();setDetailRefresh(n=>n+1);},!!selected&&!detail&&!detailError,!active||paused||!selected);
-  // An accepted personal edit changes what the server serves; re-read both views.
-  const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
   const kakaoQueue=useKakaoReviewQueue(live&&kakaoReviewOpen,refresh);
   // This is the whole manga library, even while the shelf is filtered or partially loaded.
   // Older servers cannot supply that count; do not infer it from the visible works.
@@ -589,7 +613,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   };window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet,manage,favoritesOpen]);
   useEffect(()=>{if(!active){setSheet(null);}},[active]);
 
-  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
+  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;setPendingPerformers(false);listScroll.current=0;if(showcaseRef.current)showcaseRef.current.scrollTop=0;setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
   const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{beginScreenTiming('collection.work','open');if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
@@ -597,7 +621,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
   const workActions=(work:CollectionSummary,revision:string)=>setWorkSheet({work,revision});
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
-  const openPerformer=(id:string)=>{setSheet(null);setPerformer(current=>({id,from:selected??current?.from??null}));setSelected(null);};
+  const openPerformer=(id:string)=>{if(listRef.current&&!selected&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setPerformer(current=>({id,from:selected??current?.from??null}));setSelected(null);};
   // The 배우 group headings keep one handler, so the grouped list is not rebuilt on every render.
   const latestOpenPerformer=useRef(openPerformer);latestOpenPerformer.current=openPerformer;
   const openGroupPerformer=useCallback((id:string)=>latestOpenPerformer.current(id),[]);
@@ -639,33 +663,35 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const card=(published:CollectionSummary)=>{const work=edits.authority.work(published);const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
-  const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
+  const typeOptions=TABS.filter(value=>!privacyMode||value!=='av'||performerView.view==='performers').map(value=>({value,label:labels[value]}));
   // Both orientations keep shortcuts, view and creation in the same order.
   const calendarShortcut=(tab==='game'||tab==='movie')&&<SectionTool label="발매 캘린더" icon={CalendarDaysIcon} count={calendarInterestCount||undefined} onClick={()=>{beginScreenTiming('releaseCalendar','open');setCalendarOpen(true);}}/>;
   // An invisible calendar shortcut keeps the type switch equally wide on 만화 (shorter 신간) and AV (none).
   const shortcutSizer=<span className="collection-shortcuts__sizer" aria-hidden="true" inert><SectionTool label="발매 캘린더" icon={CalendarDaysIcon} onClick={()=>{}}/></span>;
   const newsShortcut=tab==='manga'&&<SectionTool label="신간" icon={BellIcon} count={releases.unread||undefined} onClick={openInbox}/>;
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,afterSwitch:tab==='av'?<PerformerViewSwitch value={performerView.view} onChange={view=>changePerformerView({view})}/>:undefined,trailing:<>
     <SectionTool label="쇼케이스" ariaLabel="쇼케이스" icon={showcaseAll?SparklesSolidIcon:SparklesIcon} selected={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}/>
     <SectionTool label="캐릭터" icon={UserGroupIcon} selected={favoritesOpen} onClick={()=>setFavoritesOpen(open=>!open)}/>
     {(calendarShortcut||newsShortcut)&&<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">{calendarShortcut}{newsShortcut}{newsShortcut&&shortcutSizer}</div>}
-    {tab==='av'&&<div className="collection-shortcuts" aria-hidden="true" inert>{shortcutSizer}</div>}<span className="section-tools-divider" aria-hidden="true"/>
+    <span className="section-tools-divider" aria-hidden="true"/>
     <SectionTool label="보기" icon={Squares2X2Icon} onClick={()=>setSheet('view')}/>
     {edits.authority.identity&&<SectionTool label="새 작품" icon={PlusIcon} onClick={()=>setWorkForm({mode:'create',type})}/>}
   </>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
-  const searching=searchOpen||!!query||!!search;
-  const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
+  const activeQuery=performerGrid?performerQuery:query;
+  const searching=searchOpen||!!activeQuery||!performerGrid&&!!search;
+  const applySearch=(value:string)=>{if(performerGrid)setPerformerQuery(value);else{setQuery(value);setSearch(value.trim());}};
+  const closeSearch=()=>{applySearch('');setSearchOpen(false);};
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<button onClick={closeWork} className="top-bar__crumbs is-alone">{directWork?'홈':<>컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</>}</button>} itemAction={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits} tracking={false}/></div>:undefined} onMenu={item&&edits.authority.identity?()=>setManage('menu'):undefined}/>
     :performer
       ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<button onClick={closePerformer} className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</button>} menu={edits.authority.identity?{title:'배우',entries:[{id:'performer-manage',group:'action',label:'배우 관리',icon:<EllipsisHorizontalIcon/>,run:()=>setPerformerManagementRequest(value=>value+1)}]}:undefined}/>
-    :searching&&tab!=='av'&&!overlayOpen
-        ?<TopBarSearch title="컬렉션" menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:undefined} search={{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());}}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
-          <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
-          {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
+    :searching&&(tab!=='av'||performerGrid)&&!overlayOpen
+        ?<TopBarSearch title="컬렉션" menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:undefined} search={{scope:'컬렉션',run:applySearch}} loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();applySearch(activeQuery);(document.activeElement as HTMLElement|null)?.blur();}}>
+          <MagnifyingGlassIcon aria-hidden="true"/><input aria-label={performerGrid?'배우 이름 검색':'컬렉션 검색'} type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={performerGrid?'배우 이름 검색':`제목이나 ${makerLabels[type]} 찾기`} value={activeQuery} onChange={event=>performerGrid?setPerformerQuery(event.target.value):setQuery(event.target.value)}/>
+          {activeQuery&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>applySearch('')}/>}
         </form></TopBarSearch>
-        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} search={tab!=='av'?{scope:'컬렉션',run:value=>{setQuery(value);setSearch(value.trim());setSearchOpen(true);}}:undefined} menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:tab==='av'?{title:'컬렉션',entries:[{id:'av-inbox',group:'action',label:'품번 보내기',icon:<RectangleStackIcon/>,run:()=>setAvInboxOpen(true)}]}:undefined}/>;
+        :<TopBar barRef={sections.barRef} count={performerGrid?gridEntries.length:undefined} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} search={tab!=='av'||performerGrid?{scope:'컬렉션',run:value=>{applySearch(value);setSearchOpen(true);}}:undefined} menu={tab==='manga'&&kakaoUnlinked>0?{title:'컬렉션',entries:[{id:'review-links',group:'action',label:`연결 점검 ${kakaoUnlinked}`,icon:<LinkIcon/>,run:()=>setKakaoReviewOpen(true)}]}:tab==='av'?{title:'컬렉션',entries:[{id:'av-inbox',group:'action',label:'품번 보내기',icon:<RectangleStackIcon/>,run:()=>setAvInboxOpen(true)}]}:undefined}/>;
   const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
   const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
@@ -771,7 +797,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {listPull}
       {sections.inline}
       <AuthorityQueue authority={edits.authority} onForm={setWorkForm}/>
-      {listTab==='av'?<>
+      {performerGrid?<>{gridData.error&&<div className="inline-error" role="alert"><span>{gridData.error}</span><Button variant="ghost" onClick={gridData.retry}>다시 시도</Button></div>}{gridData.data?<><PerformerGrid entries={gridEntries} sort={performerView.sort} columns={performerView.columns} onOpen={openGroupPerformer} renderPortrait={({person})=><PersonPortrait person={person} current={gridData.data!.works[0]!} items={gridData.data!.works} revision={gridData.data!.revision}/>}/>{!gridEntries.length&&<EmptyState title="조건에 맞는 배우가 없습니다"/>}</>:<BusyLabel busy>배우 확인 중</BusyLabel>}</>:listTab==='av'?<>
+      {pendingPerformers&&<BusyLabel busy={!gridData.error}>배우 확인 중</BusyLabel>}
+      {pendingPerformers&&gridData.error&&<div className="inline-error" role="alert">{gridData.error}<Button variant="ghost" onClick={gridData.retry}>다시 시도</Button></div>}
       <AvInbox active={active&&!paused&&listTab==='av'} authority={edits.authority} items={main.items} open={avInboxOpen} onOpen={()=>setAvInboxOpen(true)} onClose={()=>setAvInboxOpen(false)}/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
@@ -788,7 +816,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
-      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
+      <Scrubber scrollRef={listRef} total={performerGrid?gridEntries.length:main.items.length} sort={performerGrid?gridScrubberSort:mainScrubberSort} {...(performerGrid?gridScrubber:{})} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
     <FavoriteCharacters open={favoritesOpen} active={live} covered={!!performer} onClose={()=>setFavoritesOpen(false)} backRef={favoritesBack} onOpenFolder={node=>onOpenCharacterFolder?.(node)} onOpenWork={id=>openWork(id)} cover={(work,revision)=><Artwork item={work} id={collectionCover(work)} revision={revision} active={live} label={work.name}/>}/>
@@ -821,10 +849,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
     {sheet==='view'&&(performer&&!selected?<ShelfViewSheet type="av" view={avPerformerView(viewOf('av'))} onChange={patch=>patchView('av',patch)} onClose={()=>setSheet(null)}/>:<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content shelf-view-sheet">
-      <CollectionRatingSection rating={filters.rating} onChange={rating=>changeFilters({...filters,rating})} settleMs={250}/>
+      {performerGrid?<PerformerViewOptions value={performerView} onChange={changePerformerView} tablet/>:<><CollectionRatingSection rating={filters.rating} onChange={rating=>changeFilters({...filters,rating})} settleMs={250}/>
       <ShelfViewSection type={type} view={viewOf(type)} onChange={patch=>patchView(type,patch)}/>
       <CollectionSortSection sort={filters.sort} direction={filters.direction} onSortChange={next=>changeFilters({...filters,...next})}
-        movie={type==='movie'} av={type==='av'} grouping={groupable(type)?viewOf(type).grouping??'sort':undefined} onGroupingChange={groupable(type)?grouping=>patchView(type,{grouping}):undefined}/>
+        movie={type==='movie'} av={type==='av'} grouping={groupable(type)?viewOf(type).grouping??'sort':undefined} onGroupingChange={groupable(type)?grouping=>patchView(type,{grouping}):undefined}/></>}
     </div></BottomSheet>)}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>

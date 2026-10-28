@@ -11,7 +11,8 @@ export type Surface = 'front'|'spine'|'back';
 export const SURFACES:Surface[] = ['front','spine','back'];
 export const SURFACE_LABELS:Record<Surface,string> = {front:'앞표지',spine:'책등',back:'뒤표지'};
 export type CandidatePerson = {nameJa:string;nameKo:string|null;wikidataId:string|null;fanzaActressId:string|null};
-export type InboxCandidate = {fields:AvDetailFields; jacketSha256?:string;jacketUrl:string;jacketWidth:number;jacketHeight:number;defaultSplit:{x1:number;x2:number;isWrap:boolean;useSpine:boolean};performers:CandidatePerson[];/** Directors are no longer imported; older servers still send them. */directors?:CandidatePerson[];/** The DVD cover a borrowed spine is cut from (`jacketPreview(id, signal, 'spine-source')`). */spineSource?:{width:number;height:number;x1:number;x2:number}|null};
+export type InboxJacket = {key:string;url:string;width:number;height:number;hasSpine:boolean;chosen:boolean;sha256:string;defaultSplit:InboxCandidate['defaultSplit'];spineSource?:InboxCandidate['spineSource']};
+export type InboxCandidate = {jackets?:InboxJacket[];jacketKey?:string;fields:AvDetailFields; jacketSha256?:string;jacketUrl:string;jacketWidth:number;jacketHeight:number;defaultSplit:{x1:number;x2:number;isWrap:boolean;useSpine:boolean};performers:CandidatePerson[];/** Directors are no longer imported; older servers still send them. */directors?:CandidatePerson[];/** The DVD cover a borrowed spine is cut from (`jacketPreview(id, signal, 'spine-source')`). */spineSource?:{width:number;height:number;x1:number;x2:number}|null};
 export type InboxDetail = {inbox:InboxItem;candidate:InboxCandidate|null;matches:{libraryId:string;workId:string;name:string;entityRevision:number}[]};
 export type PreparedArtwork = {surface:Surface;kind:string;provider:string;providerImageId:string;width:number;height:number;language:string|null;original:BlobReceipt;thumbnail:BlobReceipt|null};
 export type InboxWork = {workId:string;type:string;name:string;lifecycle:string;entityRevision:number;selection:Record<string,string|null>;details:{av?:AvDetailFields};avCredits:AvCredit[];avPeople?:InboxPerson[]};
@@ -20,11 +21,12 @@ export type InboxArtwork = {workId:string;artworkId:string;kind:string;provider:
 export type InboxAuthority = {identity:AuthorityIdentity;snapshotCursor?:number;works:InboxWork[];artworks:InboxArtwork[];people:InboxPerson[]};
 export const inboxPath = (id:string) => `/v1/av-inbox/${encodeURIComponent(id)}`;
 export const inboxDetail = (id:string, signal?:AbortSignal) => api<InboxDetail>(inboxPath(id), signal);
-export async function reviewedInboxDetail(id:string,connection=outboxConnection(),signal=new AbortController().signal):Promise<InboxDetail>{
+export async function reviewedInboxDetail(id:string,connection=outboxConnection(),signal=new AbortController().signal,jacketKey?:string):Promise<InboxDetail>{
   const detail=await api<InboxDetail>(inboxPath(id),signal,undefined,'GET',false,connection??undefined);
   if(detail.candidate){
-    const {reviewedJacket}=await import('./avInboxThumbnail');
-    const jacket=await reviewedJacket(detail,signal);
+    if(jacketKey)detail.candidate=selectInboxJacket(detail.candidate,jacketKey);
+    const {reviewedJacket,jacketSha256}=await import('./avInboxThumbnail');
+    const jacket=jacketKey?{sha256:await jacketSha256(await jacketPreview(id,signal,'jacket',jacketKey))}:await reviewedJacket(detail,signal);
     detail.candidate={...detail.candidate,jacketSha256:jacket.sha256};
   }
   return detail;
@@ -68,9 +70,9 @@ export async function readInboxAuthority(identity:AuthorityIdentity,signal?:Abor
   return result;
 }
 /** `spine-source`: the DVD cover a borrowed spine is cut from. */
-export async function jacketPreview(id:string,signal:AbortSignal,part:'jacket'|'spine-source'='jacket'):Promise<string> {
+export async function jacketPreview(id:string,signal:AbortSignal,part:'jacket'|'spine-source'='jacket',jacketKey?:string):Promise<string> {
   const connection=outboxConnection();if(!connection)throw new Error('서버 연결을 확인해 주세요.');
-  const reply=await native<{url:string}>('providerImage',{path:`${inboxPath(id)}/${part}`,connection},signal);
+  const reply=await native<{url:string}>('providerImage',{path:`${inboxPath(id)}/${part}${jacketKey?`?jacketKey=${encodeURIComponent(jacketKey)}`:''}`,connection},signal);
   return reply.url;
 }
 /** useSpine on a wrap whose lines enclose nothing: the jacket has no spine of its own, the server cuts it from the DVD cover. */
@@ -82,3 +84,12 @@ export const candidateHasSurface=(c:InboxCandidate,s:Surface,split?:{x1:number;x
   if(!split||sameSplit(split,c.defaultSplit))return s==='back'?c.defaultSplit.x1>0:c.defaultSplit.useSpine;
   return candidateAvailable(c.defaultSplit,split,c.jacketWidth,s);
 };
+
+/** Project the selected jacket so crop validation and durable apply use the same image. */
+export function selectInboxJacket(candidate:InboxCandidate,key?:string):InboxCandidate {
+  if(!key)return candidate;
+  const image=candidate.jackets?.find(j=>j.key===key);
+  if(!image)throw new Error('표지 후보가 변경되었습니다. 다시 확인해 주세요.');
+  return {...candidate,jacketKey:key,jacketUrl:image.url,jacketWidth:image.width,jacketHeight:image.height,
+    defaultSplit:image.defaultSplit,spineSource:image.spineSource??null,jacketSha256:image.sha256};
+}

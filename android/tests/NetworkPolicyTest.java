@@ -122,6 +122,8 @@ public final class NetworkPolicyTest {
   for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  }
  pass(()->NetworkPolicy.providerImage(inbox+"/jacket"));
+ pass(()->NetworkPolicy.providerImage(inbox+"/spine-source?jacketKey="+"a".repeat(64)));
+ reject(()->NetworkPolicy.providerImage(inbox+"/jacket?jacketKey=x"));
  if(NetworkPolicy.providerImageLimit(inbox+"/jacket")!=8L*1024*1024)throw new AssertionError("Jacket cap");
  if(NetworkPolicy.providerImageLimit("/v1/providers/stashdb/image?stashdbId=a&imageId=b")!=4L*1024*1024)throw new AssertionError("Preview cap");
  checks+=2;

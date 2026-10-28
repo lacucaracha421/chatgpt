@@ -4,6 +4,7 @@ export type ScrubberSort =
   | {kind: 'date'; values: readonly ScrubberDateValue[]}
   | {kind: 'toc'; totalCount:number; buckets:readonly {key:string; startIndex:number; count:number}[]}
   | {kind: 'name'; values: readonly (string | null | undefined)[]}
+  | {kind: 'value'; values: readonly string[]}
   | {kind: 'fallback'};
 
 export type ScrubberTick = {position: number; label?: string; major: boolean; index: number};
@@ -115,6 +116,7 @@ export function scrubberLabelAt(sort: ScrubberSort, index: number): string | nul
     return parts?`${parts[1]}년 ${Number(parts[2])}월`:'날짜 없음';
   }
   const value = sort.kind === 'fallback' ? null : sort.values[clampIndex(index, sort.values.length)];
+  if (sort.kind === 'value') return value as string ?? null;
   if (sort.kind === 'date') {
     const parts = dateParts(value);
     return parts ? `${parts.year}년 ${parts.month}월` : null;

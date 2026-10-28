@@ -11,7 +11,7 @@ export type SectionDrop = {
 };
 
 /** PC input and frame only; both copies render the shared SectionBar. */
-export function useSectionDrop<T extends string>(bar: SectionBarProps<T>, enabled = true, area?: string) {
+export function useSectionDrop<T extends string>(bar: SectionBarProps<T>, enabled = true, area?: string, currentLabel?: string) {
   const id = useId();
   const [away, setAway] = useState(false), [open, setOpen] = useState(false);
   const [topBar, setTopBar] = useState<HTMLElement | null>(null);
@@ -105,7 +105,7 @@ export function useSectionDrop<T extends string>(bar: SectionBarProps<T>, enable
     return () => { observer.disconnect(); document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", key, true); document.removeEventListener("focusin", focus); document.removeEventListener("focusout", focus); };
   }, [open, topBar, panels, close, leave, focused]);
   const pick = (value: T) => { close(); bar.onChange(value); };
-  const current = bar.options.find(option => option.value === bar.value)?.label;
+  const current = currentLabel ?? bar.options.find(option => option.value === bar.value)?.label;
   const drop: SectionDrop = {
     area,
     barRef: useCallback((element: HTMLElement | null) => setTopBar(element?.closest<HTMLElement>(".workspace-titlebar") ?? element), []),

@@ -60,6 +60,8 @@ pub(super) struct Progress {
     pub state: String,
     pub plan: AvInboxPlan,
     pub split: Split,
+    #[serde(default)]
+    pub jacket_key: Option<String>,
     /// The cover-set revision the user saw, for an existing destination.
     #[serde(default)]
     pub expected_revision: Option<String>,
@@ -306,7 +308,9 @@ impl Library {
                 } else {
                     requested
                 };
-                if super::super::collection_authority::collection_name_held_by_trash(&c, "av", name)? {
+                if super::super::collection_authority::collection_name_held_by_trash(
+                    &c, "av", name,
+                )? {
                     return Err(AvError::Inbox(
                         "av_inbox_name_in_trash",
                         "휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.",
@@ -357,13 +361,25 @@ impl Library {
         } else {
             Some(super::super::av_artwork::cover_set(&c, &work_id)?.revision)
         };
+        let selected_width = match request.jacket_key.as_deref() {
+            Some(key) => {
+                parsed
+                    .jackets
+                    .iter()
+                    .find(|j| j.key == key)
+                    .ok_or(AvError::Stale)?
+                    .width
+            }
+            None => parsed.width,
+        };
         let any_candidate = [
             request.surfaces.front,
             request.surfaces.spine,
             request.surfaces.back,
         ]
         .contains(&SurfaceChoice::Candidate);
-        if any_candidate && (request.split.x1 > request.split.x2 || request.split.x2 > parsed.width)
+        if any_candidate
+            && (request.split.x1 > request.split.x2 || request.split.x2 > selected_width)
         {
             return Err(AvError::Invalid);
         }
@@ -463,6 +479,7 @@ impl Library {
                 credits,
             },
             split: request.split.clone(),
+            jacket_key: request.jacket_key.clone(),
             expected_revision,
             operations: vec![],
             ack_attempts: 0,
@@ -489,7 +506,10 @@ impl Library {
             .map(|s| s.surface.as_str())
             .collect();
         if !wanted.is_empty() {
-            let body = json!({"x1":progress.split.x1,"x2":progress.split.x2,"surfaces":wanted});
+            let mut body = json!({"x1":progress.split.x1,"x2":progress.split.x2,"surfaces":wanted});
+            if let Some(key) = &progress.jacket_key {
+                body["jacketKey"] = json!(key);
+            }
             let answer = server_json(server.request(
                 "POST",
                 &format!("/v1/av-inbox/{}/artwork", progress.inbox_id),

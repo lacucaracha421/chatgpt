@@ -24,13 +24,15 @@ final class NetworkPolicy {
   boolean page=kind.equals("page") && (host.equals("siam-cdn.net") || host.endsWith(".siam-cdn.net"));
   if(!"https".equals(u.getScheme()) || u.getUserInfo()!=null || u.getFragment()!=null || (port!=-1 && port!=443) || !(cover||page))throw new IllegalArgumentException("Invalid catalog image");
  }
+ // An inbox jacket may name one of the candidate's alternative jackets by its sha256.
+ static final String INBOX_IMAGE="/v1/av-inbox/"+UUID+"/(jacket|spine-source)(\\?jacketKey=[a-f0-9]{64})?";
  static void providerImage(String path)throws Exception{
   api(path,"GET");
-  if(!path.startsWith("/v1/providers/image?") && !path.startsWith("/v1/providers/stashdb/image?") && !path.matches("/v1/av-inbox/"+UUID+"/(jacket|spine-source)"))throw new IllegalArgumentException("Invalid provider preview route");
+  if(!path.startsWith("/v1/providers/image?") && !path.startsWith("/v1/providers/stashdb/image?") && !path.matches(INBOX_IMAGE))throw new IllegalArgumentException("Invalid provider preview route");
  }
  static long providerImageLimit(String path)throws Exception{
   providerImage(path);
-  return path.matches("/v1/av-inbox/"+UUID+"/(jacket|spine-source)")?8L*1024*1024:4L*1024*1024;
+  return path.matches(INBOX_IMAGE)?8L*1024*1024:4L*1024*1024;
  }
  static void api(String path,String method) throws Exception {
   if(path.length()>(path.startsWith("/v1/mobile-catalog/")?16384:8192) || path.contains("\\") || path.contains("#") || path.contains("\r") || path.contains("\n"))throw new IllegalArgumentException("Unsupported API path");

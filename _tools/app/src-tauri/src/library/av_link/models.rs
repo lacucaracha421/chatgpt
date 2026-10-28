@@ -161,9 +161,21 @@ pub struct SpineSource {
     pub x1: u32,
     pub x2: u32,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JacketChoice {
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
+    pub has_spine: bool,
+    pub chosen: bool,
+    pub default_split: DefaultSplit,
+    pub spine_source: Option<SpineSource>,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
+    pub jackets: Vec<JacketChoice>,
     pub inbox: InboxItem,
     /// Live AV Collections with this product code (server `matches` in routed mode).
     pub matches: Vec<InboxMatch>,
@@ -216,6 +228,8 @@ impl PersonChoice {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplyRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jacket_key: Option<String>,
     pub collection_id: Option<String>,
     pub new_collection_name: Option<String>,
     pub expected_revision: Option<String>,

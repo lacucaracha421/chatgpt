@@ -80,3 +80,19 @@ pub async fn apply_av_link(
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn get_av_link_jacket(
+    inbox_id: String,
+    jacket_key: String,
+    spine: bool,
+    state: State<'_, AppState>,
+) -> Result<String, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.av_link_jacket_choice(&inbox_id, &jacket_key, spine)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}

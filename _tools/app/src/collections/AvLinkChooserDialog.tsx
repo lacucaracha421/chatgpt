@@ -25,7 +25,7 @@ import { coversChanged, initialSplit, resolveChoices, surfaceBounds, type Split,
 import "./avReview/avReview.css";
 
 type PersonDraft = { action: "skip" | "link" | "new"; personId?: string; displayName: string; nameSource?: AvPerson };
-type AvLinkApi = typeof avLinkClient;
+type AvLinkApi = Omit<typeof avLinkClient, "jacketPreview"> & Partial<Pick<typeof avLinkClient, "jacketPreview">>;
 type PeopleApi = Pick<AvGateway, "searchPeople" | "getPerformer" | "getDetails">;
 const SURFACE_KEYS: readonly Surface[] = ["front", "spine", "back"];
 type FieldChecks = Record<InfoKey, boolean>;
@@ -59,6 +59,13 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   const [applyError, setApplyError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [jacketsOpen, setJacketsOpen] = useState(false);
+  const [jacketImages, setJacketImages] = useState<Record<string, string>>({});
+  const [pendingJacket, setPendingJacket] = useState<AvLinkCandidate | null>(null);
+  const [switchingJacket, setSwitchingJacket] = useState(false);
+  const [jacketError, setJacketError] = useState<string | null>(null);
+  const alternativesRef = useMotionSurface("menu");
+  const jacketPreview = api.jacketPreview ?? avLinkClient.jacketPreview;
   const live = useRef({ candidate, split, surfaces, fieldChecks, newName });
   live.current = { candidate, split, surfaces, fieldChecks, newName };
 
@@ -105,7 +112,12 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
       }));
       const performers = await eligibleMatches(raw.performers);
       const current = raw.current ? { ...raw.current, people: await Promise.all(raw.current.people.map(async person => ({ ...person, ...(await peopleApi.getPerformer(person.id).catch(() => null))?.person }))) } : null;
-      const next = { ...raw, current, performers };
+      let next = { ...raw, current, performers };
+      const previousKey = keep?.candidate?.jacketKey;
+      const previousJacket = next.jackets?.find(j => j.key === previousKey);
+      if (previousJacket && keep?.candidate) next = {...next, jacketKey: previousKey, jacketUrl: keep.candidate.jacketUrl,
+        jacketWidth: previousJacket.width, jacketHeight: previousJacket.height, defaultSplit: previousJacket.defaultSplit,
+        spineSource: keep.candidate.spineSource};
       const chosen = target === NEW_DESTINATION ? NEW_DESTINATION : next.current?.collectionId ?? ((next.matches?.length ?? 0) > 1 ? null : NEW_DESTINATION);
       setCandidate(next);
       setDestination(chosen);
@@ -145,7 +157,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
     if (chosenGenres.length) fields.genres = isNew ? chosenGenres : [...(current?.fields.genres ?? []), ...chosenGenres.filter(genre => !current?.fields.genres?.includes(genre))];
     const people = isNew ? candidate.performers.map(person => ({ ...person, alreadyLinked: false })) : candidate.performers;
     const requestBase = {
-      split, surfaces: resolved, fields,
+      ...(candidate.jacketKey ? {jacketKey: candidate.jacketKey} : {}), split, surfaces: resolved, fields,
       performers: peopleRequest(people.filter(person => selected[person.name_ja]), performers),
       directors: [],
     };
@@ -170,7 +182,45 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
     finally { setBusy(false); }
   }
 
-  const locked = busy || reloading;
+  useEffect(() => {
+    if (!jacketsOpen || privacyMode || !candidate?.jackets?.length) return;
+    let live = true;
+    void (async () => {
+      for (const jacket of candidate.jackets!) {
+        if (!live) return;
+        const url = await jacketPreview(inboxId, jacket.key);
+        if (live) setJacketImages(images => ({...images, [jacket.key]: url}));
+      }
+    })().catch(reason => {if (live) setJacketError(errorMessage(reason, "표지를 불러오지 못했습니다."));});
+    return () => {live = false;};
+  }, [jacketsOpen, privacyMode, candidate?.jackets, inboxId, jacketPreview]);
+
+  async function chooseJacket(key: string) {
+    const jacket = candidate?.jackets?.find(j => j.key === key);
+    if (!candidate || !jacket || locked || key === (candidate.jacketKey ?? candidate.jackets?.find(j => j.chosen)?.key)) return;
+    setSwitchingJacket(true); setJacketError(null);
+    try {
+      const url = jacketImages[key] ?? await jacketPreview(inboxId, key);
+      const spineSource = jacket.spineSource ? {...jacket.spineSource, url: await jacketPreview(inboxId, key, true)} : null;
+      const next = {...candidate, jacketKey: key, jacketUrl: url, jacketWidth: jacket.width, jacketHeight: jacket.height,
+        defaultSplit: jacket.defaultSplit, spineSource};
+      if (privacyMode) finishJacket(next); else setPendingJacket(next);
+    } catch (reason) {setSwitchingJacket(false); setJacketError(errorMessage(reason, "표지를 불러오지 못했습니다."));}
+  }
+  useEffect(() => {if (privacyMode && pendingJacket) finishJacket(pendingJacket);}, [privacyMode, pendingJacket]);
+
+  function finishJacket(next: AvLinkCandidate) {
+    setCandidate(next); setSplit(initialSplit(next.defaultSplit, next.jacketWidth));
+    setPendingJacket(null); setSwitchingJacket(false);
+  }
+  async function retry() {
+    if (locked) return;
+    setBusy(true); setJacketError(null);
+    try {await api.retry(inboxId); await onDismissed();}
+    catch (reason) {setJacketError(errorMessage(reason, "다시 찾지 못했습니다."));}
+    finally {setBusy(false);}
+  }
+  const locked = busy || reloading || switchingJacket;
   const hasCurrent: Record<Surface, boolean> = { front: Boolean(current?.covers.frontId), spine: Boolean(current?.covers.spineId), back: Boolean(current?.covers.backId) };
   const currentImages = Object.fromEntries(SURFACE_KEYS.map(key => {
     const id = current?.covers[`${key}Id`];
@@ -194,7 +244,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   } : null;
   const infoCount = infoModel ? infoModel.fields.filter(field => field.checked).length + infoModel.people.filter(person => !person.linked && person.selected).length + (genres.size ? 1 : 0) : 0;
   const summary = needsPick ? "넣을 곳을 고르세요" : `표지 ${coverCount}면 · 정보 ${infoCount}개`;
-  const primaryDisabled = busy || reloading || !candidate || needsPick || (isNew && !newName.trim()) || mismatch;
+  const primaryDisabled = busy || reloading || switchingJacket || !candidate || needsPick || (isNew && !newName.trim()) || mismatch;
 
   const rows: DestinationRow[] = candidate ? destinationRows(candidate, collections, destination, mismatch) : [];
   const otherMatches = useMemo(() => {
@@ -215,12 +265,37 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
       </header>
       {candidate ? <div className="av-review__body" inert={reloading || undefined}>
         <div className="av-review__stage">
-          <AvCoverStage
-            code={code} jacketUrl={candidate.jacketUrl} jacketWidth={candidate.jacketWidth} jacketHeight={candidate.jacketHeight}
-            privacy={privacyMode} isWrap={candidate.defaultSplit.isWrap} auto={candidate.defaultSplit} split={split} onSplit={setSplit}
-            choices={resolved} currentImages={currentImages} hasCurrent={hasCurrent} spineSource={candidate.spineSource} disabled={locked}
-            control={props => <SurfaceMenu {...props} disabled={locked} onChoose={(surface, value) => setSurfaces(choices => ({ ...choices, [surface]: value }))} />}
-          />
+          <div style={{position: "relative", width: "100%"}}>
+            {[candidate, ...(pendingJacket ? [pendingJacket] : [])].map(image => {
+              const pending = image === pendingJacket;
+              const imageSplit = pending ? initialSplit(image.defaultSplit, image.jacketWidth) : split;
+              return <div key={image.jacketKey ?? image.jackets?.find(j => j.chosen)?.key ?? "default"}
+                style={pending ? {position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none"} : undefined}
+                inert={pending || switchingJacket || undefined} aria-hidden={pending || undefined}
+                onLoadCapture={event => {if (pending && event.target instanceof HTMLImageElement && event.target.alt === `${code} 펼친 재킷`) {
+                  const element = event.target;
+                  void (element.decode?.() ?? Promise.resolve()).then(() => finishJacket(image), () => finishJacket(image));
+                }}}
+                onErrorCapture={() => {if (pending) {setPendingJacket(null); setSwitchingJacket(false); setJacketError("표지를 불러오지 못했습니다.");}}}>
+                <AvCoverStage code={code} jacketUrl={image.jacketUrl} jacketWidth={image.jacketWidth} jacketHeight={image.jacketHeight}
+                  privacy={privacyMode} isWrap={image.defaultSplit.isWrap} auto={image.defaultSplit} split={imageSplit} onSplit={setSplit}
+                  choices={resolveChoices(surfaces, image.defaultSplit, imageSplit, image.jacketWidth, hasCurrent)}
+                  currentImages={currentImages} hasCurrent={hasCurrent} spineSource={image.spineSource} disabled={locked || pending}
+                  control={props => <SurfaceMenu {...props} disabled={locked || pending} onChoose={(surface, value) => setSurfaces(choices => ({...choices, [surface]: value}))} />} />
+              </div>;
+            })}
+            {(candidate.jackets?.length ?? 0) >= 2 && <div>
+              <Button size="sm" variant="quiet" aria-expanded={jacketsOpen} disabled={locked} onClick={() => setJacketsOpen(value => !value)}>다른 표지<ChevronDownIcon aria-hidden="true" /></Button>
+              {jacketsOpen && <div ref={alternativesRef} className="av-other" role="group" aria-label="다른 표지" style={{display: "flex", gap: "var(--space-2)", flexWrap: "wrap"}}>
+                {candidate.jackets!.map((jacket, index) => <button key={jacket.key} type="button"
+                  className={`av-cap-menu__item${(candidate.jacketKey === jacket.key || !candidate.jacketKey && jacket.chosen) ? " is-current" : ""}`}
+                  style={{width: "auto"}} aria-label={`표지 ${index + 1}`} aria-pressed={candidate.jacketKey === jacket.key || !candidate.jacketKey && jacket.chosen}
+                  disabled={locked} onClick={() => void chooseJacket(jacket.key)}>
+                  <span className="av-menu-thumb av-menu-thumb--image">{!privacyMode && jacketImages[jacket.key] && <img src={jacketImages[jacket.key]} alt="" />}</span>
+                </button>)}
+              </div>}
+            </div>}
+          </div>
         </div>
         <div className="av-review__side">
           <AvDestination
@@ -254,9 +329,11 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
             <div className="av-review__side"><Skeleton className="av-review__skeleton-line" label={null} /><Skeleton className="av-review__skeleton-line" label={null} /><Skeleton className="av-review__skeleton-line" label={null} /></div></>}
       </div>}
       {candidate && loadError && <p className="av-review__error" role="alert"><span>{loadError}</span><Button size="sm" onClick={() => void load(destination ?? undefined, live.current)}>다시 시도</Button></p>}
+      {jacketError && <p className="av-review__error" role="alert">{jacketError}</p>}
       {applyError && <p className="av-review__error" role="alert"><span>{applyError}</span>{!busy && candidate && <Button size="sm" onClick={() => void apply()}>다시 시도</Button>}</p>}
       <footer className="av-review__foot">
         <Button variant="danger" disabled={busy || !candidate} onClick={() => setRejecting(true)}>거절</Button>
+        <Button variant="quiet" disabled={locked || candidate?.inbox.status !== "found" || !!candidate?.inbox.applyState} onClick={() => void retry()}>다시 찾기</Button>
         <span className="av-review__spacer" />
         {stale && <span className="av-review__summary" role="status">다른 곳에서 바뀌어 다시 읽었어요</span>}
         {candidate && <span className="av-review__summary">{summary}</span>}

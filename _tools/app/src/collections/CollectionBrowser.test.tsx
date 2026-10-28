@@ -115,6 +115,28 @@ function SearchProbe() {
 }
 
 describe("CollectionBrowser", () => {
+  it("keeps works painted until performer data is complete, then counts performers and remembers the view", async () => {
+    type Credits = Awaited<ReturnType<NonNullable<AvGateway['listPerformerCredits']>>>;
+    let resolveCredits!: (value: Credits) => void;
+    const credits = new Promise<Credits>(resolve => { resolveCredits = resolve; });
+    const avApi = {listPerformerCredits:vi.fn(()=>credits)} as unknown as AvGateway;
+    renderBrowser({collections:[{...sample,id:'grid-work',name:'Grid work',type:'av'}],typeFilter:'av',showcase:false,avApi});
+    await userEvent.click(screen.getByRole('tab',{name:'배우'}));
+    expect(screen.getByRole('group',{name:'AV 작품 목록'})).toBeInTheDocument();
+    await act(async()=>resolveCredits({people:[{id:'grid-person',displayName:'Grid performer',nameJa:'別名',portrait:null,profile:{birthDate:'1998',cup:'F'}}],credits:[{collectionId:'grid-work',personId:'grid-person',order:0}]}));
+    expect(await screen.findByRole('button',{name:/Grid performer/})).toBeInTheDocument();
+    expect(screen.getByLabelText('배우 1명')).toBeInTheDocument();
+    expect(screen.queryByRole('group',{name:'AV 작품 목록'})).not.toBeInTheDocument();
+    expect(screen.queryByText('別名')).not.toBeInTheDocument();
+    expect(screen.getByTestId('search-label')).toHaveTextContent('배우 이름 검색');
+    await userEvent.click(screen.getByRole('button',{name:'보기'}));
+    expect(screen.queryByRole('slider',{name:'내 별점'})).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    cleanup();
+    renderBrowser({collections:[{...sample,id:'grid-work',name:'Grid work',type:'av'}],typeFilter:'av',showcase:false,avApi});
+    expect(await screen.findByRole('button',{name:/Grid performer/})).toBeInTheDocument();
+    expect(screen.getByRole('tab',{name:'배우'})).toHaveAttribute('aria-selected','true');
+  });
   it("opens connection review after Showcase and new releases, hides a zero count, and returns in place", async () => {
     const onViewChange = vi.fn();
     const review = {collectionId: manga.id, query: manga.name, querySource: "name" as const, bound: false, volumes: [], highestOwnedVolume: 0, ownedCount: 0, partialDismissed: false, groupFingerprints: [], minVolume: null, maxVolume: null, hideConnectionPrompt: false};

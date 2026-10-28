@@ -563,6 +563,7 @@ pub(super) struct ServerCandidate {
     pub split: DefaultSplit,
     pub spine_source: Option<SpineSource>,
     pub names: Vec<NameMapping>,
+    pub jackets: Vec<JacketChoice>,
     pub matches: Vec<(String, String)>,
 }
 
@@ -612,6 +613,8 @@ pub(super) fn parse_detail(detail: &Value) -> Result<ServerCandidate, AvError> {
         })
         .collect();
     Ok(ServerCandidate {
+        jackets: serde_json::from_value(candidate.get("jackets").cloned().unwrap_or(json!([])))
+            .map_err(|_| AvError::Invalid)?,
         inbox: detail["inbox"].clone(),
         movie,
         fields: Fields {
@@ -710,6 +713,7 @@ impl Library {
             .map(|p| person_match(&c, mapping(p), target, "director"))
             .collect::<Result<_, _>>()?;
         Ok(Candidate {
+            jackets: parsed.jackets,
             fields: parsed.fields,
             metadata: parsed.movie,
             jacket_url: format!("http://lakomics.localhost/av-link-jacket/{id}"),
@@ -762,8 +766,7 @@ impl Library {
         let mut jackets = JACKETS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        jackets
-            .retain(|(cached, _, _, _)| cached != id && cached.strip_suffix("/spine") != Some(id));
+        jackets.retain(|(cached, _, _, _)| cached.split(['/', '?']).next() != Some(id));
         drop(jackets);
         let c = self.connection()?;
         store_item(&c, &detail["inbox"])
@@ -813,7 +816,7 @@ impl Library {
         server: &impl InboxServer,
         id: &str,
     ) -> Result<(Vec<u8>, &'static str), AvError> {
-        self.routed_image(server, id, false)
+        self.routed_image(server, id, false, None)
     }
 
     /// The image a borrowed spine is cut from (the DVD cover), served under `<id>/spine`.
@@ -822,17 +825,23 @@ impl Library {
         server: &impl InboxServer,
         id: &str,
     ) -> Result<(Vec<u8>, &'static str), AvError> {
-        self.routed_image(server, id, true)
+        self.routed_image(server, id, true, None)
     }
 
-    fn routed_image(
+    pub(crate) fn routed_image(
         &self,
         server: &impl InboxServer,
         id: &str,
         spine: bool,
+        jacket_key: Option<&str>,
     ) -> Result<(Vec<u8>, &'static str), AvError> {
         uuid::Uuid::parse_str(id).map_err(|_| AvError::Invalid)?;
-        let (path, key) = if spine {
+        if jacket_key
+            .is_some_and(|key| key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(AvError::Invalid);
+        }
+        let (mut path, mut key) = if spine {
             (
                 format!("/v1/av-inbox/{id}/spine-source"),
                 format!("{id}/spine"),
@@ -840,6 +849,10 @@ impl Library {
         } else {
             (format!("/v1/av-inbox/{id}/jacket"), id.to_owned())
         };
+        if let Some(jacket_key) = jacket_key {
+            path.push_str(&format!("?jacketKey={jacket_key}"));
+            key.push_str(&format!("?jacketKey={jacket_key}"));
+        }
         let _lane = JACKET_LANE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -262,6 +262,7 @@ impl Library {
             .map(|p| person_match(&connection, mapping(p), target, "director"))
             .collect::<Result<_, _>>()?;
         Ok(Candidate {
+            jackets: vec![],
             fields: movie_fields(&candidate.movie)?,
             metadata: candidate.movie,
             jacket_url: format!("http://lakomics.localhost/av-link-jacket/{id}"),
@@ -370,6 +371,18 @@ impl Library {
             return self.routed_spine_source(&self.av_inbox_session()?, id);
         }
         Err(AvError::Invalid)
+    }
+    pub fn av_link_jacket_choice(
+        &self,
+        id: &str,
+        key: &str,
+        spine: bool,
+    ) -> Result<String, AvError> {
+        if self.av_link_route()? != routed::Route::Server {
+            return Err(AvError::Invalid);
+        }
+        let (bytes, mime) = self.routed_image(&self.av_inbox_session()?, id, spine, Some(key))?;
+        Ok(super::av_portrait::data_url(mime, &bytes))
     }
     fn read_av_link_jacket(&self, path: &str) -> Result<(Vec<u8>, &'static str), AvError> {
         // Resolve through the same canonical library containment check as WorkArtwork.

@@ -745,6 +745,28 @@ describe('read-only collections',()=>{
       await step();await screen.findByText('밤의 도서관');
     }finally{Reflect.deleteProperty(document,'startViewTransition');}
   });
+  it('keeps AV works until complete performer profiles arrive and uses the shared performer view options',async()=>{
+    let resolvePerson!:(value:unknown)=>void;
+    const personRead=new Promise(resolve=>{resolvePerson=resolve;});
+    const work={...item,id:'grid-av-work',name:'Grid AV work',type:'av' as const,av:{people:[{id:'tablet-grid-person',name:'Grid performer',role:'performer' as const,order:0}],genres:[]}};
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/collections/people/tablet-grid-person')?personRead:Promise.resolve(path.includes('type=av')?{...page,items:[work]}:page));
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await screen.findByText(item.name);
+    pressTab('AV');
+    await screen.findByText('Grid AV work');
+    fireEvent.click(screen.getByRole('tab',{name:'배우'}));
+    expect(screen.getByText('Grid AV work')).toBeTruthy();
+    expect(screen.queryByRole('group',{name:'AV 배우 목록'})).toBeNull();
+    await act(async()=>resolvePerson({person:{id:'tablet-grid-person',displayName:'Grid performer',favorite:true,profile:{birthDate:'1998',cup:'F'},portraitImage:null,portraitSelection:null}}));
+    const grid=await screen.findByRole('group',{name:'AV 배우 목록'});
+    expect(within(grid).getByText('1998년생')).toBeTruthy();
+    expect(within(grid).getByText('F컵')).toBeTruthy();
+    expect(screen.queryByText('Grid AV work')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));
+    expect(screen.getByRole('radiogroup',{name:'정렬 기준'})).toBeTruthy();
+    expect(screen.queryByRole('slider',{name:'내 별점'})).toBeNull();
+    expect(screen.getByRole('slider',{name:'한 줄에'}).getAttribute('aria-valuetext')).toBe('3개');
+  });
   it('shows the AV tab and requests the deployed AV collection type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(within(screen.getByRole('radiogroup',{name:'컬렉션 유형'})).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['게임','만화','영화','AV']);

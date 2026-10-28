@@ -37,7 +37,7 @@ const baseCandidate = (existing = true): AvLinkCandidate => ({
 
 function api(candidate: AvLinkCandidate) {
   return {
-    listInbox: vi.fn(), pendingCount: vi.fn(), getCandidate: vi.fn().mockResolvedValue(candidate), retry: vi.fn(), fixCode: vi.fn(),
+    jacketPreview: vi.fn().mockResolvedValue("data:image/png;base64,Yg=="), listInbox: vi.fn(), pendingCount: vi.fn(), getCandidate: vi.fn().mockResolvedValue(candidate), retry: vi.fn(), fixCode: vi.fn(),
     dismiss: vi.fn().mockResolvedValue(undefined), apply: vi.fn().mockResolvedValue({ collectionId: candidate.current?.collectionId ?? "new-av", covers: { frontId: "f", spineId: "s", backId: "b", revision: "r" } }),
   } as AvLinkApi;
 }
@@ -291,4 +291,34 @@ describe("existing performer search", () => {
     await waitFor(() => expect(client.apply).toHaveBeenCalled());
     expect(vi.mocked(client.apply).mock.calls[0][1].performers).toEqual([{ name_ja: "女優A", action: "link", personId: "actor" }]);
   });
+});
+
+it("holds the old jacket until the selected image loads, then applies its split and key", async () => {
+  const candidate=baseCandidate(false);
+  candidate.jackets=[
+    {key:"wrap",width:800,height:438,hasSpine:true,chosen:true,defaultSplit:candidate.defaultSplit},
+    {key:"digital",width:2184,height:1638,hasSpine:true,chosen:false,defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true},spineSource:{url:"",width:800,height:438,x1:382,x2:418}},
+  ];
+  const {client}=show(candidate);
+  await screen.findByRole("button",{name:"다른 표지"});
+  const old=screen.getByRole("img",{name:"SSIS-001 펼친 재킷"});
+  fireEvent.click(screen.getByRole("button",{name:"다른 표지"}));
+  await waitFor(()=>expect(client.jacketPreview).toHaveBeenCalledWith("inbox-1","digital"));
+  fireEvent.click(screen.getByRole("button",{name:"표지 2"}));
+  await waitFor(()=>expect(screen.getAllByAltText("SSIS-001 펼친 재킷")).toHaveLength(2));
+  const next=screen.getAllByAltText("SSIS-001 펼친 재킷").find(image=>image!==old)!;
+  expect(old).toBeVisible();expect(next).not.toBeVisible();
+  expect(screen.getByRole("button",{name:"만들기"})).toBeDisabled();
+  fireEvent.load(next);
+  await waitFor(()=>expect(next).toBeVisible());
+  expect(old).not.toBeInTheDocument();
+  expect(screen.getByRole("slider",{name:"뒤표지 쪽 선"})).toHaveAttribute("aria-valuenow","1092");
+  fireEvent.click(screen.getByRole("button",{name:"만들기"}));
+  await waitFor(()=>expect(client.apply).toHaveBeenCalledWith("inbox-1",expect.objectContaining({jacketKey:"digital",split:{x1:1092,x2:1093},surfaces:{front:"candidate",spine:"candidate",back:"candidate"}})));
+});
+it("relooks up a found item from the chooser",async()=>{
+  const {client,onDismissed}=show(baseCandidate(false));
+  fireEvent.click(await screen.findByRole("button",{name:"다시 찾기"}));
+  await waitFor(()=>expect(client.retry).toHaveBeenCalledWith("inbox-1"));
+  expect(onDismissed).toHaveBeenCalled();
 });

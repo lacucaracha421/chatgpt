@@ -272,7 +272,7 @@ def front_only_address(address):
     return bool(FRONT_ONLY_NAME.search(urlsplit(address).path))
 
 
-def fetch_first(addresses, deadline, pace, accept):
+def fetch_first(addresses, deadline, pace, accept, *, fetched=None):
     """First jacket image that decodes and passes ``accept(width, height)``; else None.
 
     Returns dict(data, mime, width, height, address). A 404 or an unusable image moves on to the
@@ -280,6 +280,13 @@ def fetch_first(addresses, deadline, pace, accept):
     delayed by a sick CDN.
     """
     for address in addresses:
+        if fetched is not None and address in fetched:
+            image = fetched[address]
+            if image is not None and accept(image['width'], image['height']):
+                return image
+            continue
+        if fetched is not None:
+            fetched[address] = None
         try:
             pace()
             data, mime = wp.outbound(jacket_address(address), deadline=deadline, limit=MAX_JACKET, image=True,
@@ -298,8 +305,11 @@ def fetch_first(addresses, deadline, pace, accept):
             if code in ('providerImageInvalid', 'providerResponseTooLarge'):
                 continue
             return None
+        image = dict(data=data, mime=mime, width=width, height=height, address=address)
+        if fetched is not None:
+            fetched[address] = image
         if accept(width, height):
-            return dict(data=data, mime=mime, width=width, height=height, address=address)
+            return image
     return None
 
 
@@ -309,7 +319,7 @@ def fetch_hires(addresses, deadline, pace=lambda: None):
     return None if found is None else (found['data'], found['mime'], found['width'], found['height'])
 
 
-def fetch_wrap(code, raw, deadline, pace=lambda: None, *, for_spine, with_cover=True):
+def fetch_wrap(code, raw, deadline, pace=lambda: None, *, for_spine, with_cover=True, fetched=None):
     """A DVD/digital wrap image of the record: dict(data, mime, width, height, address[, x1, x2]).
 
     ``for_spine`` wants a wrap whose spine can be located (x1, x2 are then its pixel columns);
@@ -317,36 +327,76 @@ def fetch_wrap(code, raw, deadline, pace=lambda: None, *, for_spine, with_cover=
     """
     addresses = wrap_addresses(code, raw, with_cover=with_cover)
     found = fetch_first(addresses, deadline, pace, (lambda w, h: wrap_spine(w, h) is not None) if for_spine
-                        else (lambda w, h: w / max(h, 1) > WRAP_MIN_ASPECT))
+                        else (lambda w, h: w / max(h, 1) > WRAP_MIN_ASPECT), fetched=fetched)
     if found is not None and for_spine:
         found['x1'], found['x2'] = wrap_spine(found['width'], found['height'])
     return found
 
 
-def choose_jacket(code, raw, deadline, pace=lambda: None):
-    """The jacket a lookup uses: dict(data, mime, width, height, address, spine).
+def jacket_front_matches(digital, wrap):
+    """Compare front layouts, ignoring resolution and small encoding/colour differences."""
+    from PIL import Image
 
-    1. DMM's wide digital jacket when one exists. A 4:3 digital jacket has front and back but no
-       spine, so a DVD wrap's spine is borrowed (``spine``: that wrap plus the spine's x1, x2).
+    def grid(source, x2):
+        with decode_jacket(source['data'], source['mime']) as image:
+            with image.crop((x2, 0, image.width, image.height)) as front:
+                with front.convert('L') as gray:
+                    with gray.resize((24, 32), Image.Resampling.BOX) as small:
+                        return small.tobytes()
+
+    digital_spine = wrap_spine(digital['width'], digital['height'])
+    digital_x2 = (digital_spine[1] if digital_spine else
+                  default_split(digital['width'], digital['height'])['x2'])
+    first, second = grid(digital, digital_x2), grid(wrap, wrap['x2'])
+    # A coarse grid suppresses text/JPEG noise. Allow 12% mean luminance error for
+    # scaling and colour variations, while rejecting a different panel/layout.
+    return sum(abs(a - b) for a, b in zip(first, second)) / (len(first) * 255) <= .12
+
+
+def choose_jacket(code, raw, deadline, pace=lambda: None):
+    """The automatic jacket plus distinct usable alternatives, each with its own spine source.
+
+    1. DMM's wide digital jacket when its front matches the available DVD wrap (or no DVD wrap
+       is available). A matching 4:3 digital jacket borrows the DVD wrap's spine
+       (``spine``: that wrap plus the spine's x1, x2). A mismatch uses the DVD wrap itself.
     2. Otherwise the LibreDMM cover. A front-only ``ps``/``pt`` cover is replaced by the
        record's ``pl`` wrap when one exists and is clearly a wrap.
     """
     budget = lambda: min(deadline, time.monotonic() + HIRES_SECONDS)
-    found = fetch_first(hires_addresses(code, raw), budget(), pace, lambda width, height: width > HIRES_MIN_WIDTH)
-    if found is not None:
-        spine = None
-        if is_spineless(found['width'], found['height']):
-            spine = fetch_wrap(code, raw, budget(), pace, for_spine=True)
-        return dict(found, spine=spine)
+    fetched = {}
+    digital = fetch_first(hires_addresses(code, raw), budget(), pace, lambda width, height: width > HIRES_MIN_WIDTH)
+    wrap = fetch_wrap(code, raw, budget(), pace, for_spine=True, fetched=fetched) if digital else None
     address = jacket_address(raw.get('cover_image_url'))
-    data, mime = wp.outbound(address, deadline=deadline, limit=MAX_JACKET, image=True,
-                             headers={'User-Agent': 'Lakomics/0.2'})
-    width, height = wp.image_dimensions(data, mime, max_pixels=MAX_PIXELS)
-    if front_only_address(address):
+    # Reuse an already fetched source, and keep an optional provider cover failure
+    # from discarding a usable digital/DVD candidate.
+    cover = next((image for image in (digital, wrap) if image and image['address'] == address), None)
+    if cover is None:
+        if digital is not None:
+            cover = fetch_first([address], budget(), pace, lambda w, h: True, fetched=fetched)
+        else:
+            data, mime = wp.outbound(address, deadline=deadline, limit=MAX_JACKET, image=True,
+                                     headers={'User-Agent': 'Lakomics/0.2'})
+            width, height = wp.image_dimensions(data, mime, max_pixels=MAX_PIXELS)
+            cover = dict(data=data, mime=mime, width=width, height=height, address=address)
+    if digital is None and cover and front_only_address(address):
         wrap = fetch_wrap(code, raw, budget(), pace, for_spine=False, with_cover=False)
-        if wrap is not None:
-            return dict(wrap, spine=None)
-    return dict(data=data, mime=mime, width=width, height=height, address=address, spine=None)
+    if digital:
+        chosen = wrap if wrap and not jacket_front_matches(digital, wrap) else digital
+    else:
+        chosen = wrap or cover
+    if chosen is None:
+        wp.fail(502, 'providerImageInvalid', '재킷 이미지를 가져오지 못했습니다.')
+    import hashlib
+    alternatives = []
+    for image in (chosen, digital, wrap, cover):
+        if image is None:
+            continue
+        key = hashlib.sha256(image['data']).hexdigest()
+        if any(entry['key'] == key for entry in alternatives):
+            continue
+        spine = wrap if image is not wrap and wrap and is_spineless(image['width'], image['height']) else None
+        alternatives.append(dict(image, key=key, spine=spine))
+    return dict(alternatives[0], alternatives=alternatives)
 
 
 def japanese(name):
@@ -559,21 +609,31 @@ class Worker:
         chosen = choose_jacket(code, json.loads(data), deadline, lambda: self.pace('dmm', deadline))
         # Decoding/storage shares the interactive provider artwork admission lane.
         def prepare(_):
-            frame = decode_jacket(chosen['data'], chosen['mime'])
-            width, height = frame.size
-            frame.close()
-            spine = chosen['spine']
-            blobs = [(chosen['data'], chosen['mime'])] + ([(spine['data'], spine['mime'])] if spine else [])
-            manifests = confirm_blobs(self.get_db, self.storage, self.bucket, blobs, deadline)
-            source = None if spine is None else dict(
-                manifests[1], address=spine['address'], x1=spine['x1'], x2=spine['x2'],
-                width=spine['width'], height=spine['height'])
-            return manifests[0], width, height, source
-        manifest, width, height, spine_source = self.relay.paced('artwork', prepare)
+            jackets = []
+            for image in chosen.get('alternatives', [chosen]):
+                with decode_jacket(image['data'], image['mime']) as frame:
+                    width, height = frame.size
+                spine = image['spine']
+                blobs = [(image['data'], image['mime'])] + ([(spine['data'], spine['mime'])] if spine else [])
+                manifests = confirm_blobs(self.get_db, self.storage, self.bucket, blobs, deadline)
+                source = None if spine is None else dict(
+                    manifests[1], address=spine['address'], x1=spine['x1'], x2=spine['x2'],
+                    width=spine['width'], height=spine['height'])
+                split = default_split(width, height, source is not None)
+                if 'x1' in image and 'x2' in image:
+                    split = dict(x1=image['x1'], x2=image['x2'], isWrap=True, useSpine=True)
+                jackets.append(dict(key=manifests[0]['sha256'], jacket=manifests[0],
+                                    jacketWidth=width, jacketHeight=height,
+                                    defaultSplit=split,
+                                    spineSource=source))
+            return jackets
+        jackets = self.relay.paced('artwork', prepare)
+        first = jackets[0]
+        manifest, width, height, spine_source = first['jacket'], first['jacketWidth'], first['jacketHeight'], first['spineSource']
         # Directors are no longer imported: they are not resolved, and the key stays (empty) for older clients.
         mappings = self.names([p['name'] for p in movie['actresses']], deadline)
-        candidate = dict(metadata=movie, fields=fields, jacket=manifest, jacketWidth=width, jacketHeight=height,
-                         defaultSplit=default_split(width, height, spine_source is not None),
+        candidate = dict(metadata=movie, fields=fields, jackets=jackets, jacket=manifest, jacketWidth=width, jacketHeight=height,
+                         defaultSplit=first['defaultSplit'],
                          **({} if spine_source is None else dict(spineSource=spine_source)),
                          performers=[mappings[p['name']] for p in movie['actresses']],
                          directors=[])
@@ -697,7 +757,14 @@ def detail(get_db, id_):
         current = matches(db, row['normalized_code'])
     candidate = json.loads(row['candidate']) if row['candidate'] else None
     if candidate:
-        candidate = {k: v for k, v in candidate.items() if k != 'jacket'}
+        chosen_key = candidate['jacket']['sha256']
+        alternatives = candidate.get('jackets', [])
+        candidate = {k: v for k, v in candidate.items() if k not in ('jacket', 'jackets')}
+        candidate['jacketSha256'] = chosen_key
+        candidate['jackets'] = [dict(key=j['key'], url=PREFIX + '/' + id_ + '/jacket?jacketKey=' + j['key'],
+            width=j['jacketWidth'], height=j['jacketHeight'], defaultSplit=j['defaultSplit'],
+            hasSpine=j['defaultSplit']['useSpine'], chosen=j['key'] == chosen_key,
+            sha256=j['jacket']['sha256'], spineSource=j.get('spineSource')) for j in alternatives]
         candidate['jacketUrl'] = PREFIX + '/' + id_ + '/jacket'
     return dict(inbox=summary(row), candidate=candidate, matches=current)
 
@@ -775,12 +842,21 @@ def render_borrowed_spine(candidate, height, storage, bucket, deadline):
         frame.close()
 
 
+def selected_jacket(candidate, key=None):
+    if key is None:
+        return candidate
+    for jacket in candidate.get('jackets', []):
+        if jacket['key'] == key:
+            return dict(candidate, **jacket)
+    wp.fail(409, 'avInboxCandidateUnavailable', '표지 후보가 변경되었습니다. 다시 확인해 주세요.')
+
+
 def prepare_artwork(get_db, id_, body, deadline, storage, bucket):
     with get_db() as db:
         row = get_row(db, id_)
     if row['status'] != 'found' or not row['candidate']:
         wp.fail(409, 'avInboxCandidateUnavailable', '사용할 후보가 없습니다.')
-    candidate = json.loads(row['candidate'])
+    candidate = selected_jacket(json.loads(row['candidate']), body.get('jacketKey'))
     width, height = candidate['jacketWidth'], candidate['jacketHeight']
     x1, x2, surfaces = body['x1'], body['x2'], body['surfaces']
     wrap = candidate['defaultSplit']['isWrap']
@@ -850,25 +926,25 @@ def register(app, get_db, require_client, storage, bucket, *, relay=None):
         return detail(get_db, id_)
 
     @app.get(PREFIX + '/{id_}/jacket')
-    def jacket(id_: str, authorization: str | None = Header(default=None)):
+    def jacket(id_: str, authorization: str | None = Header(default=None), jacketKey: str | None = None):
         require_client(authorization)
         def preview(deadline):
             with get_db() as db:
                 row = get_row(db, id_)
             if not row['candidate']:
                 wp.fail(409, 'avInboxCandidateUnavailable', '재킷 후보가 없습니다.')
-            data, mime = stored_jacket(json.loads(row['candidate']), storage, bucket, deadline)
+            data, mime = stored_jacket(selected_jacket(json.loads(row['candidate']), jacketKey), storage, bucket, deadline)
             return Response(data, media_type=mime, headers={'Cache-Control': 'private, no-store'})
         return relay.paced('artwork', preview)
 
     @app.get(PREFIX + '/{id_}/spine-source')
-    def spine_source(id_: str, authorization: str | None = Header(default=None)):
+    def spine_source(id_: str, authorization: str | None = Header(default=None), jacketKey: str | None = None):
         """The image a spine-less jacket borrows its spine from (the PC shows the real strip in its spine menu)."""
         require_client(authorization)
         def preview(deadline):
             with get_db() as db:
                 row = get_row(db, id_)
-            candidate = json.loads(row['candidate']) if row['candidate'] else None
+            candidate = selected_jacket(json.loads(row['candidate']), jacketKey) if row['candidate'] else None
             if not candidate or not candidate.get('spineSource'):
                 wp.fail(409, 'avInboxCandidateUnavailable', '책등 후보가 없습니다.')
             data, mime = stored_jacket(candidate, storage, bucket, deadline, 'spineSource')
@@ -879,7 +955,8 @@ def register(app, get_db, require_client, storage, bucket, *, relay=None):
     async def artwork(id_: str, request: Request, authorization: str | None = Header(default=None)):
         require_client(authorization)
         body = await ca._read_body(request, 2048, 'avLookupRequestTooLarge')
-        if not isinstance(body, dict) or set(body) != {'x1','x2','surfaces'}:
+        if (not isinstance(body, dict) or not {'x1','x2','surfaces'} <= set(body)
+                or set(body) - {'x1','x2','surfaces','jacketKey'}):
             wp.fail(422, 'invalidAvSplit', '재킷 분할 요청이 올바르지 않습니다.')
         return await run_in_threadpool(relay.paced, 'artwork', lambda d:
                                       prepare_artwork(get_db, id_, body, d, storage, bucket))

@@ -2,6 +2,13 @@ import {describe,expect,it} from 'vitest';
 import {buildScrubberModel,generateScrubberTicks,koreanInitial,scrubberIndexAt,scrubberLabelAt,clampScrubberTag,thinScrubberLabels} from './scrubberModel';
 
 describe('scrubber model',()=>{
+  it('shows the performer sort value verbatim in the bubble',()=>{
+    const model=buildScrubberModel({kind:'value',values:['F컵','160cm','만 27세','38편']});
+    expect(model.labelAt(0)).toBe('F컵');
+    expect(model.labelAt(1)).toBe('160cm');
+    expect(model.labelAt(2)).toBe('만 27세');
+    expect(model.labelAt(3)).toBe('38편');
+  });
   it('maps the scrubber edges to the first and last item',()=>{
     expect(scrubberIndexAt(-.2,5)).toBe(0);
     expect(scrubberIndexAt(0,5)).toBe(0);

@@ -261,3 +261,27 @@ it('shows genres by Korean name without sale tags and never plans a hidden tag o
   fireEvent.click(screen.getByRole('button',{name:'만들기'}));
   const plan=readInboxPlans()[0]!;expect(plan.choices.fields.genres).toEqual(['痴女']);expect(plan.choices.people.map(p=>p.role)).toEqual(['performer']);
 });
+
+it('keeps the old jacket until the alternative loads and saves the selected key',async()=>{
+  const detail=structuredClone(inboxFixture),candidate=detail.candidate!;
+  candidate.jackets=[
+    {key:'wrap',url:'',width:800,height:538,hasSpine:true,chosen:true,sha256:candidate.jacketSha256!,defaultSplit:candidate.defaultSplit},
+    {key:'digital',url:'',width:2184,height:1638,hasSpine:true,chosen:false,sha256:'b'.repeat(64),defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true},spineSource:{width:800,height:538,x1:378,x2:422}},
+  ];
+  chooser(detail);
+  await waitFor(()=>expect(screen.getByRole('img',{name:'SSIS-001 펼친 재킷'})).toBeVisible());
+  const old=screen.getByRole('img',{name:'SSIS-001 펼친 재킷'});
+  fireEvent.click(screen.getByRole('button',{name:'다른 표지'}));
+  await waitFor(()=>expect(mocks.native.mock.calls.some(([,body])=>body.path.endsWith('/jacket?jacketKey=digital'))).toBe(true));
+  fireEvent.click(screen.getByRole('button',{name:'표지 2'}));
+  await waitFor(()=>expect(screen.getAllByAltText('SSIS-001 펼친 재킷')).toHaveLength(2));
+  const next=screen.getAllByAltText('SSIS-001 펼친 재킷').find(image=>image!==old)!;
+  expect(old).toBeVisible();expect(next).not.toBeVisible();
+  fireEvent.load(next);await waitFor(()=>expect(next).toBeVisible());expect(old).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  expect(readInboxPlans()[0]).toMatchObject({choices:{jacketKey:'digital',split:{x1:1092,x2:1093}},reviewedJacketSha256:'b'.repeat(64)});
+});
+it('relooks up found items from the chooser',async()=>{
+  chooser();fireEvent.click(screen.getByRole('button',{name:'다시 찾기'}));
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.endsWith('/retry'))).toBe(true));
+});

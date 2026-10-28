@@ -598,6 +598,7 @@ pub fn run() {
             commands::characters::character_review_inbound_status,
             commands::av_link::list_av_link_inbox,
             commands::av_link::get_av_link_candidate,
+            commands::av_link::get_av_link_jacket,
             commands::av_link::retry_av_link,
             commands::av_link::fix_av_link_code,
             commands::av_link::dismiss_av_link,

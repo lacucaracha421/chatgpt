@@ -302,3 +302,16 @@ it('uses a new work id when rechecking switches an existing target to a new coll
   const next=createInboxPlan(inboxFixture,authority,initialChoices(inboxFixture,null));
   expect(next.isNew).toBe(true);expect(next.workId).not.toBe(inboxWork.workId);
 });
+
+it('prepares the selected alternative after reopening the durable plan',async()=>{
+  const detail=structuredClone(inboxFixture),candidate=detail.candidate!;
+  candidate.jackets=[{key:'digital',url:'',width:2184,height:1638,hasSpine:true,chosen:false,
+    sha256:candidate.jacketSha256!,defaultSplit:{x1:1092,x2:1092,isWrap:true,useSpine:true},spineSource:{width:800,height:538,x1:378,x2:422}}];
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(...args)=>args[0]===`/v1/av-inbox/${detail.inbox.id}`?structuredClone(detail):original(...args));
+  const choices=initialChoices(detail,null);choices.jacketKey='digital';choices.split={x1:1092,x2:1093};
+  createInboxPlan(detail,authority,choices);
+  await resumeInboxApplies(inboxIdentity);
+  expect(mocks.native.mock.calls.some(([,body])=>body.path.endsWith('/jacket?jacketKey=digital'))).toBe(true);
+  expect(mocks.api.mock.calls.find(([path])=>path.endsWith('/artwork'))?.[2]).toMatchObject({jacketKey:'digital',x1:1092,x2:1093,surfaces:['front','spine','back']});
+});

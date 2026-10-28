@@ -3,6 +3,7 @@ import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import type { AvPortrait as AvPortraitData } from "../avTypes";
 import { portraitCropStyle } from "./portraitCrop";
+import { StableImage } from "../../shared/ui/StableImage";
 import "./avPortrait.css";
 
 export type AvPortraitProps = {
@@ -10,6 +11,7 @@ export type AvPortraitProps = {
   name: string;
   size?: number | "detail" | "performer" | "home";
   className?: string;
+  stable?: boolean;
 };
 
 function revisioned(url: string, revision: string) {
@@ -20,7 +22,7 @@ function initials(name: string) {
   return [...name.trim()][0] ?? "?";
 }
 
-export function AvPortrait({ portrait, name, size = "detail", className = "" }: AvPortraitProps) {
+export function AvPortrait({ portrait, name, size = "detail", className = "", stable = false }: AvPortraitProps) {
   const { privacyMode } = usePrivacy();
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const imageSrc = portrait?.kind === "commons" || portrait?.kind === "stashdb" ? portrait.dataUrl : null;
@@ -29,7 +31,7 @@ export function AvPortrait({ portrait, name, size = "detail", className = "" }: 
   const classNames = `av-portrait av-portrait--${typeof size === "string" ? size : "custom"}${className ? ` ${className}` : ""}`;
   const style = { "--portrait-width": `${dimension}px`, "--portrait-height": `${height}px` } as CSSProperties;
   if (privacyMode || !portrait || (imageSrc && imageSrc === failedSrc)) return <span className={classNames} style={style} aria-label={`${name} 이니셜`}>{initials(name)}</span>;
-  if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} referrerPolicy="no-referrer" onError={() => setFailedSrc(portrait.dataUrl)} /></span>;
+  if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}>{stable ? <StableImage src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} referrerPolicy="no-referrer" onPreloadError={() => setFailedSrc(portrait.dataUrl)} /> : <img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} referrerPolicy="no-referrer" onError={() => setFailedSrc(portrait.dataUrl)} />}</span>;
 
   // The crop is 3:4; square and round boxes show its upper part instead of stretching it.
   return <span className={classNames} style={style} aria-label={`${name} 대표 이미지`}>

@@ -352,11 +352,11 @@ Status: `HOLD` (user 2026-10-13: later). The person detector sometimes merges or
 
 ## AV-OWNED-MARK-001 — Mark owned AV codes on javlibrary/avdbs (2026-10-28)
 
-Status: `DELIVERED` (2026-10-28, server deployed, extension 3.5.69; real-site check pending) — the extension marks product codes on javlibrary.com and avdbs.com pages (detail and list pages) that are already AV works in Collections, with a small square 보유 badge; the detail-page 컬렉션에 보내기 button shows 보유 instead. One batched server question per page (`POST /v1/av-owned`), short client-side memory. avdbs needs a login/cookie check, so the page structure was not inspected; the scan reads codes from page text.
+Status: `DELIVERED` (2026-10-28, server deployed, extension 3.5.69; real-site check passed, user 2026-10-28) — the extension marks product codes on javlibrary.com and avdbs.com pages (detail and list pages) that are already AV works in Collections, with a small square 보유 badge; the detail-page 컬렉션에 보내기 button shows 보유 instead. One batched server question per page (`POST /v1/av-owned`), short client-side memory. avdbs needs a login/cookie check, so the page structure was not inspected; the scan reads codes from page text.
 
 ## AV-PERFORMER-GRID-001 — Performer profile grid in AV Collections (2026-10-28)
 
-Status: `DESIGN APPROVED` (2026-10-28: card A 3:4, no Japanese name, age "만 N세", only a no-value group at the end, favourite star on cards, 작품 | 배우 in the section bar after the type control) — a top-level 작품 | 배우 switch on the AV screen; 배우 shows large performer cards with age, height, B-W-H/cup and work count, sortable by work count, name, age, height, cup and latest work (missing values last). Cards open the existing performer detail. Existing 안 묶음 / 배우 grouping stays. PC mockup with tablet variant in `docs/prototypes/av-performer-grid-20261028/`.
+Status: `DELIVERED` (2026-10-28, PC build + tablet 0.9.161; device feedback pending; design: card A 3:4, no Japanese name, age "만 N세", only a no-value group at the end, favourite star on cards, 작품 | 배우 in the section bar after the type control) — a top-level 작품 | 배우 switch on the AV screen; 배우 shows large performer cards with age, height, B-W-H/cup and work count, sortable by work count, name, age, height, cup and latest work (missing values last). Cards open the existing performer detail. Existing 안 묶음 / 배우 grouping stays. PC mockup with tablet variant in `docs/prototypes/av-performer-grid-20261028/`.
 
 ## AV-AUTHORITY-001 — AV acceptance and remaining profile polish
 

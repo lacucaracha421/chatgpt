@@ -5,10 +5,10 @@ import {AV_DETAIL_FIELDS, sameAvValue, validateAvDetails, validateAvCredits, typ
 import {normalizeProductCode} from './avLookup';
 import {displayAvGenres} from '../src/collections/avGenreNames';
 import {COLLECTION_NAME_IN_TRASH} from '../src/collections/collectionEditFields';
-import {candidateHasSurface, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
+import {candidateHasSurface, selectInboxJacket, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
 
 export type PersonChoice={nameJa:string;role:'performer'|'director';action:'new'|'link'|'skip';displayName:string;personId:string|null};
-export type InboxChoices={workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[];/** The cut lines the user chose; absent means the server's own split. */split?:{x1:number;x2:number}};
+export type InboxChoices={jacketKey?:string;workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[];/** The cut lines the user chose; absent means the server's own split. */split?:{x1:number;x2:number}};
 /** The lines a plan cuts the jacket at. */
 export const planSplit=(plan:Pick<InboxPlan,'choices'|'detail'>)=>plan.choices.split??plan.detail.candidate!.defaultSplit;
 export type InboxPlan={id:string;runId?:string;identity:AuthorityIdentity;detail:InboxDetail;choices:InboxChoices;workId:string;isNew:boolean;base:InboxWork|null;artworkIds:Record<Surface,string>;personIds:Record<string,string>;manifests:PreparedArtwork[];commands:Command[];accepted:string[];dependencies?:string[];state:'preparing'|'sending'|'waiting'|'blocked'|'done';attempts:number;stageAttempts?:Partial<Record<'preparing'|'sending'|'waiting',number>>;reviewedCode:string;reviewedJacketSha256:string;nextAttemptAt:number;doneAt?:number;error?:string};
@@ -146,6 +146,7 @@ function sameCompositionState(a:InboxWork,b:InboxWork) {
     &&sameAvValue(a.avCredits,b.avCredits);
 }
 export function createInboxPlan(detail:InboxDetail,authority:InboxAuthority,choices:InboxChoices):InboxPlan{
+  if(choices.jacketKey&&detail.candidate)detail={...detail,candidate:selectInboxJacket(detail.candidate,choices.jacketKey)};
   if(detail.inbox.status!=='found'||!detail.candidate)throw new Error('후보를 다시 확인해 주세요.');
   const previous=readInboxPlans().find(p=>p.id===detail.inbox.id);
   if(previous&&previous.state!=='blocked'&&previous.state!=='done')throw new Error('이미 보내는 중입니다.');
@@ -233,7 +234,7 @@ async function resume(connection:string,identity:AuthorityIdentity){
         if((plan.dependencies??[]).some(id=>id.startsWith('plan:')&&plans.some(p=>p.id===id.slice(5)&&p.state!=='done')))continue;
         if(dependencies.some(r=>r.state==='conflict')) {plan.state='blocked';plan.error='앞선 변경이 다른 기기의 변경과 겹침';save(plan,connection);continue;}
         if(dependencies.some(r=>r.state==='pending'))continue;
-        const fresh=await reviewedInboxDetail(plan.id,connection);
+        const fresh=await reviewedInboxDetail(plan.id,connection,new AbortController().signal,plan.choices.jacketKey);
         if(!currentPlan(plan,connection))return;
         if(!fresh.candidate){plan.detail=fresh;throw new PlanStopped('후보가 없어졌어요 · 적용 취소해 주세요.');}
         if(normalizeProductCode(fresh.inbox.normalizedCode??fresh.inbox.productCode)!==plan.reviewedCode||fresh.candidate.jacketSha256!==plan.reviewedJacketSha256)
@@ -241,7 +242,7 @@ async function resume(connection:string,identity:AuthorityIdentity){
         const wanted=SURFACES.filter(s=>plan.choices.surfaces[s]==='candidate'&&!plan.manifests.some(m=>m.surface===s));
         if(wanted.length){
           const split=planSplit(plan);
-          const reply=await api<{items:PreparedArtwork[]}>(`${inboxPath(plan.id)}/artwork`,undefined,{x1:split.x1,x2:split.x2,surfaces:wanted},'POST',false,connection);
+          const reply=await api<{items:PreparedArtwork[]}>(`${inboxPath(plan.id)}/artwork`,undefined,{x1:split.x1,x2:split.x2,surfaces:wanted,...(plan.choices.jacketKey?{jacketKey:plan.choices.jacketKey}:{})},'POST',false,connection);
           if(!currentPlan(plan,connection))return;
           if(!Array.isArray(reply?.items)||reply.items.length!==wanted.length||wanted.some(s=>reply.items.filter(m=>m.surface===s).length!==1))throw new PlanStopped('표지 응답을 확인하지 못했어요 · 다시 확인');
           plan.manifests.push(...reply.items);save(plan,connection);

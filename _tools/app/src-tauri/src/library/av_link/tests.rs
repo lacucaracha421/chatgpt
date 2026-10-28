@@ -112,6 +112,7 @@ fn found(lib: &Library) -> String {
 }
 fn new_request() -> ApplyRequest {
     ApplyRequest {
+        jacket_key: None,
         collection_id: None,
         new_collection_name: Some("".into()),
         expected_revision: None,
