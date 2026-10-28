@@ -828,7 +828,7 @@ class CollectionAuthorityTests(unittest.TestCase):
 
     def test_inactive_domain_changes_nothing(self):
         self.assertEqual(self.client.get(PREFIX + '/status', headers=self.auth).json(),
-                         {'active': False, 'domain': 'collections', 'features': ['personProfileFields', 'kakaoReview']})
+                         {'active': False, 'domain': 'collections', 'features': ['personProfileFields', 'mergePeople', 'kakaoReview']})
         for path, params in (('/baseline', {'libraryId': LIBRARY, 'epoch': 1}),
                              ('/changes', {'libraryId': LIBRARY, 'epoch': 1})):
             reply = self.client.get(PREFIX + path, headers=self.auth, params=params)

@@ -501,3 +501,14 @@ pub async fn resolve_av_person_profile_conflict(person_id: String, operation_id:
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.resolve_av_person_profile_conflict(&person_id, &operation_id, overwrite)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn merge_av_people(person_id: String, remove_person_id: String, expected_revision: i64, expected_remove_revision: i64, state: State<'_, AppState>) -> Result<String, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.merge_av_people(&person_id, &remove_person_id, expected_revision, expected_remove_revision)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn discard_av_people_merge(operation_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.discard_av_people_merge(&operation_id)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}

@@ -103,14 +103,17 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
     setReloading(true); setLoadError(null);
     try {
       const raw = await api.getCandidate(inboxId, target && target !== NEW_DESTINATION ? target : undefined);
-      const eligibleMatches = async (people: AvLinkPersonMatch[]) => Promise.all(people.map(async person => {
+      const performers = await Promise.all(raw.performers.map(async person => {
         if (!person.personId) return person;
-        const page = await peopleApi.getPerformer(person.personId).catch(reason => { if (person.alreadyLinked) return null; throw reason; });
+        const exactName = person.matchBy === 'name_ja';
+        const page = await peopleApi.getPerformer(person.personId).catch(reason => {
+          if (person.alreadyLinked || exactName) return null;
+          throw reason;
+        });
         if (!page) return person;
-        const enriched = { ...person, ...page.person };
-        return person.alreadyLinked || await hasPerformerCredit(peopleApi, person.personId, page) ? enriched : { ...person, personId: null, displayName: null, matchBy: null };
+        return person.alreadyLinked || exactName || await hasPerformerCredit(peopleApi, person.personId, page)
+          ? {...person, ...page.person} : {...person, personId:null, displayName:null, matchBy:null};
       }));
-      const performers = await eligibleMatches(raw.performers);
       const current = raw.current ? { ...raw.current, people: await Promise.all(raw.current.people.map(async person => ({ ...person, ...(await peopleApi.getPerformer(person.id).catch(() => null))?.person }))) } : null;
       let next = { ...raw, current, performers };
       const previousKey = keep?.candidate?.jacketKey;

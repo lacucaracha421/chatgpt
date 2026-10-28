@@ -124,13 +124,14 @@ PERSON_PORTRAIT = "setPersonPortrait"
 PERSON_PROFILE = "setPersonProfile"
 PERSON_PROFILE_FIELDS = "setPersonProfileFields"
 DELETE_PERSON = "deletePerson"
+MERGE_PEOPLE = "mergePeople"
 
 #: An ordinary client credential may send these, including count tracking/subscriptions.
 #: Provider, volume, individual ownership and purge
 #: commands (and any unrecognized name) require the publisher role.
 CLIENT_COMMAND_TYPES = (CREATE, UPDATE, DELETE, RESTORE, SHOWCASE_ORDER, ADD_ARTWORK,
                         SELECT_ARTWORK, MEMBERSHIP, TRACK_OWNERSHIP, RELEASE_SUBSCRIPTION,
-                        VOLUME_RANGE, KAKAO_REVIEW, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS)
+                        VOLUME_RANGE, KAKAO_REVIEW, ACK_RELEASE, AV_DETAILS, AV_CREDITS, PERSON, PERSON_PORTRAIT, PERSON_PROFILE, PERSON_PROFILE_FIELDS, MERGE_PEOPLE)
 PUBLISHER_COMMAND_TYPES = (PURGE, PURGE_EXPIRED, BIND, UNBIND, APPLY_SNAPSHOT,
                            UPSERT_VOLUME, UPSERT_VOLUME_SOURCE, OWNERSHIP, RECORD_RELEASE, DELETE_PERSON)
 COMMAND_TYPES = CLIENT_COMMAND_TYPES + PUBLISHER_COMMAND_TYPES
@@ -147,6 +148,7 @@ COMMAND_KEYS = {
     PERSON_PROFILE: {"personId", "stashdbId", "expectedRevision"},
     PERSON_PROFILE_FIELDS: {"personId", "changes", "expected"},
     DELETE_PERSON: {"personId", "expectedRevision"},
+    MERGE_PEOPLE: {"personId", "removePersonId", "expectedRevision", "expectedRemoveRevision"},
     DELETE: {"workId", "expectedRevision"},
     RESTORE: {"workId", "expectedRevision"},
     PURGE: {"workId", "expectedRevision"},
@@ -1868,6 +1870,9 @@ def person_entity(db, library_id, row):
     name, name_ja = av_person_identity(db, library_id, row["person_id"], payload)
     return {**payload, **_profile_metadata(payload), "personId": row["person_id"], "displayName": name, "nameJa": name_ja,
             "entityRevision": row["entity_revision"],
+            "creditWorkCount": db.execute("SELECT COUNT(DISTINCT w.work_id) FROM collection_authority_works w,json_each(w.av_credits) c"
+                " WHERE w.library_id=? AND w.lifecycle IN ('live','trashed') AND json_extract(c.value,'$.personId')=?",
+                [library_id, row["person_id"]]).fetchone()[0],
             "portraitSelection": person_portrait_selection(db, library_id, row),
             "portraitImage": None if row["portrait_image"] is None else json.loads(row["portrait_image"])}
 
@@ -2092,6 +2097,86 @@ def _set_person_portrait(ctx, entity, payload_sha):
                    person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, person_id)))
 
 
+def _merge_people(ctx, entity, payload_sha):
+    import av_person_profile as profile
+    from mobile_collections import MAX_PERSON_BYTES
+
+    keep_id, remove_id = entity["personId"], entity["removePersonId"]
+    keep, remove = _person_row(ctx, keep_id), _person_row(ctx, remove_id)
+    for row, key in ((keep, "expectedRevision"), (remove, "expectedRemoveRevision")):
+        if row["entity_revision"] != entity[key]:
+            conflict(ctx, "person", person_entity(ctx.db, ctx.library_id, row))
+    target = person_entity(ctx.db, ctx.library_id, keep)
+    other = person_entity(ctx.db, ctx.library_id, remove)
+    payload = json.loads(keep["payload"])
+    def empty(value):
+        return value is None or isinstance(value, str) and not value.strip() or value == [] or value == {}
+    if empty(payload.get("memo")):
+        payload["memo"] = other.get("memo")
+    payload["favorite"] = bool(target.get("favorite") or other.get("favorite"))
+    overrides = dict(target["profileOverrides"])
+    baseline = dict(target["stashdbProfile"] or {})
+    other_base = other["stashdbProfile"] or {}
+    for field in profile.PROFILE_FIELDS:
+        # Explicit clears are owned values, not gaps to fill.
+        if field in overrides or not empty((target.get("profile") or {}).get(field)):
+            continue
+        if field in other["profileOverrides"]:
+            overrides[field] = other["profileOverrides"][field]
+        elif not empty(other_base.get(field)):
+            baseline[field] = other_base[field]
+    if not target["stashdbProfile"] and other["stashdbProfile"]:
+        baseline = {**other["stashdbProfile"], **baseline}
+        if not payload.get("stashdbId"):
+            payload["stashdbId"] = other.get("stashdbId")
+    payload["stashdbProfile"] = baseline or None
+    payload["profileOverrides"] = overrides
+    payload["profile"] = profile.merged(payload)
+    name, name_ja = target["displayName"], target["nameJa"]
+    if "nameJa" not in overrides and empty(name_ja):
+        name_ja = other["nameJa"]
+        if "nameJa" in other["profileOverrides"]:
+            overrides["nameJa"] = other["profileOverrides"]["nameJa"]
+            payload.setdefault("profileBaseNames", {"displayName": name, "nameJa": target["nameJa"]})
+    payload.update(displayName=name, nameJa=name_ja)
+    selection = target["portraitSelection"]
+    image = keep["portrait_image"]
+    if selection is None:
+        selection, image = other["portraitSelection"], remove["portrait_image"]
+        if empty(payload.get("portrait")):
+            payload["portrait"] = other.get("portrait")
+    if len(encode(payload).encode()) > MAX_PERSON_BYTES:
+        fail(413, "collectionPayloadTooLarge", "인물 프로필 크기가 허용 범위를 초과했습니다.")
+    ctx.db.execute("UPDATE collection_authority_people SET payload=?,display_name=?,name_ja=?,"
+                   "portrait_selection=?,portrait_image=?,entity_revision=entity_revision+1"
+                   " WHERE library_id=? AND person_id=?",
+                   [encode(payload), name, name_ja, None if selection is None else encode(selection),
+                    image, ctx.library_id, keep_id])
+    rows = ctx.db.execute("SELECT DISTINCT w.* FROM collection_authority_works w,json_each(w.av_credits) c"
+                          " WHERE w.library_id=? AND json_extract(c.value,'$.personId') IN (?,?)"
+                          " ORDER BY w.work_id", [ctx.library_id, keep_id, remove_id]).fetchall()
+    for row in rows:
+        state = work_state(row)
+        credits = state.get("avCredits", [])
+        has_keep = any(c["personId"] == keep_id for c in credits)
+        merged, seen = [], False
+        for credit in credits:
+            if credit["personId"] in (keep_id, remove_id):
+                if (credit["personId"] == remove_id and has_keep) or seen:
+                    continue
+                credit = {**credit, "personId": keep_id, "name": name, "nameJa": name_ja}
+                seen = True
+            merged.append(credit)
+        state["avCredits"] = merged
+        if state["lifecycle"] == "tombstoned":
+            write_work(ctx.db, ctx.library_id, state)
+        else:
+            _bump_work(ctx, state)
+    _remove_person(ctx, remove)
+    return _finish(ctx, payload_sha, keep_id, personChanged=True,
+                   person=person_entity(ctx.db, ctx.library_id, _person_row(ctx, keep_id)))
+
+
 def _delete_person(ctx, entity, payload_sha):
     """Remove a person no live or trashed work credits (operator-only; clients learn from the feed).
 
@@ -2109,6 +2194,12 @@ def _delete_person(ctx, entity, payload_sha):
                           [ctx.library_id, person_id]).fetchone()
     if used is not None:
         fail(409, "personInUse", "작품에 연결된 인물은 삭제할 수 없습니다.", personId=person_id, workId=used[0])
+    _remove_person(ctx, row)
+    return _finish(ctx, payload_sha, person_id)
+
+
+def _remove_person(ctx, row):
+    person_id = row["person_id"]
     ctx.db.execute("DELETE FROM collection_authority_people WHERE library_id=? AND person_id=?",
                    [ctx.library_id, person_id])
     if row["portrait_image"] is not None:
@@ -2121,7 +2212,6 @@ def _delete_person(ctx, entity, payload_sha):
         home_publications.replace_cover_refs(ctx.db, mobile_collections.PORTRAIT_OWNER, [
             home_publications.BlobCover(**{k: i[k] for k in ("sha256", "sizeBytes", "contentType")}) for i in images])
     ctx.add("deletedPeople", {"personId": person_id, "entityRevision": row["entity_revision"]})
-    return _finish(ctx, payload_sha, person_id)
 
 
 def _delete(ctx, entity, payload_sha):
@@ -2846,6 +2936,7 @@ HANDLERS = {
     PERSON_PROFILE_FIELDS: _set_person_profile_fields,
     PERSON: _set_person, PERSON_PORTRAIT: _set_person_portrait, PERSON_PROFILE: _set_person_profile,
     DELETE_PERSON: _delete_person,
+    MERGE_PEOPLE: _merge_people,
 }
 
 
@@ -2983,6 +3074,13 @@ def parse_command(body):
     elif command_type == PERSON_PORTRAIT:
         entity.update(personId=require_id(body["personId"]), portrait=_portrait_input(body["portrait"]),
                       expectedRevision=_revision(body["expectedRevision"], minimum=1))
+    elif command_type == MERGE_PEOPLE:
+        entity.update(personId=require_id(body["personId"]),
+                      removePersonId=require_id(body["removePersonId"]),
+                      expectedRevision=_revision(body["expectedRevision"], minimum=1),
+                      expectedRemoveRevision=_revision(body["expectedRemoveRevision"], minimum=1))
+        if entity["personId"] == entity["removePersonId"]:
+            fail()
     elif command_type == DELETE_PERSON:
         entity.update(personId=require_id(body["personId"]),
                       expectedRevision=_revision(body["expectedRevision"], minimum=1))
@@ -4227,7 +4325,7 @@ def advertised_features():
     import release_calendar
     import release_wishlist
     import kakao_bind_worker
-    return ["personProfileFields", "kakaoReview", *collection_release_checks.features(), *release_calendar.features(),
+    return ["personProfileFields", "mergePeople", "kakaoReview", *collection_release_checks.features(), *release_calendar.features(),
             *release_wishlist.features(), *kakao_bind_worker.features(), *kakao_bind_worker.features(provider="mangadex")]
 
 

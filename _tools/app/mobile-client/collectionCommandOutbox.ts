@@ -1,3 +1,4 @@
+import type {MergePeopleCommand} from '../src/collections/av/MergePeopleDialog';
 import {rememberPersonNames} from './personNameCache';
 import {applyProfileChanges, hasOwn, hasProfileMetadata, profileExpected, validateProfileChanges, validateProfileExpected, validateProfileCareer, type ProfilePerson, type ProfileChanges, type ProfileExpected} from "../src/collections/av/personProfileFields";
 import {connectionOutbox, outboxConnection, outboxKey} from './outboxConnection';
@@ -43,10 +44,10 @@ export type PersonRevisionCommand = {personId: string; workId?: never; expectedR
   {commandType: 'setPersonProfile'; stashdbId: string | null} |
   {commandType: 'setPersonPortrait'; portrait: PortraitSelection | null});
 export type SetPersonProfileFieldsCommand = {commandType: 'setPersonProfileFields'; personId: string; workId?: never; changes: ProfileChanges; expected: ProfileExpected};
-export type PersonCommand = SetPersonCommand | PersonRevisionCommand | SetPersonProfileFieldsCommand;
+export type PersonCommand = SetPersonCommand | PersonRevisionCommand | SetPersonProfileFieldsCommand | MergePeopleCommand;
 export type AuthorityCommand = WorkCommand | PersonCommand;
 export function isPersonCommand(command: AuthorityCommand): command is PersonCommand {
-  return command.commandType === 'setPersonProfileFields' || command.commandType === 'setPerson' || command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait';
+  return command.commandType === 'mergePeople' || command.commandType === 'setPersonProfileFields' || command.commandType === 'setPerson' || command.commandType === 'setPersonProfile' || command.commandType === 'setPersonPortrait';
 }
 export type Command = AuthorityIdentity & AuthorityCommand & {operationId: string};
 /**
@@ -169,7 +170,10 @@ export function replaceCommand(operationId: string, command: AuthorityCommand | 
 }
 const inFlight = new Map<string, Promise<void>>();
 function validateAvCommand(command: AuthorityCommand) {
-  if (command.commandType === 'setPersonProfileFields') {
+  if (command.commandType === 'mergePeople') {
+    if (![command.personId,command.removePersonId].every(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id))
+      ||command.personId===command.removePersonId||![command.expectedRevision,command.expectedRemoveRevision].every(r=>Number.isSafeInteger(r)&&r>0)) throw new Error(AV_INPUT_ERROR);
+  } else if (command.commandType === 'setPersonProfileFields') {
     if (typeof command.personId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(command.personId)) throw new Error(AV_INPUT_ERROR);
     validateProfileChanges(command.changes); validateProfileExpected(command.changes, command.expected);
     if (new TextEncoder().encode(JSON.stringify(command)).byteLength > 64 * 1024) throw new Error(AV_INPUT_ERROR);
@@ -415,7 +419,7 @@ export function personCommand(personId: string, confirmed: PersonValues, rows: C
 /** 덮어쓰기 for a refused `setPerson`: the same wish, expected from the server's current person. */
 export function rebasePersonCommand(row: CommandIntent): PersonCommand | null {
   const command = row.command, current = row.conflict?.current?.person;
-  if (!isPersonCommand(command) || !current) return null;
+  if (!isPersonCommand(command) || !current || command.commandType === 'mergePeople') return null;
   if (command.commandType === 'setPersonProfileFields') return row.conflict?.code === 'revisionConflict' && hasProfileMetadata(current) ? {commandType: 'setPersonProfileFields', personId: command.personId, changes: command.changes, expected: profileExpected(current, command.changes)} : null;
   if (command.commandType !== 'setPerson') return row.conflict?.code === 'revisionConflict' && Number.isSafeInteger(current.entityRevision) && current.entityRevision! > 0
     ? command.commandType === 'setPersonProfile'

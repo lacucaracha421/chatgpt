@@ -617,6 +617,8 @@ pub fn run() {
             commands::av::preview_av_stashdb_portrait,
             commands::av::use_av_stashdb_portrait,
             commands::av::save_av_person_memo,
+            commands::av::merge_av_people,
+            commands::av::discard_av_people_merge,
             commands::av::get_av_person_profile_state,
             commands::av::set_av_person_profile_fields,
             commands::av::resolve_av_person_profile_conflict,

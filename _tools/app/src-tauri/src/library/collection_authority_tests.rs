@@ -3963,6 +3963,23 @@ fn collection_authority_people_adoption_projects_server_person_after_capturing_p
 }
 
 #[test]
+fn collection_authority_people_merge_queues_two_revision_guards_and_predicts_work_bump() {
+    let (_temp, library, mut status) = people_fixture(true);
+    status.features = vec!["mergePeople".into()];
+    store_profile_features_status(&*library.connection().unwrap(), &status).unwrap();
+    library.merge_av_people("p", "other", 1, 7).unwrap();
+    let commands = provider_commands(&library);
+    assert_eq!(commands.len(),1);
+    assert_eq!(commands[0]["commandType"],"mergePeople");
+    assert_eq!(commands[0]["personId"],"p");
+    assert_eq!(commands[0]["removePersonId"],"other");
+    assert_eq!(commands[0]["expectedRevision"],1);
+    assert_eq!(commands[0]["expectedRemoveRevision"],7);
+    assert_eq!(predicted_collection_revision(&*library.connection().unwrap(), "works", &json!(["av"]).to_string()).unwrap(),2);
+    assert!(library.merge_av_people("p", "third", 1, 1).is_err());
+}
+
+#[test]
 fn collection_authority_people_memo_favorite_portrait_queue_projection_receipts_and_conflict() {
     use super::super::av_models::AvPortraitRect;
     let (temp, l, s) = people_fixture(true);

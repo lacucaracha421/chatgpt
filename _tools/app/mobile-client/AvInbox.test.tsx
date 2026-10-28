@@ -130,12 +130,12 @@ it('dismisses a row without a candidate immediately and requests no confirm dial
   await waitFor(()=>expect(mocks.api.mock.calls.some(([p])=>p.endsWith('/dismiss'))).toBe(true));
   expect(screen.queryByRole('dialog',{name:/후보를 버릴까요/})).toBeNull();
 });
-it('does not choose one of several people with the same Japanese name silently',()=>{
+it('links an existing same-name person deterministically when their credit counts tie',()=>{
   chooser(inboxFixture,{...inboxAuthority,people:[{personId:'p1',displayName:'첫 배우',nameJa:'女優'},{personId:'p2',displayName:'둘째 배우',nameJa:'女優'}]});
   details_();
-  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('새 인물');
-  fireEvent.change(screen.getByRole('textbox',{name:'女優 한국어 이름'}),{target:{value:''}});
-  expect(screen.getByRole('button',{name:'만들기'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('기존 인물');
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  expect(readInboxPlans()[0].choices.people[0]).toMatchObject({action:'link',personId:'p1'});
 });
 it('does not flash an empty inbox while the first list is still loading',async()=>{
   let resolve!:(value:unknown)=>void;const base=mocks.api.getMockImplementation()!;
@@ -248,11 +248,13 @@ it('offers only people credited as a performer, including people credited in bot
   fireEvent.click(screen.getByRole('button',{name:'女優 인물 연결'}));fireEvent.click(screen.getByRole('button',{name:'새 인물로'}));
   expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toHaveValue('배우');expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toBeEnabled();
 });
-it('does not automatically link a director-only match to a performer',()=>{
+it('reuses an exact Japanese-name identity even when its previous credit was a director',()=>{
   chooser(inboxFixture,{...inboxAuthority,people:[{personId:'director',displayName:'감독',nameJa:'女優'}],works:[{...inboxWork,details:{av:{productCode:'OTHER-1',genres:[]}},avCredits:[{personId:'director',role:'director',order:0}]}]});
   details_();
-  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('새 인물');
-  expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toBeEnabled();
+  expect(screen.getByRole('button',{name:'女優 인물 연결'})).toHaveTextContent('기존 인물');
+  expect(screen.getByRole('textbox',{name:'女優 한국어 이름'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'만들기'}));
+  expect(readInboxPlans()[0].choices.people[0]).toMatchObject({action:'link',personId:'director'});
 });
 it('shows genres by Korean name without sale tags and never plans a hidden tag or a director',()=>{
   const detail={...inboxFixture,candidate:{...inboxFixture.candidate!,fields:{...inboxFixture.candidate!.fields,genres:['痴女','セール対象商品','ハイビジョン']},directors:[{nameJa:'監督',nameKo:null,wikidataId:null,fanzaActressId:null}]}};

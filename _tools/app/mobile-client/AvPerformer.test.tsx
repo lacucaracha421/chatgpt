@@ -44,6 +44,28 @@ function Harness() {
 const open = async () => { render(<Harness/>); return screen.findByRole('region', {name: '내 메모'}); };
 const editable = () => screen.findByRole('button', {name: '즐겨찾기'});
 
+it('sends a confirmed merge through the tablet authority outbox and keeps the current performer',async()=>{
+  const base=mocks.api.getMockImplementation()!;
+  const joint={...work,av:{...work.av!,people:[...work.av!.people,{id:'other',name:'다른 배우',role:'performer' as const,order:1}]}};
+  person={...person!,entityRevision:4,creditWorkCount:1};
+  mocks.api.mockImplementation(async(path:string,signal:unknown,body:PersonCommand)=>{
+    if(path===AUTHORITY_STATUS_PATH)return {...identity,active:true,features:['mergePeople']};
+    if(path==='/v1/collections/people/p1?authority=1')return {person};
+    if(path==='/v1/collections/people/other?authority=1')return {person:{...person,id:'other',entityRevision:7,creditWorkCount:3}};
+    if(path.startsWith('/v1/collections?type=av'))return {...listPage,items:[joint]};
+    if(path===COMMAND_PATH)return {...body,changed:true,person:{...person,entityRevision:5}};
+    return base(path,signal,body);
+  });
+  await open();
+  fireEvent.click(await screen.findByRole('button',{name:'배우 관리'}));
+  fireEvent.click(await screen.findByRole('button',{name:'다른 배우와 합치기'}));
+  fireEvent.click(await screen.findByRole('option',{name:/다른 배우/}));
+  expect(await screen.findByText('다른 배우를 하야세 미오로 합칩니다. 다른 배우의 작품 3편이 옮겨지고 다른 배우는 사라집니다.')).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'합치기'}));
+  await waitFor(()=>expect(sent()).toEqual([expect.objectContaining({commandType:'mergePeople',personId:'p1',removePersonId:'other',expectedRevision:4,expectedRemoveRevision:7})]));
+  expect(screen.getByRole('heading',{name:'하야세 미오',level:1})).toBeVisible();
+});
+
 describe('tablet performer 즐겨찾기 and 내 메모', () => {
   it('toggles 즐겨찾기 at once, queues setPerson with the confirmed value and keeps the star while it is sent', async () => {
     let release: (value: unknown) => void = () => {};

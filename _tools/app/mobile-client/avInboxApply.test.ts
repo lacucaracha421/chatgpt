@@ -21,6 +21,20 @@ beforeEach(()=>{localStorage.clear();setOutboxConnection('https://test.example')
   });
 });
 const pass=async()=>{await resumeInboxApplies(inboxIdentity);await flushCommands();await resumeInboxApplies(inboxIdentity);};
+it('defaults trimmed Japanese names to the target credit, then the most credited person, and never appends that person twice',()=>{
+  const nameJa=inboxFixture.candidate!.performers[0].nameJa;
+  authority.people=[{personId:'target',displayName:'다른 한국 이름',nameJa:` ${nameJa} `},{personId:'popular',displayName:'인기',nameJa}];
+  const credit=(personId:string)=>({personId,role:'performer' as const,order:0,creditName:null});
+  const base={...structuredClone(inboxWork),avCredits:[credit('target')],avPeople:authority.people};
+  authority.works=[base,...['a','b'].map(workId=>({...base,workId,avCredits:[credit('popular')]}))];
+  const choices=initialChoices(inboxFixture,base,authority);
+  expect(choices.people[0]).toMatchObject({action:'link',personId:'target'});
+  expect(initialChoices(inboxFixture,null,authority).people[0]).toMatchObject({action:'link',personId:'popular'});
+  const plan=createInboxPlan(inboxFixture,authority,choices);plan.manifests=['front','spine','back'].map(s=>manifest(s as 'front'|'spine'|'back'));
+  const credits=composeInboxCommands(plan).find(c=>c.commandType==='setAvCredits');
+  expect(credits?.commandType==='setAvCredits'?credits.credits.filter(c=>c.personId==='target').length:1).toBe(1);
+  expect(credits?.commandType==='setAvCredits'?credits.people:[]).toEqual([]);
+});
 it('restores the latest same-name AV work before applying selected candidate values and preserves its credits',async()=>{
   const trashed={...structuredClone(inboxWork),name:'ssis-001',lifecycle:'trashed',trashedAt:'2026-10-27',details:{av:{productCode:'SSIS-001',maker:'keep maker'}},avCredits:[{personId:'old',role:'performer' as const,order:0,creditName:null}]};
   authority.works=[{...trashed,workId:'older',trashedAt:'2026-10-20'},trashed,{...trashed,type:'game',workId:'other',trashedAt:'2026-10-28'}];

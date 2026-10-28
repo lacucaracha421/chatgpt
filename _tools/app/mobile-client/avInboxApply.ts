@@ -62,7 +62,7 @@ export function inboxWorks(authority:InboxAuthority,inboxId?:string):InboxWork[]
       work.details.av={...work.details.av,...p.choices.fields};
       for(const person of p.choices.people){const personId=person.action==='new'?p.personIds[person.nameJa]:person.personId;
         if(person.action!=='skip'&&personId){
-          if(!work.avCredits.some(c=>c.personId===personId&&c.role===person.role))work.avCredits.push({personId,role:person.role,order:work.avCredits.filter(c=>c.role===person.role).length,creditName:null});
+          if(!work.avCredits.some(c=>c.personId===personId))work.avCredits.push({personId,role:person.role,order:work.avCredits.filter(c=>c.role===person.role).length,creditName:null});
           if(person.action==='new'){work.avPeople??=[];if(!work.avPeople.some(p=>p.personId===personId))work.avPeople.push({personId,nameJa:person.nameJa,displayName:person.displayName});}
         }}
     }
@@ -112,7 +112,21 @@ export function inboxRecheckChanges(detail:InboxDetail,work:InboxWork|null,previ
   return changes;
 }
 export const surfaceSlot=(s:Surface)=>s==='front'?'work':s;
-export function initialChoices(detail:InboxDetail,work:InboxWork|null):InboxChoices{
+export function matchInboxPerson(authority:Pick<InboxAuthority,'people'|'works'>,p:PersonChoice,work:InboxWork|null=null){
+  if(p.action==='link')return authority.people.find(person=>person.personId===p.personId);
+  const count=(id:string)=>authority.works.filter(w=>w.avCredits.some(c=>c.personId===id)).length;
+  return authority.people.filter(person=>!!p.nameJa.trim()&&person.nameJa?.trim()===p.nameJa.trim()).sort((a,b)=>
+    Number(!!work?.avCredits.some(c=>c.personId===b.personId))-Number(!!work?.avCredits.some(c=>c.personId===a.personId))
+    ||count(b.personId)-count(a.personId)||a.personId.localeCompare(b.personId))[0];
+}
+export function defaultInboxPeople(choices:InboxChoices,authority:Pick<InboxAuthority,'people'|'works'>,work:InboxWork|null):InboxChoices{
+  return {...choices,people:choices.people.map(p=>{
+    if(p.action==='skip')return p;
+    const known=matchInboxPerson(authority,p,work);
+    return known?{...p,action:'link',personId:known.personId,displayName:known.displayName}:p;
+  })};
+}
+export function initialChoices(detail:InboxDetail,work:InboxWork|null,authority?:Pick<InboxAuthority,'people'|'works'>):InboxChoices{
   const c=detail.candidate!;const fields:AvDetailFields={};
   for(const [key,entry] of Object.entries(c.fields)){
     const old=work?.details.av?.[key as AvDetailKey];
@@ -120,10 +134,11 @@ export function initialChoices(detail:InboxDetail,work:InboxWork|null):InboxChoi
     const value=key==='genres'&&Array.isArray(entry)?displayAvGenres(entry).map(genre=>genre.original):entry;
     if((old==null||old===''||Array.isArray(old)&&!old.length)&&value!=null&&value!==''&&(!Array.isArray(value)||value.length))fields[key as AvDetailKey]=value;
   }
-  return {workId:work?.workId??null,name:detail.inbox.normalizedCode??detail.inbox.productCode,
+  const choices:InboxChoices={workId:work?.workId??null,name:detail.inbox.normalizedCode??detail.inbox.productCode,
     surfaces:Object.fromEntries(SURFACES.map(s=>[s,work?.selection[surfaceSlot(s)]?'keep':candidateHasSurface(c,s)?'candidate':work?'keep':'clear'])) as InboxChoices['surfaces'],fields,
     // Directors are no longer imported.
     people:c.performers.map(p=>({nameJa:p.nameJa,role:'performer' as const,action:'new' as const,displayName:p.nameKo||p.nameJa,personId:null}))};
+  return defaultInboxPeople(choices,authority??{people:work?.avPeople??[],works:work?[work]:[]},work);
 }
 /** The chooser includes preceding FIFO intents over its frozen authority read. */
 export function predictedInboxWork(work:InboxWork,authority:InboxAuthority,inboxId?:string):InboxWork {
@@ -204,7 +219,7 @@ export function composeInboxCommands(plan:InboxPlan,artworks:InboxAuthority['art
   for(const p of choices.people){
     if(p.action==='skip')continue;
     const personId=p.action==='link'?p.personId:plan.personIds[p.nameJa];if(!personId)throw new Error('인물을 선택해 주세요.');
-    if(credits.some(credit=>credit.role===p.role&&credit.personId===personId))continue;
+    if(credits.some(credit=>credit.personId===personId))continue;
     const allowed=(p.role==='performer'?c.performers:c.directors??[]).some(person=>person.nameJa===p.nameJa);if(!allowed)throw new Error('인물을 다시 확인해 주세요.');
     if(p.action==='new'&&!people.some(person=>person.personId===personId))people.push({personId,displayName:p.displayName.trim(),nameJa:p.nameJa});
     credits.push({personId,role:p.role,order:credits.filter(v=>v.role===p.role).reduce((max,v)=>Math.max(max,v.order+1),0),creditName:null});

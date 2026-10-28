@@ -28,6 +28,25 @@ function gateway(overrides: Partial<AvGateway> = {}): AvGateway {
 function page(api: AvGateway, props: Partial<Parameters<typeof AvPerformerPage>[0]> = {}) {
   return <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" currentCollectionId="work-0" api={api} onBack={vi.fn()} {...props} /></PrivacyProvider>;
 }
+it('confirms the removed performer and sends both revisions while keeping this page', async () => {
+  const merge = vi.fn().mockResolvedValue('operation');
+  const api = gateway({mergePeople:merge,
+    listPerformerCredits:vi.fn().mockResolvedValue({people:[{id:'p',displayName:'배우',nameJa:'日本名'},{id:'other',displayName:'다른 배우',nameJa:'日本名'}],credits:[]}),
+    getPersonProfileState:vi.fn().mockResolvedValue({entityRevision:4,mergeSupported:true}),
+    refreshPersonProfileState:vi.fn().mockImplementation(async id => ({entityRevision:id==='p'?4:7,creditWorkCount:id==='p'?14:3,mergeSupported:true})),
+  });
+  const back=vi.fn();render(page(api,{onBack:back}));
+  await screen.findByRole('heading',{name:'배우',level:1});
+  const user=userEvent.setup();
+  await user.click(screen.getByRole('button',{name:'배우 관리'}));
+  await user.click(await screen.findByRole('menuitem',{name:'다른 배우와 합치기'}));
+  await user.click(await screen.findByRole('option',{name:/다른 배우/}));
+  expect(await screen.findByText('다른 배우를 배우로 합칩니다. 다른 배우의 작품 3편이 옮겨지고 다른 배우는 사라집니다.')).toBeVisible();
+  await user.click(screen.getByRole('button',{name:'합치기'}));
+  await waitFor(()=>expect(merge).toHaveBeenCalledWith({commandType:'mergePeople',personId:'p',removePersonId:'other',expectedRevision:4,expectedRemoveRevision:7}));
+  expect(back).not.toHaveBeenCalled();
+  expect(screen.getByRole('heading',{name:'배우',level:1})).toBeVisible();
+});
 it("centres the profile column on the portrait, identity, facts and editable memo while retaining actions", async () => {
   const api = gateway({ getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true }), refreshPerformerProfile: vi.fn().mockResolvedValue(profile) });
   const back = vi.fn(); const { container } = render(page(api, { onBack: back }));

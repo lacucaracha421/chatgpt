@@ -1,5 +1,5 @@
 import type {ProfilePerson, ProfileChanges, ProfileExpected} from "./av/personProfileFields";
-export type PersonProfileState = ProfilePerson & {profilePending?: boolean; profileFieldsSupported?: boolean; profileMessage?: string; profileConflicts?: {operationId: string; code: string}[]};
+export type PersonProfileState = ProfilePerson & {creditWorkCount?: number; mergeSupported?: boolean; mergePending?: boolean; mergeConflicts?: {operationId: string; code: string}[]; profilePending?: boolean; profileFieldsSupported?: boolean; profileMessage?: string; profileConflicts?: {operationId: string; code: string}[]};
 export type AvPersonRole = "performer" | "director";
 export type AvPerson = ProfilePerson & { id: string; displayName: string };
 export type AvPortrait =
@@ -71,6 +71,8 @@ export type AvPerformerProfile = {
   candidates: AvProfileCandidate[]; fetchedAt: string;
 };
 export interface AvGateway {
+  mergePeople?(command: import('./av/MergePeopleDialog').MergePeopleCommand): Promise<string>;
+  discardPeopleMerge?(operationId: string): Promise<void>;
   refreshPersonProfileState?(personId: string): Promise<PersonProfileState | null>;
   getPersonProfileState?(personId: string): Promise<PersonProfileState | null>;
   setPersonProfileFields?(personId: string, changes: ProfileChanges, expected: ProfileExpected): Promise<PersonProfileState>;

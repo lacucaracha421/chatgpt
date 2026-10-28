@@ -291,7 +291,7 @@ pub(crate) fn enqueue_av_inbox_apply(
         let person = safe_id(&choice.person_id)?;
         if credits
             .iter()
-            .any(|c| c["personId"] == person && c["role"] == choice.role.as_str())
+            .any(|c| c["personId"] == person)
         {
             continue;
         }

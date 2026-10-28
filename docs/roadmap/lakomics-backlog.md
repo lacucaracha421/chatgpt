@@ -364,7 +364,11 @@ Status: `OPEN` — `collection_authority_writer_guard_scans_schema_tables_and_re
 
 ## AV-TRASH-NAME-001 — Re-register a name held by a trashed collection (2026-10-28)
 
-Status: `DELIVERED` (2026-10-28, PC build + tablet 0.9.162; device check pending) — AV inbox apply restores a same-name trashed AV work and applies into it (notice "휴지통에 있던 컬렉션을 복원해서 넣었어요"); manual/MangaDex/IGDB/TMDB create dialogs offer 휴지통에서 복원 next to the conflict message. Server uniqueness rule unchanged.
+Status: `DELIVERED` (2026-10-28, PC build + tablet 0.9.162; device check passed, user 2026-10-28) — AV inbox apply restores a same-name trashed AV work and applies into it (notice "휴지통에 있던 컬렉션을 복원해서 넣었어요"); manual/MangaDex/IGDB/TMDB create dialogs offer 휴지통에서 복원 next to the conflict message. Server uniqueness rule unchanged.
+
+## AV-PERSON-MERGE-001 — Duplicate performers and 다른 배우와 합치기 (2026-10-28)
+
+Status: `DELIVERED` (2026-10-28, server deployed, PC build + tablet 0.9.163; device check pending) — inbox apply links an existing person with the same nameJa by default (target work's credit first, then most credits) and never credits one person twice; the performer page's 배우 관리 offers 다른 배우와 합치기 (server command `mergePeople`: moves live/trashed credits, fills only empty fields, deletes the other person via `deletedPeople`). Pending: the user merges 가미키 레이 / 카미키 레이 (神木麗, both on START-649).
 
 ## AV-AUTHORITY-001 — AV acceptance and remaining profile polish
 

@@ -782,3 +782,29 @@ pub(crate) fn enqueue_relay_person_portrait(
     enqueue_person_portrait(tx, status, person, portrait)?;
     Ok(())
 }
+
+impl Library {
+    pub fn merge_av_people(&self, person: &str, remove: &str, expected: i64, expected_remove: i64) -> Result<String, LibraryError> {
+        safe_id(person)?;
+        safe_id(remove)?;
+        if person == remove || expected < 1 || expected_remove < 1 {
+            return Err(LibraryError::InvalidCollectionMetadata);
+        }
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let status = collection_write_status(&tx)?;
+        if !status.active || !status.features.iter().any(|f| f == "mergePeople") {
+            return Err(LibraryError::CollectionAuthorityOperationUnavailable);
+        }
+        let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state IN ('pending','blocked') AND (json_extract(payload,'$.personId') IN (?1,?2) OR json_extract(payload,'$.removePersonId') IN (?1,?2)))",params![person,remove],|r|r.get(0))?;
+        if pending { return Err(LibraryError::CollectionAuthorityOperationUnavailable); }
+        let operation = enqueue_collection_command(&tx, &status, "mergePeople", person,
+            json!({"personId":person,"removePersonId":remove,"expectedRevision":expected,"expectedRemoveRevision":expected_remove}))?;
+        tx.commit()?;
+        Ok(operation)
+    }
+    pub fn discard_av_people_merge(&self, operation: &str) -> Result<(), LibraryError> {
+        self.connection()?.execute("UPDATE collection_authority_outbox SET state='dropped',drop_reason='userDiscarded' WHERE operation_id=?1 AND command_type='mergePeople' AND state='blocked'",[operation])?;
+        Ok(())
+    }
+}

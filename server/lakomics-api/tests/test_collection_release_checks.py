@@ -743,7 +743,7 @@ class ReleaseCheckTests(unittest.TestCase):
         for value in ("", "0", "false", "no"):
             with mock.patch.dict(os.environ, {rc.ENV: value}):
                 self.assertEqual(rc.features(), [])
-                self.assertEqual(features(), ["personProfileFields", "kakaoReview"])
+                self.assertEqual(features(), ["personProfileFields", "mergePeople", "kakaoReview"])
                 self.worker.start()
                 self.assertIsNone(self.worker.thread)
                 self.worker.run_batch()
@@ -760,7 +760,7 @@ class ReleaseCheckTests(unittest.TestCase):
         return self.client.get(authority_tests.PREFIX + "/status", headers=self.auth).json()["features"]
 
     def test_the_feature_needs_the_switch_a_server_key_and_a_live_worker(self):
-        base = ["personProfileFields", "kakaoReview"]
+        base = ["personProfileFields", "mergePeople", "kakaoReview"]
         worker = api_app.app.state.release_check_worker
         worker.start_delay = 3600  # alive, but never wakes during the test
         self.addCleanup(worker.stop)

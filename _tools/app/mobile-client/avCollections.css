@@ -9,3 +9,4 @@
 .av-portrait{position:relative}.av-portrait>img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 20%}
 /* A cover crop is 3:4 from the top of the shape, as on the PC (avPortrait.css): a round or square shape shows its upper part. */
 .av-portrait>.av-portrait__crop{position:absolute;inset:0 0 auto;aspect-ratio:3/4;background-repeat:no-repeat}
+.library-sheet .merge-people button { min-height: var(--touch-target, 44px); }

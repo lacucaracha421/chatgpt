@@ -46,6 +46,7 @@ const COMMANDS: &[&str] = &[
     "setPersonPortrait",
     "setPersonProfile",
     "setPersonProfileFields",
+    "mergePeople",
 ];
 
 include!("collection_authority_people.rs");
@@ -1611,6 +1612,11 @@ pub(crate) fn predicted_collection_revision(
                     target["showcaseOrder"] = json!(order);
                 }
             }
+        } else if section == "works" && command == "mergePeople"
+            && state["avCredits"].as_array().is_some_and(|credits| credits.iter().any(|c|
+                c["personId"] == body["personId"] || c["personId"] == body["removePersonId"]))
+        {
+            predicted += 1;
         } else if section == "works"
             && matches!(
                 command,

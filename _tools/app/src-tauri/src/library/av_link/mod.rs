@@ -147,21 +147,25 @@ fn person_match(
 ) -> Result<PersonMatch, AvError> {
     let mut found = None;
     for (field, value) in [
+        ("name_ja", Some(mapping.name_ja.as_str())),
         ("fanza_actress_id", mapping.fanza_actress_id.as_deref()),
         ("wikidata_id", mapping.wikidata_id.as_deref()),
-        ("name_ja", Some(mapping.name_ja.as_str())),
         ("display_name", mapping.name_ko.as_deref()),
     ] {
         let Some(value) = value else { continue };
-        let predicate = if field == "name_ja" {
-            "name_ja=?1 OR (name_ja IS NULL AND display_name=?1)".to_owned()
+        let order = "EXISTS(SELECT 1 FROM collection_person_relations r WHERE r.person_id=p.id AND r.collection_id=?2) DESC,
+            (SELECT COUNT(*) FROM collection_person_relations r WHERE r.person_id=p.id) DESC, id";
+        let matches = if field == "name_ja" {
+            connection.prepare(&format!("SELECT id,display_name,name_ja FROM collection_people p ORDER BY {order}"))?
+                .query_map(params![value, collection], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?)))?
+                .collect::<Result<Vec<_>,_>>()?.into_iter()
+                .filter(|(_,display,ja)| ja.as_deref().unwrap_or(display).trim() == value.trim())
+                .take(1).map(|(id,name,_)| (id,name)).collect::<Vec<_>>()
         } else {
-            format!("{field}=?1")
+            connection.prepare(&format!("SELECT id,display_name FROM collection_people p WHERE {field}=?1 ORDER BY {order} LIMIT 1"))?
+                .query_map(params![value, collection], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?
+                .collect::<Result<Vec<_>,_>>()?
         };
-        let matches=connection.prepare(&format!("SELECT id,display_name FROM collection_people WHERE {predicate} ORDER BY id LIMIT 2"))?.query_map([value],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
-        if matches.len() > 1 {
-            break;
-        }
         if let Some((id, name)) = matches.into_iter().next() {
             found = Some((id, name, field.to_owned()));
             break;

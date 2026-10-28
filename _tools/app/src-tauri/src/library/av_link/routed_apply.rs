@@ -427,6 +427,7 @@ impl Library {
         }
         let mut created: BTreeMap<String, String> = BTreeMap::new();
         let mut credits = Vec::new();
+        let mut seen_people = std::collections::BTreeSet::new();
         for (role, choices, allowed) in [
             (
                 "performer",
@@ -445,7 +446,6 @@ impl Library {
             ),
         ] {
             let mut seen_names = std::collections::BTreeSet::new();
-            let mut seen_people = std::collections::BTreeSet::new();
             for choice in choices {
                 let name = choice.name_ja();
                 if !allowed.contains(&name) || !seen_names.insert(name.to_owned()) {
@@ -476,7 +476,7 @@ impl Library {
                     }
                 };
                 if !seen_people.insert(person_id.clone()) {
-                    return Err(AvError::Invalid);
+                    continue;
                 }
                 credits.push(AvInboxCreditPlan {
                     role: role.into(),

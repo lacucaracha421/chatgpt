@@ -1,5 +1,6 @@
 import {BusyLabel} from "../../shared/ui/BusyLabel";
 import {PersonProfileEditor} from "./PersonProfileEditor";
+import {MergePeopleDialog} from "./MergePeopleDialog";
 import {PersonProfileRows, ProfileManualMark} from "./PersonProfileRows";
 import {performerName} from "./performerName";
 import {hasProfileMetadata, ownsProfile, profileExpected, type ProfileExpected, type ProfileChanges} from "./personProfileFields";
@@ -7,7 +8,7 @@ import type {PersonProfileState} from "../avTypes";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { ArrowLeftIcon, CameraIcon, ChevronDownIcon, EllipsisHorizontalIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { displayDate } from "../../shared/displayDate";
 import { Button } from "../../shared/ui/Button";
 import { IconButton } from "../../shared/ui/IconButton";
@@ -46,6 +47,13 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const [filter, setFilter] = useState<WorkFilter>("all");
   const [sort, setSort] = useState<WorkSort>("newest");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const loadMergePeople = useCallback(async () => (await api.listPerformerCredits!()).people, [api]);
+  const readMergePerson = useCallback(async (id: string) => {
+    const value = await api.refreshPersonProfileState!(id);
+    if (!value || value.profilePending || value.mergePending) throw new Error("앞선 변경을 보낸 뒤 다시 시도해 주세요.");
+    return {entityRevision: value.entityRevision!, creditWorkCount: value.creditWorkCount!};
+  }, [api]);
   const [memoEditing, setMemoEditing] = useState(false);
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,7 +67,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   useEffect(() => {
     const generation = ++request.current;
     let active = true;
-    setError(null); setBusy(false); setMemoEditing(false); setPickerOpen(false); setProfileEditing(false); setSourceError(null);
+    setError(null); setBusy(false); setMemoEditing(false); setPickerOpen(false); setMergeOpen(false); setProfileEditing(false); setSourceError(null);
     void api.getPerformer(personId).then(value => { if (active && generation === request.current) { setPage(value); setMemo(value.person.memo ?? ""); } }, reason => { if (active) setError(avError(reason)); });
     return () => { active = false; request.current++; };
   }, [api, personId]);
@@ -89,6 +97,14 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
     if (!page) return [];
     return page.works.filter(work => filter === "all" || (filter === "solo" ? work.solo : !work.solo)).slice().sort((left, right) => compareRelease(left.releaseDate, right.releaseDate, sort)).map(work => ({ ...work, id: work.collectionId, type: "av" as const }));
   }, [filter, page, sort]);
+
+  useEffect(() => {
+    if (profileState?.id !== personId || !profileState.value?.entityRevision) return;
+    let active = true;
+    void api.getPerformer(personId).then(value => { if(active) setPage(value); }, () => {});
+    void libraryGateway.listAvFavorites().then(rows => { if(active) setFavorite(rows.some(row => row.id === personId)); }, () => {});
+    return () => { active = false; };
+  }, [api, personId, profileState?.id, profileState?.value?.entityRevision]);
 
   async function saveMemo() {
     if (!page) return;
@@ -146,10 +162,14 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
         { id: "portrait", label: "사진 바꾸기", onSelect: () => setPickerOpen(true), disabled: stale },
         ...(profileEditable ? [{id: "profile", label: "프로필 편집", onSelect: () => setProfileEditing(true), disabled: profileRefused}] : []),
         { id: "memo", label: "메모 편집", onSelect: () => { setMemo(page.person.memo ?? ""); setMemoEditing(true); }, disabled: stale },
+        ...(api.mergePeople && api.listPerformerCredits && api.refreshPersonProfileState ? [{id: "merge", label: "다른 배우와 합치기", onSelect: () => setMergeOpen(true), disabled: stale || !profilePerson?.mergeSupported || !!profilePerson?.mergePending || !!profilePerson?.mergeConflicts?.length}] : []),
         ...(onOpenSettings ? [{ id: "settings", label: "설정", onSelect: onOpenSettings }] : []),
       ]} />
     </div>
     <BusyLabel busy={!!profilePerson?.profilePending} delay={400}><p className="av-profile__quiet" role="status">대기</p></BusyLabel>
+    <BusyLabel busy={!!profilePerson?.mergePending}><p role="status">배우 합치기 대기</p></BusyLabel>
+    {profilePerson?.mergeConflicts?.map(conflict => <p role="alert" key={conflict.operationId}>배우를 합치지 못했습니다. 변경된 정보를 확인한 뒤 다시 시도해 주세요. <Button size="sm" onClick={() => { void api.discardPeopleMerge?.(conflict.operationId); }}>버리기</Button></p>)}
+    {mergeOpen && !stale && api.mergePeople && <MergePeopleDialog person={{id: personId, displayName: name.primary, nameJa: person.nameJa}} load={loadMergePeople} read={readMergePerson} onMerge={async command => { await api.mergePeople!(command); }} onClose={() => setMergeOpen(false)}/>}
     {profilePerson?.profileMessage && <p role="status">{profilePerson.profileMessage}</p>}
     {profilePerson?.profileConflicts?.map(conflict => <div key={conflict.operationId} className="av-profile__quiet" role="status">충돌 · <Button size="sm" disabled={conflict.code !== "revisionConflict"} onClick={() => { void resolveProfile(conflict.operationId, true); }}>덮어쓰기</Button><Button size="sm" onClick={() => { void resolveProfile(conflict.operationId, false); }}>버리기</Button></div>)}
     {profileEditing && profileEditable && <PersonProfileEditor person={person} disabled={profileRefused} onClose={() => setProfileEditing(false)} onSave={saveProfile}/>}

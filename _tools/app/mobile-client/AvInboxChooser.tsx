@@ -18,7 +18,7 @@ import {api, errorText, native} from './transport';
 import {normalizeProductCode} from './avLookup';
 import type {CollectionSummary} from './collectionModel';
 import type {AvDetailFields} from './avEditModel';
-import {createInboxPlan, initialChoices, inboxWorks, inboxPeople, inboxMatches, refreshedChoices, inboxRecheckChanges, readInboxPlans, surfaceSlot, type InboxChoices, type PersonChoice} from './avInboxApply';
+import {createInboxPlan, defaultInboxPeople, matchInboxPerson, initialChoices, inboxWorks, inboxPeople, inboxMatches, refreshedChoices, inboxRecheckChanges, readInboxPlans, surfaceSlot, type InboxChoices, type PersonChoice} from './avInboxApply';
 import {loadInboxJacket} from './avInboxThumbnail';
 import {SURFACES, inboxPath, selectInboxJacket, jacketPreview, type InboxCandidate, type InboxAuthority, type InboxDetail, type InboxWork, type Surface} from './avInboxModel';
 
@@ -36,14 +36,8 @@ function useInboxSpineSource(id:string,enabled:boolean,version?:string){
 /** The review's field names against the candidate's. */
 const FIELD_KEYS:Record<InfoKey,'titleJa'|'releaseDate'|'maker'|'label'|'series'>={title_ja:'titleJa',release_date:'releaseDate',maker:'maker',label:'label',series:'series'};
 const asText=(value:unknown)=>typeof value==='string'&&value.trim()?value:null;
-function matchPerson(authority:InboxAuthority,p:PersonChoice){
-  if(p.action==='link'&&p.personId)return authority.people.find(person=>person.personId===p.personId&&authority.works.some(work=>work.avCredits.some(credit=>credit.personId===person.personId&&credit.role===p.role)));
-  const matches=authority.people.filter(person=>person.nameJa===p.nameJa&&authority.works.some(work=>work.avCredits.some(credit=>credit.personId===person.personId&&credit.role===p.role)));
-  return matches.length===1?matches[0]:undefined;
-}
-function withPeople(choices:InboxChoices,authority:InboxAuthority,work:InboxWork|null):InboxChoices{
-  return {...choices,people:choices.people.map(p=>{if(p.action==='skip')return p;const known=authority.people.find(person=>person.nameJa===p.nameJa&&work?.avCredits.some(credit=>credit.personId===person.personId&&credit.role===p.role))??matchPerson(authority,p);return known?{...p,action:'link',personId:known.personId,displayName:known.displayName}:p.action==='link'?{...p,action:'new',personId:null}:p;})};
-}
+const withPeople=defaultInboxPeople;
+const matchPerson=matchInboxPerson;
 
 /** One surface label: it opens the choices in a bottom sheet (the PC opens a menu). */
 function SurfaceSheet({surface,face,ariaLabel,value,options,disabled,onChoose}:SurfaceControl&{disabled:boolean;onChoose(surface:Surface,value:SurfaceControl['value']):void}){

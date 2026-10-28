@@ -151,6 +151,24 @@ fn av_collection(lib: &Library, name: &str) -> String {
 }
 
 #[test]
+fn av_link_same_japanese_name_prefers_target_then_credit_count() {
+    let (_dir, lib) = setup();
+    let target = av_collection(&lib, "target");
+    let other = av_collection(&lib, "other");
+    let third = av_collection(&lib, "third");
+    let db = lib.connection().unwrap();
+    for (id, display, ja) in [("target", "Korean A", "\t日本名　"), ("popular", "Korean B", "日本名")] {
+        db.execute("INSERT INTO collection_people(id,display_name,name_ja,created_at,updated_at) VALUES(?1,?2,?3,'t','t')",params![id,display,ja]).unwrap();
+    }
+    for (work, person) in [(&target,"target"),(&other,"popular"),(&third,"popular")] {
+        db.execute("INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order) VALUES(?1,?2,'performer',0)",params![work,person]).unwrap();
+    }
+    let mapping = || NameMapping {name_ja:" 日本名 ".into(), name_ko:Some("Different Korean".into()),wikidata_id:None,fanza_actress_id:None};
+    assert_eq!(person_match(&db,mapping(),Some(&target),"performer").unwrap().person_id.as_deref(),Some("target"));
+    assert_eq!(person_match(&db,mapping(),None,"performer").unwrap().person_id.as_deref(),Some("popular"));
+}
+
+#[test]
 fn av_link_normalization_table() {
     for (input, want) in [
         (" ssis-1 ", "SSIS-001"),
@@ -417,9 +435,9 @@ fn av_link_wikidata_escaping_ambiguity_cache_and_matching() {
     }
     drop(connection);
     for (want, by) in [
+        ("ja", "name_ja"),
         ("fanza", "fanza_actress_id"),
         ("wiki", "wikidata_id"),
-        ("ja", "name_ja"),
         ("ko", "display_name"),
     ] {
         let c = lib.get_av_link_candidate(&id, None).unwrap();

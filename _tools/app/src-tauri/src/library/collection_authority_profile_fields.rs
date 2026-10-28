@@ -368,6 +368,10 @@ impl Library {
         if state.is_object() {
             let pending: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state='pending' AND command_type='setPersonProfileFields' AND json_extract(payload,'$.personId')=?1)",[person],|r|r.get(0))?;
             state["profilePending"] = json!(pending);
+            state["mergeSupported"] = json!(cached_profile_features(&db)?.iter().any(|f| f == "mergePeople"));
+            state["mergePending"] = json!(db.query_row("SELECT EXISTS(SELECT 1 FROM collection_authority_outbox WHERE state='pending' AND command_type='mergePeople' AND json_extract(payload,'$.personId')=?1)",[person],|r|r.get::<_,bool>(0))?);
+            state["mergeConflicts"] = json!(db.prepare("SELECT operation_id,COALESCE(conflict_code,'commandRejected') FROM collection_authority_outbox WHERE state='blocked' AND command_type='mergePeople' AND json_extract(payload,'$.personId')=?1 ORDER BY seq")?.query_map([person],|r|Ok(json!({"operationId":r.get::<_,String>(0)?,"code":r.get::<_,String>(1)?})))?.collect::<Result<Vec<_>,_>>()?);
+
             state["profileFieldsSupported"] = json!(
                 supported
                     && state.get("stashdbProfile").is_some()

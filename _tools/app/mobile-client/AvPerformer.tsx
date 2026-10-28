@@ -1,11 +1,12 @@
 import {PerformerName} from "./PerformerName";
+import {MergePeopleDialog} from '../src/collections/av/MergePeopleDialog';
 import {BottomSheet} from "./BottomSheet";
 import {PersonProfileEditor, type ProfileSurfaceProps} from "../src/collections/av/PersonProfileEditor";
 import {PersonProfileRows, ProfileManualMark} from "../src/collections/av/PersonProfileRows";
 import {performerName} from "../src/collections/av/performerName";
 import {hasProfileMetadata, ownsProfile, profileExpected, type ProfileExpected, type ProfileChanges} from "../src/collections/av/personProfileFields";
 import {optimisticPersonProfile, personProfileCommand} from "./collectionCommandOutbox";
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowsUpDownIcon, CameraIcon, EllipsisHorizontalIcon, PencilIcon, Squares2X2Icon, StarIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolidIcon} from '@heroicons/react/24/solid';
 import {CollectionList} from '../src/collections/CollectionList';
@@ -111,6 +112,13 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   const hidePhotos = privacy || privateMode;
   const [profileOpen, setProfileOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const loadMergePeople = useCallback(async () => [...new Map((shelf?.works ?? []).flatMap(performersOf).map(p => [p.id, {id:p.id, displayName:p.displayName ?? p.name, nameJa:p.nameJa}])).values()], [shelf]);
+  const readMergePerson = useCallback(async (id: string) => {
+    const value = personReply(await api(`${personPath(id)}?authority=1`, undefined, undefined, 'GET', true), id);
+    if (!value || authority?.rows.some(row => row.state !== 'accepted' && isPersonCommand(row.command) && (row.command.personId === id || row.command.commandType === 'mergePeople' && row.command.removePersonId === id))) throw new Error('앞선 변경을 보낸 뒤 다시 시도해 주세요.');
+    return {entityRevision:value.entityRevision!, creditWorkCount:value.creditWorkCount!};
+  }, [authority?.rows]);
   const managementSeen = useRef(managementRequest ?? 0);
   useEffect(() => { if (managementRequest !== undefined && managementRequest !== managementSeen.current) { managementSeen.current = managementRequest; setManageOpen(true); } }, [managementRequest]);
   const [memoOpen, setMemoOpen] = useState(false), [editError, setEditError] = useState('');
@@ -128,7 +136,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     });
     return () => controller.abort();
   }, [active, personId, person?.id, stale]);
-  useEffect(() => { setProfileOpen(false); setManageOpen(false); setMemoOpen(false); setStashSheet(null); setEditError(''); setPortraitWish(null); }, [personId]);
+  useEffect(() => { setProfileOpen(false); setManageOpen(false); setMergeOpen(false); setMemoOpen(false); setStashSheet(null); setEditError(''); setPortraitWish(null); }, [personId]);
   const identity = authority?.identity;
   const authorityScope = identity ? JSON.stringify([outboxConnection(), identity.libraryId, identity.epoch]) : '';
   const authorityRead = authorityPerson?.scope === authorityScope ? authorityPerson : null;
@@ -171,7 +179,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     setError('');
     void allWorks('av', controller.signal).then(result => { if (!controller.signal.aborted) setShelf({works: result.works, revision: result.revision}); }, reason => { if (!controller.signal.aborted) setError(errorText(reason) || '배우 정보를 불러오지 못했습니다.'); });
     return () => controller.abort();
-  }, [active, attempt]);
+  }, [active, attempt, acknowledged]);
   const page = useMemo(() => {
     if (!shelf) return null;
     const works = shelf.works.filter(work => performersOf(work).some(person => person.id === shownId));
@@ -271,12 +279,14 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
       {notice && <div className="inline-error" role="alert"><span>{notice}</span><Button variant="ghost" onClick={() => clearPersonNotice(shownId)}>닫기</Button></div>}
     </div>}
     {manageOpen && editable && <BottomSheet title="배우 관리" onClose={() => setManageOpen(false)}><div className="tablet-performer__manage-items">
+      <Button variant="quiet" disabled={!authority?.features?.includes('mergePeople') || refused || portraitPending} onClick={() => { setManageOpen(false); setMergeOpen(true); }}>다른 배우와 합치기</Button>
       {profileEditable && <Button variant="quiet" disabled={refused} onClick={() => { setManageOpen(false); setProfileOpen(true); }}>프로필 편집</Button>}
       <Button variant="quiet" disabled={revision === null || refused} onClick={() => { setManageOpen(false); setStashSheet('portrait'); }}>사진 바꾸기</Button>
       <Button variant="quiet" disabled={refused || portraitPending} onClick={() => { setManageOpen(false); setMemoOpen(true); }}>메모 편집</Button>
       <Button variant="quiet" disabled={revision === null || refused} onClick={() => { setManageOpen(false); setStashSheet('profile'); }}>StashDB 프로필 선택</Button>
       {published && <StashdbProfileActions person={published} authority={authority!} name={shownName.primary} onClose={() => setManageOpen(false)}/>}
     </div></BottomSheet>}
+    {mergeOpen && editable && authority && <MergePeopleDialog surface={TabletProfileSurface} person={{id:shownId,displayName:shownName.primary,nameJa:published?.nameJa ?? page.person.nameJa}} load={loadMergePeople} read={readMergePerson} onMerge={async command => { authority.enqueue(command, shownName.primary); }} onClose={() => setMergeOpen(false)}/>}
     {profileOpen && profileEditable && published && <PersonProfileEditor surface={TabletProfileSurface} lead={portraitLead} person={{...page.person, ...published, displayName: published.displayName ?? page.person.name}} disabled={refused} onSave={saveProfile} onClose={() => setProfileOpen(false)}/>}
     {memoOpen && editable && <PersonMemoSheet initial={memo ?? ''} onClose={() => setMemoOpen(false)} onSave={value => { if (save({memo: value})) setMemoOpen(false); }}/>}
     {stashSheet && editable && published && <AvStashdbSheet mode={stashSheet} person={published} name={shownName.primary} nameJa={shownName.secondary} privacy={hidePhotos} authority={authority!} covers={{works: page.works, revision: shelf!.revision}} onClose={() => setStashSheet(null)} onPortrait={(command: PersonRevisionCommand, url, operationId) => {
