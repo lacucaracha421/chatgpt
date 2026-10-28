@@ -7,6 +7,17 @@ import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 
 afterEach(cleanup);
 
+it("offers to restore a rejected creation and closes after selecting the restored work", async () => {
+  const user = userEvent.setup(), onClose = vi.fn(), onRestore = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{kind: "create", type: "av"}} onClose={onClose} onRestore={onRestore}
+    onSubmit={vi.fn().mockRejectedValue({code: "collection_name_in_trash", message: COLLECTION_NAME_IN_TRASH})}/>);
+  await user.type(screen.getByRole("textbox", {name: "이름"}), "SSIS-001");
+  await user.click(screen.getByRole("button", {name: "저장"}));
+  await user.click(await screen.findByRole("button", {name: "휴지통에서 복원"}));
+  expect(onRestore).toHaveBeenCalledWith("av", "SSIS-001");
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
 it.each(["create", "edit"] as const)("shows the native trash-name conflict in the %s dialog and keeps the draft", async (kind) => {
   const user = userEvent.setup();
   const onClose = vi.fn();

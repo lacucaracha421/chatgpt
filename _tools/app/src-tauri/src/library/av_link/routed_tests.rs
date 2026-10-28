@@ -234,6 +234,13 @@ impl Authority {
                 self.works.insert(work_id.clone(), w);
                 changed = true;
             }
+            "restoreWork" => {
+                let w = self.works.get_mut(&work_id).unwrap();
+                assert_eq!(w["entityRevision"], body["expectedRevision"]);
+                w["lifecycle"] = json!("live");
+                w["trashedAt"] = Value::Null;
+                changed = true;
+            }
             "addArtwork" => {
                 let mut a = artwork(
                     body["artworkId"].as_str().unwrap(),
@@ -911,27 +918,45 @@ fn apply_refuses_a_destination_with_another_product_code() {
 }
 
 #[test]
-fn apply_new_refuses_a_name_held_by_a_trashed_work_before_queueing() {
-    // The authority keeps a trashed work's name until it is purged: the create would be
-    // refused as nameConflict and rolled back after the whole sequence was queued.
+fn apply_new_restores_the_latest_same_name_av_work_and_preserves_personal_data() {
     let mut trashed = av_work("av-trash", 2, None);
     trashed["name"] = json!("ssis-001");
     trashed["lifecycle"] = json!("trashed");
     trashed["trashedAt"] = json!(NOW);
-    let (_temp, library, _) = routed(json!({"works":[trashed]}));
+    trashed["fields"]["description"] = json!("my memo");
+    trashed["fields"]["myScore"] = json!(4.5);
+    trashed["avPeople"] = json!([person("existing", "Existing performer", "既存")]);
+    trashed["avCredits"] = json!([credit("existing", "performer", 0, "Existing performer")]);
+    let mut older = trashed.clone();
+    older["workId"] = json!("av-older");
+    older["trashedAt"] = json!("2026-10-08T00:00:00Z");
+    let (_temp, library, status) = routed(json!({"works":[older,trashed.clone()]}));
     let server = item_server(ID, json!([]));
-    let error = library
+    let result = library
         .apply_av_link_routed_with(&server, ID, request_new())
-        .unwrap_err();
-    assert!(matches!(error, AvError::Inbox("av_inbox_name_in_trash", _)));
-    assert!(provider_commands(&library).is_empty());
-    assert!(!server.paths().iter().any(|p| p.ends_with("/artwork")));
-    // Another name is not blocked.
-    let mut renamed = request_new();
-    renamed.new_collection_name = Some("SSIS-001 (2)".into());
-    library
-        .apply_av_link_routed_with(&server, ID, renamed)
         .unwrap();
+    assert_eq!(result.collection_id, "av-trash");
+    assert!(result.restored_from_trash);
+    let commands = provider_commands(&library);
+    assert_eq!(commands[0]["commandType"], "restoreWork");
+    assert_eq!(commands[0]["expectedRevision"], 2);
+    assert!(!commands.iter().any(|c| c["commandType"] == "createWork"));
+    let authority = RefCell::new(Authority::new(vec![trashed]));
+    flush(&library, &status, &authority, usize::MAX, 1_000_000);
+    assert!(outbox(&library).iter().all(|(_, s)| s == "accepted"));
+    let state = &authority.borrow().works["av-trash"];
+    assert_eq!(state["lifecycle"], "live");
+    assert_eq!(state["fields"]["description"], "my memo");
+    assert_eq!(state["fields"]["myScore"], 4.5);
+    assert_eq!(state["details"]["av"]["productCode"], "SSIS-001");
+    assert_eq!(state["details"]["av"]["titleJa"], "選択した原題");
+    assert_eq!(state["avCredits"].as_array().unwrap().len(), 3);
+    assert!(state["avCredits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["personId"] == "existing"));
+    assert!(state["selection"]["work"].is_string());
 }
 
 #[test]
@@ -1701,6 +1726,7 @@ fn artwork_selections_expect_pending_inbox_choices_for_every_slot() {
             // actual FIFO no-op
             } else {
                 let plan = AvInboxPlan {
+                    restore_revision: None,
                     work_id: "av-1".into(),
                     is_new: false,
                     name: String::new(),

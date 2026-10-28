@@ -65,6 +65,8 @@ pub(crate) struct AvInboxCreditPlan {
 pub(crate) struct AvInboxPlan {
     pub work_id: String,
     pub is_new: bool,
+    #[serde(default)]
+    pub restore_revision: Option<i64>,
     pub name: String,
     /// Selected `setAvDetails` values keyed by authority field (productCode included
     /// when the work must carry the code for the acknowledgement to succeed).
@@ -134,6 +136,19 @@ pub(crate) fn enqueue_av_inbox_apply(
             work,
             json!({"workId":work,"type":"av","name":name,"legacyKind":null,"fields":{},"binding":null}),
         )?)?;
+    } else if let Some(revision) = plan.restore_revision {
+        let trashed =
+            collection_in_trash(tx, "av", &plan.name)?.ok_or(LibraryError::CollectionNotFound)?;
+        if trashed["workId"] != work || trashed["entityRevision"] != revision {
+            return Err(LibraryError::CollectionAuthorityMismatch);
+        }
+        // Include an already queued restore in this sequence's dependencies as well.
+        let operation = enqueue_collection_restore(tx, &status, work, revision)?;
+        let operation = match operation {
+            Some(operation) => operation,
+            None => tx.query_row("SELECT operation_id FROM collection_authority_outbox WHERE command_type='restoreWork' AND json_extract(payload,'$.workId')=?1 AND state IN ('pending','blocked','accepted') ORDER BY seq DESC LIMIT 1", [work], |r| r.get(0))?,
+        };
+        remember(operation)?;
     } else {
         let valid: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM collections WHERE id=?1 AND type='av')",
@@ -259,10 +274,14 @@ pub(crate) fn enqueue_av_inbox_apply(
     }
 
     // 4. Credits: the complete desired list; existing credits are kept as they are.
-    let mut credits: Vec<Value> = editable_av(tx, work)?["credits"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let existing = if plan.restore_revision.is_some() {
+        collection_in_trash(tx, "av", &plan.name)?.ok_or(LibraryError::CollectionNotFound)?
+            ["avCredits"]
+            .clone()
+    } else {
+        editable_av(tx, work)?["credits"].clone()
+    };
+    let mut credits: Vec<Value> = existing.as_array().cloned().unwrap_or_default();
     let mut people: Vec<Value> = Vec::new();
     let mut added = false;
     for choice in &plan.credits {

@@ -1,3 +1,5 @@
+import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, ClockIcon, ExclamationTriangleIcon, MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
@@ -119,7 +121,15 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const found = useMemo(() => items.filter(item => item.status === "found" && !applying(item) && !stopped(item)), [items]);
-  if (items.length === 0) return null;
+  const [restoringIds, setRestoringIds] = useState<string[]>([]);
+  const [restoreNotice, setRestoreNotice] = useState(false);
+  useAutoDismiss(restoreNotice ? "restored" : null, () => setRestoreNotice(false));
+  useEffect(() => {
+    if (restoringIds.some(id => !items.some(item => item.id === id))) {
+      setRestoreNotice(true);
+      setRestoringIds(ids => ids.filter(id => items.some(item => item.id === id)));
+    }
+  }, [items, restoringIds]);
 
   async function action(id: string, work: () => Promise<unknown>) {
     setBusyId(id); setActionError(null);
@@ -138,7 +148,7 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
     void action(item.id, () => api.dismiss(item.id));
   }
 
-  return <section className="av-link-inbox" aria-label="받은 품번">
+  return <>{restoreNotice && <Toast onDismiss={() => setRestoreNotice(false)}>휴지통에 있던 컬렉션을 복원해서 넣었어요</Toast>}{items.length > 0 && <section className="av-link-inbox" aria-label="받은 품번">
     <div className="av-link-inbox__header">
       <h3>받은 품번</h3><span className="av-link-inbox__count numeric">{items.length.toLocaleString()}</span>
       <span className="av-link-inbox__hint">Chrome에서 보낸 품번 · 적용 전</span>
@@ -176,8 +186,8 @@ export function AvLinkInbox({ items, collections, api = avLinkClient, error, onR
     {(error || actionError) && <p className="av-link-inbox__error" role="alert">{actionError ?? error}</p>}
     {chooserId && <AvLinkChooserDialog inboxId={chooserId} collections={collections.filter(collection => collection.type === "av")} api={api}
       onClose={() => setChooserId(null)} onDismissed={async () => { setChooserId(null); await onRefresh(); }}
-      onApplied={async () => { setChooserId(null); await Promise.all([onRefresh(), onCollectionsChanged()]); }} />}
-  </section>;
+      onApplied={async (_id, restored) => { if (restored && chooserId) setRestoringIds(ids => [...ids, chooserId]); setChooserId(null); await Promise.all([onRefresh(), onCollectionsChanged()]); }} />}
+  </section>}</>;
 }
 
 function statusIcon(item: AvLinkInboxItem) {

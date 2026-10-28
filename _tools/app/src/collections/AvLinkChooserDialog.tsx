@@ -36,7 +36,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
   api?: AvLinkApi;
   peopleApi?: PeopleApi;
   onClose(): void;
-  onApplied(collectionId: string): void | Promise<void>;
+  onApplied(collectionId: string, restoredFromTrash?: boolean): void | Promise<void>;
   onDismissed(): void | Promise<void>;
 }) {
   const { privacyMode } = usePrivacy();
@@ -166,7 +166,8 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
       : { ...requestBase, newCollectionName: newName.trim() || candidate.inbox.normalizedCode || candidate.inbox.productCode };
     try {
       const result = await api.apply(inboxId, request);
-      await onApplied(result.collectionId);
+      if (result.restoredFromTrash) await onApplied(result.collectionId, true);
+      else await onApplied(result.collectionId);
     } catch (reason) {
       if (isStale(reason)) {
         await load(destination ?? undefined, live.current);

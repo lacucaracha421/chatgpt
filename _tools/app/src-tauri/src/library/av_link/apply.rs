@@ -325,6 +325,7 @@ impl Library {
             eprintln!("av-link: candidate file cleanup failed after apply");
         }
         Ok(ApplyResult {
+            restored_from_trash: false,
             collection_id: collection,
             covers,
         })

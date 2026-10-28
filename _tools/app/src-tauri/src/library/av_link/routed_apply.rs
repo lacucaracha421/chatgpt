@@ -257,6 +257,7 @@ impl Library {
         let mut progress = self.build_progress(id, &request, &parsed, &code, salvage.as_deref())?;
         write_progress(&*self.connection()?, None, &mut progress)?;
         let work = progress.plan.work_id.clone();
+        let restored_from_trash = progress.plan.restore_revision.is_some();
         match self.prepare_and_queue(server, progress) {
             Ok(_) => {}
             Err(error) => {
@@ -272,7 +273,17 @@ impl Library {
         }
         let c = self.connection()?;
         Ok(ApplyResult {
-            covers: super::super::av_artwork::cover_set(&c, &work)?,
+            covers: if restored_from_trash {
+                super::super::av_models::AvCoverSet {
+                    front_id: None,
+                    spine_id: None,
+                    back_id: None,
+                    revision: String::new(),
+                }
+            } else {
+                super::super::av_artwork::cover_set(&c, &work)?
+            },
+            restored_from_trash,
             collection_id: work,
         })
     }
@@ -296,10 +307,10 @@ impl Library {
             )
             .unwrap_or(false)
         }));
-        let (work_id, is_new, name) = match target {
+        let (work_id, is_new, name, restore_revision) = match target {
             Some(target) => {
                 super::super::av_collection::require_av(&c, target)?;
-                (target.to_owned(), false, String::new())
+                (target.to_owned(), false, String::new(), None)
             }
             None => {
                 let requested = request.new_collection_name.as_deref().unwrap_or("").trim();
@@ -308,15 +319,20 @@ impl Library {
                 } else {
                     requested
                 };
-                if super::super::collection_authority::collection_name_held_by_trash(
-                    &c, "av", name,
-                )? {
-                    return Err(AvError::Inbox(
-                        "av_inbox_name_in_trash",
-                        "휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.",
-                    ));
+                match super::super::collection_authority::collection_in_trash(&c, "av", name)? {
+                    Some(work) => (
+                        work["workId"].as_str().ok_or(AvError::Invalid)?.to_owned(),
+                        false,
+                        name.to_owned(),
+                        Some(work["entityRevision"].as_i64().ok_or(AvError::Invalid)?),
+                    ),
+                    None => (
+                        uuid::Uuid::new_v4().to_string(),
+                        true,
+                        name.to_owned(),
+                        None,
+                    ),
                 }
-                (uuid::Uuid::new_v4().to_string(), true, name.to_owned())
             }
         };
         let mut fields = json!({});
@@ -335,7 +351,11 @@ impl Library {
             fields["genres"] = json!(genres.iter().map(|g| g.trim()).collect::<Vec<_>>());
         }
         // The server acknowledges only a work that carries this code.
-        let stored: Option<String> = if is_new {
+        let stored: Option<String> = if restore_revision.is_some() {
+            super::super::collection_authority::predicted_av_details(&c, &work_id)?["productCode"]
+                .as_str()
+                .map(str::to_owned)
+        } else if is_new {
             None
         } else {
             c.query_row(
@@ -354,7 +374,7 @@ impl Library {
                 "품번이 다른 컬렉션에는 연결할 수 없어요. 새 컬렉션을 만들거나 품번을 고쳐 주세요.",
             )),
         }
-        let expected_revision = if is_new {
+        let expected_revision = if is_new || restore_revision.is_some() {
             None
         } else if request.collection_id.is_some() {
             Some(request.expected_revision.clone().ok_or(AvError::Invalid)?)
@@ -473,6 +493,7 @@ impl Library {
             plan: AvInboxPlan {
                 work_id,
                 is_new,
+                restore_revision,
                 name,
                 fields,
                 surfaces,

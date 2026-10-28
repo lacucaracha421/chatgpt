@@ -1,3 +1,5 @@
+import { RestoreCollectionAction } from "./RestoreCollectionAction";
+import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
@@ -182,6 +184,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
       <div className="tmdb-movie-dialog">
         {target.kind === "reconnect" && <p>정확한 작품을 검색해 선택한 뒤 저장하세요. 저장하기 전까지 기존 연결은 유지됩니다.</p>}
         {error && <div className="tmdb-movie-dialog__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>TMDB 설정 열기</Button>}</div>}
+        {error === COLLECTION_NAME_IN_TRASH && target.kind === "new" && step.kind === "preview" && <RestoreCollectionAction onBusyChange={value => setBusy(value ? "apply" : null)} gateway={gateway} type="movie" name={step.kind === "preview" ? step.preview.proposedTitle : ""} onRestored={async work => { await onApplied(work); onClose(); }} />}
         {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label={`${formatLabel} 검색 중`} />}
         <BusyLabel busy={busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv"}><p role="status">시즌별 에피소드와 포스터를 저장하고 있습니다. 시즌 수에 따라 시간이 걸릴 수 있습니다.</p></BusyLabel>
         {busy === "artwork" && <Skeleton className="tmdb-movie-dialog__loading" label="아트워크 불러오는 중" />}

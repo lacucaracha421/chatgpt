@@ -2,6 +2,12 @@ import { KIND_LABEL } from "./collectionFormat";
 
 export const COLLECTION_NAME_IN_TRASH = "휴지통에 같은 이름의 컬렉션이 있어요. 휴지통에서 복원하거나, 다른 이름으로 만들어 주세요.";
 
+/** SQLite NOCASE folds ASCII letters only, on both authority and clients. */
+export const collectionNameKey = (name: string) => name.replace(/[A-Z]/g, char => char.toLowerCase());
+export const latestTrashedCollection = <T extends {type: string; name: string; trashedAt?: string | null}>(items: T[], type: string, name: string): T | undefined =>
+  items.filter(item => item.type === type && collectionNameKey(item.name) === collectionNameKey(name.trim()))
+    .sort((a, b) => (b.trashedAt ?? '').localeCompare(a.trashedAt ?? ''))[0];
+
 /**
  * The basic-information fields of 컬렉션 편집, shared by the PC dialog and the tablet form so
  * both offer the same fields, order, wording and checks. UI-free: each surface renders them

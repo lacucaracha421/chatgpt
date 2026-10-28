@@ -1,3 +1,5 @@
+import { RestoreCollectionAction } from "./RestoreCollectionAction";
+import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 import { useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -130,6 +132,7 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
         </div>
 
         {error && <p className="mangadex-import__error" role="alert">{error}</p>}
+        {error === COLLECTION_NAME_IN_TRASH && target.kind === "new" && selected && <RestoreCollectionAction onBusyChange={value => setBusy(value ? "apply" : null)} gateway={gateway} type="manga" name={selected?.title} onRestored={async work => { await onApplied(work); onClose(); }} />}
         {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
         <p className="mangadex-import__provider-note">
           MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Kakao에 연결할 수 있습니다.

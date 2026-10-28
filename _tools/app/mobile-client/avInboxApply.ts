@@ -4,14 +4,14 @@ import {enqueueInboxCommands, readCommands, releaseInboxCommands, discardInboxCo
 import {AV_DETAIL_FIELDS, sameAvValue, validateAvDetails, validateAvCredits, type AvCredit, type AvDetailFields, type AvDetailKey, type AvNewPerson} from './avEditModel';
 import {normalizeProductCode} from './avLookup';
 import {displayAvGenres} from '../src/collections/avGenreNames';
-import {COLLECTION_NAME_IN_TRASH} from '../src/collections/collectionEditFields';
+import {COLLECTION_NAME_IN_TRASH, latestTrashedCollection} from '../src/collections/collectionEditFields';
 import {candidateHasSurface, selectInboxJacket, inboxPath, reviewedInboxDetail, SURFACES, SURFACE_LABELS, type InboxAuthority, type InboxDetail, type InboxWork, type PreparedArtwork, type Surface} from './avInboxModel';
 
 export type PersonChoice={nameJa:string;role:'performer'|'director';action:'new'|'link'|'skip';displayName:string;personId:string|null};
 export type InboxChoices={jacketKey?:string;workId:string|null;name:string;surfaces:Record<Surface,'candidate'|'keep'|'clear'>;fields:AvDetailFields;people:PersonChoice[];/** The cut lines the user chose; absent means the server's own split. */split?:{x1:number;x2:number}};
 /** The lines a plan cuts the jacket at. */
 export const planSplit=(plan:Pick<InboxPlan,'choices'|'detail'>)=>plan.choices.split??plan.detail.candidate!.defaultSplit;
-export type InboxPlan={id:string;runId?:string;identity:AuthorityIdentity;detail:InboxDetail;choices:InboxChoices;workId:string;isNew:boolean;base:InboxWork|null;artworkIds:Record<Surface,string>;personIds:Record<string,string>;manifests:PreparedArtwork[];commands:Command[];accepted:string[];dependencies?:string[];state:'preparing'|'sending'|'waiting'|'blocked'|'done';attempts:number;stageAttempts?:Partial<Record<'preparing'|'sending'|'waiting',number>>;reviewedCode:string;reviewedJacketSha256:string;nextAttemptAt:number;doneAt?:number;error?:string};
+export type InboxPlan={id:string;runId?:string;identity:AuthorityIdentity;detail:InboxDetail;choices:InboxChoices;workId:string;isNew:boolean;restoreFromTrash?:boolean;base:InboxWork|null;artworkIds:Record<Surface,string>;personIds:Record<string,string>;manifests:PreparedArtwork[];commands:Command[];accepted:string[];dependencies?:string[];state:'preparing'|'sending'|'waiting'|'blocked'|'done';attempts:number;stageAttempts?:Partial<Record<'preparing'|'sending'|'waiting',number>>;reviewedCode:string;reviewedJacketSha256:string;nextAttemptAt:number;doneAt?:number;error?:string};
 export const INBOX_APPLY_EVENT='lakomics-av-inbox-apply';
 const KEY=connectionOutbox('lakomics.av-inbox.apply.v1');
 export function readInboxPlans(connection=outboxConnection()):InboxPlan[]{
@@ -141,7 +141,7 @@ export function predictedInboxWork(work:InboxWork,authority:InboxAuthority,inbox
   return next;
 }
 function sameCompositionState(a:InboxWork,b:InboxWork) {
-  return SURFACES.every(s=>(a.selection[surfaceSlot(s)]??null)===(b.selection[surfaceSlot(s)]??null))
+  return a.lifecycle===b.lifecycle&&SURFACES.every(s=>(a.selection[surfaceSlot(s)]??null)===(b.selection[surfaceSlot(s)]??null))
     &&AV_DETAIL_FIELDS.every(({key})=>sameAvValue(a.details.av?.[key]??(key==='genres'?[]:null),b.details.av?.[key]??(key==='genres'?[]:null)))
     &&sameAvValue(a.avCredits,b.avCredits);
 }
@@ -152,19 +152,21 @@ export function createInboxPlan(detail:InboxDetail,authority:InboxAuthority,choi
   if(previous&&previous.state!=='blocked'&&previous.state!=='done')throw new Error('이미 보내는 중입니다.');
   const chosen=choices.workId??(previous?.isNew&&previous.accepted.includes(previous.commands[0]?.operationId)?previous.workId:null);
   const confirmed=chosen?inboxWorks(authority,detail.inbox.id).find(w=>w.workId===chosen)??null:null;
-  const base=confirmed;
+  const trashed=!chosen?latestTrashedCollection(authority.works.filter(w=>w.lifecycle==='trashed'),'av',choices.name.trim()||detail.inbox.normalizedCode||detail.inbox.productCode):undefined;
+  const base=confirmed??(trashed?predictedInboxWork(trashed,authority,detail.inbox.id):null);
+  const targetId=base?.workId??chosen;
   if(chosen&&!base)throw new Error('컬렉션을 다시 확인해 주세요.');
   const code=detail.inbox.normalizedCode??normalizeProductCode(detail.inbox.productCode);
   if(!code)throw new Error('품번을 확인해 주세요.');
-  if(!chosen&&inboxMatches(detail,authority).some(m=>!authority.works.some(w=>w.workId===m.workId)))throw new Error('같은 품번의 대기 컬렉션이 있어요. 기존 컬렉션에 후보 추가를 선택해 주세요.');
+  if(!base&&inboxMatches(detail,authority).some(m=>!authority.works.some(w=>w.workId===m.workId)))throw new Error('같은 품번의 대기 컬렉션이 있어요. 기존 컬렉션에 후보 추가를 선택해 주세요.');
   const oldCode=base?.details.av?.productCode;
   if(typeof oldCode==='string'&&oldCode.trim()&&normalizeProductCode(oldCode)!==code)throw new Error('품번이 다른 컬렉션');
-  const preceding=readCommands().filter(r=>sameAuthority(r.command,authority.identity)&&r.command.workId===chosen&&r.inboxId!==detail.inbox.id);
+  const preceding=readCommands().filter(r=>sameAuthority(r.command,authority.identity)&&r.command.workId===targetId&&r.inboxId!==detail.inbox.id);
   if(preceding.some(r=>r.state==='conflict'))throw new Error('이 컬렉션의 앞선 변경을 먼저 확인해 주세요.');
   validateAvDetails(choices.fields);
   if(choices.people.some(p=>p.action==='new'&&(!p.displayName.trim()||[...p.displayName.trim()].length>120)))throw new Error('인물 이름을 확인해 주세요.');
-  const plan:InboxPlan={id:detail.inbox.id,runId:crypto.randomUUID(),identity:authority.identity,detail:structuredClone(detail),choices:structuredClone(choices),workId:base?.workId??(previous?.isNew?previous.workId:crypto.randomUUID()),isNew:!base,base:base?structuredClone(base):null,
-    artworkIds:{front:crypto.randomUUID(),spine:crypto.randomUUID(),back:crypto.randomUUID()},personIds:{},manifests:[],commands:[],accepted:[],dependencies:[...preceding.filter(r=>r.state==='pending'&&!r.inboxId).map(r=>r.command.operationId),...readInboxPlans().filter(p=>p.id!==detail.inbox.id&&p.workId===chosen&&p.state!=='done').map(p=>`plan:${p.id}`)],state:'preparing',attempts:0,stageAttempts:{},reviewedCode:code,reviewedJacketSha256:detail.candidate.jacketSha256??'',nextAttemptAt:0};
+  const plan:InboxPlan={id:detail.inbox.id,runId:crypto.randomUUID(),identity:authority.identity,detail:structuredClone(detail),choices:structuredClone(choices),workId:base?.workId??(previous?.isNew?previous.workId:crypto.randomUUID()),isNew:!base,restoreFromTrash:!!trashed,base:base?structuredClone(base):null,
+    artworkIds:{front:crypto.randomUUID(),spine:crypto.randomUUID(),back:crypto.randomUUID()},personIds:{},manifests:[],commands:[],accepted:[],dependencies:[...preceding.filter(r=>r.state==='pending'&&!r.inboxId).map(r=>r.command.operationId),...readInboxPlans().filter(p=>p.id!==detail.inbox.id&&p.workId===targetId&&p.state!=='done').map(p=>`plan:${p.id}`)],state:'preparing',attempts:0,stageAttempts:{},reviewedCode:code,reviewedJacketSha256:detail.candidate.jacketSha256??'',nextAttemptAt:0};
   if(previous&&previous.state==='blocked'&&sameAvValue(previous.detail.candidate,detail.candidate))plan.manifests=previous.manifests;
   for(const p of choices.people)if(p.action==='new'&&!plan.personIds[p.nameJa])plan.personIds[p.nameJa]=crypto.randomUUID();
   // The plan must be durable before cancelling the refused sequence or preparing bytes.
@@ -174,6 +176,7 @@ export function composeInboxCommands(plan:InboxPlan,artworks:InboxAuthority['art
   const {choices,base,workId,detail}=plan,c=detail.candidate;
   if(!c||normalizeProductCode(detail.inbox.normalizedCode??detail.inbox.productCode)!==plan.reviewedCode||!plan.reviewedJacketSha256||c.jacketSha256!==plan.reviewedJacketSha256)throw new PlanStopped('후보가 바뀌었어요 · 다시 확인');
   const commands:WorkCommand[]=[];let revision=base?.entityRevision??1;
+  if(plan.restoreFromTrash&&base){commands.push({commandType:'restoreWork',workId,expectedRevision:revision});revision++;}
   if(plan.isNew)commands.push({commandType:'createWork',workId,type:'av',name:choices.name.trim()||detail.inbox.normalizedCode!,legacyKind:null,fields:{},binding:null});
   for(const surface of SURFACES){
     const action=choices.surfaces[surface];if(action==='keep')continue;
@@ -279,7 +282,7 @@ async function resume(connection:string,identity:AuthorityIdentity){
           const receipt=rows.find(r=>r.command.operationId===command.operationId)?.receipts?.[0];
           const entity=receipt?.entities?.works?.find(work=>work.workId===plan.workId);
           if(entity && Number.isSafeInteger(entity.entityRevision) && entity.entityRevision>0)revision=entity.entityRevision;
-          else if(['selectArtwork','setAvDetails'].includes(command.commandType)) {
+          else if(['restoreWork','selectArtwork','setAvDetails'].includes(command.commandType)) {
             if(typeof receipt?.changed!=='boolean') throw new PlanStopped('변경 확인 응답이 없어요 · 다시 확인');
             if(receipt.changed)revision++;
           }

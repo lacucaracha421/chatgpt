@@ -21,6 +21,21 @@ beforeEach(()=>{localStorage.clear();setOutboxConnection('https://test.example')
   });
 });
 const pass=async()=>{await resumeInboxApplies(inboxIdentity);await flushCommands();await resumeInboxApplies(inboxIdentity);};
+it('restores the latest same-name AV work before applying selected candidate values and preserves its credits',async()=>{
+  const trashed={...structuredClone(inboxWork),name:'ssis-001',lifecycle:'trashed',trashedAt:'2026-10-27',details:{av:{productCode:'SSIS-001',maker:'keep maker'}},avCredits:[{personId:'old',role:'performer' as const,order:0,creditName:null}]};
+  authority.works=[{...trashed,workId:'older',trashedAt:'2026-10-20'},trashed,{...trashed,type:'game',workId:'other',trashedAt:'2026-10-28'}];
+  const choices=initialChoices(inboxFixture,null);choices.fields={titleJa:'chosen'};
+  const plan=createInboxPlan(inboxFixture,authority,choices);
+  expect(plan).toMatchObject({workId:trashed.workId,isNew:false,restoreFromTrash:true});
+  await pass();await pass();
+  const commands=mocks.api.mock.calls.filter(([p])=>p===COMMAND_PATH).map(([, ,body])=>body);
+  expect(commands[0]).toMatchObject({commandType:'restoreWork',workId:trashed.workId,expectedRevision:trashed.entityRevision});
+  expect(commands.some(c=>c.commandType==='createWork')).toBe(false);
+  expect(commands.find(c=>c.commandType==='setAvDetails')).toMatchObject({changes:{titleJa:'chosen'}});
+  expect(commands.find(c=>c.commandType==='setAvDetails').changes).not.toHaveProperty('maker');
+  expect(commands.find(c=>c.commandType==='setAvCredits').credits[0]).toMatchObject({personId:'old'});
+  expect(readInboxPlans()[0].state).toBe('done');
+});
 it('composes create, surfaces, field CAS and preserved/new credits with exact revisions',()=>{
   const choices=initialChoices(inboxFixture,null),plan=createInboxPlan(inboxFixture,authority,choices);plan.manifests=['front','spine','back'].map(s=>manifest(s as 'front'|'spine'|'back'));
   const commands=composeInboxCommands(plan);

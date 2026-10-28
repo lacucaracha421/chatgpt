@@ -1,3 +1,5 @@
+import { Toast } from "../src/shared/ui/Toast";
+import { useAutoDismiss } from "../src/shared/ui/useAutoDismiss";
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {InboxArrowDownIcon, ChevronRightIcon, ClockIcon, ExclamationTriangleIcon, CheckIcon, PauseCircleIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
@@ -43,6 +45,14 @@ type Authority=ReturnType<typeof useCollectionAuthority>;
 export function AvInbox({active,authority,items,open,onClose,onOpen}:{active:boolean;authority:Authority;items:CollectionSummary[];open:boolean;onClose():void;onOpen():void}){
   const connection=outboxConnection();const [rows,setRows]=useState(cachedList),[plans,setPlans]=useState(readInboxPlans),[offline,setOffline]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [listReady,setListReady]=useState(hasCachedList);
+  const [restoreNotice,setRestoreNotice]=useState(false);
+  const noticedRestores=useRef(new Set<string>());
+  useAutoDismiss(restoreNotice ? "restored" : null,()=>setRestoreNotice(false));
+  useEffect(()=>{
+    for(const plan of plans)if(plan.restoreFromTrash&&plan.state==='done'&&(plan.doneAt??0)+5000>Date.now()&&!noticedRestores.current.has(plan.runId??plan.id)){
+      noticedRestores.current.add(plan.runId??plan.id);setRestoreNotice(true);
+    }
+  },[plans]);
   const [details,setDetails]=useState<Record<string,InboxDetail>>({});
   const knownDetails=useRef(details);knownDetails.current=details;
   const [chooser,setChooser]=useState<{detail:InboxDetail;authority:InboxAuthority}|null>(null);
@@ -87,7 +97,7 @@ export function AvInbox({active,authority,items,open,onClose,onOpen}:{active:boo
     catch(reason){setError(errorText(reason));}finally{setBusy(false);}
   };
   const discard=(item:InboxItem)=>{if(item.status==='found')setConfirm(item);else void action(item,'dismiss');};
-  return <><InboxEntry items={mergedRows} plans={plans} onOpen={onOpen}/>{open&&<BottomSheet tall headerActions={<Button variant="ghost" disabled={offline||busy||!found.length||!authority.identity} onClick={()=>{walking.current=found.slice(1).map(item=>item.id);void showCandidate(found[0]!.id);}}>후보 차례로 보기 {found.length}</Button>} title={`받은 품번 ${visible.length}`} onClose={()=>{choiceRead.current++;walking.current=null;setChooser(null);onClose();}}><div className="av-inbox-list">
+  return <>{restoreNotice&&<Toast onDismiss={()=>setRestoreNotice(false)}>휴지통에 있던 컬렉션을 복원해서 넣었어요</Toast>}<InboxEntry items={mergedRows} plans={plans} onOpen={onOpen}/>{open&&<BottomSheet tall headerActions={<Button variant="ghost" disabled={offline||busy||!found.length||!authority.identity} onClick={()=>{walking.current=found.slice(1).map(item=>item.id);void showCandidate(found[0]!.id);}}>후보 차례로 보기 {found.length}</Button>} title={`받은 품번 ${visible.length}`} onClose={()=>{choiceRead.current++;walking.current=null;setChooser(null);onClose();}}><div className="av-inbox-list">
     <AvLookupSender disabled={offline} onSent={()=>void refresh()}/>
     <BusyLabel busy={busy}>확인하는 중</BusyLabel>
     {offline&&<div className="av-inbox-offline"><span>서버에 연결되지 않음 · 마지막으로 받은 목록</span><Button disabled={busy} onClick={()=>void refresh()}>다시 시도</Button></div>}

@@ -1,3 +1,5 @@
+import { RestoreCollectionAction } from "./RestoreCollectionAction";
+import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
@@ -220,6 +222,7 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
         {loadingExisting && <Skeleton className="igdb-import__loading" label="IGDB 게임 정보 불러오는 중" />}
         {existingError && <div className="igdb-import__error" role="alert"><p>{existingError.message}</p>{existingError.credentialError && <Button type="button" onClick={onOpenSettings}>IGDB 설정 열기</Button>}</div>}
         {error && <div className="igdb-import__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>IGDB 설정 열기</Button>}</div>}
+        {error === COLLECTION_NAME_IN_TRASH && target.kind === "new" && step.kind === "hero" && <RestoreCollectionAction onBusyChange={value => setBusy(value ? "apply" : null)} gateway={gateway} type="game" name={step.kind === "hero" ? step.preview.proposedTitle : ""} onRestored={async work => { await onApplied(work); onClose(); }} />}
         {!loadingExisting && !existingError && step.kind === "search" && <SearchStep step={step} busy={busy} onQuery={(query) => updateSearch({ query })} onSearch={() => void search()} onSelect={(selectedGameId) => { updateSearch({ selectedGameId }); setError(null); setCredentialError(false); }} />}
         {!loadingExisting && !existingError && preview && <PreviewSummary preview={preview} />}
         {!loadingExisting && !existingError && step.kind === "cover" && <ArtworkStep kind="cover" candidates={candidates} selectedId={step.coverImageId} onSelect={(imageId) => setStep({ ...step, coverImageId: imageId, coverDecisionMade: true })} />}

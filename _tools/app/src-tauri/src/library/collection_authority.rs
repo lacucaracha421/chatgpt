@@ -67,6 +67,42 @@ pub(crate) fn collection_name_held_by_trash(
     )
 }
 
+/// The newest trashed work holding this type/name, using the authority's NOCASE rule.
+pub(crate) fn collection_in_trash(
+    db: &Connection,
+    work_type: &str,
+    name: &str,
+) -> Result<Option<Value>, LibraryError> {
+    let raw: Option<String> = db.query_row(
+        "SELECT payload FROM collection_authority_trash WHERE lifecycle='trashed' AND json_extract(payload,'$.type')=?1 AND json_extract(payload,'$.name')=?2 COLLATE NOCASE ORDER BY trashed_at DESC,work_id DESC LIMIT 1",
+        params![work_type,name], |r| r.get(0),
+    ).optional()?;
+    raw.map(|raw| serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse))
+        .transpose()
+}
+
+/// Shared by the trash UI and an inbox sequence; confirmed projection waits for the receipt.
+fn enqueue_collection_restore(
+    tx: &Transaction<'_>,
+    status: &CollectionAuthorityStatus,
+    work: &str,
+    revision: i64,
+) -> Result<Option<String>, LibraryError> {
+    if pending_restore(tx, work, revision)? {
+        return Ok(None);
+    }
+    let confirmed: i64 = tx.query_row("SELECT entity_revision FROM collection_authority_revisions WHERE section='works' AND entity_key=?1", [json!([work]).to_string()], |r| r.get(0)).optional()?.unwrap_or(0);
+    let predicted = predicted_collection_revision(tx, "works", &json!([work]).to_string())?;
+    enqueue_collection_command(
+        tx,
+        status,
+        "restoreWork",
+        work,
+        json!({"workId":work,"expectedRevision":revision + predicted - confirmed}),
+    )
+    .map(Some)
+}
+
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CollectionAuthorityStatus {
@@ -454,20 +490,7 @@ impl Library {
         if id.library != library || id.epoch != epoch {
             return Err(LibraryError::CollectionAuthorityMismatch);
         }
-        if !pending_restore(&tx, work, revision)? {
-            // The trash list supplies a confirmed revision. Earlier queued person
-            // edits also republish trashed works, so include their FIFO bumps.
-            let confirmed: i64 = tx.query_row("SELECT entity_revision FROM collection_authority_revisions WHERE section='works' AND entity_key=?1", [json!([work]).to_string()], |r| r.get(0)).optional()?.unwrap_or(0);
-            let predicted = predicted_collection_revision(&tx, "works", &json!([work]).to_string())?;
-            let expected_revision = revision + (predicted - confirmed);
-            enqueue_collection_command(
-                &tx,
-                &status,
-                "restoreWork",
-                work,
-                json!({"workId":work,"expectedRevision":expected_revision}),
-            )?;
-        }
+        enqueue_collection_restore(&tx, &status, work, revision)?;
         // Keep the work in trash until the authority's receipt/change projects it.
         tx.commit()?;
         Ok(())
@@ -1589,7 +1612,10 @@ pub(crate) fn predicted_collection_revision(
                 }
             }
         } else if section == "works"
-            && matches!(command, "createWork" | "updateWork" | "deleteWork")
+            && matches!(
+                command,
+                "createWork" | "updateWork" | "deleteWork" | "restoreWork"
+            )
             && key("works", &body)? == entity_key
         {
             match command {
@@ -1618,6 +1644,12 @@ pub(crate) fn predicted_collection_revision(
                         state["showcaseOrder"] = orders
                             .get(text(&body, "workId")?)
                             .map_or(Value::Null, |v| v["showcaseOrder"].clone());
+                    }
+                }
+                "restoreWork" => {
+                    if state["lifecycle"] != "live" {
+                        predicted += 1;
+                        state["lifecycle"] = json!("live");
                     }
                 }
                 "deleteWork" => {

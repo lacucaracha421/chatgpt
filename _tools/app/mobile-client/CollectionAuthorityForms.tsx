@@ -2,12 +2,15 @@ import {useEffect, useState} from 'react';
 import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 import {Badge, Button, Dialog, DialogDescription, Field, SegmentedControl, TextInput} from './ui';
 import {BusyLabel} from '../src/shared/ui/BusyLabel';
-import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_IN_TRASH, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, collectionCreateLabel,
+import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
+import {COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_IN_TRASH, COLLECTION_NAME_MAX, COLLECTION_NAME_REQUIRED, latestTrashedCollection, collectionCreateLabel,
   collectionEditDraft, collectionEditError, collectionEditValue, type CollectionCreateType} from '../src/collections/collectionEditFields';
 import type {CollectionDetail, CollectionKind} from './collectionModel';
 import {createdWork, isPersonCommand, discardLifecycle, isLifecycle, lifecycleInFlight, rebasePersonCommand, replaceCommand, retryCommandNow, type CommandIntent, type Fields, type WorkCommand} from './collectionCommandOutbox';
 import type {useCollectionAuthority} from './useCollectionAuthority';
-import {errorText} from './transport';
+import {api, errorText} from './transport';
+import {outboxConnection} from './outboxConnection';
+import {TRASH_PATH, type TrashItem} from './CollectionTrash';
 import {readInboxPlans, cancelInboxPlan} from './avInboxApply';
 import './collectionAuthority.css';
 
@@ -22,14 +25,43 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
     ['name', form.item?.name ?? ''], ['description', form.item?.description ?? ''], ...Object.entries(collectionEditDraft(form.item as Fields | undefined)),
   ]));
   const [error, setError] = useState('');
+  const [trashMatch, setTrashMatch] = useState<TrashItem | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [restoring, setRestoring] = useState<TrashItem | null>(null);
+  const restoreRef = useMotionSurface('menu');
   const [operation, setOperation] = useState<string | null>(form.retry?.command.operationId ?? null);
-  const intent = authority.rows.find(row => row.command.operationId === operation);
-  const pending = intent?.state === 'pending';
-  useEffect(() => { if (intent?.state === 'accepted') onClose(); }, [intent?.state, onClose]);
+  const intent = [...authority.rows, ...authority.acknowledgements].find(row => row.command.operationId === operation);
+  const pending = intent?.state === 'pending' || checking;
+  useEffect(() => { if (intent?.state === 'accepted') {
+    if (restoring && operation) onCreated?.(restoring.workId, restoring.type, operation);
+    onClose();
+  } }, [intent?.state, onClose, restoring, operation]);
   const nameConflict = intent?.conflict?.code === 'nameConflict';
   const title = form.mode === 'create' ? '새 컬렉션' : '컬렉션 편집';
-  const change = (key: string, value: string) => { setDraft(current => ({...current, [key]: value})); setError(''); };
-  const save = () => {
+  const change = (key: string, value: string) => { setDraft(current => ({...current, [key]: value})); setError(''); if (key === 'name') setTrashMatch(null); };
+  const readTrashMatch = async () => {
+    const identity = authority.identity, connection = outboxConnection();
+    if (!identity || !connection) throw new Error('서버 연결을 확인해 주세요.');
+    const params = new URLSearchParams({libraryId: identity.libraryId, epoch: String(identity.epoch)});
+    const page = await api<{libraryId: string; epoch: number; items: TrashItem[]}>(`${TRASH_PATH}?${params}`, undefined, undefined, 'GET', false, connection).catch(() => null);
+    if (!page) return null;
+    if (connection !== outboxConnection() || page.libraryId !== identity.libraryId || page.epoch !== identity.epoch) throw new Error('라이브러리가 변경되었습니다. 다시 열어 주세요.');
+    return latestTrashedCollection(page.items, type, draft.name) ?? null;
+  };
+  const restore = async () => {
+    setChecking(true);
+    try {
+      const item = await readTrashMatch();
+      if (!item) throw new Error('휴지통의 컬렉션을 찾지 못했습니다. 다시 확인해 주세요.');
+      if (intent?.state === 'conflict') replaceCommand(intent.command.operationId, null);
+      setRestoring(item);
+      setOperation(authority.enqueue({commandType: 'restoreWork', workId: item.workId, expectedRevision: item.entityRevision}, item.name).command.operationId);
+      setError('');
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setChecking(false); }
+  };
+  const save = async () => {
+    setChecking(true);
     try {
       const values: Fields = {};
       values.name = draft.name.trim();
@@ -47,6 +79,10 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
       }
       let command: WorkCommand;
       if (form.mode === 'create') {
+        // Offline creates still enter the existing durable queue. The authority then
+        // reports a name conflict, whose retry form offers the same restore action.
+        const trashed = await readTrashMatch();
+        if (trashed) { setTrashMatch(trashed); setError(COLLECTION_NAME_IN_TRASH); return; }
         const {name, ...basic} = values;
         command = {commandType: 'createWork', workId: form.retry?.command.workId ?? crypto.randomUUID(), type, name: name as string, fields: basic, legacyKind: null, binding: null};
       } else {
@@ -70,16 +106,18 @@ export function CollectionWorkForm({form, authority, onClose, onCreated}: {form:
       } else { operationId = authority.enqueue(command).command.operationId; setOperation(operationId); }
       if (form.mode === 'create' && operationId) { onClose(); onCreated?.(command.workId, type, operationId, type === 'movie' ? createType === 'tv' ? 'tv' : 'movie' : undefined); }
     } catch (reason) { setError(errorText(reason)); }
+    finally { setChecking(false); }
   };
   return <Dialog open title={title} onClose={onClose}><DialogDescription className="sr-only">작품 정보를 저장합니다.</DialogDescription>
     <form className={`library-sheet collection-authority-form${form.mode === 'create' ? ' collection-create-form' : ''}`} onSubmit={event => { event.preventDefault(); if (!pending) save(); }}>
       <div className="collection-authority-form__fields">
         <Field label="이름" error={nameConflict ? intent?.conflict?.lifecycle === 'trashed' ? COLLECTION_NAME_IN_TRASH : '같은 종류에 같은 이름의 작품이 있습니다.' : undefined}><TextInput value={draft.name} maxLength={COLLECTION_NAME_MAX} disabled={pending} onChange={event => change('name', event.target.value)}/></Field>
         {form.mode === 'create' && <><Field label="설명"><TextInput value={draft.description} maxLength={2000} disabled={pending} onChange={event => change('description', event.target.value)}/></Field>
-          <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={setCreateType}/></>}
+          <SegmentedControl label="유형" fullWidth options={createTypes} value={createType} onChange={value => { if (pending) return; setCreateType(value); setTrashMatch(null); setError(''); }}/></>}
         {form.mode === 'edit' && COLLECTION_EDIT_FIELDS[type].map(field => <Field key={field.key} label={field.label}><TextInput {...COLLECTION_EDIT_INPUT[field.control]} value={draft[field.key] ?? ''} maxLength={field.maxLength} disabled={pending} onChange={event => change(field.key, event.target.value)}/></Field>)}
         {intent?.state === 'conflict' && !nameConflict && <p role="alert">다른 기기에서 작품 정보가 바뀌었거나 변경을 받지 못했습니다. 내용을 확인해 주세요.</p>}
         <BusyLabel busy={pending} idle=""><Badge>대기</Badge></BusyLabel>{error && <p role="alert">{error}</p>}
+        {form.mode === 'create' && (trashMatch || nameConflict && intent?.conflict?.lifecycle === 'trashed') && <div ref={restoreRef}><Button type="button" disabled={pending} onClick={() => void restore()}><BusyLabel busy={pending} idle="휴지통에서 복원">복원하는 중</BusyLabel></Button></div>}
       </div>
       <div className="ui-dialog__actions"><Button type="button" variant={form.mode === 'create' ? 'quiet' : 'secondary'} onClick={onClose}>{form.mode === 'create' ? '취소' : '닫기'}</Button><Button type="submit" variant="primary" disabled={pending || form.mode === 'create' && !draft.name.trim()}>저장</Button></div>
     </form>

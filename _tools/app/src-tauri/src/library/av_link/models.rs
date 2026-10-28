@@ -242,6 +242,7 @@ pub struct ApplyRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyResult {
+    pub restored_from_trash: bool,
     pub collection_id: String,
     pub covers: AvCoverSet,
 }

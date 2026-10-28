@@ -71,7 +71,7 @@ export type AvLinkApplyRequest = (
   /** Directors are no longer imported: always empty. */
   directors: AvLinkPersonChoice[];
 };
-export interface AvLinkApplyResult { collectionId: string; covers: AvLinkCoverSet }
+export interface AvLinkApplyResult { collectionId: string; covers: AvLinkCoverSet; restoredFromTrash?: boolean }
 
 export const avLinkClient = {
   listInbox: () => invoke<AvLinkInboxItem[]>("list_av_link_inbox"),

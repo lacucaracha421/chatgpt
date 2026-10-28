@@ -5,6 +5,9 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
+import { BusyLabel } from "../shared/ui/BusyLabel";
+import { useMotionSurface } from "../shared/ui/useMotionSurface";
+import { COLLECTION_NAME_IN_TRASH } from "./collectionEditFields";
 import { COLLECTION_CREATE_TYPES, COLLECTION_EDIT_FIELDS, COLLECTION_EDIT_INPUT, COLLECTION_NAME_REQUIRED, collectionCreateLabel, collectionEditDraft,
   collectionEditError, collectionEditField, collectionEditValues, type CollectionEditFieldKey } from "./collectionEditFields";
 
@@ -18,12 +21,14 @@ export function CollectionEditDialog({
   onClose,
   onSubmit,
   onSubmitMangaSettings,
+  onRestore,
 }: {
   open: boolean;
   mode: CollectionEditMode;
   onClose: () => void;
   onSubmit: (input: CreateCollection | UpdateCollection, mediaType?: "movie" | "tv") => Promise<void>;
   onSubmitMangaSettings?: (input: CollectionVolumeRangeInput) => Promise<void>;
+  onRestore?: (type: CollectionType, name: string) => Promise<void>;
 }) {
   const existing = mode.kind === "edit" ? mode.collection : null;
   const [name, setName] = useState(existing?.name ?? "");
@@ -38,6 +43,8 @@ export function CollectionEditDialog({
   const [hideConnectionPrompt, setHideConnectionPrompt] = useState(existing?.hideConnectionPrompt ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nameInTrash, setNameInTrash] = useState(false);
+  const errorRef = useMotionSurface("menu");
 
   useEffect(() => {
     setName(existing?.name ?? "");
@@ -52,6 +59,7 @@ export function CollectionEditDialog({
     setRestartNumbering(existing?.restartNumbering ?? false);
     setSaving(false);
     setError(null);
+    setNameInTrash(false);
   }, [existing, mode]);
 
   async function handleSubmit() {
@@ -101,21 +109,23 @@ export function CollectionEditDialog({
       }
       onClose();
     } catch (submitError) {
-      setError(commandErrorMessage(submitError, "저장하지 못했습니다."));
+      const message = commandErrorMessage(submitError, "저장하지 못했습니다.");
+      setError(message);
+      setNameInTrash(message === COLLECTION_NAME_IN_TRASH);
       setSaving(false);
     }
   }
 
   return (
-    <Dialog open={open} title={mode.kind === "create" ? "새 컬렉션" : "컬렉션 편집"} onClose={onClose}>
+    <Dialog open={open} title={mode.kind === "create" ? "새 컬렉션" : "컬렉션 편집"} onClose={() => { if (!saving) onClose(); }}>
       <div className="collection-edit-dialog">
-        <TextField label="이름" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} />
+        <TextField label="이름" disabled={saving} value={name} onChange={(event) => { setName(event.target.value); setError(null); setNameInTrash(false); }} />
         <TextField label="설명" value={description} onChange={(event) => setDescription(event.target.value)} />
         {mode.kind === "create" ? <div role="group" aria-label="유형" className="collection-edit-dialog__types">
           {COLLECTION_CREATE_TYPES.map(value => (
             <Button key={value} type="button" aria-pressed={value === "tv" ? type === "movie" && series : type === value && !series}
               variant={(value === "tv" ? type === "movie" && series : type === value && !series) ? "primary" : "secondary"}
-              disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); }}>
+              disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); setError(null); setNameInTrash(false); }}>
               {collectionCreateLabel(value)}
             </Button>
           ))}
@@ -155,7 +165,14 @@ export function CollectionEditDialog({
             {[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}
           </Select>
         )}
-        {error && <p className="collection-edit-dialog__error" role="alert">{error}</p>}
+        {error && <p ref={errorRef} className="collection-edit-dialog__error" role="alert">{error}
+          {mode.kind === "create" && onRestore && nameInTrash && <Button disabled={saving} onClick={async () => {
+            setSaving(true);
+            try { await onRestore(type, name.trim()); onClose(); }
+            catch (reason) { setError(commandErrorMessage(reason, "복원하지 못했습니다.")); }
+            finally { setSaving(false); }
+          }}><BusyLabel busy={saving} idle="휴지통에서 복원">복원하는 중</BusyLabel></Button>}
+        </p>}
         <div className="ui-dialog__actions">
           <Button type="button" disabled={saving} onClick={onClose}>취소</Button>
           <Button type="button" variant="primary" disabled={saving} onClick={() => void handleSubmit()}>저장</Button>

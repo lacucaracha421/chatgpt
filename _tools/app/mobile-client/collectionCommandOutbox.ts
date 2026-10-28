@@ -243,8 +243,9 @@ async function deliver(connection: string) {
         throw new Error('서버 응답을 확인하지 못했습니다. 다시 전송합니다.');
       changeIntent(connection, row.command.operationId, stored => { stored.receipts = [receipt]; stored.acceptedAt = Date.now(); stored.state = 'accepted'; });
       // No read ever shows a trashed work, so nothing would reconcile it: screens keep the
-      // acknowledgement they just observed, and the queue lets it go.
-      if (isLifecycle(row.command)) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
+      // acknowledgement they just observed, and the queue lets it go. An inbox sequence
+      // retains its restore receipt until the subsequent apply has been acknowledged.
+      if (isLifecycle(row.command) && !row.inboxId) write(readCommands(connection).filter(stored => stored.command.operationId !== row.command.operationId), connection);
     } catch (error) {
       const detail = error instanceof ApiError ? (error.details as {detail?: {code?: string; lifecycle?: string; current?: {work?: ConflictWork; person?: ConflictPerson}}} | null)?.detail : null;
       const code = detail?.code;

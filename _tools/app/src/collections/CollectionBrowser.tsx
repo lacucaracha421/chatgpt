@@ -38,6 +38,7 @@ import { useCollectionCoverPerf } from "./collectionPerf";
 import { ShelfCollectionCard } from "./ShelfCollectionCard";
 import { exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
+import { restoreCollectionByName } from "./restoreCollection";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
@@ -562,6 +563,11 @@ export function CollectionBrowser({
           mode={editMode}
           onClose={() => setEditMode(null)}
           onSubmit={handleSubmit}
+          onRestore={async (type, name) => {
+            const restored = await restoreCollectionByName(gateway, type, name);
+            await onChanged();
+            onViewChange({ kind: "collection", collectionId: restored.id });
+          }}
           onSubmitMangaSettings={editMode.kind === "edit" && editMode.collection.type === "manga" ? handleMangaSettings : undefined}
         />
       )}

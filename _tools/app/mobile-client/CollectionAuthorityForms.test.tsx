@@ -26,6 +26,7 @@ beforeEach(() => {
   mocks.api.mockImplementation(async (path: string, _signal: unknown, body?: Record<string, unknown>) => {
     if (path === AUTHORITY_STATUS_PATH) return active ? {...identity, active: true} : {active: false};
     if (path === '/v1/collections/status') return status;
+    if (path.startsWith('/v1/collections/authority/trash?')) return {...identity, items: [], hasMore: false};
     if (path === COMMAND_PATH || path === '/v1/collections/personal-edits') { const reply = await command(body!); if (reply instanceof Error) throw reply; return {...body, ...reply as object}; }
     if (path.startsWith('/v1/collections?')) return {ready: true, filterVersion: 1, revision: 'r1', items: [item], nextCursor: null, publishedAt: null};
     return {revision: 'r1', item};
@@ -148,6 +149,27 @@ describe('activation-gated tablet forms', () => {
     act(() => { expect(backRef.current?.()).toBe(true); });
     await screen.findByRole('button', {name: '새 작품'});
     expect(screen.getAllByRole('radio', {name: '영화'})[0].getAttribute('aria-checked')).toBe('true');
+  });
+  it('offers restore for a same-name trashed creation and opens the restored work after acceptance', async () => {
+    const previous = mocks.api.getMockImplementation()!;
+    const restored = {...item, id: 'trashed-game', name: 'reserved', description: 'saved memo', myScore: 4.5};
+    mocks.api.mockImplementation(async (path: string, ...args: unknown[]) => {
+      if (path.startsWith('/v1/collections/authority/trash?')) return {...identity, items: [
+        {workId: 'older', type: 'game', name: 'Reserved', trashedAt: '2026-10-20', entityRevision: 2},
+        {workId: restored.id, type: 'game', name: 'reserved', trashedAt: '2026-10-27', entityRevision: 5},
+      ]};
+      if (path === `/v1/collections/${restored.id}`) return {revision: 'restored', item: restored};
+      return previous(path, ...args);
+    });
+    render(<Collections active paused={false} backRef={{current: null}}/>);
+    fireEvent.click(await screen.findByRole('button', {name: '새 작품'}));
+    fireEvent.change(screen.getByLabelText('이름'), {target: {value: 'Reserved'}});
+    fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    fireEvent.click(await screen.findByRole('button', {name: '휴지통에서 복원'}));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]).toMatchObject({commandType: 'restoreWork', workId: restored.id, expectedRevision: 5});
+    await waitFor(() => expect(screen.queryByRole('dialog', {name: '새 컬렉션'})).toBeNull());
+    expect(await screen.findByRole('heading', {name: restored.name})).toBeTruthy();
   });
   it.each([['시리즈', 'tv'], ['영화', 'movie']] as const)('opens %s TMDB search only after the create is accepted and the server detail is ready', async (label, kind) => {
     let accept!: (value: object) => void, showDetail!: (value: object) => void;

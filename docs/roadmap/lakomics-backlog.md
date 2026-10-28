@@ -358,6 +358,14 @@ Status: `DELIVERED` (2026-10-28, server deployed, extension 3.5.69; real-site ch
 
 Status: `DELIVERED` (2026-10-28, PC build + tablet 0.9.161; device feedback pending; design: card A 3:4, no Japanese name, age "만 N세", only a no-value group at the end, favourite star on cards, 작품 | 배우 in the section bar after the type control) — a top-level 작품 | 배우 switch on the AV screen; 배우 shows large performer cards with age, height, B-W-H/cup and work count, sortable by work count, name, age, height, cup and latest work (missing values last). Cards open the existing performer detail. Existing 안 묶음 / 배우 grouping stays. PC mockup with tablet variant in `docs/prototypes/av-performer-grid-20261028/`.
 
+## GUARD-WRITER-001 — Collection writer guard fails on four unannotated writers (2026-10-28)
+
+Status: `OPEN` — `collection_authority_writer_guard_scans_schema_tables_and_requires_annotated_allowlist` fails on files untouched by the 2026-10-28 AV work: `auto_jobs.rs` (collection_update_status), `aladin_flow.rs` (collection_volumes), `authority_pass.rs` (collection_authority_outbox), `manga_spine_scans.rs` (collection_volume_sources, collection_volumes, collections). Each needs a batch/local-only annotation in the guard allowlist or a routed write.
+
+## AV-TRASH-NAME-001 — Re-register a name held by a trashed collection (2026-10-28)
+
+Status: `DELIVERED` (2026-10-28, PC build + tablet 0.9.162; device check pending) — AV inbox apply restores a same-name trashed AV work and applies into it (notice "휴지통에 있던 컬렉션을 복원해서 넣었어요"); manual/MangaDex/IGDB/TMDB create dialogs offer 휴지통에서 복원 next to the conflict message. Server uniqueness rule unchanged.
+
 ## AV-AUTHORITY-001 — AV acceptance and remaining profile polish
 
 Status: `PARTIAL` — authority command work in steps 1–6 is implemented; unmentioned later native/device checks count as passed. Arbitrary tablet portrait crop remains unconfirmed below. The laptop update for `deletedPeople` is in [Waiting on the user](#waiting-on-the-user-devicenative-checks). The accepted performer redesign and retired book import are in the [archive](lakomics-completed.md#closure-checkpoint--2026-10-10--backlog-reconciliation).
