@@ -13,7 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { ImageTextNotes, type ImageTextNotesHandle } from "../shared/viewer/ImageTextNotes";
@@ -111,6 +111,7 @@ export function AssetViewer({
   const [replacementFailed, setReplacementFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [folderPath, setFolderPath] = useState("");
+  const folderPaths = useMemo(() => new Map<string, string>(), [classifications, library?.gateway]);
   const [infoOpen, setInfoOpen] = useState(false);
   const [textOpen, setTextOpen] = useState(false);
   const [textSelection, setTextSelection] = useState<{ assetId: string; index: number } | null>(null);
@@ -143,6 +144,21 @@ export function AssetViewer({
   useEffect(() => () => clearTimeout(textGestureTimer.current), []);
   const holdTextLayout = () => { setTextGesture(true); clearTimeout(textGestureTimer.current); textGestureTimer.current = setTimeout(() => setTextGesture(false), 140); };
   const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 });
+  const panDelta = useRef({ x: 0, y: 0 });
+  const panFrame = useRef<number | null>(null);
+  const flushPan = useCallback(() => {
+    if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
+    panFrame.current = null;
+    const { x, y } = panDelta.current;
+    panDelta.current = { x: 0, y: 0 };
+    if (x || y) setZoom(current => ({ ...current, x: current.x + x, y: current.y + y }));
+  }, []);
+  useEffect(() => () => {
+    if (panFrame.current !== null) window.cancelAnimationFrame(panFrame.current);
+    panFrame.current = null;
+    panDelta.current = { x: 0, y: 0 };
+    panRef.current = null;
+  }, [asset?.id]);
   const videoPlayerRef = useRef<VideoPlayerHandle>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
   const favoriteButtonRef = useRef<HTMLButtonElement>(null);
@@ -266,20 +282,25 @@ export function AssetViewer({
       setFolderPath("");
       return;
     }
-    setFolderPath("");
     if (classifications === undefined) return;
+    if (folderPaths.has(asset.id)) {
+      setFolderPath(folderPaths.get(asset.id)!);
+      return;
+    }
     const getAssetClassifications = library?.gateway?.getAssetClassifications;
     if (typeof getAssetClassifications !== "function") return;
     let active = true;
     void getAssetClassifications(asset.id).then((ids) => {
       if (!active) return;
       const first = ids.map((id) => classifications.find((entry) => entry.id === id)).find((entry): entry is ClassificationEntry => Boolean(entry));
-      setFolderPath(first ? breadcrumbPath(first, classifications) : "");
+      const path = first ? breadcrumbPath(first, classifications) : "";
+      folderPaths.set(asset.id, path);
+      setFolderPath(path);
     }, () => {
       if (active) setFolderPath("");
     });
     return () => { active = false; };
-  }, [asset?.id, classifications, library?.gateway]);
+  }, [asset?.id, classifications, library?.gateway, folderPaths]);
 
   useEffect(() => {
     if (!asset) {
@@ -304,7 +325,7 @@ export function AssetViewer({
   const filmstripVisible = showFilmstrip && !videoPlaying && (zones.bottom || seekable);
   const artistLabel = getArtistLabel(asset, artist);
   const dateLabel = [displayDate(asset.collectedAt), displayTime(asset.collectedAt)].filter(Boolean).join(" ");
-  const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
+  const metaLabel = [folderPaths.get(asset.id) ?? folderPath, dateLabel].filter(Boolean).join(" · ");
   const handleDialogClose = () => {
     if (notesRef.current?.dismissCard()) return;
     if (infoOpen) { setInfoOpen(false); return; }
@@ -331,6 +352,7 @@ export function AssetViewer({
       const px = event.clientX - (bounds.left + bounds.width / 2);
       const py = event.clientY - (bounds.top + bounds.height / 2);
       holdTextLayout();
+      flushPan();
       setZoom((current) => {
         const scale = Math.min(VIEWER_MAX_ZOOM, Math.max(1, current.scale * Math.exp(-event.deltaY * 0.002)));
         if (scale === 1) return { scale: 1, x: 0, y: 0 };
@@ -393,7 +415,7 @@ export function AssetViewer({
       revealChrome();
       if (event.key === "ArrowLeft") { event.preventDefault(); move(previous); }
       if (event.key === "ArrowRight") { event.preventDefault(); move(next); }
-      if ((event.ctrlKey || event.metaKey) && event.key === "0") { event.preventDefault(); setZoom({ scale: 1, x: 0, y: 0 }); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key === "0") { event.preventDefault(); flushPan(); setZoom({ scale: 1, x: 0, y: 0 }); return; }
       // Single-key shortcuts only: Ctrl+F (the old Find), Ctrl+I and the like must not toggle anything.
       const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
       if (plain && event.key.toLowerCase() === "f") { event.preventDefault(); if (onToggleFavorite) { if (favoriteButtonRef.current) popToggle(favoriteButtonRef.current, !asset.favorite); onToggleFavorite(asset); } }
@@ -431,10 +453,12 @@ export function AssetViewer({
           if (!pan || pan.pointerId !== event.pointerId) return;
           const dx = event.clientX - pan.x; const dy = event.clientY - pan.y;
           panRef.current = { pointerId: pan.pointerId, x: event.clientX, y: event.clientY };
-          setZoom((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
+          panDelta.current.x += dx;
+          panDelta.current.y += dy;
+          if (panFrame.current === null) panFrame.current = window.requestAnimationFrame(flushPan);
         }}
-        onPointerUp={() => { panRef.current = null; setTextGesture(false); }}
-        onPointerCancel={() => { panRef.current = null; setTextGesture(false); }}
+        onPointerUp={() => { flushPan(); panRef.current = null; setTextGesture(false); }}
+        onPointerCancel={() => { flushPan(); panRef.current = null; setTextGesture(false); }}
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
           <div className="asset-viewer__topbar" data-tauri-drag-region="deep" {...overlayHover("top")}
@@ -472,7 +496,7 @@ export function AssetViewer({
             ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} poster={mediaSource === "vault" ? vaultThumbnailUrl(asset.id, asset.thumbnailRevision ?? undefined) : assetThumbnailUrl(asset)} loop mediaEvents={{onDurationChange: (event) => { const seconds = event.currentTarget.duration; if (Number.isFinite(seconds) && seconds > 0) onVideoDurationKnown?.(asset, Math.round(seconds * 1_000)); }, onPlay: () => setVideoPlaying(true), onPause: () => { setVideoPlaying(false); revealChrome(); }, onEnded: () => { setVideoPlaying(false); revealChrome(); }}} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
             : imageFailed
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
-              : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} className={`asset-viewer__media${textPanning ? " asset-viewer__media--panning" : ""}`} style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
+              : <StableImage key={String(nsfwFilter)} perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" && !masked(next, requestedPrivacy) ? assetUrl(next.id) : undefined} prefetchSecondarySrc={mediaSource === "library" && previous?.media.kind === "image" && !masked(previous, requestedPrivacy) ? assetUrl(previous.id) : undefined} className={`asset-viewer__media${textPanning ? " asset-viewer__media--panning" : ""}`} style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
         </div>
         </ViewerMediaContextMenu>
         {hasText && displayed && <ImageTextNotes ref={notesRef} key={displayed.src} lines={lines} selected={selectedLine} open={textOpen} interactive={textCurrent} onSelect={selectText} rect={displayed.rect} zoom={zoom} panning={textPanning || textGesture} animatePan={textPanning} />}

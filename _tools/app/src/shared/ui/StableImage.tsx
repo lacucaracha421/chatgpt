@@ -12,6 +12,8 @@ type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt">
   onPreloadError?: () => void;
   /** Load one adjacent image in the actual spare DOM slot, after the current image is ready. */
   prefetchSrc?: string;
+  /** A second adjacent source, using one extra DOM slot only when needed. */
+  prefetchSecondarySrc?: string;
   /** Opt-in native-kit tracing; absent in ordinary image surfaces. */
   perfName?: string;
   /**
@@ -28,13 +30,13 @@ type Slot = { src: string; alt: string; ready?: boolean; decoded?: boolean; fail
 /**
  * Keeps the current image on screen until the next one has loaded and decoded.
  *
- * Two <img> elements take turns: the hidden one loads the next source and becomes the visible one
+ * Image slots take turns: a hidden one loads the next source and becomes the visible one
  * once ready. Showing the element that did the loading matters on the PC (WebKitGTK), which does not
  * reliably reuse a preloaded `lakomics://` image for a fresh <img>, so swapping `src` flashed blank.
  */
-export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, decodeFirst = true, respectReducedMotion = false, ...props }: StableImageProps) {
-  const [slots, setSlots] = useState<[Slot | null, Slot | null]>([{ src, alt }, null]);
-  const [active, setActive] = useState<0 | 1>(0);
+export function StableImage({ src, alt, onPreloadError, prefetchSrc, prefetchSecondarySrc, perfName, decodeFirst = true, respectReducedMotion = false, ...props }: StableImageProps) {
+  const [slots, setSlots] = useState<(Slot | null)[]>([{ src, alt }, null]);
+  const [active, setActive] = useState(0);
   const appeared = useRef(false);
   const firstFramePassed = useRef(false);
   // A cached load can arrive just after attachment. If it decodes before the first frame,
@@ -74,14 +76,20 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
   useEffect(() => {
     const current = slots[active];
     if (current?.src === src) {
-      if (current.alt !== alt) setSlots((previous) => replaceSlot(previous, active, { ...current, alt }));
-      const other = active === 0 ? 1 : 0;
-      if (current.ready && prefetchSrc && prefetchSrc !== src && slots[other]?.src !== prefetchSrc) {
-        setSlots(previous => replaceSlot(previous, other, { src: prefetchSrc, alt: "" }));
+      let updated = current.alt === alt ? slots : replaceSlot(slots, active, { ...current, alt });
+      if (current.ready) {
+        const targets = [prefetchSrc, prefetchSecondarySrc].filter((target): target is string => Boolean(target) && target !== src);
+        for (const target of targets) {
+          if (updated.some(slot => slot?.src === target)) continue;
+          const spare = updated.findIndex((slot, index) => index !== active && !targets.includes(slot?.src ?? ""));
+          updated = replaceSlot(updated, spare < 0 ? updated.length : spare, { src: target, alt: "" });
+        }
       }
+      if (updated !== slots) setSlots(updated);
       return;
     }
-    const other = active === 0 ? 1 : 0;
+    const existing = slots.findIndex(slot => slot?.src === src);
+    const other = existing >= 0 ? existing : slots.findIndex((_, index) => index !== active);
     const next = slots[other];
     if (next?.src === src) {
       if (next.alt !== alt) setSlots((previous) => replaceSlot(previous, other, { ...next, alt }));
@@ -90,9 +98,9 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
       return;
     }
     setSlots((previous) => replaceSlot(previous, other, { src, alt }));
-  }, [active, alt, slots, src, prefetchSrc, onPreloadError]);
+  }, [active, alt, slots, src, prefetchSrc, prefetchSecondarySrc, onPreloadError]);
 
-  const loaded = (index: 0 | 1, event: SyntheticEvent<HTMLImageElement>) => {
+  const loaded = (index: number, event: SyntheticEvent<HTMLImageElement>) => {
     const loadedSrc = slots[index]?.src;
     const element = event.currentTarget;
     const preparingOnLoad = Boolean(element.closest('[data-folder-move="pending"], [data-motion-view][style*="opacity: 0"]') || element.hasAttribute(REVEAL_HOLD_ATTRIBUTE));
@@ -127,7 +135,7 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
       });
     };
     if (loadedSrc === wanted.current) trace.current?.mark("loaded");
-    if (!decodeFirst && index === active && !slots[index]?.ready && slots[1 - index] === null) {
+    if (!decodeFirst && index === active && !slots[index]?.ready && slots.every((slot, other) => other === index || slot === null)) {
       show(false);
       return;
     }
@@ -136,7 +144,7 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
     if (typeof element.decode === "function") void element.decode().then(decoded, decoded);
     else decoded();
   };
-  const failed = (index: 0 | 1) => {
+  const failed = (index: number) => {
     // A speculative failure must not replace the current image with an error surface.
     if (index !== active) setSlots(previous => previous[index]
       ? replaceSlot(previous, index, { ...previous[index]!, failed: true }) : previous);
@@ -155,11 +163,13 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, d
     data-stable-image-loading={index !== active ? "true" : undefined}
     data-stable-image-pending={index !== active && slot.src === src ? "true" : undefined}
     aria-hidden={index !== active ? true : undefined}
-    onLoad={(event) => { loaded(index as 0 | 1, event); if (slot.src === src) props.onLoad?.(event); }}
-    onError={(event) => { failed(index as 0 | 1); if (index === active) props.onError?.(event); }}
+    onLoad={(event) => { loaded(index, event); if (slot.src === src) props.onLoad?.(event); }}
+    onError={(event) => { failed(index); if (index === active) props.onError?.(event); }}
   />)}</>;
 }
 
-function replaceSlot(slots: [Slot | null, Slot | null], index: 0 | 1, slot: Slot): [Slot | null, Slot | null] {
-  return index === 0 ? [slot, slots[1]] : [slots[0], slot];
+function replaceSlot(slots: (Slot | null)[], index: number, slot: Slot): (Slot | null)[] {
+  const updated = [...slots];
+  updated[index] = slot;
+  return updated;
 }

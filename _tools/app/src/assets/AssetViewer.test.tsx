@@ -103,6 +103,41 @@ it("shows the total count, artist handle and breadcrumb date metadata", async ()
   expect(gateway.getAssetClassifications).toHaveBeenCalledWith("a");
 });
 
+it("keeps the breadcrumb while loading, reuses resolved paths and refreshes them after classification changes", async () => {
+  let resolvePath!: (ids: string[]) => void;
+  const getAssetClassifications = vi.fn(() => new Promise<string[]>(resolve => { resolvePath = resolve; }));
+  const gateway = { getAssetClassifications } as unknown as LibraryGateway;
+  const classifications: ClassificationEntry[] = [
+    { id: "one", kind: "root", name: "First folder", parentId: null, iconKey: null, colorKey: null },
+    { id: "two", kind: "root", name: "Second folder", parentId: null, iconKey: null, colorKey: null },
+  ];
+  const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];
+  const draw = (activeId: string | null, entries = classifications) => <LibraryProvider gateway={gateway}><AssetViewer items={items} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()} classifications={entries} /></LibraryProvider>;
+  const { rerender } = render(draw("a"));
+  await act(async () => resolvePath(["one"]));
+  expect(screen.getByText(/First folder/)).toBeInTheDocument();
+  rerender(draw("b"));
+  expect(screen.getByText(/First folder/)).toBeInTheDocument();
+  await act(async () => resolvePath(["two"]));
+  expect(screen.getByText(/Second folder/)).toBeInTheDocument();
+  rerender(draw("a"));
+  expect(screen.getByText(/First folder/)).toBeInTheDocument();
+  expect(getAssetClassifications).toHaveBeenCalledTimes(2);
+  const renamed = classifications.map(entry => ({ ...entry, name: `${entry.name} renamed` }));
+  rerender(draw("a", renamed));
+  expect(screen.getByText(/First folder/)).toBeInTheDocument();
+  await act(async () => resolvePath(["one"]));
+  expect(screen.getByText(/First folder renamed/)).toBeInTheDocument();
+  expect(getAssetClassifications).toHaveBeenCalledTimes(3);
+  rerender(draw("c", renamed));
+  expect(screen.getByText(/First folder renamed/)).toBeInTheDocument();
+  await act(async () => resolvePath([]));
+  expect(screen.queryByText(/First folder/)).toBeNull();
+  rerender(draw(null, renamed));
+  rerender(draw("b", renamed));
+  expect(screen.queryByText(/folder/)).toBeNull();
+});
+
 it("renders a bounded filmstrip and moves from a thumbnail", () => {
   const items = Array.from({ length: 15 }, (_, index) => asset(`asset-${index}`, `${index}.png`));
   const onActiveIdChange = vi.fn();
@@ -258,6 +293,30 @@ it("zooms an image with Ctrl+wheel without paging, and Ctrl+0 resets", () => {
   expect(stage).toHaveAttribute("data-zoomed", "true");
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "0", ctrlKey: true });
   expect(screen.getByRole("img", { name: "a.png" }).style.transform).toBe("");
+});
+
+it.each(["pointerUp", "pointerCancel"] as const)("batches pan deltas per frame and flushes the final movement on %s", endEvent => {
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  render(<AssetViewer items={[asset("a", "a.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  measureStage();
+  const stage = document.querySelector<HTMLElement>(".asset-viewer__stage")!;
+  const image = screen.getByRole<HTMLImageElement>("img", { name: "a.png" });
+  fireEvent.wheel(stage, { deltaY: -200, ctrlKey: true, ...CENTRE });
+  let frame!: FrameRequestCallback;
+  const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frame = callback; return 123; });
+  const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+  fireEvent.pointerDown(stage, { button: 0, ...CENTRE });
+  const initial = image.style.transform;
+  fireEvent.pointerMove(stage, { clientX: 610, clientY: 405 });
+  fireEvent.pointerMove(stage, { clientX: 625, clientY: 415 });
+  expect(image.style.transform).toBe(initial);
+  expect(request).toHaveBeenCalledTimes(1);
+  act(() => frame(0));
+  expect(image.style.transform).toContain("translate(25px, 15px)");
+  fireEvent.pointerMove(stage, { clientX: 630, clientY: 420 });
+  fireEvent[endEvent](stage);
+  expect(image.style.transform).toContain("translate(30px, 20px)");
+  expect(cancel).toHaveBeenCalledWith(123);
 });
 
 it("calls near-end loading once for each loaded item count", () => {
@@ -811,21 +870,21 @@ it.each([{ activeId: "v" }, { mediaSource: "vault" }, { privacyMode: true }])("v
   expect(document.querySelector(".image-text-section, .image-text-notes")).toBeNull();
 });
 
-it("warms only the next library image, never vault, private or video media", () => {
+it("warms both adjacent library images, never vault, private or video media", () => {
   const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];
-  const draw = (extra = {}) => <AssetViewer items={items} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} {...extra} />;
+  const draw = (extra = {}) => <AssetViewer items={items} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} {...extra} />;
   const { rerender } = render(draw());
-  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
-  expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(2);
-  expect(document.querySelector('.asset-viewer__media[src$="/asset/b"]')).toHaveAttribute("aria-hidden", "true");
-  expect(document.querySelector('.asset-viewer__media[src$="/asset/c"]')).toBeNull();
+  fireEvent.load(screen.getByRole("img", { name: "b.png" }));
+  expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(3);
+  expect(document.querySelector('.asset-viewer__media[src$="/asset/a"]')).toHaveAttribute("aria-hidden", "true");
+  expect(document.querySelector('.asset-viewer__media[src$="/asset/c"]')).toHaveAttribute("aria-hidden", "true");
   rerender(draw({ privacyMode: true }));
   expect(document.querySelector('.asset-viewer__media')).toBeNull();
   rerender(draw({ mediaSource: "vault" }));
-  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
+  fireEvent.load(screen.getByRole("img", { name: "b.png" }));
   expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
   rerender(draw({ privacyMode: true }));
-  rerender(draw({ items: [items[0], videoAsset("v", "v.mp4")] }));
+  rerender(draw({ items: [videoAsset("v", "v.mp4"), items[0], videoAsset("w", "w.mp4")], activeId: "a" }));
   fireEvent.load(screen.getByRole("img", { name: "a.png" }));
   expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
 });
@@ -883,7 +942,7 @@ it('keeps the window drag bar visible without panning the image or changing view
 
 it('NSFW viewer and filmstrip use each rating and never preload the masked neighbour',async()=>{
   const {PrivacyProvider}=await import('../privacy/PrivacyContext');
-  const items=[{...asset('g','safe.png'),contentRating:'g' as const},{...asset('e','explicit.png'),contentRating:'e' as const},asset('u','unknown.png')];
+  const items=[{...asset('e','explicit.png'),contentRating:'e' as const},{...asset('g','safe.png'),contentRating:'g' as const},asset('u','unknown.png')];
   const draw=(activeId:string,privacy=false)=><PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()} nsfwFilter><AssetViewer items={items} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()}/></PrivacyProvider>;
   const {rerender}=render(draw('e'));
   expect(document.querySelector('.asset-viewer__media-surface img')).toBeNull();

@@ -227,3 +227,28 @@ it("reports a speculative failure only when that source is requested", () => {
   rerender(<StableImage src="/b" alt="B" onPreloadError={onPreloadError} />);
   expect(errors).toBeGreaterThan(0);
 });
+
+it("promotes either decoded neighbour's existing DOM slot and keeps it painted during a cold replacement", () => {
+  const draw = (src: string, next?: string, previous?: string) => <StableImage src={src} alt={src} prefetchSrc={next} prefetchSecondarySrc={previous} />;
+  const { container, rerender } = render(draw("/b", "/c", "/a"));
+  const b = screen.getByRole("img");
+  expect(container.querySelectorAll("img")).toHaveLength(1);
+  fireEvent.load(b);
+  const a = container.querySelector('img[src="/a"]')!;
+  const c = container.querySelector('img[src="/c"]')!;
+  fireEvent.load(a);
+  fireEvent.load(c);
+  expect(screen.getByRole("img")).toBe(b);
+  rerender(draw("/a", "/b"));
+  expect(screen.getByRole("img")).toBe(a);
+  rerender(draw("/b", "/c", "/a"));
+  expect(screen.getByRole("img")).toBe(b);
+  rerender(draw("/c", "/d", "/b"));
+  expect(screen.getByRole("img")).toBe(c);
+  expect(container.querySelectorAll("img")).toHaveLength(3);
+  rerender(draw("/e", "/f", "/d"));
+  expect(screen.getByRole("img")).toBe(c);
+  fireEvent.load(container.querySelector('img[src="/e"]')!);
+  expect(screen.getByRole("img")).toHaveAttribute("src", "/e");
+  expect(container.querySelectorAll("img")).toHaveLength(3);
+});
