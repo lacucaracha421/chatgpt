@@ -183,6 +183,8 @@ fn count_filtered_assets(
     connection: &rusqlite::Connection,
     query: &AssetQuery,
 ) -> Result<u64, LibraryError> {
+    #[cfg(test)]
+    FILTERED_COUNTS.with(|count| count.set(count.get() + 1));
     let (range_start, range_end) = collected_range_bounds(query)?;
     let total: i64 = connection.query_row(
         &scoped_asset_sql(connection, ASSET_COUNT_SQL, query, 1, 7)?,
@@ -202,6 +204,26 @@ fn count_filtered_assets(
         |row| row.get(0),
     )?;
     Ok(u64::try_from(total.max(0)).unwrap_or(0))
+}
+
+#[cfg(test)]
+thread_local! {
+    static FILTERED_COUNTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl Library {
+    fn cached_filtered_asset_count(
+        &self,
+        connection: &rusqlite::Connection,
+        query: &AssetQuery,
+    ) -> Result<u64, LibraryError> {
+        if let Some(total) = self.asset_count_cache.get(query) {
+            return Ok(total);
+        }
+        let total = count_filtered_assets(connection, query)?;
+        self.asset_count_cache.insert(query, total);
+        Ok(total)
+    }
 }
 
 /// The listing and count statements all start their filters with this clause.
@@ -519,7 +541,7 @@ impl Library {
             items: items.into_iter().map(|asset| asset.summary).collect(),
             next_cursor,
             previous_cursor: None,
-            total_count: count_filtered_assets(&connection, &query)?,
+            total_count: self.cached_filtered_asset_count(&connection, &query)?,
         })
     }
 
@@ -565,7 +587,7 @@ impl Library {
             items,
             next_cursor,
             previous_cursor,
-            total_count: count_filtered_assets(connection, query)?,
+            total_count: self.cached_filtered_asset_count(connection, query)?,
         })
     }
 
@@ -611,7 +633,7 @@ impl Library {
             items,
             next_cursor: None,
             previous_cursor,
-            total_count: count_filtered_assets(connection, query)?,
+            total_count: self.cached_filtered_asset_count(connection, query)?,
         })
     }
 

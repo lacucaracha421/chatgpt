@@ -179,6 +179,7 @@ pub mod models;
 mod online_catalog;
 mod provider_requests;
 mod query;
+mod asset_count_cache;
 pub(crate) mod release_calendar;
 pub(crate) mod server_release_calendar;
 pub(crate) mod server_release_wishlist;
@@ -291,6 +292,7 @@ pub struct Library {
     volume_import_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
+    asset_count_cache: Arc<asset_count_cache::AssetCountCache>,
     // Lock-free read connections for the media protocol's per-request row lookups.
     // When combined with database_lock: database_lock -> media_reads (file replacement only).
     media_reads: Arc<media_reads::MediaReads>,
@@ -443,6 +445,7 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            asset_count_cache: Arc::default(),
             media_reads: Arc::default(),
             asset_sync_lock: Arc::new(Mutex::new(())),
             album_flush_lock: Arc::new(Mutex::new(())),
@@ -614,10 +617,12 @@ impl Library {
         let changed = character_queue_changed.clone();
         let publication_inputs = self.publication_inputs.clone();
         let character_changes = self.character_changes.clone();
+        let asset_count_cache = self.asset_count_cache.clone();
         connection.update_hook(Some(
             move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
                 publication_inputs.changed_table(table);
                 character_changes.changed_table(table);
+                asset_count_cache.changed_table(table);
                 if character_incremental::is_queue_table(table) {
                     changed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -646,8 +651,20 @@ impl Library {
                 }
             },
         ))?;
-        #[cfg(test)]
-        connection.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+        let asset_count_cache = self.asset_count_cache.clone();
+        connection.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+            // The update hook omits WITHOUT ROWID tables and truncate-optimized
+            // deletes. Also invalidate at write preparation: database_lock prevents
+            // a listing from repopulating the cache before these writes execute.
+            match context.action {
+                rusqlite::hooks::AuthAction::Insert { table_name }
+                | rusqlite::hooks::AuthAction::Delete { table_name }
+                | rusqlite::hooks::AuthAction::Update { table_name, .. } => {
+                    asset_count_cache.changed_table(table_name);
+                }
+                _ => {}
+            }
+            #[cfg(test)]
             if matches!(context.action, rusqlite::hooks::AuthAction::Select) {
                 PREPARED_SELECTS.with(|count| count.set(count.get() + 1));
             }
