@@ -78,6 +78,38 @@ beforeEach(() => {
 });
 afterEach(() => {cleanup(); vi.useRealTimers(); setOutboxConnection(null); delete window.LakomicsNative;});
 
+it.each(['native', 'http'])('reuses a valid Home cover immediately on remount and renews it after expiry (%s)', async mode => {
+  const sha256 = (mode === 'native' ? 'c' : 'd').repeat(64);
+  const entry = {...upcomingEntry, cover: {sha256}};
+  server.upcoming = {entries: [entry], wishlist: [entry]};
+  if (mode === 'native') window.LakomicsNative = {} as typeof window.LakomicsNative;
+  const ticket = vi.fn().mockResolvedValue({url: 'https://img.example/cached-cover', expires_in: 31});
+  const readApi = mocks.api.getMockImplementation()!;
+  const readNative = mocks.native.getMockImplementation()!;
+  mocks.api.mockImplementation((path, ...args) => path.includes('/home/covers/') ? ticket() : readApi(path, ...args));
+  mocks.native.mockImplementation((op, ...args) => op === 'homeCover' ? ticket() : readNative(op, ...args));
+  render(<Home {...props()}/>);
+  const day = within(await openDay('2026-10-01'));
+  const open = () => fireEvent.click(day.getByRole('button', {name: /Hades II/}));
+  open();
+  let sheet = within(screen.getByRole('dialog', {name: entry.title}));
+  expect((await sheet.findByRole('img', {name: entry.title})).getAttribute('src')).toBe('https://img.example/cached-cover');
+  const requests = ticket.mock.calls.length;
+  fireEvent.click(sheet.getByRole('button', {name: '닫기', exact: true}));
+  ticket.mockImplementation(() => new Promise(() => {}));
+  open();
+  sheet = within(screen.getByRole('dialog', {name: entry.title}));
+  expect(sheet.getByRole('img', {name: entry.title}).getAttribute('src')).toBe('https://img.example/cached-cover');
+  expect(ticket).toHaveBeenCalledTimes(requests);
+  fireEvent.click(sheet.getByRole('button', {name: '닫기', exact: true}));
+  vi.setSystemTime(Date.now() + 1001);
+  open();
+  sheet = within(screen.getByRole('dialog', {name: entry.title}));
+  // A new img must not start a request with an expired ticket.
+  expect(sheet.queryByRole('img', {name: entry.title})).toBeNull();
+  expect(ticket).toHaveBeenCalledTimes(requests + 1);
+});
+
 describe('shared Home attention on tablet', () => {
   it('acknowledges unread wishlist notices when a Home title is opened', async () => {
     const released = {...upcomingEntry, date: '2026-09-24', released: true, events: [{id: 'release-event', kind: 'released', previousValue: null, currentValue: '2026-09-24', detectedAt: '2026-09-25T00:00:00Z', readAt: null}]};

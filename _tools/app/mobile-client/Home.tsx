@@ -65,10 +65,23 @@ export interface HomeProps {
   notes?: NotesStore;
 }
 
+const homeCoverCache = new Map<string, {url: string; until: number}>();
+const HOME_COVER_KEEP_MS = 4 * 60_000;
+function knownHomeCover(cover?: HomeCover | null) {
+  if (!cover) return '';
+  if (!cover.sha256) return cover.url && /^https:\/\//.test(cover.url) ? cover.url : '';
+  const hit = homeCoverCache.get(cover.sha256);
+  if (hit && hit.until > Date.now()) return hit.url;
+  homeCoverCache.delete(cover.sha256);
+  return '';
+}
+
 function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: HomeCover | null; alt: string; privacy?: boolean; className?: string}) {
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(() => privacy ? '' : knownHomeCover(cover));
   useEffect(() => {
     if (privacy || !cover) { setUrl(''); return; }
+    const known = knownHomeCover(cover);
+    if (known) { setUrl(known); return; }
     const sha256 = cover.sha256;
     if (!sha256) {
       if (cover.url && /^https:\/\//.test(cover.url)) { setUrl(cover.url); return; }
@@ -79,7 +92,11 @@ function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: 
       ? native<Ticket>('homeCover', {sha256}, controller.signal)
       : api<Ticket>(`/v1/home/covers/${encodeURIComponent(sha256)}/media-ticket`, controller.signal, undefined, 'POST');
     void request.then(reply => {
-      if (!controller.signal.aborted && reply?.url && /^https:\/\//.test(reply.url)) setUrl(reply.url);
+      if (!controller.signal.aborted && reply?.url && /^https:\/\//.test(reply.url)) {
+        homeCoverCache.set(sha256, {url: reply.url, until: Date.now() + Math.max(0, (reply.expires_in ?? HOME_COVER_KEEP_MS / 1000) - 30) * 1000});
+        while (homeCoverCache.size > 200) homeCoverCache.delete(homeCoverCache.keys().next().value!);
+        setUrl(reply.url);
+      }
     }, () => {});
     return () => controller.abort();
   }, [cover?.url, cover?.sha256, privacy]);

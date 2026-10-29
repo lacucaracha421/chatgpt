@@ -297,11 +297,12 @@ export function CharacterBrowser({review,classifications=[],onOpenFolder,search,
   const goUp=()=>{if(backRef.current?.())return;onExit();};
   useEffect(()=>{
     if(!active)return;
-    const request=indexGate.current.begin();setBusy(true);setError('');
+    const request=indexGate.current.begin();setBusy(!latest.current.index);setError('');
     pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;setMore(false);
     void api<CharacterIndex>('/v1/library/characters',request.signal).then(result=>{
       if(!indexGate.current.current(request.id))return;
       if(!validCharacterIndex(result))throw new Error('캐릭터 보기를 지원하는 앱과 서버가 필요합니다.');
+      if(JSON.stringify(latest.current.index)===JSON.stringify(result))return;
       // Technical metadata may change without a new membership publication.
       // A host refresh must not restore an old page solely because revision is unchanged.
       cache.current.clear();

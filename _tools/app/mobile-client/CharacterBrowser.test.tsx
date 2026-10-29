@@ -25,6 +25,26 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 
+it('keeps a loaded empty index visible during re-entry and applies changed metadata at the same revision',async()=>{
+  const empty={...structuredClone(index),nodes:[],scopes:[]};
+  mocks.api.mockResolvedValue(empty);
+  const view=render(<CharacterBrowser {...props}/>);
+  await screen.findByText('등록된 시리즈가 없습니다');
+  view.rerender(<CharacterBrowser {...props} active={false}/>);
+  let finish!:(value:CharacterIndex)=>void;
+  mocks.api.mockImplementation(path=>path==='/v1/library/characters'?new Promise(resolve=>{finish=resolve;}):Promise.resolve(page()));
+  view.rerender(<CharacterBrowser {...props}/>);
+  expect(screen.getByText('등록된 시리즈가 없습니다')).toBeTruthy();
+  await act(async()=>finish(structuredClone(empty)));
+  expect(screen.getByText('등록된 시리즈가 없습니다')).toBeTruthy();
+  view.rerender(<CharacterBrowser {...props} active={false}/>);
+  view.rerender(<CharacterBrowser {...props}/>);
+  expect(screen.getByText('등록된 시리즈가 없습니다')).toBeTruthy();
+  await act(async()=>finish(structuredClone(index)));
+  expect(screen.getByRole('button',{name:'Series · 2장'})).toBeTruthy();
+  expect(screen.queryByText('등록된 시리즈가 없습니다')).toBeNull();
+});
+
 it('links inner series through classifications after characters and opens plain folders outside the hub',async()=>{
   const nested=structuredClone(index);
   // An older publication may still mark a folder excluded; the shelf no longer shows it.
