@@ -20,6 +20,7 @@ import asset_filters
 import asset_visibility
 import change_signal
 import read_budget
+from response_compression import TextGZipMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
@@ -30,6 +31,7 @@ DB_BUSY_TIMEOUT_SECONDS = 10
 
 app = FastAPI(title="Lakomics Cloud API", version="0.1.0")
 app.add_middleware(read_budget.ReadBudgetMiddleware)
+app.add_middleware(TextGZipMiddleware)
 
 
 def now_iso() -> str:

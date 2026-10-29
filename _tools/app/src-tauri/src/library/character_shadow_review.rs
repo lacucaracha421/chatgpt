@@ -32,19 +32,36 @@ impl ReviewRead for Connection {
 }
 impl ReviewRead for Library {
     fn read<T>(&self, query: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let connection = self.connection()?;
-        let started = SUMMARY_HOLD.with(|hold| hold.get().map(|_| std::time::Instant::now()));
-        let result = query(&connection);
-        if let Some(started) = started {
-            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
-            SUMMARY_HOLD.with(|hold| {
-                if let Some((total, longest)) = hold.get() {
-                    hold.set(Some((total + elapsed, longest.max(elapsed))));
-                }
-            });
-        }
-        result
+        self.read_without_lock(|connection| {
+            let started = SUMMARY_HOLD.with(|hold| hold.get().map(|_| std::time::Instant::now()));
+            let result = query(connection);
+            if let Some(started) = started {
+                let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+                SUMMARY_HOLD.with(|hold| {
+                    if let Some((total, longest)) = hold.get() {
+                        hold.set(Some((total + elapsed, longest.max(elapsed))));
+                    }
+                });
+            }
+            Ok(result)
+        })?
     }
+}
+
+#[cfg(test)]
+#[test]
+fn review_read_bypasses_database_lock_and_preserves_summary_accounting() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let (result, total, longest) = Library::measure_character_summary_hold(|| {
+        library.read(|connection| {
+            assert!(library.database_lock.try_lock().is_ok());
+            Ok(connection.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))?)
+        })
+    });
+    assert_eq!(result.unwrap(), 1);
+    assert!(total > 0.0);
+    assert_eq!(total, longest);
 }
 
 thread_local! {

@@ -948,10 +948,10 @@ impl Library {
                     .filter_map(|reference| reference.asset_id.clone())
             }))
             .collect::<BTreeSet<_>>();
-        let c = self.connection()?;
-        let protected = c
-            .prepare(
-                "SELECT target_id,asset_id FROM character_references
+        let read = |c: &Connection| -> Result<Vec<QueuedPair>> {
+            let protected = c
+                .prepare(
+                    "SELECT target_id,asset_id FROM character_references
              WHERE target_id IN (SELECT value FROM json_each(?1)) AND asset_id IS NOT NULL
              UNION
              SELECT target_id,asset_id FROM character_learned_references
@@ -959,118 +959,124 @@ impl Library {
              UNION
              SELECT target_id,asset_id FROM character_member_pending
              WHERE target_id IN (SELECT value FROM json_each(?1))",
-            )?
-            .query_map([serde_json::to_string(&target_ids)?], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
-        let person_heights = super::character_reference_regions::matched_person_height_ratios(
-            &c,
-            &serde_json::to_string(&pairs)?,
-        )?;
-        let mut target_order = BTreeMap::new();
-        for (target, _) in &pairs {
-            let next = target_order.len();
-            target_order.entry(target.clone()).or_insert(next);
-        }
-        let assets = {
-            let wanted = serde_json::to_string(&asset_ids)?;
-            c.prepare(
-                "SELECT id,content_hash,relative_path FROM assets
+                )?
+                .query_map([serde_json::to_string(&target_ids)?], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+            let person_heights = super::character_reference_regions::matched_person_height_ratios(
+                c,
+                &serde_json::to_string(&pairs)?,
+            )?;
+            let mut target_order = BTreeMap::new();
+            for (target, _) in &pairs {
+                let next = target_order.len();
+                target_order.entry(target.clone()).or_insert(next);
+            }
+            let assets = {
+                let wanted = serde_json::to_string(&asset_ids)?;
+                c.prepare(
+                    "SELECT id,content_hash,relative_path FROM assets
                  WHERE id IN (SELECT value FROM json_each(?1))
                    AND status='normal' AND media_kind='image'",
-            )?
-            .query_map([wanted], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    (row.get::<_, String>(1)?, row.get::<_, String>(2)?),
-                ))
-            })?
-            .collect::<std::result::Result<BTreeMap<_, _>, _>>()?
-        };
-        let series_names = {
-            let series = targets
-                .values()
-                .filter_map(|target| target.series_classification_id.clone())
-                .collect::<BTreeSet<_>>();
-            let wanted = serde_json::to_string(&series)?;
-            c.prepare(
-                "SELECT id,name FROM classification_entries
+                )?
+                .query_map([wanted], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        (row.get::<_, String>(1)?, row.get::<_, String>(2)?),
+                    ))
+                })?
+                .collect::<std::result::Result<BTreeMap<_, _>, _>>()?
+            };
+            let series_names = {
+                let series = targets
+                    .values()
+                    .filter_map(|target| target.series_classification_id.clone())
+                    .collect::<BTreeSet<_>>();
+                let wanted = serde_json::to_string(&series)?;
+                c.prepare(
+                    "SELECT id,name FROM classification_entries
                  WHERE id IN (SELECT value FROM json_each(?1))",
-            )?
-            .query_map([wanted], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<std::result::Result<BTreeMap<_, _>, _>>()?
-        };
-        // Images in an analysis-excluded folder (실사, 밈, ...) are never sent to Claude.
-        let excluded = member_run::excluded_assets(
-            &c,
-            &pairs.iter().map(|(_, asset)| asset.clone()).collect::<Vec<_>>(),
-        )?;
-        let mut queue = Vec::new();
-        for (target_id, asset_id) in pairs {
-            if protected.contains(&(target_id.clone(), asset_id.clone()))
-                || excluded.contains(&asset_id)
-            {
-                continue;
-            }
-            let Some(target) = targets
-                .get(&target_id)
-                .filter(|target| target.enabled && target.role == "character")
-            else {
-                continue;
+                )?
+                .query_map([wanted], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<std::result::Result<BTreeMap<_, _>, _>>()?
             };
-            let Some((asset_hash, relative_path)) = assets.get(&asset_id) else {
-                continue;
-            };
-            let mut references = target
-                .references
-                .iter()
-                .filter(|reference| reference.status == "ready")
-                .collect::<Vec<_>>();
-            references.sort_by_key(|reference| reference.slot);
-            let sent = references
-                .into_iter()
-                .filter_map(|reference| {
-                    let (_, path) = assets.get(reference.asset_id.as_deref()?)?;
-                    Some(SentReference {
-                        reference: reference.clone(),
-                        relative_path: path.clone(),
+            // Images in an analysis-excluded folder (실사, 밈, ...) are never sent to Claude.
+            let excluded = member_run::excluded_assets(
+                c,
+                &pairs
+                    .iter()
+                    .map(|(_, asset)| asset.clone())
+                    .collect::<Vec<_>>(),
+            )?;
+            let mut queue = Vec::new();
+            for (target_id, asset_id) in pairs {
+                if protected.contains(&(target_id.clone(), asset_id.clone()))
+                    || excluded.contains(&asset_id)
+                {
+                    continue;
+                }
+                let Some(target) = targets
+                    .get(&target_id)
+                    .filter(|target| target.enabled && target.role == "character")
+                else {
+                    continue;
+                };
+                let Some((asset_hash, relative_path)) = assets.get(&asset_id) else {
+                    continue;
+                };
+                let mut references = target
+                    .references
+                    .iter()
+                    .filter(|reference| reference.status == "ready")
+                    .collect::<Vec<_>>();
+                references.sort_by_key(|reference| reference.slot);
+                let sent = references
+                    .into_iter()
+                    .filter_map(|reference| {
+                        let (_, path) = assets.get(reference.asset_id.as_deref()?)?;
+                        Some(SentReference {
+                            reference: reference.clone(),
+                            relative_path: path.clone(),
+                        })
                     })
-                })
-                .take(MAX_REFERENCES)
-                .collect::<Vec<_>>();
-            if sent.is_empty() {
-                continue;
+                    .take(MAX_REFERENCES)
+                    .collect::<Vec<_>>();
+                if sent.is_empty() {
+                    continue;
+                }
+                let key = reference_key(sent.iter().map(|r| r.reference.asset_hash.as_str()));
+                let haiku = load_opinion(c, &target_id, asset_hash, &key, HAIKU)?;
+                let sonnet = load_opinion(c, &target_id, asset_hash, &key, SONNET)?;
+                let person_height_ratio = person_heights
+                    .get(&(target_id.clone(), asset_id.clone()))
+                    .copied();
+                let pair = QueuedPair {
+                    display_name: target.display_name.clone(),
+                    series_name: target
+                        .series_classification_id
+                        .as_ref()
+                        .and_then(|series| series_names.get(series).cloned()),
+                    target_id,
+                    asset_id,
+                    asset_hash: asset_hash.clone(),
+                    relative_path: relative_path.clone(),
+                    reference_key: key,
+                    references: sent,
+                    tiny: person_height_ratio.is_some_and(|ratio| ratio < TINY_PERSON_HEIGHT),
+                    person_height_ratio,
+                };
+                if pair.cascade(haiku.as_ref(), sonnet.as_ref()) != Step::Done(Outcome::Leave) {
+                    queue.push(pair);
+                }
             }
-            let key = reference_key(sent.iter().map(|r| r.reference.asset_hash.as_str()));
-            let haiku = load_opinion(&c, &target_id, asset_hash, &key, HAIKU)?;
-            let sonnet = load_opinion(&c, &target_id, asset_hash, &key, SONNET)?;
-            let person_height_ratio = person_heights
-                .get(&(target_id.clone(), asset_id.clone()))
-                .copied();
-            let pair = QueuedPair {
-                display_name: target.display_name.clone(),
-                series_name: target
-                    .series_classification_id
-                    .as_ref()
-                    .and_then(|series| series_names.get(series).cloned()),
-                target_id,
-                asset_id,
-                asset_hash: asset_hash.clone(),
-                relative_path: relative_path.clone(),
-                reference_key: key,
-                references: sent,
-                tiny: person_height_ratio.is_some_and(|ratio| ratio < TINY_PERSON_HEIGHT),
-                person_height_ratio,
-            };
-            if pair.cascade(haiku.as_ref(), sonnet.as_ref()) != Step::Done(Outcome::Leave) {
-                queue.push(pair);
-            }
-        }
-        queue.sort_by_key(|pair| target_order[&pair.target_id]);
-        Ok(queue)
+            queue.sort_by_key(|pair| target_order[&pair.target_id]);
+            Ok(queue)
+        };
+        // Preserve character errors separately from acquiring the read connection.
+        self.read_without_lock(|c| Ok(read(c)))?
     }
 
     /// Reads and encodes one image for the model. Nothing here holds the library connection.

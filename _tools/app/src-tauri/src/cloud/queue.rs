@@ -9,19 +9,21 @@ use crate::library::{error::LibraryError, Library};
 
 impl Library {
     pub(crate) fn cloud_sync_config(&self) -> Result<CloudSyncConfig, LibraryError> {
-        self.connection()?
-            .query_row(
-                "SELECT cloud_sync_enabled, cloud_api_base_url
+        self.read_without_lock(|connection| {
+            connection
+                .query_row(
+                    "SELECT cloud_sync_enabled, cloud_api_base_url
                  FROM library_settings WHERE singleton = 1",
-                [],
-                |row| {
-                    Ok(CloudSyncConfig {
-                        enabled: row.get::<_, i64>(0)? != 0,
-                        api_base_url: row.get(1)?,
-                    })
-                },
-            )
-            .map_err(Into::into)
+                    [],
+                    |row| {
+                        Ok(CloudSyncConfig {
+                            enabled: row.get::<_, i64>(0)? != 0,
+                            api_base_url: row.get(1)?,
+                        })
+                    },
+                )
+                .map_err(Into::into)
+        })
     }
 
     #[cfg(test)]

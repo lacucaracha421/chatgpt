@@ -703,7 +703,7 @@ impl Library {
     /// Durable identity minted by migration 0079. Read-only by design: a library
     /// never mints or repairs its identity outside that migration transaction.
     pub(crate) fn library_id(&self) -> Result<String, LibraryError> {
-        library_id_on(&*self.connection()?)
+        self.read_without_lock(library_id_on)
     }
 
     pub fn manga_root(&self) -> Result<Option<String>, LibraryError> {
@@ -880,25 +880,26 @@ impl Library {
         }
         let mut thumbnail_path = None;
         let relative_path = match variant {
-            MediaVariant::Asset => self
-                .connection()?
-                .query_row(
-                    "SELECT CASE WHEN media_kind != 'video' THEN relative_path END
+            MediaVariant::Asset => self.read_without_lock(|connection| {
+                Ok(connection
+                    .query_row(
+                        "SELECT CASE WHEN media_kind != 'video' THEN relative_path END
                      FROM assets WHERE id = ?1 AND status IN ('normal', 'review')",
-                    [asset_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()?
-                .flatten(),
-            MediaVariant::TrashThumbnail => self
-                .connection()?
-                .query_row(
+                        [asset_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten())
+            })?,
+            MediaVariant::TrashThumbnail => self.read_without_lock(|connection| {
+                Ok(connection.query_row(
                     "SELECT thumbnail_relative_path FROM assets WHERE id = ?1 AND status = 'trash'",
                     [asset_id],
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .optional()?
-                .flatten(),
+                .flatten())
+            })?,
             MediaVariant::Thumbnail => {
                 // Runs for every grid tile and shelf card, so it reads the current row on a
                 // reused read connection instead of opening one under database_lock.
@@ -988,7 +989,7 @@ impl Library {
     }
 
     /// One read on a reused `query_only` connection that does not take `database_lock`, so a
-    /// long read for the extension never stalls the app's own database work (WAL readers
+    /// long background read never stalls the app's writes (WAL readers
     /// see the last committed state).
     pub(crate) fn read_without_lock<T>(
         &self,
@@ -1092,6 +1093,36 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{error::LibraryError, Library};
+
+    #[test]
+    fn library_id_config_and_original_media_reads_bypass_database_lock() {
+        use super::MediaVariant;
+        use std::{sync::mpsc, thread, time::Duration};
+
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let expected_id = library.library_id().unwrap();
+        let expected_config = library.cloud_sync_config().unwrap();
+        let guard = library.connection().unwrap();
+        let reader = library.clone();
+        let (send, receive) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let id = reader.library_id().unwrap();
+            let config = reader.cloud_sync_config().unwrap();
+            for variant in [MediaVariant::Asset, MediaVariant::TrashThumbnail] {
+                assert!(matches!(
+                    reader.resolve_media("missing", variant),
+                    Err(LibraryError::AssetNotFound)
+                ));
+            }
+            send.send((id, config)).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(5));
+        // Release before asserting so a regression cannot leave a blocked worker.
+        drop(guard);
+        worker.join().unwrap();
+        assert_eq!(result.unwrap(), (expected_id, expected_config));
+    }
 
     #[test]
     fn second_library_open_is_rejected_until_the_first_is_dropped() {

@@ -188,13 +188,24 @@ class SavedXMediaUploadTests(ServerFixture):
             self.assertEqual(ok.json()["count"], 1)
             self.assertEqual(client.get(PATH, headers=self.auth).json()["keys"], ["3:1"])
 
-    def test_no_application_wide_body_middleware_remains(self):
-        """Other routes must not pay for, or fail through, the upload bound.
 
-        The read budget middleware only marks GET/HEAD requests in a context
-        variable; it never reads or bounds a request body.
-        """
-        self.assertEqual([m.cls.__name__ for m in api_app.app.user_middleware], ["ReadBudgetMiddleware"])
+class ResponseMiddlewareTests(unittest.TestCase):
+    def test_other_routes_do_not_read_or_bound_the_request_body(self):
+        """Response/read-budget middleware must leave upload limits route-local."""
+        delivered = []
+
+        async def app_with_counting_receive(scope, receive, send):
+            async def counting():
+                message = await receive()
+                delivered.append(message)
+                return message
+            await api_app.app(scope, counting, send)
+
+        error, sent = drive(app_with_counting_receive, "GET", "/health", [b"{}"],
+                            content_length=api_app.MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES + 1)
+        self.assertIsNone(error)
+        self.assertEqual(status_of(sent), 200)
+        self.assertEqual(delivered, [])
 
 
 class ConditionalPollTests(ServerFixture):

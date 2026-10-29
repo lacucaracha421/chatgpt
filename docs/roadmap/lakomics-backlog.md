@@ -146,6 +146,20 @@ Delivered folder/idle/startup/thumbnail-priority changes and their dated measure
 - **Measurement gap:** restore a native Notes scenario with a disposable Secret Service in the kit's private D-Bus; hidden-idle kit coverage remains unavailable. Use [native kit](../../_tools/app/scripts/native-check/README.md), [PC counters](../../_tools/app/scripts/perf/README.md), [tablet kit](../../android/tools/PERFORMANCE.md), [local API kit](../../server/lakomics-api/tools/PERFORMANCE.md).
 - **Immutable-thumbnail cleanup:** the full run `thumb-full` finished 2026-10-03 ~02:30 KST (8,960 committed, 0 errors; controller record). Wait at least 14 days (from ~2026-10-17) and obtain separate approval before deleting only journaled old `library/{id}/thumbnail` objects; never delete prefixes containing originals. ID-only-cover revisions and DocumentsUI/Picker follow-ups remain optional (`server/lakomics-api/ASSET_SEARCH.md` and thumbnail contract source).
 
+<a id="perf-audit-20261029"></a>
+## PERF-AUDIT-20261029 — Static performance audit findings (2026-10-29)
+
+Status: `OPEN` — six parallel read-only code audits on `main` at `4a2d5a79`; nothing was run or profiled, so every item is a suspected cost until measured under [Performance work](../agents/implementation.md#performance-work). Worked in this order (user, 2026-10-29):
+
+1. **PC library connection convoy:** `Library::connection()` (`library/mod.rs`) opens a fresh SQLite connection per call under one global `database_lock`, so `prepare_cached` never hits and background workers block UI reads; about 77 synchronous `#[tauri::command] pub fn` take that lock on the main thread. Matches the earlier PERF-ALL-001 convoy record.
+2. **PC list sorts:** Favorites (`EXISTS(asset_likes)`) and Random (`CASE` on `content_hash`) sorts in `library/query.rs` cannot use an index, and `list_assets` recounts the filtered total on every page.
+3. **PC viewer:** zoom pan re-renders the whole `AssetViewer` per pointer move; the breadcrumb blanks to `""` on every next/previous (no-flash violation); only the next image is preloaded.
+4. **PC cold start:** 1.13 MB main chunk (eager `AssetBrowser`), 2 MB Pretendard font, release profile without LTO/codegen-units/strip, setup file/network work before first paint, `devtools` in release.
+5. **Tablet re-entry blanks:** Home cover image starts empty on every mount, Home-opened work remounts `Collections` by key, character view turns busy on every activation, character/classification lists fetched in four places, bundled hashed assets served `no-store`, visible thumbnails don't join in-flight prefetches.
+6. **Server:** no response compression; original-cache URLs change every ticket (no client cache hit, no ETag); catalog search and collections list re-rank the whole match set per page; new connection + TEMP VIEWs per request; global write generation wakes all long-polls on metadata-only writes.
+7. **PC smaller:** `PrivacyProvider`/`WorkspaceChromeScope` context values rebuilt per App render; per-folder/per-album cover calls (up to 40); total-count reads in several places.
+8. **Collector:** `av-owned.js` rescans the whole page per mutation; 14 content scripts injected into every frame; four page-wide observers on X.
+
 # Cloud / Mobile authority
 
 <a id="cloud-post-001--서버-원천화-이후-클라이언트-구조-정리"></a>
