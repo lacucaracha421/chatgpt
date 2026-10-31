@@ -141,7 +141,7 @@ it('brings the group a 찾기 pick names into view, at once on open and again fo
   Element.prototype.scrollIntoView=function(this:Element,options?:boolean|ScrollIntoViewOptions){scrolled.push({group:this.getAttribute('aria-labelledby'),behavior:typeof options==='object'?options.behavior:undefined});};
   const props={status:{configured:true,endpoint:'https://example.invalid'},onStatus:vi.fn(),onClose:vi.fn(),onCacheCleared:vi.fn()};
   const view=render(<Settings {...props} section={{id:'storage',request:1}}/>);
-  expect(scrolled).toEqual([{group:'settings-group-저장 공간',behavior:'auto'}]);
+  expect(scrolled).toEqual([{group:'settings-group-저장-공간',behavior:'auto'}]);
   view.rerender(<Settings {...props} section={{id:'display',request:2}}/>);
   expect(scrolled.at(-1)?.group).toBe('settings-group-화면');
   delete (Element.prototype as Partial<Element>).scrollIntoView;

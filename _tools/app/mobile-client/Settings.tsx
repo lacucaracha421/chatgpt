@@ -9,6 +9,7 @@ import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} fro
 import {useNsfwFilter,usePrivacyMode} from './privacyMode';
 import {useCaseSounds} from '../src/preferences/caseSoundPreference';
 import {SETTINGS_SECTION_LABELS} from '../src/shared/findEntries';
+import {settingsGroupId} from '../src/shared/ui/SettingsRow';
 import {prefersReducedMotion} from '../src/shared/motion/curves';
 import type {TabletSettingsSection} from './findData';
 import './Settings.css';
@@ -51,7 +52,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
   const scroller = useRef<HTMLElement>(null), opened = useRef(false);
   useLayoutEffect(() => {
     if (!section) return;
-    const group = scroller.current?.querySelector(`[aria-labelledby="settings-group-${SETTINGS_SECTION_LABELS[section.id]}"]`);
+    const group = scroller.current?.querySelector(`[aria-labelledby="${settingsGroupId(SETTINGS_SECTION_LABELS[section.id])}"]`);
     group?.scrollIntoView?.({block:'start', behavior:opened.current && !prefersReducedMotion() ? 'smooth' : 'auto'});
     opened.current = true;
   }, [section?.id, section?.request]);

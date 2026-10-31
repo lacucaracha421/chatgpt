@@ -45,6 +45,43 @@ it('keeps a loaded empty index visible during re-entry and applies changed metad
   expect(screen.queryByText('등록된 시리즈가 없습니다')).toBeNull();
 });
 
+it('keeps a cached asset page on plain re-entry when the index is identical',async()=>{
+  const view=render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByText('asset-1');
+  fireEvent.click(screen.getByRole('button',{name:'Group · 2장'}));
+  await screen.findByRole('heading',{name:'Group'});
+  await screen.findByText('asset-1');
+  await act(async()=>{backRef.current?.();});
+  await screen.findByRole('heading',{name:'Series'});
+  await screen.findByText('asset-1');
+  const reads=()=>mocks.api.mock.calls.filter(([path])=>String(path).includes('node='));
+  const before=reads().length;
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s" active={false}/>);
+  const pending=Promise.withResolvers<CharacterIndex>();
+  mocks.api.mockImplementation(path=>path==='/v1/library/characters'?pending.promise:Promise.resolve(page(['unexpected-reload'])));
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s"/>);
+  expect(screen.getByText('asset-1')).toBeTruthy();
+  await act(async()=>pending.resolve(structuredClone(index)));
+  expect(screen.getByText('asset-1')).toBeTruthy();
+  expect(reads()).toHaveLength(before);
+  expect(screen.queryByText('unexpected-reload')).toBeNull();
+});
+
+it.each(['refreshKey','retry'] as const)('keeps the old page until an identical-index %s finishes',async trigger=>{
+  const view=render(<CharacterBrowser {...props} initialNode="character:c"/>);
+  await screen.findByText('asset-1');
+  const pending=Promise.withResolvers<CharacterPage>();
+  mocks.api.mockImplementation(path=>path==='/v1/library/characters'?Promise.resolve(structuredClone(index)):pending.promise);
+  if(trigger==='refreshKey')view.rerender(<CharacterBrowser {...props} initialNode="character:c" refreshKey={2}/>);
+  else fireEvent.click(screen.getByRole('button',{name:'refresh gallery'}));
+  await act(async()=>{});
+  expect(screen.getByText('asset-1')).toBeTruthy();
+  expect(screen.queryByText('updated')).toBeNull();
+  await act(async()=>pending.resolve(page(['updated'])));
+  await screen.findByText('updated');
+  expect(screen.queryByText('asset-1')).toBeNull();
+});
+
 it('links inner series through classifications after characters and opens plain folders outside the hub',async()=>{
   const nested=structuredClone(index);
   // An older publication may still mark a folder excluded; the shelf no longer shows it.

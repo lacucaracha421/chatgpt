@@ -23,9 +23,13 @@ export function StatusWord({ tone, children }: { tone?: string; children: ReactN
   return <span className="settings-view__state" data-tone={tone}>{children}</span>;
 }
 
+export function settingsGroupId(title: string): string {
+  return `settings-group-${title.replace(/\s+/g, "-")}`;
+}
+
 /** `help` is the ⓘ text: one paragraph, or several. */
 export function SettingsGroup({ title, help, children }: { title: string; help?: string | readonly string[]; children: ReactNode }) {
-  const headingId = `settings-group-${title.replace(/\s+/g, "-")}`;
+  const headingId = settingsGroupId(title);
   return <section className="settings-view__group" aria-labelledby={headingId}>
     <SectionLabel as="h3" id={headingId} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
     {children}

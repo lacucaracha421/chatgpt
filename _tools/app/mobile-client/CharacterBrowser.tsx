@@ -190,6 +190,7 @@ export function CharacterBrowser({review,classifications=[],onOpenFolder,search,
   const folderStripId=useId();
   const [restore,setRestore]=useState(0);
   const [retry,setRetry]=useState(0);
+  const handledRefresh=useRef({refreshKey,retry});
   const host=useRef<HTMLDivElement>(null),scroll=useRef(0);
   const swapOwner=useRef({});
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
@@ -302,7 +303,9 @@ export function CharacterBrowser({review,classifications=[],onOpenFolder,search,
     void api<CharacterIndex>('/v1/library/characters',request.signal).then(result=>{
       if(!indexGate.current.current(request.id))return;
       if(!validCharacterIndex(result))throw new Error('캐릭터 보기를 지원하는 앱과 서버가 필요합니다.');
-      if(JSON.stringify(latest.current.index)===JSON.stringify(result))return;
+      const explicitRefresh=handledRefresh.current.refreshKey!==refreshKey||handledRefresh.current.retry!==retry;
+      handledRefresh.current={refreshKey,retry};
+      if(!explicitRefresh&&JSON.stringify(latest.current.index)===JSON.stringify(result))return;
       // Technical metadata may change without a new membership publication.
       // A host refresh must not restore an old page solely because revision is unchanged.
       cache.current.clear();
