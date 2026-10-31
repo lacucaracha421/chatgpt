@@ -4,6 +4,15 @@
 
 - Keep folder search open and visible above the mobile keyboard in the Arca picker.
 
+## 3.5.70 — 2026-10-29
+
+- Keep ownership badges on JAVLibrary and AVDBS up to date by checking changed
+  text and added rows instead of repeatedly walking the whole page.
+- Group X gallery updates into animation frames and check only changed post text
+  for automatic translation after the initial page scan.
+- Stop watching individual page text edits while image translations are open.
+  Keep layout tracking for scrolling, resizing, hidden media and position changes.
+
 ## 3.5.68 — 2026-10-26
 
 - Keep X translation prefetch steady while scrolling: small scroll corrections no longer

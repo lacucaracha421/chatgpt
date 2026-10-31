@@ -1133,22 +1133,42 @@ test('a long rate-limit cooldown is handed back at once and a sub model answers 
   assert.equal(second.ok,true); assert.equal(calls,3,'the cooling model is skipped, not called again');
 });
 
-test('page churn outside post text does not rescan, while new or edited post text does',async()=>{
+test('page churn leaves old posts alone while added, edited and recycled text is translated',async t=>{
+  const requests=[];
   const w=translationWindow('<article><div data-testid="tweetText" lang="en">First post</div><time>1m</time></article><div id="feed"></div>',
-    ()=>({ok:true,enabled:true,hasApiKey:true}));
+    message=>{
+      if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+      requests.push(message.text);
+      return {ok:true,text:`Translated: ${message.text}`};
+    });
   const clock=fakeTimers(w); w.IntersectionObserver=translationObserver(w);
+  const rect=()=>({width:300,height:60,top:10,bottom:70});
+  const first=w.document.querySelector('[data-testid="tweetText"]'); first.getBoundingClientRect=rect;
   w.eval(content); await clock.advance(400);
+  assert.deepEqual(requests,['First post']);
   let scans=0; const query=w.document.querySelectorAll.bind(w.document);
   w.document.querySelectorAll=selector=>{ if(selector==='[data-testid="tweetText"]') scans++; return query(selector); };
   w.document.querySelector('time').textContent='2m';
   w.document.querySelector('article').setAttribute('href','/status/1');
   w.document.getElementById('feed').append(w.document.createElement('span'));
   await clock.advance(400); assert.equal(scans,0);
-  w.document.querySelector('[data-testid="tweetText"]').firstChild.data='First post, edited';
-  await clock.advance(400); assert.equal(scans,1);
+  first.firstChild.data='First post, edited';
+  await clock.advance(400); assert.equal(scans,0);
+  assert.equal(first.nextElementSibling.textContent,'Translated: First post, edited');
   const next=w.document.createElement('article'); next.innerHTML='<div data-testid="tweetText" lang="en">Second post</div>';
+  const second=next.firstChild; second.getBoundingClientRect=rect;
   w.document.getElementById('feed').append(next);
-  await clock.advance(400); assert.equal(scans,2); w.close();
+  await clock.advance(400); assert.equal(scans,0);
+  assert.equal(second.nextElementSibling.textContent,'Translated: Second post');
+  next.remove(); await clock.advance(400);
+  assert.equal(next.querySelector('.lakomics-translation'),null);
+  second.firstChild.data='Recycled post';
+  w.document.getElementById('feed').append(next);
+  await clock.advance(400);
+  assert.equal(second.nextElementSibling.textContent,'Translated: Recycled post');
+  assert.deepEqual(requests,['First post','First post, edited','Second post','Recycled post']);
+  t.diagnostic(`document tweet queries after initial scan: ${scans}`);
+  w.close();
 });
 
 test('a rejected sub model key never hides or replaces the Claude answer',async()=>{

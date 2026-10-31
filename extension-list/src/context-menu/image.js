@@ -801,9 +801,13 @@
             : record.target.matches?.(media) || record.target.querySelector?.(media)));
           schedule(scanNeighbours);
         });
-        overlay.mutations.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+        // Style/class/hidden changes can move the image or hide a neighbour without
+        // resizing the image. Text edits are covered by the layout fallback below.
+        overlay.mutations.observe(doc.documentElement, { subtree: true, childList: true, attributes: true });
       }
       const check = () => {
+        // ResizeObserver does not report position-only layout shifts or neighbours
+        // moving without a DOM mutation (for example after fonts or CSS load).
         schedule();
         overlay.checkTimer = win.setTimeout(check, 500);
       };

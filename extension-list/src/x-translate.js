@@ -34,6 +34,7 @@
   // so the height is cached on resize and the scroll position is read once per frame.
   let viewHeight = globalThis.innerHeight || 0;
   const snapshots = new WeakMap();
+  const changedTexts = new Set();
   let textObserver, onTextMutations;
   // Main-tweet articles whose "Show more" was pressed, with the time to stop waiting.
   const expansions = new WeakMap();
@@ -608,23 +609,23 @@
   function invalidateSource(record) {
     const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
     const element = target?.closest(SELECTOR);
-    if (element) snapshots.delete(element);
+    if (element) { snapshots.delete(element); changedTexts.add(element); }
     // Invalidate removed/reinserted subtrees too: X can edit a recycled post
     // while detached, outside the body observer's coverage.
     if (record.type !== "childList") return;
     for (const node of [...record.addedNodes, ...record.removedNodes]) {
       if (node.nodeType !== 1 || node.matches(OWN_NODES)) continue;
-      if (node.matches(SELECTOR)) snapshots.delete(node);
-      for (const text of node.querySelectorAll(SELECTOR)) snapshots.delete(text);
+      if (node.matches(SELECTOR)) { snapshots.delete(node); changedTexts.add(node); }
+      for (const text of node.querySelectorAll(SELECTOR)) { snapshots.delete(text); changedTexts.add(text); }
     }
   }
   const viewportState = new WeakMap();
   const canRun = () => enabled && hasApiKey && !blocked && !document.hidden;
   // While blocked, cards already shown still need scans to drop them from recycled posts.
   const needsScan = () => canRun() || (!document.hidden && rendered.size > 0);
-  function scan(immediate = false) {
+  function scan(immediate = false, changed = null) {
     if (!needsScan()) return;
-    for (const element of observed) {
+    for (const element of changed || observed) {
       if (!element.isConnected) {
         intersection?.unobserve(element);
         viewportIntersection?.unobserve(element);
@@ -636,7 +637,8 @@
         removeResult(element);
       }
     }
-    for (const element of document.querySelectorAll(SELECTOR)) {
+    for (const element of changed || document.querySelectorAll(SELECTOR)) {
+      if (!element.isConnected) continue;
       if (!observed.has(element)) {
         observed.add(element);
         viewportIntersection?.observe(element);
@@ -861,9 +863,14 @@
         invalidateSource(record);
         relevant = true;
       }
-      if (!relevant || !needsScan()) return;
+      if (!needsScan()) { changedTexts.clear(); return; }
+      if (!relevant) return;
       if (scanTimer !== null) return;
-      scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        const changed = new Set(changedTexts); changedTexts.clear();
+        scan(false, changed);
+      }, 200);
     };
     textObserver = new MutationObserver(onTextMutations);
     textObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href", "alt"] });

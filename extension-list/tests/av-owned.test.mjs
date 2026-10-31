@@ -87,6 +87,59 @@ test('owned JAVLibrary detail button becomes non-sending on both protocols', asy
   }
 });
 
+test('later rows and text edits do not walk old rows or skipped branches', async t => {
+  const fixture = page('<main>' + '<p>Old row MIDA-703</p>'.repeat(100)
+    + '</main><div id="ticker"><div><span>DLDSS-467</span></div></div><section id="rows"></section>');
+  const { w, doc } = fixture;
+  const walks = [], parsed = [];
+  const createWalker = doc.createTreeWalker.bind(doc);
+  doc.createTreeWalker = (root, ...args) => { walks.push(root); return createWalker(root, ...args); };
+  const parse = w.LakomicsAvLookup.productCodesInText;
+  w.LakomicsAvLookup.productCodesInText = text => { parsed.push(text); return parse(text); };
+  try {
+    await fixture.controller.start();
+    const initialWalks = walks.filter(root => root === doc.body).length;
+    assert.equal(initialWalks, 1, 'the first scan walks the body once, including its reply');
+    assert.ok(!parsed.includes('DLDSS-467'), 'text inside a nested skipped branch is never parsed');
+    walks.length = 0; parsed.length = 0;
+    doc.getElementById('rows').innerHTML = '<a>MIDA-703 DLDSS-467</a>';
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(doc.querySelector('#rows a span')?.dataset.code, 'MIDA-703');
+    assert.deepEqual(fixture.messages.at(-1).codes, ['DLDSS-467']);
+    assert.ok(!parsed.some(text => text.includes('Old row')), 'unchanged rows are not parsed again');
+    assert.equal(walks.filter(root => root === doc.body).length, 0);
+    const link = doc.querySelector('#rows a');
+    link.firstChild.data = 'DLDSS-467';
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(link.querySelector('span'), null, 'editing a code removes its stale badge');
+    doc.getElementById('ticker').insertAdjacentHTML('beforeend', '<div>MIDA-999</div>');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.ok(!fixture.messages.some(message => message.codes.includes('MIDA-999')));
+    t.diagnostic(`body walks: initial ${initialWalks}; subsequent row/edit/ticker changes ${walks.filter(root => root === doc.body).length}`);
+  } finally { fixture.close(); }
+});
+
+test('rows added while ownership is pending and split text across reply batches keep every badge', async () => {
+  let resolveFirst;
+  const fixture = page('<p>' + Array.from({ length: 201 }, (_, i) => `MIDA-${i + 100}`).join(' ') + '</p>', {
+    sendMessage: message => message.codes.includes('MIDA-100')
+      ? new Promise(resolve => { resolveFirst = resolve; })
+      : { ok: true, owned: message.codes },
+  });
+  try {
+    const started = fixture.controller.start();
+    fixture.doc.body.insertAdjacentHTML('beforeend', '<a>MIDA-100</a>');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    resolveFirst({ ok: true, owned: ['MIDA-100'] });
+    await started;
+    assert.equal(fixture.doc.querySelector('a span')?.dataset.code, 'MIDA-100');
+    assert.deepEqual([...fixture.doc.querySelectorAll('p span')].map(node => node.dataset.code), ['MIDA-100', 'MIDA-300']);
+    fixture.doc.querySelector('p').firstChild.remove();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.deepEqual([...fixture.doc.querySelectorAll('p span')].map(node => node.dataset.code), ['MIDA-300']);
+  } finally { fixture.close(); }
+});
+
 test('unowned HTTP detail can still send with an API-compatible optional source URL', async () => {
   const fixture = page('<table><tr id="video_id"><td class="text">DLDSS-467</td></tr></table>',
     { url: 'http://www.javlibrary.com/ja/?v=work' });
@@ -96,6 +149,21 @@ test('unowned HTTP detail can still send with an API-compatible optional source 
     await fixture.avSend.send('DLDSS-467');
     assert.equal(fixture.messages.at(-1).type, 'av-send');
     assert.equal(fixture.messages.at(-1).request.sourceUrl, null);
+  } finally { fixture.close(); }
+});
+
+test('detail page button updates do not keep scheduling ownership scans', async () => {
+  const fixture = page('<table><tr id="video_id"><td class="text">MIDA-703</td></tr></table>',
+    { url: 'https://www.javlibrary.com/ja/?v=work' });
+  let updates = 0;
+  const setOwned = fixture.avSend.setOwned;
+  fixture.avSend.setOwned = codes => { updates++; setOwned(codes); };
+  try {
+    await fixture.controller.start();
+    const settled = updates;
+    await new Promise(resolve => setTimeout(resolve, 700));
+    assert.equal(updates, settled, 'own button text changes must not cause recurring scans');
+    assert.equal(fixture.doc.querySelector('button').disabled, true);
   } finally { fixture.close(); }
 });
 

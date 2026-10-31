@@ -864,6 +864,26 @@ test('nested overflow containers retain fixed scroll tracking, including the out
   f.actions.destroy(); f.close();
 });
 
+test('page text edits wait for layout fallback and media removal still hides the overlay promptly', async () => {
+  const f = page('<p id="text">A paragraph</p><img id="pic" src="https://img.test/a.png">', {send: async () => ({ok: true, lines: noteLines})});
+  let y = 100, reads = 0;
+  Object.defineProperty(f.img, 'getBoundingClientRect', {configurable: true,
+    value: () => { reads++; return {left: 100, top: y, width: 200, height: 200}; }});
+  await f.actions.activate('image.translate', f.context(), origin, gesture);
+  const v = notesView(f);
+  await f.timer.advance(100);
+  reads = 0; y = 130;
+  const text = f.doc.getElementById('text').firstChild;
+  for (let i = 0; i < 20; i++) text.data = `Paragraph update ${i}`;
+  await f.timer.advance(100);
+  assert.equal(reads, 0, 'character-data bursts do not trigger page geometry checks');
+  await f.timer.advance(500);
+  assert.equal(v.host.style.top, '130px', 'position-only shifts still follow the image');
+  f.img.remove(); await f.timer.advance(60);
+  assert.equal(v.host.style.visibility, 'hidden', 'removal does not wait for the fallback');
+  f.actions.destroy(); f.close();
+});
+
 test('X-style corner clipping keeps document anchoring; actually scrollable hidden wrappers fall back', async () => {
   const f = page('<div style="overflow:hidden"><img id="pic" src="https://img.test/a.png"></div>', {send: async () => ({ok: true, lines: noteLines})});
   await f.actions.activate('image.translate', f.context(), origin, gesture);

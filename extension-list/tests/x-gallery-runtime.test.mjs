@@ -106,6 +106,34 @@ test('photo ordinal comes from the photo link, not from loaded-image order', () 
   assert.equal(post.images[0].index, 3);
 });
 
+test('timeline mutation bursts wait for one frame and process each target once', async ctx => {
+  const intersections = [], t = tab(sharedStorage(), { intersections });
+  await wait();
+  intersections.shift()();
+  await until(() => t.$('.lakomics-x-gallery-summary').textContent.includes('1'));
+  const timeline = t.w.document.getElementById('timeline');
+  const closest = timeline.closest.bind(timeline);
+  let calls = 0;
+  timeline.closest = selector => { calls++; return closest(selector); };
+  const frames = [], requestFrame = t.w.requestAnimationFrame;
+  t.w.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+  for (let i = 0; i < 8; i++) {
+    timeline.append(t.w.document.createElement('span'));
+    await Promise.resolve();
+  }
+  timeline.insertAdjacentHTML('beforeend', article('101'));
+  await Promise.resolve();
+  assert.equal(calls, 0, 'observer delivery does not search ancestors');
+  assert.equal(frames.length, 1, 'separate deliveries share one frame');
+  t.w.requestAnimationFrame = requestFrame;
+  frames[0]();
+  assert.equal(calls, 1);
+  await until(() => intersections.length === 1);
+  intersections.shift()();
+  await until(() => t.$('.lakomics-x-gallery-summary').textContent.includes('2'));
+  ctx.diagnostic(`ancestor searches for nine timeline records: ${calls}`);
+});
+
 test('compact metrics, harvest decisions, disinterest decay and migration', () => {
   const g = helpers().LakomicsXGallery;
   assert.equal(g.parseCompactMetric('1.2K'), 1200);

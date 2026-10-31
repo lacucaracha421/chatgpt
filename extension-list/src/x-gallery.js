@@ -757,41 +757,55 @@
       }
     }, { threshold: [0, 0.08] });
 
-    const mutationObserver = new MutationObserver((mutations) => {
+    const mutationRecords = [];
+    let mutationFrame = null;
+    function processMutations() {
+      mutationFrame = null;
+      const mutations = mutationRecords.splice(0);
+      const targets = new Set(), added = new Set(), removed = new Set();
       let routeMayHaveChanged = false;
       for (const mutation of mutations) {
         if (ui.root.contains(mutation.target)) continue;
         routeMayHaveChanged = true;
-        let timelineTouched = false;
-        const ownerArticle = mutation.target?.closest?.(TWEET_SELECTOR);
+        targets.add(mutation.target);
+        for (const node of mutation.addedNodes) added.add(node);
+        for (const node of mutation.removedNodes) removed.add(node);
+      }
+      let timelineTouched = false;
+      for (const target of targets) {
+        const ownerArticle = target?.closest?.(TWEET_SELECTOR);
         if (ownerArticle) {
           timelineTouched = true;
           observeArticle(ownerArticle);
           if (visibleArticles.has(ownerArticle)) queueArticle(ownerArticle);
         }
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          if (node.matches?.(TWEET_SELECTOR)) {
-            timelineTouched = true;
-            observeArticle(node);
-          }
-          const nested = node.querySelectorAll?.(TWEET_SELECTOR) ?? [];
-          if (nested.length) timelineTouched = true;
-          for (const article of nested) observeArticle(article);
-        }
-        // X virtualizes the timeline; stop observing tweets it has removed.
-        for (const node of mutation.removedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          const removed = node.matches?.(TWEET_SELECTOR) ? [node] : Array.from(node.querySelectorAll?.(TWEET_SELECTOR) ?? []);
-          for (const article of removed) {
-            if (article.isConnected) continue;
-            intersectionObserver.unobserve(article);
-            observedArticles.delete(article); visibleArticles.delete(article); pendingArticles.delete(article);
-          }
-        }
-        if (timelineTouched) timelineVersion += 1;
       }
+      for (const node of added) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (node.matches?.(TWEET_SELECTOR)) {
+          timelineTouched = true;
+          observeArticle(node);
+        }
+        const nested = node.querySelectorAll?.(TWEET_SELECTOR) ?? [];
+        if (nested.length) timelineTouched = true;
+        for (const article of nested) observeArticle(article);
+      }
+      // X virtualizes the timeline; stop observing tweets it has removed.
+      for (const node of removed) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        const articles = node.matches?.(TWEET_SELECTOR) ? [node] : Array.from(node.querySelectorAll?.(TWEET_SELECTOR) ?? []);
+        for (const article of articles) {
+          if (article.isConnected) continue;
+          intersectionObserver.unobserve(article);
+          observedArticles.delete(article); visibleArticles.delete(article); pendingArticles.delete(article);
+        }
+      }
+      if (timelineTouched) timelineVersion += 1;
       if (routeMayHaveChanged) queueRouteSync();
+    }
+    const mutationObserver = new MutationObserver((mutations) => {
+      mutationRecords.push(...mutations);
+      if (mutationFrame === null) mutationFrame = requestAnimationFrame(processMutations);
     });
 
     mutationObserver.observe(document.body, { childList: true, subtree: true });
