@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { memo, StrictMode } from "react";
 import { act } from "@testing-library/react";
 import { LibrarySetup } from "./LibrarySetup";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -10,6 +10,19 @@ import { LIBRARY_PATH_STORAGE_KEY, LibraryProvider, useLibrary } from "./Library
 afterEach(() => {
   localStorage.clear();
   cleanup();
+});
+
+it("does not notify library consumers on an unrelated parent render", () => {
+  const libraryGateway = gateway();
+  const observe = vi.fn();
+  const Consumer = memo(function Consumer() {
+    observe(useLibrary());
+    return null;
+  });
+  const { rerender } = render(<LibraryProvider gateway={libraryGateway}><Consumer /></LibraryProvider>);
+  observe.mockClear();
+  rerender(<LibraryProvider gateway={libraryGateway}><Consumer /></LibraryProvider>);
+  expect(observe).not.toHaveBeenCalled();
 });
 
 it("retains the startup path for the next launch when automatic restore fails", async () => {

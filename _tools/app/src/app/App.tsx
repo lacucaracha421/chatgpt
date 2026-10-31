@@ -16,7 +16,7 @@ import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { HomeAssetDestination } from "../home/HomeAssetDestination";
 import { applyInitialCountOrder, reorderFolders, withFolderSiblingOrder } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
-import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
 import { FolderPrefetchContext, invalidateFolderPrefetch, type FolderPrefetchPlan } from "../assets/folderPrefetch";
 import { planFolderPrefetch } from "./folderPrefetchPlan";
@@ -497,6 +497,12 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   function updatePreferences(update: Partial<UiPreferences>) {
     setPreferences((current) => ({ ...current, ...update }));
   }
+  const setPrivacyMode = useCallback((privacyMode: boolean) => {
+    setPreferences(current => ({ ...current, privacyMode }));
+  }, []);
+  const setNsfwFilter = useCallback((nsfwFilter: boolean) => {
+    setPreferences(current => ({ ...current, nsfwFilter }));
+  }, []);
 
   /** Set when Home opened another tab: back (mouse, Escape) from that tab's first screen returns to Home. */
   const homeReturnRef = useRef(false);
@@ -765,7 +771,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   return (
-    <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={(nsfwFilter) => updatePreferences({nsfwFilter})} privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
+    <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={setNsfwFilter} privacyMode={preferences.privacyMode} setPrivacyMode={setPrivacyMode}>
       <FaultGameProvider>
       <FolderPrefetchContext.Provider value={folderPrefetchPlan}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
@@ -1010,5 +1016,6 @@ const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, setti
 function WorkspaceChromeScope({chrome, scope, children}: {chrome: ReturnType<typeof useWorkspaceChrome>; scope: string; children: ReactNode}) {
   const painted = useContext(AreaPainted);
   // A portal escapes the stage's opacity. Only the painted tree may use the shell's slots.
-  return <ChromeContext.Provider value={chrome ? {...chrome, scope, targets: painted ? chrome.targets : NO_CHROME_TARGETS} : null}>{children}</ChromeContext.Provider>;
+  const value = useMemo(() => chrome ? {...chrome, scope, targets: painted ? chrome.targets : NO_CHROME_TARGETS} : null, [chrome, scope, painted]);
+  return <ChromeContext.Provider value={value}>{children}</ChromeContext.Provider>;
 }

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { memo } from "react";
 import { expect, it, vi } from "vitest";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage, useWorkTurnBlocked } from "./WorkZoom";
 
@@ -6,6 +7,23 @@ function Turner({ onTurn }: { onTurn(): void }) {
   const blocked = useWorkTurnBlocked();
   return <div data-testid="object" onPointerMove={() => { if (!blocked?.current) onTurn(); }} />;
 }
+
+it("keeps zoom consumers stable on parent renders and updates them when zoom changes", () => {
+  const observe = vi.fn();
+  const Consumer = memo(function Consumer() {
+    observe(useWorkTurnBlocked());
+    return null;
+  });
+  const { rerender } = render(<WorkZoomProvider workId="w" reset={0}><WorkZoomStage data-testid="stage"><WorkZoomObject><Consumer /></WorkZoomObject></WorkZoomStage></WorkZoomProvider>);
+  observe.mockClear();
+  rerender(<WorkZoomProvider workId="w" reset={0}><WorkZoomStage data-testid="stage"><WorkZoomObject><Consumer /></WorkZoomObject></WorkZoomStage></WorkZoomProvider>);
+  expect(observe).not.toHaveBeenCalled();
+  fireEvent.wheel(screen.getByTestId("stage"), { deltaY: -100 });
+  expect(Number(document.querySelector<HTMLElement>(".work-zoom-object")!.dataset.zoom)).toBeGreaterThan(1);
+  expect(observe).toHaveBeenCalledTimes(1);
+  rerender(<WorkZoomProvider workId="other" reset={0}><WorkZoomObject><Consumer /></WorkZoomObject></WorkZoomProvider>);
+  expect(document.querySelector<HTMLElement>(".work-zoom-object")!.dataset.zoom).toBe("1");
+});
 
 it("lets a one-finger vertical drag on the stage scroll the page instead of turning the object", () => {
   const onTurn = vi.fn();

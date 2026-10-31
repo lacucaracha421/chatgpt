@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PropsWithChildren,
@@ -67,8 +68,9 @@ export function LibraryProvider({
     return () => { active = false; };
   }, [gateway, tryOpenLibrary]);
 
+  const value = useMemo(() => ({ gateway, library, error, initializing, openLibrary }), [gateway, library, error, initializing, openLibrary]);
   return (
-    <LibraryContext.Provider value={{ gateway, library, error, initializing, openLibrary }}>
+    <LibraryContext.Provider value={value}>
       {children}
     </LibraryContext.Provider>
   );

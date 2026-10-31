@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject } from "react";
 
 /** One-finger gesture on the stage: "pending" until the axis is chosen, then it either turns the object or scrolls the page. */
 export type WorkGesture = "pending" | "turn" | "scroll" | null;
@@ -16,7 +16,10 @@ export function WorkZoomProvider({ workId, reset, children }: { workId: string; 
   const blocked = useRef(false);
   const gesture = useRef<WorkGesture>(null);
   useLayoutEffect(() => { setZoom(1); blocked.current = false; gesture.current = null; }, [workId, reset]);
-  return <ZoomContext.Provider value={{ zoom, blocked, gesture, session: JSON.stringify([workId, reset]), change: factor => setZoom(value => Math.min(2.5, Math.max(.6, value * factor))) }}>{children}</ZoomContext.Provider>;
+  const session = useMemo(() => JSON.stringify([workId, reset]), [workId, reset]);
+  const change = useCallback((factor: number) => setZoom(value => Math.min(2.5, Math.max(.6, value * factor))), []);
+  const value = useMemo(() => ({ zoom, blocked, gesture, session, change }), [zoom, session, change]);
+  return <ZoomContext.Provider value={value}>{children}</ZoomContext.Provider>;
 }
 
 /** Only object layers scale; controls and backdrops stay fixed at the stage centre. */

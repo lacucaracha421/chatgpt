@@ -60,6 +60,17 @@ vi.mock("../layout/StatusCenter", async (original) => wrapExports(await original
 vi.mock("../layout/WorkspaceNavigation", async (original) => wrapExports(await original(), ["WorkspaceNavigation"]));
 vi.mock("../collections/CollectionBrowser", async (original) => wrapExports(await original(), ["CollectionBrowser"]));
 vi.mock("../notes/NotesView", async (original) => wrapExports(await original(), ["NotesView"]));
+const privacyValues = vi.hoisted(() => vi.fn());
+vi.mock("../privacy/PrivacyContext", async (original) => {
+  const mod = await original<typeof import("../privacy/PrivacyContext")>();
+  const { createElement, memo } = await import("react");
+  const Observer = memo(function Observer() {
+    privacyValues(mod.usePrivacy());
+    return null;
+  });
+  return { ...mod, PrivacyProvider: (props: Parameters<typeof mod.PrivacyProvider>[0]) =>
+    createElement(mod.PrivacyProvider, props, createElement(Observer), props.children) };
+});
 vi.mock("../assets/mediaUrl", async (original) => {
   const m = await original<typeof import("../assets/mediaUrl")>();
   return {
@@ -454,6 +465,16 @@ describe("desktop idle re-render gate (PERF-ALL-001)", () => {
     expect(Object.keys(idle.renders).filter(name => name !== "StatusCenter")).toEqual([]);
     expect(idle.commits).toBeLessThanOrEqual(IDLE_GATE.commitsPerMinute);
   });
+});
+
+it("keeps privacy consumers stable when switching to an unrelated tab", async () => {
+  const gateway = gw();
+  await startWorkspace(gateway);
+  privacyValues.mockClear();
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  await act(async () => { fireEvent.click(within(rail).getByRole("button", { name: "메모" })); });
+  await advance(3_000);
+  expect(privacyValues).not.toHaveBeenCalled();
 });
 
 it("Home revisit shows retained content while its overview refresh is pending", async () => {
