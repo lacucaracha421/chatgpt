@@ -153,6 +153,7 @@ globalThis.LakomicsPickerCss = String.raw`
 @keyframes breathe{50%{opacity:.55}}
 .sheet-handle,.sheet-scrim,.remembered-caret,.foot-picks{display:none}
 :host([data-sheet="true"]){transition:height 200ms var(--ease);transition-delay:0}
+:host([data-sheet="true"][data-panel-keyboard="true"]){transition:none}
 :host([data-sheet="true"]) .dock{border-radius:8px 8px 0 0;animation:sheetIn 200ms var(--ease) both;font-size:17px;line-height:22px}
 :host([data-sheet="true"]) .dock.leaving{animation:sheetOut 140ms var(--ease) both}
 :host([data-sheet="true"]) .clip{border-radius:8px 8px 0 0}

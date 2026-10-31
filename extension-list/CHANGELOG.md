@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.71 — 2026-10-31
+
+- Keep folder search open and visible above the mobile keyboard in the Arca picker.
+
 ## 3.5.68 — 2026-10-26
 
 - Keep X translation prefetch steady while scrolling: small scroll corrections no longer

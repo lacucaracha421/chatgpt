@@ -53,7 +53,7 @@
     const thumbs = new Map();
     const s = { panelWidth: PANEL_WIDTH, width: PANEL_WIDTH, columns: 3, folded: false, overlay: false, dragging: false, folders: [], characters: [], folderId: null, scopeKind: null, scopeId: null, include: true, order: "random", nextOffset: null, gridKey: null, batchLoading: false, body: "loading", error: null, batch: [], allSeen: false, popover: false, preview: null, notice: null, inserted: new Set(), focus: 0, jobVisible: false, running: false, hasGrid: false, expanded: new Set(), query: "", cursor: 0, settled: false };
     Object.assign(s, { sheet: false, sheetLevel: "half", sheetHeight: 0, keyboard: false });
-    let keyboardRestore = null, viewportBaseline = win.innerHeight, viewportWidth = win.innerWidth, sheetDrag = null, suppressClick = false, scrollFrame = null;
+    let keyboardRestore = null, keyboardInPanel = false, viewportBaseline = win.innerHeight, viewportWidth = win.innerWidth, sheetDrag = null, suppressClick = false, scrollFrame = null;
     let host = null, root = null, ui = {}, isOpen = false, opening = false, loadToken = 0, retryTimer = null, themeObserver = null, pushed = false, leaveTimer = null, resizeFrame = null, fillFrame = null, filling = false, trayHovered = false, trayTimer = null;
     const reduced = () => Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
     const message = async payload => { try { return await send(payload); } catch { return { ok: false, kind: "offline" }; } };
@@ -831,9 +831,12 @@
       unplace({ keepSheet: true });
       const oldCols = s.columns;
       s.width = win.innerWidth; s.columns = Math.max(4, Math.min(6, Math.floor(s.width / 128)));
-      s.sheetHeight = height ?? (s.sheetLevel === "bar" ? 72 : s.sheetLevel === "full" ? win.innerHeight - 36 : Math.round(win.innerHeight * .55));
+      const vv = win.visualViewport, panelKeyboard = s.keyboard && keyboardInPanel;
+      const viewportHeight = panelKeyboard ? viewportBaseline : win.innerHeight;
+      s.sheetHeight = height ?? (s.sheetLevel === "bar" ? 72 : s.sheetLevel === "full" ? viewportHeight - 36 : Math.round(viewportHeight * .55));
+      if (panelKeyboard && vv) s.sheetHeight = Math.min(s.sheetHeight, vv.height);
+      host.dataset.panelKeyboard = String(panelKeyboard);
       host.style.top = "auto"; host.style.width = "100%"; host.style.height = `${s.sheetHeight}px`;
-      const vv = win.visualViewport;
       host.style.bottom = `${s.keyboard && vv ? Math.max(0, win.innerHeight - (vv.offsetTop + vv.height)) : 0}px`;
       host.style.setProperty("--panel-width", `${s.width}px`); host.style.setProperty("--columns", s.columns);
       host.style.setProperty("--sheet-height", `${s.sheetHeight}px`);
@@ -858,9 +861,11 @@
       const keyboard = viewportBaseline - vv.height > 150;
       if (keyboard && !s.keyboard) {
         s.keyboard = true;
-        if (!s.folded) { keyboardRestore = s.sheetLevel; setSheetLevel("bar", { keyboard: true }); }
+        // Shadow-root focus identifies our search; keep its input mounted throughout the keyboard session.
+        keyboardInPanel = s.popover && root.activeElement === ui.searchInput;
+        if (!keyboardInPanel && !s.folded) { keyboardRestore = s.sheetLevel; setSheetLevel("bar", { keyboard: true }); }
       } else if (!keyboard && s.keyboard) {
-        s.keyboard = false;
+        s.keyboard = false; keyboardInPanel = false;
         const restore = keyboardRestore; keyboardRestore = null;
         if (restore) setSheetLevel(restore, { keyboard: true });
       }
@@ -900,7 +905,7 @@
       win.removeEventListener("scroll", drawCaret); doc.removeEventListener("focusin", drawCaret); doc.removeEventListener("focusout", onFocusOut);
       win.cancelAnimationFrame(scrollFrame); scrollFrame = null; sheetDrag = null;
       if (keyboardRestore) { s.folded = false; s.sheetLevel = keyboardRestore; }
-      keyboardRestore = null; s.keyboard = false;
+      keyboardRestore = null; keyboardInPanel = false; s.keyboard = false;
     }
     function installSheetDrag() {
       // Touch events let a scrollable grid keep native scrolling until it reaches its top.
@@ -939,10 +944,13 @@
     }
     function place() {
       const wasSheet = s.sheet;
-      s.sheet = portrait(win); host.dataset.sheet = String(s.sheet);
+      // A keyboard can shrink innerHeight past the portrait breakpoint without a rotation.
+      const keyboardResize = wasSheet && viewportWidth === win.innerWidth && win.visualViewport && viewportBaseline - win.visualViewport.height > 150;
+      const viewportHeight = keyboardResize ? Math.max(win.innerHeight, viewportBaseline) : win.innerHeight;
+      s.sheet = portrait({ innerWidth: win.innerWidth, innerHeight: viewportHeight }); host.dataset.sheet = String(s.sheet);
       host.style.contain = s.sheet ? "style" : "layout style";
       if (wasSheet !== s.sheet) {
-        keyboardRestore = null; s.keyboard = false;
+        keyboardRestore = null; keyboardInPanel = false; s.keyboard = false;
         s.sheetLevel = s.folded ? "bar" : "half";
         if (!s.sheet) { ui.spacer.hidden = true; host.style.top = "0"; host.style.bottom = "0"; host.style.height = ""; ui.caret.hidden = true; }
       }

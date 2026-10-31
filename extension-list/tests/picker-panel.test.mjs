@@ -1021,13 +1021,68 @@ test('sheet handle snaps, scrim returns full to half, bar drag closes keeping pi
   f.panel.destroy(); f.w.close();
 });
 
+for (const shrinkWindow of [false, true]) for (const level of ['half', 'full']) test(`sheet search keeps focus through keyboard resize (${level}, window shrink: ${shrinkWindow})`, async () => {
+  const f = setup({ width: 674, height: 1078, stored: { [VIEW]: { folderId: 'f2' } } });
+  const vv = new f.w.EventTarget(); Object.assign(vv, { height: 1078, offsetTop: 0 });
+  Object.defineProperty(f.w, 'visualViewport', { value: vv });
+  const resize = async height => {
+    if (shrinkWindow) rotate(f, 674, height);
+    vv.height = height; vv.dispatchEvent(new f.w.Event('resize'));
+    await wait(40);
+  };
+  try {
+    await f.panel.open();
+    if (level === 'full') dragSheet(f, 400);
+    const normalHeight = f.panel.state.sheetHeight;
+    f.q('.folder').click();
+    const popover = f.q('.pop'), input = f.q('.pop input');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await resize(500);
+      assert.equal(f.panel.state.keyboard, true);
+      assert.equal(f.panel.state.sheet, true);
+      assert.equal(f.panel.state.sheetLevel, level);
+      assert.equal(f.panel.state.folded, false);
+      assert.equal(f.q('.lk').inert, false);
+      assert.equal(f.q('.pop'), popover);
+      assert.equal(f.panel.root.activeElement, input);
+      assert.ok(f.panel.state.sheetHeight <= vv.height, 'sheet fits above the keyboard');
+      input.value = '아로'; input.dispatchEvent(new f.w.Event('input'));
+      assert.deepEqual(f.qa('.trow').map(row => row.dataset.id), ['f2']);
+      await resize(1078);
+      assert.equal(f.panel.state.keyboard, false);
+      assert.equal(f.panel.state.sheetHeight, normalHeight);
+      assert.equal(f.q('.pop'), popover, 'dismissing the keyboard keeps search open');
+      assert.equal(f.panel.root.activeElement, input);
+    }
+    await resize(500);
+    input.value = '빈'; input.dispatchEvent(new f.w.Event('input'));
+    f.q('.trow[data-id="f3"]').click(); await settle();
+    assert.equal(f.q('.pop'), null);
+    assert.equal(f.panel.state.folderId, 'f3');
+    await resize(1078);
+    assert.equal(f.panel.state.sheetLevel, level);
+    assert.equal(f.panel.state.sheetHeight, normalHeight);
+    f.q('.folder').click();
+    await resize(500);
+    f.q('.sheet-handle').click();
+    assert.equal(f.q('.pop'), null, 'explicit sheet changes still close search');
+    assert.equal(f.panel.state.sheetLevel, 'bar');
+    await resize(1078);
+    assert.equal(f.panel.state.sheetLevel, 'bar');
+  } finally { f.panel.destroy(); f.w.close(); }
+});
+
 test('visual viewport folds only for keyboard, restores its prior height, and bar tap blurs', async () => {
   const f = setup({ width: 674, height: 1078, stored: { [VIEW]: { folderId: 'f2' } } });
   const vv = new f.w.EventTarget(); Object.assign(vv, { height: 1078, offsetTop: 0 });
   Object.defineProperty(f.w, 'visualViewport', { value: vv });
-  let blurred = 0; f.editor.find = () => ({ blur() { blurred++; } });
+  let blurred = 0;
+  const field = f.doc.querySelector('.fr-element'); field.setAttribute('tabindex', '0');
+  f.editor.find = () => field;
+  field.addEventListener('blur', () => { blurred++; });
   const resize = height => { vv.height = height; vv.dispatchEvent(new f.w.Event('resize')); };
   await f.panel.open(); dragSheet(f, 400); await wait(1);
+  field.focus(); assert.equal(f.doc.activeElement, field); assert.equal(f.q('.pop'), null);
   resize(650); assert.equal(f.panel.state.keyboard, true); assert.equal(f.panel.state.sheetLevel, 'bar');
   assert.equal(f.store[VIEW].folded, false, 'automatic fold is not remembered');
   resize(1078); assert.equal(f.panel.state.sheetLevel, 'full');
