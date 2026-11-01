@@ -17,6 +17,10 @@ final class NetworkPolicy {
  }
  /** Direct exchange peers: a literal RFC1918 or Tailscale (100.64/10) IPv4 address on the contract port, nothing else. */
  static boolean lanPeer(String ip,int port){return port==LanProtocol.PORT && LanProtocol.addressKind(ip)!=null;}
+ static void somiImage(String raw)throws Exception{
+  if(raw==null||raw.length()>16384)throw new IllegalArgumentException("Invalid Somi image");
+  URI u=new URI(raw);if(!"https".equals(u.getScheme())||!"gimel.mittere.io".equals(u.getHost())||u.getUserInfo()!=null||u.getFragment()!=null||(u.getPort()!=-1&&u.getPort()!=443))throw new IllegalArgumentException("Invalid Somi image");
+ }
  static void catalogImage(String workId,String revision,String kind,int index,String raw) throws Exception {
   if(workId==null || !workId.matches("[1-9][0-9]{0,18}") || revision==null || !revision.matches("[a-f0-9]{64}") || !(kind.equals("cover") || kind.equals("page")) || index<0 || index>=2000 || (kind.equals("cover") && index!=0) || raw==null || raw.length()>16384)throw new IllegalArgumentException("Invalid catalog image");
   URI u=new URI(raw);String host=u.getHost()==null?"":u.getHost().toLowerCase(Locale.ROOT);int port=u.getPort();
@@ -37,6 +41,8 @@ final class NetworkPolicy {
  static void api(String path,String method) throws Exception {
   if(path.length()>(path.startsWith("/v1/mobile-catalog/")?16384:8192) || path.contains("\\") || path.contains("#") || path.contains("\r") || path.contains("\n"))throw new IllegalArgumentException("Unsupported API path");
   String p=path.split("\\?",2)[0];
+  if(p.equals("/v1/somi/state")&&method.equals("GET"))return;
+  if(p.matches("/v1/somi/(bookmarks|progress)/[A-Za-z0-9_-]{22}")&&method.equals("PUT"))return;
   boolean get=p.equals("/v1/library/list-generation") || p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
   get=get || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/image-text");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");

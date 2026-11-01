@@ -22,6 +22,7 @@ final class MediaRepository {
  }
  private final SecureSettings settings;
  private final CloudClient client;
+ private final float density;
  private final FutureTask<ThumbnailCache> cache;
  private final Semaphore transfers=new Semaphore(8,true);
  private final Semaphore thumbnailTransfers=new Semaphore(8,true);
@@ -37,6 +38,7 @@ final class MediaRepository {
  private static final class LockEntry{final ReentrantLock lock=new ReentrantLock();int users;}
  private static final class Scope{boolean cover,small;String key,ticketGroup;long generation;JSONObject connection;ThumbnailCache.Kind kind=ThumbnailCache.Kind.VIEW;}
  private MediaRepository(Context context)throws IOException{
+  density=context.getResources().getDisplayMetrics().density;
   settings=new SecureSettings(context);client=new CloudClient(settings);
   cache=ThumbnailCache.restoreAsync(new File(context.getCacheDir(),"thumbnail-media"),restore->{
    Thread thread=new Thread(()->{long step=StartupPerf.clock();try{restore.run();}finally{StartupPerf.step("thumbnailScanJournalRestore",step);}},"thumbnail-cache-restore");
@@ -324,6 +326,35 @@ final class MediaRepository {
    if(count>=12 && header[4]=='f' && header[5]=='t' && header[6]=='y' && header[7]=='p' && header[8]=='a' && header[9]=='v' && header[10]=='i' && (header[11]=='f' || header[11]=='s'))return "image/avif";
    String mime=java.net.URLConnection.guessContentTypeFromStream(input);return imageMime(mime)?mime:null;
   }
+ }
+ private Scope somiScope(String id,String key,boolean cover)throws Exception{
+  SomiSef.idBytes(id);if(!key.matches("[a-f0-9]{64}"))throw new IllegalArgumentException();
+  Scope scope=scopedIdentity("somi/"+(cover?"cover/":"page/")+key+(cover?"/"+Math.round(148*density):""));scope.cover=cover;scope.kind=cover?ThumbnailCache.Kind.KEEP:ThumbnailCache.Kind.VIEW;return scope;
+ }
+ JSONObject somiCached(String id,String key)throws Exception{Scope scope=somiScope(id,key,true);cache().file(scope.key,scope.generation,scope.kind);return local(scope,"image/webp");}
+ JSONObject somiImage(String id,String key,boolean cover,String url,CancellationSignal signal)throws Exception{
+  NetworkPolicy.somiImage(url);Scope scope=somiScope(id,key,cover);LockEntry entry=retainLock(scope.key);boolean locked=false;
+  try{lock(entry,signal);locked=true;signal.throwIfCanceled();
+   try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache().remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
+   active.add(signal);
+   try{cache().obtain(scope.key,scope.generation,scope.kind,MAX_VIEW_IMAGE,file->{
+    // This process has cookies disabled. The existing download path sends neither cookies nor cloud credentials.
+    client.download(url,file,MAX_VIEW_IMAGE,signal);signal.throwIfCanceled();
+    if(cover){
+     int width=Math.max(1,Math.round(148*density)),height=Math.max(1,Math.round(208*density));
+     android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();bounds.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeFile(file.getPath(),bounds);
+     if(bounds.outWidth<=0||bounds.outHeight<=0)throw new IOException("소미 표지 형식 오류");
+     android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();options.inSampleSize=1;
+     while(bounds.outWidth/(options.inSampleSize*2)>=width&&bounds.outHeight/(options.inSampleSize*2)>=height)options.inSampleSize*=2;
+     android.graphics.Bitmap original=android.graphics.BitmapFactory.decodeFile(file.getPath(),options);if(original==null)throw new IOException("소미 표지 형식 오류");
+     android.graphics.Bitmap resized=original;
+     try{float scale=Math.min(1f,Math.min((float)width/original.getWidth(),(float)height/original.getHeight()));if(scale<1)resized=android.graphics.Bitmap.createScaledBitmap(original,Math.max(1,Math.round(original.getWidth()*scale)),Math.max(1,Math.round(original.getHeight()*scale)),true);
+      try(OutputStream out=new FileOutputStream(file)){if(!resized.compress(android.graphics.Bitmap.CompressFormat.WEBP,85,out))throw new IOException("소미 표지 변환 실패");}
+     }finally{if(resized!=original)resized.recycle();original.recycle();}
+    }
+   });}finally{active.remove(signal);}
+   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache().remove(scope.key,scope.generation);throw new IOException("소미 이미지 형식 오류");}return local(scope,mime);
+  }finally{releaseLock(scope.key,entry,locked);}
  }
  JSONObject catalogImage(String workId,String revision,String kind,int index,String url,CancellationSignal signal)throws Exception{
   if(workId==null || !workId.matches("[1-9][0-9]{0,18}") || !(kind.equals("cover") || kind.equals("page")) || index<0 || index>=2000 || kind.equals("cover")&&index!=0)throw new IllegalArgumentException();

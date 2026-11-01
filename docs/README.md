@@ -35,7 +35,7 @@ and [portable user preferences](agents/user-preferences.md).
 
 ## Subsystem contracts and retained research
 
-- [PC responsibilities](agents/pc-required-features.md), [mobile character publication](agents/mobile-character-contract.md) and [manga index](agents/manga-index-contract.md).
+- [PC responsibilities](agents/pc-required-features.md), [mobile character publication](agents/mobile-character-contract.md), [manga index](agents/manga-index-contract.md) and [Somi state](agents/somi-state-contract.md).
 - [Collection objects](research/collection-objects-design-20261004.md), [authority design](research/collection-authority-design-20260924.md) and [retained activation/runbook record](research/collection-authority-1b-plan-20261006.md). Consult current source and backlog before acting on dated batch sections.
 - [Character reference deltas](research/character-reference-delta-reconsideration-design-20260911.md), [automation research direction](research/character-autonomy-and-jev-direction-20260921.md) and [mobile review design](research/mobile-character-review-design-20260924.md).
 - [Release calendar](research/server-release-calendar-20261009.md) and [motion system](research/motion-system-20261004.md).

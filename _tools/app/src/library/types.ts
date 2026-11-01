@@ -1523,7 +1523,23 @@ export type ImageTextLine = {
 
 export type AssetImageText = { lines: ImageTextLine[]; digest: string };
 
+export type SomiSort = "new" | "old" | "votes" | "views" | "comments" | "added";
+export type SomiStatus = { loggedIn: boolean; handle: string | null; displayName: string | null; collected: number; total: number | null; complete: boolean; syncing: boolean; syncError?: string | null };
+export type SomiPost = { bookmarked: boolean; id: string; seconds: number; nanos: number; title: string; writerHandle: string; writerName: string; views: number; votes: number; comments: number; coverKey: string | null; cover: string | null; pages: number | null };
+export type SomiSearchPage = { items: SomiPost[]; total: number };
+export type SomiOpenedPost = { title: string; writer: string; pageUrls: string[]; initialPage: number };
+
 export interface LibraryGateway {
+  somiStatus?(collect?: boolean): Promise<SomiStatus>;
+  somiSyncNow?(): Promise<void>;
+  somiSyncState?(flush?: boolean): Promise<void>;
+  somiToggleBookmark?(id: string): Promise<boolean>;
+  somiOpenLogin?(): Promise<void>;
+  somiLogout?(): Promise<void>;
+  somiSearch?(query: string, sort: SomiSort, page: number, days: number | null, bookmarked?: boolean): Promise<SomiSearchPage>;
+  somiFillCovers?(ids: string[]): Promise<{ id: string; cover: string }[]>;
+  somiOpenPost?(id: string): Promise<SomiOpenedPost>;
+  somiSavePage?(id: string, page: number): Promise<void>;
   autoJobsStatus?(): Promise<AutoJobStatus[]>;
   runAutoJob?(id: AutoJobId): Promise<AutoJobStatus>;
   stopAutoJob?(id: AutoJobId): Promise<AutoJobStatus>;

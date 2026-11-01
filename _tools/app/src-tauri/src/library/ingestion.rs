@@ -917,7 +917,11 @@ fn inspect_image(staging: File) -> Result<(ImageFormat, u32, u32), LibraryError>
 }
 
 pub(super) fn encode_thumbnail_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
-    let thumbnail = image.thumbnail(THUMBNAIL_BOUND, THUMBNAIL_BOUND).to_rgba8();
+    encode_webp(&image.thumbnail(THUMBNAIL_BOUND, THUMBNAIL_BOUND))
+}
+
+pub(crate) fn encode_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
+    let thumbnail = image.to_rgba8();
     let mut config = webp::WebPConfig::new().map_err(|_| LibraryError::UnsupportedImage)?;
     config.lossless = 0;
     config.quality = THUMBNAIL_WEBP_QUALITY;

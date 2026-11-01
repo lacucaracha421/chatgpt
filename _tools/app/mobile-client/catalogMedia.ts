@@ -11,6 +11,7 @@ export type CatalogImageRequest = {
   kind:CatalogImageKind;
   index:number;
   url:string;
+  source?:'kHentai'|'somi';
 };
 type Queued = {start():void;visible():boolean};
 let active=0,sequence=0;
@@ -26,6 +27,7 @@ function drain(){
 /** Only nearby covers enter this queue; an on-screen cover overtakes queued preloads. */
 export function catalogImageTicket(request:CatalogImageRequest,signal:AbortSignal,visible:()=>boolean=()=>true):Promise<Ticket>{
   if(signal.aborted||tabletCatalogMasked())return Promise.reject(new DOMException('Cancelled','AbortError'));
+  if(request.kind==='cover'&&request.url.startsWith('https://app.lakomics.local/media-cache/'))return Promise.resolve({url:request.url,expires_in:240} as Ticket);
   const submitted=performance.now(),perfId=`catalog-${Date.now().toString(36)}-${++sequence}`;
   const foregroundDone=request.kind==='cover'?beginShelfForeground():()=>{};
   return new Promise((resolve,reject)=>{
@@ -43,7 +45,8 @@ export function catalogImageTicket(request:CatalogImageRequest,signal:AbortSigna
     const start=()=>{
       if(signal.aborted||tabletCatalogMasked()){cancel();return;}started=true;active++;
       const timing=request.kind==='cover'&&catalogPerfEnabled()?{perfId,jsQueueMs:performance.now()-submitted}:{};
-      void native<Ticket>('catalogImage',{...request,...timing},signal).then(value=>{if(finish())resolve(value);},error=>{if(finish())reject(error);});
+      const job=request.source==='somi'?native<Ticket>('somiImage',{id:request.workId,index:request.index},signal,70_000):native<Ticket>('catalogImage',{...request,...timing},signal);
+      void job.then(value=>{if(finish())resolve(value);},error=>{if(finish())reject(error);});
     };
     const entry:Queued={start,visible};
     signal.addEventListener('abort',cancel,{once:true});

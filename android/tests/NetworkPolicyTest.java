@@ -5,6 +5,12 @@ public final class NetworkPolicyTest {
  static void pass(Attempt a)throws Exception{a.run();checks++;}
  static void reject(Attempt a)throws Exception{try{a.run();}catch(Exception e){checks++;return;}throw new AssertionError("Unsafe input accepted");}
  public static void main(String[] args)throws Exception{
+ pass(()->NetworkPolicy.somiImage("https://gimel.mittere.io/cover.webp?key=signed"));
+ for(String url:new String[]{"http://gimel.mittere.io/x","https://evil.test/x","https://gimel.mittere.io.evil.test/x","https://user@gimel.mittere.io/x","https://gimel.mittere.io:444/x"})reject(()->NetworkPolicy.somiImage(url));
+ pass(()->NetworkPolicy.api("/v1/somi/state?since=0&limit=200","GET"));
+ pass(()->NetworkPolicy.api("/v1/somi/bookmarks/aaaaaaaaaaaaaaaaaaaaab","PUT"));
+ pass(()->NetworkPolicy.api("/v1/somi/progress/aaaaaaaaaaaaaaaaaaaaab","PUT"));
+ reject(()->NetworkPolicy.api("/v1/somi/state","PUT"));reject(()->NetworkPolicy.api("/v1/somi/bookmarks/aaaaaaaaaaaaaaaaaaaaab","GET"));reject(()->NetworkPolicy.api("/v1/somi/progress/aaaaaaaaaaaaaaaaaaaaab/extra","PUT"));
  String lan="/v1/exchange/devices/0f8fad5b-d9cb-469f-a165-70867728950e/lan";
  pass(()->NetworkPolicy.api(lan,"PUT"));
  for(String method:new String[]{"GET","POST","DELETE","PATCH","HEAD"})reject(()->NetworkPolicy.api(lan,method));

@@ -3,6 +3,9 @@ mod brave_link;
 mod card_cutouts;
 mod catalog_source;
 mod catalog_transport;
+mod kone_sef;
+mod kone_transport;
+mod somi;
 mod cloud;
 mod collectible_cors;
 mod commands;
@@ -47,6 +50,8 @@ pub fn run() {
         .manage(library::av_stashdb::AvProfileState::default())
         .manage(extension_runtime.clone())
         .manage(catalog_transport::CatalogTransport::default())
+        .manage(kone_transport::KoneTransport::default())
+        .manage(somi::SomiState::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
             motion::create_main_window(app.handle())?;
@@ -274,6 +279,16 @@ pub fn run() {
             });
         })
         .invoke_handler(perf_log::startup_handler(tauri::generate_handler![
+            commands::somi::somi_status,
+            commands::somi::somi_sync_now,
+            commands::somi::somi_open_login,
+            commands::somi::somi_logout,
+            commands::somi::somi_search,
+            commands::somi::somi_fill_covers,
+            commands::somi::somi_open_post,
+            commands::somi::somi_save_page,
+            commands::somi::somi_toggle_bookmark,
+            commands::somi::somi_sync_state,
             auto_jobs::auto_jobs_status,
             auto_jobs::run_auto_job,
             auto_jobs::stop_auto_job,

@@ -1,3 +1,4 @@
+pub(crate) mod somi;
 use crate::library::manga_index::{
     MangaFolderPurgeResult, MangaFrequentIndex, MangaIndexIdentity, MangaLocalIndex,
 };

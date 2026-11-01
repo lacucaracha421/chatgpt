@@ -3,7 +3,7 @@ import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
@@ -73,6 +73,8 @@ type OnlineCatalogBrowserProps = {
   onBookmarksChanged?: () => void;
   onSwitchLocal: () => void;
   initialScope?: CatalogScope;
+  bookmarkSwitch?: ReactNode;
+  toolbarSource?: MangaSource;
   requestedSource?: MangaSource;
   active?: boolean;
   onSourceChange?: (source: MangaSource) => void;
@@ -82,7 +84,7 @@ type OnlineCatalogBrowserProps = {
   onBookmarkCount?: (count: number | undefined) => void;
 };
 
-export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, onBookmarksChanged, onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
+export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, onBookmarksChanged, onSwitchLocal, initialScope = "all", bookmarkSwitch, toolbarSource, requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
   const areaVisible = useContext(AreaVisible);
   const privacyMode = useCatalogMasked();
@@ -162,7 +164,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     if (status && !status.installed) onReady?.(scope);
   }, [status, scope, onReady]);
   useEffect(() => {
-    if (!requestedSource || requestedSource === "local" || requestedSource === scope) return;
+    if (!requestedSource || requestedSource === "local" || requestedSource === "somi" || requestedSource === scope) return;
     const nextSort = requestedSource === "bookmarked" ? bookmarkSort : sort === "bookmarkAdded" ? "latest" : sort;
     setScope(requestedSource); setSort(nextSort);
     if (status?.installed) void search(query.trim(), nextSort, requestedSource);
@@ -637,7 +639,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 
   function selectSource(next: MangaSource) {
     if (next === "local") { closeDetail(); closeViewer(); onSwitchLocal(); return; }
-    onSourceChange?.(next);
+    if (next === "somi") { closeDetail(); closeViewer(); onSourceChange?.(next); return; }
+    if (onSourceChange) { onSourceChange(next); return; }
     if (next === scope) return;
     const nextSort = next === "bookmarked" ? bookmarkSort : sort === "bookmarkAdded" ? "latest" : sort;
     setScope(next); setSort(nextSort);
@@ -706,7 +709,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const searchScope = scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그";
   const moreAvailable = Boolean(results && !results.complete && (totalCount === null || results.pages * CATALOG_PAGE_SIZE < totalCount));
   const autoLoadSupported = typeof IntersectionObserver !== "undefined";
-  const canAutoLoad = moreAvailable && autoLoadSupported && areaVisible && active && requestedSource !== "local" && !loading && !searchPending && !loadingMore && !loadMoreFailed;
+  const canAutoLoad = moreAvailable && autoLoadSupported && areaVisible && active && requestedSource !== "local" && requestedSource !== "somi" && !loading && !searchPending && !loadingMore && !loadMoreFailed;
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
   useEffect(() => {
@@ -730,7 +733,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const scrubberSort = useMemo<ScrubberSort>(() => results && displayedView.current?.sort === "latest"
     ? {kind: "date", values: results.works.map(work => work.posted)} : {kind: "fallback"}, [results]);
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
-    {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
+    {active && <MangaToolbar source={toolbarSource ?? requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
       countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}${appliedQuery || indexFilter ? "개 결과" : "개 작품"}` : countError ? "결과 수 확인 실패" : undefined}
       controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate}
@@ -758,7 +761,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="online-catalog__workspace">
     <div ref={gridScroll} tabIndex={0} className="manga-browser__content online-catalog__content">
-      <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local"}>
+      {bookmarkSwitch}
+      <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local" || requestedSource === "somi"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />
         : !status.installed ? <EmptyState title="온라인 카탈로그가 없습니다">
@@ -772,7 +776,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
             {results.works.map((work) => <OnlineCatalogCard
               key={`${work.provider}:${work.groupId}`}
               work={work}
-              opening={reading || loading || !active || requestedSource === "local"}
+              opening={reading || loading || !active || requestedSource === "local" || requestedSource === "somi"}
               selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
               bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
               onOpen={cardOpen}
@@ -791,7 +795,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
         </>}
       </div>
     </div>
-    <Scrubber input="pointer" scrollRef={gridScroll} total={results?.works.length ?? 0} sort={scrubberSort} hidden={!active || loading || requestedSource === "local" || detailOpen || !!viewer} onEndReached={moreAvailable ? () => { void loadMoreRef.current(); } : undefined} />
+    <Scrubber input="pointer" scrollRef={gridScroll} total={results?.works.length ?? 0} sort={scrubberSort} hidden={!active || loading || requestedSource === "local" || requestedSource === "somi" || detailOpen || !!viewer} onEndReached={moreAvailable ? () => { void loadMoreRef.current(); } : undefined} />
     <div ref={panelHost} className="online-catalog__panel-host">
       {!viewer && active && <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
         onOpenChange={(open) => { if (!open) closeDetail(); }} actions={detailGroup && detailGroup.versionCount >= 2 && <span onKeyDown={(event) => {

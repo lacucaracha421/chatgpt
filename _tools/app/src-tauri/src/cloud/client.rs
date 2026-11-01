@@ -1,3 +1,5 @@
+#[path = "somi.rs"]
+pub(crate) mod somi;
 use std::{fs::File, io::Read, time::Duration};
 
 use super::models::{

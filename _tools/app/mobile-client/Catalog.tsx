@@ -3,9 +3,9 @@ import {displayCount} from '../src/shared/displayDate';
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode,type MutableRefObject} from 'react';
 import {beginScreenTiming,screenReady} from './perf';
-import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
+import {useAppendArrivals,useLevelMotion} from './motion';
 import {swapSegment,type ViewSwap} from '../src/shared/motion/viewSwap';
 import {BookmarkToggle} from '../src/shared/ui/BookmarkToggle';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
@@ -41,16 +41,14 @@ import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue
 import {DEFAULT_CATALOG_PREFERENCES,clearCatalogPreferences,readCatalogPreferences,writeCatalogPreferences,type CatalogPreferences} from './catalogPreferences';
 import {BOOKMARK_SORT_OPTIONS,readBookmarkSort,writeBookmarkSort,type BookmarkSort} from '../src/manga/bookmarkSort';
 import './Catalog.css';
+import {CatalogCard as ArrivingCard} from './CatalogCard';
+import {Somi} from './Somi';
+import {BookmarkSourceSwitch,readBookmarkSource,writeBookmarkSource,type BookmarkSource} from '../src/manga/BookmarkSourceSwitch';
+import {CATALOG_SOURCES,type CatalogSource} from './catalogSources';
 
 function lruGet<K,V>(map:Map<K,V>,key:K){const value=map.get(key);if(value!==undefined){map.delete(key);map.set(key,value);}return value;}
 function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);map.set(key,value);while(map.size>limit)map.delete(map.keys().next().value!);}
 
-
-/** A list card; one appended by scrolling stays hidden until its cover is decoded, then rises in whole. */
-function ArrivingCard({arriving,onArrived,disabled,onClick,children}:{arriving:boolean;onArrived():void;disabled:boolean;onClick():void;children(arrival:CardArrival):ReactNode}){
-  const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,onArrived,false);
-  return <button ref={host} className="catalog-card" disabled={disabled} onClick={onClick}>{children(arrival)}</button>;
-}
 
 /** The one background reader-manifest request for the currently selected work. */
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
@@ -60,12 +58,12 @@ function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revis
 const FIRST_SCREEN_COVERS=12;
 /** The cover revision a page without a publication revision is shown under (see `revision` below). */
 const NO_REVISION='0'.repeat(64);
-const SOURCES:readonly {value:CatalogQuery['scope'];label:string}[]=[{value:'all',label:'카탈로그'},{value:'bookmarked',label:'북마크'}];
-export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
+const SOURCES=CATALOG_SOURCES;
+function CatalogContent({active,visible=active,prefetch=false,paused,backRef,endpoint='',openDuplicates=0,onReturnHome,source,onSourceChange,onReady,bookmarkSwitch,sectionSource}:{active:boolean;visible?:boolean;prefetch?:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
   /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
   openDuplicates?:number;
   /** Set while 중복 검토 was opened from Home: closing it returns there. */
-  onReturnHome?:()=>void}){
+  onReturnHome?:()=>void;source?:CatalogSource;onSourceChange?(source:CatalogSource):void;onReady?():void;bookmarkSwitch?:ReactNode;sectionSource?:CatalogSource}){
   const editionWheel=useHorizontalWheel();
   const [bookmarkSort,setBookmarkSort]=useState<BookmarkSort>(readBookmarkSort);
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
@@ -526,7 +524,8 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     <button type="button" className={`ui-segmented__cell${filterCount?' is-active':''}`} aria-haspopup="dialog" aria-label={filterCount?`필터 ${filterCount}개 적용`:defaultTags?`필터, 기본 회피 태그 ${defaultTags}개`:'필터'} disabled={!active} onClick={openSettings}><FunnelIcon aria-hidden="true"/>필터{filterCount>0?<span className="catalog-view-count numeric">{filterCount}</span>:defaultTags>0&&<span className="catalog-view-default">기본</span>}</button>
   </div>;
   // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down.
-  const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:bookmarkSort}:{scope,sort:query.sort==='bookmarkAdded'?'latest':query.sort});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
+  useEffect(()=>{if(source&&source!=='somi'&&query.scope!==source)change(source==='bookmarked'?{scope:source,sort:bookmarkSort}:{scope:source,sort:query.sort==='bookmarkAdded'?'latest':query.sort});},[source]);
+  const sources=useSectionShade<CatalogSource>({label:'카탈로그 출처',options:SOURCES,value:sectionSource??query.scope,onChange:scope=>{if(onSourceChange){onSourceChange(scope);return;}if(scope==='somi')return;if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:bookmarkSort}:{scope,sort:query.sort==='bookmarkAdded'?'latest':query.sort});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
   const revision=page?.publicationRevision??NO_REVISION;
   const shownList=active&&!paused&&!selected&&!reader&&!privacy&&page?.ready&&committed.current===key;
   const shownListKey=shownList?committed.current:null;
@@ -557,21 +556,23 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
           {listboxOpen&&<ul ref={suggestionList} id="catalog-suggestions" className="catalog-suggestions" role="listbox" aria-label="태그 추천">{options.map((option,index)=><li key={option.value} id={`catalog-suggestion-${index}`} role="option" aria-selected={index===activeOption} className="catalog-suggestion" onMouseDown={event=>event.preventDefault()} onClick={()=>chooseSuggestion(option)}><span className="catalog-suggestion__value">{option.value}</span>{option.label&&option.label!==option.value&&<span className="catalog-suggestion__label">{option.label}</span>}{typeof option.count==='number'&&<span className="catalog-suggestion__count numeric">{option.count.toLocaleString()}</span>}</li>)}</ul>}
         </form>
   </>;
-  return <section ref={section} className="mobile-catalog" style={{display:active?'flex':'none'}} aria-label="만화 카탈로그">
+  useLayoutEffect(()=>{if(active&&source!=='somi'&&(!source||query.scope===source)&&(duplicates||selected||(!busy&&committed.current===key&&page)||page?.ready===false||capability==='failed'))onReady?.();},[active,source,query.scope,duplicates,selected,busy,key,page,capability,onReady]);
+  return <section ref={section} className="mobile-catalog" style={{display:visible?'flex':'none'}} aria-label="만화 카탈로그">
     {refreshLanguage&&<BottomSheet title="가져올 언어" onClose={()=>setRefreshLanguage(false)}><div role="radiogroup" aria-label="가져올 언어">{(['korean','japanese'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={false} onClick={()=>{setRefreshLanguage(false);void refreshState.request(value);}}>{value==='korean'?'한국어':'일본어'}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     <div className="catalog-content" style={{display:selected?'none':undefined}}>
-      {searching?<TopBarSearch title="카탈로그" search={localFind} menu={refreshMenu} loading={(busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} onClose={closeSearch}>{searchForm}</TopBarSearch>
-      :<TopBar barRef={sources.barRef} loading={(busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} title={<>{sources.title('카탈로그')}{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{displayCount(page.totalCount)}</span>}</>}
+      {searching?<TopBarSearch title="카탈로그" search={localFind} menu={refreshMenu} loading={(source==='somi'||busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} onClose={closeSearch}>{searchForm}</TopBarSearch>
+      :<TopBar barRef={sources.barRef} loading={(source==='somi'||busy||refreshState.sending||refreshState.running)&&'카탈로그 불러오는 중'} title={<>{sources.title('카탈로그')}{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{displayCount(page.totalCount)}</span>}</>}
         search={localFind} menu={refreshMenu}/>}
       {!searching&&sources.shade}
       <div ref={list} className="catalog-scroll" onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))loadMore();}}>
         {listPull}
         {sources.inline}
+        {bookmarkSwitch}
         {indexFilter&&<div className="catalog-index-token"><span>{indexFilter.label}</span><button type="button" aria-label={`${indexFilter.label} 필터 빼기`} onClick={()=>setIndexFilter(null)}>×</button></div>}
         <CatalogRefreshBanner state={refreshState}/>
         {browseSort!==null&&browseSort!=='latest'&&query.sort==='latest'&&!bookmarkScope&&<p className="catalog-search-note muted" style={{margin:'0 0 8px',fontSize:12}}>검색 중에는 최신순으로 표시합니다</p>}
         {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{committed.current='';setRefresh(n=>n+1);}}>다시 시도</Button></div>}{countError&&<div className="catalog-count-error">개수를 확인하지 못했습니다.<Button size="sm" variant="ghost" onClick={()=>setCountRetry(n=>n+1)}>다시 시도</Button></div>}
-        {wireIssue!=='none'?<EmptyState title="검색 조건이 너무 깁니다" hint={wireIssue==='filterTooLarge'?`회피 태그와 분류를 합쳐 ${FILTER_JSON_MAX_BYTES}바이트까지 보낼 수 있습니다.`:'검색어와 회피 태그를 합친 요청이 너무 깁니다. 검색어를 줄여 주세요.'} action={<Button onClick={openSettings}>필터 열기</Button>}/>:capability==='checking'||showCapability?(showCapability?<EmptyState role="status" title="카탈로그를 준비하는 중입니다"/>:<div role="status"/>):capability==='failed'?<EmptyState title="서버 상태를 확인하지 못했습니다" hint="연결을 확인한 뒤 다시 시도해 주세요." action={<Button onClick={()=>{setCapability('checking');setCapabilityRetry(n=>n+1);}}>다시 시도</Button>}/>:preferencesBlocked?<EmptyState title="이 기기의 설정을 쓸 수 없습니다" hint="서버 업데이트 후에는 저장된 회피 태그가 그대로 적용됩니다. 기다리는 동안 설정을 지우면 필터 없이 볼 수 있습니다." action={<Button onClick={resetPreferences}>설정 지우고 계속</Button>}/>:page?.ready===false?<EmptyState icon={BookOpenIcon} title="카탈로그가 아직 공유되지 않았습니다" hint="PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요."/>:page?.ready&&<>{items.length?<div className="catalog-grid">{items.map(item=>{const state=visibleGroupBookmark(item),id=`${item.provider}:${item.groupId}`;return <ArrivingCard key={id} arriving={arrivals.arriving(id)} onArrived={()=>arrivals.arrived(id)} disabled={busy||committed.current!==key} onClick={()=>open(item)}>{arrival=><><div className="catalog-cover"><CatalogCover item={item} revision={revision} active={active&&!paused&&!selected&&!reader} arrival={arrival}/><Badge variant="scrim" className="catalog-cover-pages">{item.fileCount}p</Badge>{state.desired&&shownScope.current!=='bookmarked'&&<BookmarkSolidIcon className={`catalog-saved${state.pending?' catalog-saved--pending':''}`} aria-label={state.pending?'북마크 저장 대기':'북마크됨'}/>}</div><strong aria-description={catalogDisplayTitle(item.title)!==item.title?item.title:undefined}>{catalogDisplayTitle(item.title)}</strong><span>{item.artists.join(' · ')}</span></>}</ArrivingCard>;})}</div>:<EmptyState title="검색 결과 없음" hint="검색어나 필터를 바꿔 보세요."/>}
+        {wireIssue!=='none'?<EmptyState title="검색 조건이 너무 깁니다" hint={wireIssue==='filterTooLarge'?`회피 태그와 분류를 합쳐 ${FILTER_JSON_MAX_BYTES}바이트까지 보낼 수 있습니다.`:'검색어와 회피 태그를 합친 요청이 너무 깁니다. 검색어를 줄여 주세요.'} action={<Button onClick={openSettings}>필터 열기</Button>}/>:capability==='checking'||showCapability?(showCapability?<EmptyState role="status" title="카탈로그를 준비하는 중입니다"/>:<div role="status"/>):capability==='failed'?<EmptyState title="서버 상태를 확인하지 못했습니다" hint="연결을 확인한 뒤 다시 시도해 주세요." action={<Button onClick={()=>{setCapability('checking');setCapabilityRetry(n=>n+1);}}>다시 시도</Button>}/>:preferencesBlocked?<EmptyState title="이 기기의 설정을 쓸 수 없습니다" hint="서버 업데이트 후에는 저장된 회피 태그가 그대로 적용됩니다. 기다리는 동안 설정을 지우면 필터 없이 볼 수 있습니다." action={<Button onClick={resetPreferences}>설정 지우고 계속</Button>}/>:page?.ready===false?<EmptyState icon={BookOpenIcon} title="카탈로그가 아직 공유되지 않았습니다" hint="PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요."/>:page?.ready&&<>{items.length?<div className="catalog-grid">{items.map(item=>{const state=visibleGroupBookmark(item),id=`${item.provider}:${item.groupId}`;return <ArrivingCard key={id} arriving={arrivals.arriving(id)} onArrived={()=>arrivals.arrived(id)} disabled={busy||committed.current!==key||source==='somi'} onClick={()=>open(item)}>{arrival=><><div className="catalog-cover"><CatalogCover item={item} revision={revision} active={active&&!paused&&!selected&&!reader} arrival={arrival}/><Badge variant="scrim" className="catalog-cover-pages">{item.fileCount}p</Badge>{state.desired&&shownScope.current!=='bookmarked'&&<BookmarkSolidIcon className={`catalog-saved${state.pending?' catalog-saved--pending':''}`} aria-label={state.pending?'북마크 저장 대기':'북마크됨'}/>}</div><strong aria-description={catalogDisplayTitle(item.title)!==item.title?item.title:undefined}>{catalogDisplayTitle(item.title)}</strong><span>{item.artists.join(' · ')}</span></>}</ArrivingCard>;})}</div>:<EmptyState title="검색 결과 없음" hint="검색어나 필터를 바꿔 보세요."/>}
           <BusyLabel busy={!!(moreBusy)}><p className="hint catalog-more-status" role="status">더 불러오는 중…</p></BusyLabel>
           {moreError&&<div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" onClick={()=>{setMoreError('');window.setTimeout(loadMore);}}>다시 시도</Button></div>}
           {items.length>0&&!nextCursor&&!moreBusy&&<p className="hint catalog-more-status">마지막 작품입니다</p>}</>}
@@ -599,4 +600,22 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} index={<CatalogIndex index={index} filter={indexFilter} onFilter={row=>{setIndexFilter(row);setSettings(false);}}/>} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
     {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={closeDuplicates}/>}
   </section>;
+}
+
+/** Retain each source's list and scroll state when visiting the other source. */
+export function Catalog(props:Omit<Parameters<typeof CatalogContent>[0],'source'|'onSourceChange'|'visible'|'onReady'|'bookmarkSwitch'|'sectionSource'>){
+  const [source,setSource]=useState<CatalogSource>('all'),[shownView,setShownView]=useState<'catalog'|'board'|'bookmarks'>('catalog'),[somiVisited,setSomiVisited]=useState(false);
+  const [bookmarkSource,setBookmarkSource]=useState<BookmarkSource>(readBookmarkSource);
+  const wantsSomi=source==='somi'||(source==='bookmarked'&&bookmarkSource==='somi');
+  const targetView:'catalog'|'board'|'bookmarks'=wantsSomi?source==='bookmarked'?'bookmarks':'board':'catalog';
+  const requestedView=useRef(targetView);requestedView.current=targetView;
+  const catalogBack=useRef<(()=>boolean)|null>(null),somiBack=useRef<(()=>boolean)|null>(null);
+  const choose=(next:CatalogSource)=>{if(next==='somi'||(next==='bookmarked'&&bookmarkSource==='somi'))setSomiVisited(true);setSource(next);};
+  const chooseBookmarks=(next:BookmarkSource)=>{setBookmarkSource(next);writeBookmarkSource(next);if(next==='somi')setSomiVisited(true);};
+  const bookmarkSwitch=source==='bookmarked'?<BookmarkSourceSwitch value={bookmarkSource} onChange={chooseBookmarks} fullWidth/>:undefined;
+  const somiReady=useCallback(()=>{if(requestedView.current!=='catalog')setShownView(requestedView.current);},[]);
+  const catalogReady=useCallback(()=>{if(requestedView.current==='catalog')setShownView('catalog');},[]);
+  useEffect(()=>{props.backRef.current=()=> (shownView==='catalog'?catalogBack:somiBack).current?.()??false;return()=>{props.backRef.current=null;};},[props.backRef,shownView]);
+  useEffect(()=>{if(props.openDuplicates)setSource('all');},[props.openDuplicates]);
+  return <><CatalogContent {...props} active={props.active&&(!wantsSomi||shownView==='catalog')} visible={props.active&&shownView==='catalog'} prefetch={!wantsSomi&&props.prefetch} backRef={catalogBack} source={wantsSomi?'somi':source} sectionSource={source} bookmarkSwitch={bookmarkSwitch} onSourceChange={choose} onReady={catalogReady}/>{somiVisited&&<Somi active={props.active&&wantsSomi} visible={props.active&&shownView!=='catalog'} bookmarked={targetView==='bookmarks'} source={source} bookmarkSwitch={bookmarkSwitch} paused={props.paused} backRef={somiBack} onSourceChange={choose} onReady={somiReady}/>}</>;
 }

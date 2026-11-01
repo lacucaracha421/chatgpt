@@ -10,9 +10,10 @@ import { SectionBar } from "../shared/ui/SectionBar";
 import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
 import { displayDateTime } from "../shared/displayDate";
 
-export type MangaSource = "all" | "bookmarked" | "local";
+export type MangaSource = "all" | "bookmarked" | "local" | "somi";
 const sourceOptions = [
   { value: "all" as const, label: "카탈로그" }, { value: "bookmarked" as const, label: "북마크" }, { value: "local" as const, label: "로컬" },
+  { value: "somi" as const, label: "소미" },
 ];
 
 /** The source switch as the section bar under the top bar; the 보기 menu sits at its right end. */

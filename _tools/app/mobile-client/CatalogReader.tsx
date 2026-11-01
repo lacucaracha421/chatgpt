@@ -18,11 +18,11 @@ import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 type Transform={scale:number;x:number;y:number};
 /** Share of the stage width on each side whose tap turns the page. */
 export const SIDE_TAP=0.3;
-function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,onReady,onDispose,attempt}:{workId:string;manifestRevision:string;page:CatalogReaderPage;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number}){
+function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,onReady,onDispose,attempt,source,refreshable}:{workId:string;manifestRevision:string;page:CatalogReaderPage;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number;source?:'kHentai'|'somi';refreshable:boolean}){
   const [src,setSrc]=useState(''),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
   useEffect(()=>{
     setFailed(false);const controller=new AbortController();
-    void catalogImageTicket({workId,revision:manifestRevision,kind:'page',index:page.index,url:page.url},controller.signal).then(async ticket=>{
+    void catalogImageTicket({workId,revision:manifestRevision,kind:'page',index:page.index,url:page.url,...(source==='somi'?{source}:{})},controller.signal).then(async ticket=>{
       if(controller.signal.aborted)return;
       if(!ticket.url.startsWith('https://app.lakomics.local/media-cache/')&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid catalog page');
       const decoded=await decodeImage(ticket.url,controller.signal);if(controller.signal.aborted)return;
@@ -33,7 +33,7 @@ function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,
   useEffect(()=>()=>onDispose(page.index),[page.index,onDispose]);
   const style=transform?{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}:undefined;
   return <div className="catalog-reader-page" data-perf-image-pending={catalogPerfEnabled()&&!src&&!failed?"true":undefined} data-page={page.index}>
-    {src?<img src={src} alt={`${page.index+1}페이지`} draggable={false} style={style} onError={()=>{setSrc('');setFailed(true);onFailure();}}/>:failed?<div className="catalog-reader-page-error"><span>페이지를 불러오지 못했습니다.</span><div><Button size="sm" variant="ghost" onClick={()=>setRetry(v=>v+1)}>다시 시도</Button><Button size="sm" variant="ghost" onClick={onRefresh}>주소 갱신</Button></div></div>:<div className="catalog-reader-page-loading"><BusyLabel busy>페이지 불러오는 중…</BusyLabel></div>}
+    {src?<img src={src} alt={`${page.index+1}페이지`} draggable={false} style={style} onError={()=>{setSrc('');setFailed(true);onFailure();}}/>:failed?<div className="catalog-reader-page-error"><span>페이지를 불러오지 못했습니다.</span><div><Button size="sm" variant="ghost" onClick={()=>setRetry(v=>v+1)}>다시 시도</Button>{refreshable&&<Button size="sm" variant="ghost" onClick={onRefresh}>주소 갱신</Button>}</div></div>:<div className="catalog-reader-page-loading"><BusyLabel busy>페이지 불러오는 중…</BusyLabel></div>}
   </div>;
 }
 
@@ -43,10 +43,13 @@ export function CatalogReader(props: Parameters<typeof CatalogReaderContent>[0])
   return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : <CatalogReaderContent {...props}/>;
 }
 
-function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookmark}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean;bookmark?:{desired:boolean;pending:boolean;disabled:boolean;failure:string;toggle():void}}){
+function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookmark,initialPage=1,onPage,refreshable=true}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean;bookmark?:{desired:boolean;pending:boolean;disabled:boolean;failure:string;toggle():void};initialPage?:number;onPage?(page:number):void;refreshable?:boolean}){
   const bookmarkBusy=useDelayedBusy(!!bookmark?.pending);
-  const [current,setCurrent]=useState(0),[chrome,setChrome]=useState(false),[transform,setTransform]=useState<Transform>({scale:1,x:0,y:0});
-  const [target,setTarget]=useState(0);
+  const initial=Math.max(0,Math.min(manifest.pages.length-1,initialPage-1));
+  const [current,setCurrent]=useState(initial),[chrome,setChrome]=useState(false),[transform,setTransform]=useState<Transform>({scale:1,x:0,y:0});
+  const [target,setTarget]=useState(initial);
+  const savedPage=useRef(initial);
+  useEffect(()=>{if(savedPage.current!==current){savedPage.current=current;onPage?.(current+1);}},[current,onPage]);
   const [scrubbing,setScrubbing]=useState(false),[controlsFocused,setControlsFocused]=useState(false),[menuOpen,setMenuOpen]=useState(false);
   const [attempt,setAttempt]=useState(0),[failedPages,setFailedPages]=useState<number[]>([]);
   const [ready,setReady]=useState<Record<number,number>>({});
@@ -72,7 +75,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookm
   const stage=useRef<HTMLDivElement>(null),autoRefresh=useRef(false);
   const bindStage=useCallback((node:HTMLDivElement|null)=>{stage.current=node;setStageElement(node);},[]);
   const gesture=useRef({points:new Map<number,{x:number;y:number}>(),startX:0,startY:0,distance:0,scale:1,lastX:0,lastY:0,moved:false,pinched:false});
-  const refreshOnce=()=>{if(!autoRefresh.current){autoRefresh.current=true;onRefresh();}};
+  const refreshOnce=()=>{if(refreshable&&!autoRefresh.current){autoRefresh.current=true;onRefresh();}};
   const change=(next:number)=>{if(next>=0&&next<manifest.pages.length){setTarget(next);setTransform({scale:1,x:0,y:0});}};
   const distance=()=>{const [a,b]=[...gesture.current.points.values()];return a&&b?Math.hypot(a.x-b.x,a.y-b.y):0;};
   const clamp=(scale:number,x:number,y:number)=>{
@@ -114,7 +117,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookm
         }
       }} onPointerCancel={()=>gesture.current.points.clear()}>
         <div className="catalog-reader-spread" style={{width:spreadWidth||'100%',height:spreadWidth?spreadWidth/spreadRatio:'100%',transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}>
-          {pool.map(page=><div key={`${manifest.providerWorkId}:${page.index}`} className="catalog-reader-leaf" style={{display:shown.some(p=>p.index===page.index)?undefined:'none',flex:`0 0 ${pageRatio(page)/spreadRatio*100}%`,order:page.index}}><ReaderPage workId={manifest.providerWorkId} manifestRevision={manifest.publicationRevision} page={page} onRefresh={onRefresh} onReady={pageReady} onDispose={pageDisposed} attempt={attempt} onFailure={()=>{setFailedPages(old=>old.includes(page.index)?old:[...old,page.index]);if(targetPages.some(p=>p.index===page.index))refreshOnce();}}/></div>)}
+          {pool.map(page=><div key={`${manifest.providerWorkId}:${page.index}`} className="catalog-reader-leaf" style={{display:shown.some(p=>p.index===page.index)?undefined:'none',flex:`0 0 ${pageRatio(page)/spreadRatio*100}%`,order:page.index}}><ReaderPage refreshable={refreshable} source={manifest.provider} workId={manifest.providerWorkId} manifestRevision={manifest.publicationRevision} page={page} onRefresh={onRefresh} onReady={pageReady} onDispose={pageDisposed} attempt={attempt} onFailure={()=>{setFailedPages(old=>old.includes(page.index)?old:[...old,page.index]);if(targetPages.some(p=>p.index===page.index))refreshOnce();}}/></div>)}
           {blankCover&&<div className="catalog-reader-blank" aria-hidden="true" style={{flex:`0 0 ${pageRatio(shown[0])/spreadRatio*100}%`,order:1}}/>}
         </div>
         <BusyLabel busy={target!==current&&!targetPages.some(page=>failedPages.includes(page.index))} idle={target!==current&&targetPages.some(page=>failedPages.includes(page.index))&&<span className="reader-loading-next" role="status"><Button size="sm" onClick={()=>{setFailedPages([]);setAttempt(n=>n+1);}}>다시 시도</Button></span>}><span className="reader-loading-next" role="status">{`${target+1}페이지 준비 중…`}</span></BusyLabel>

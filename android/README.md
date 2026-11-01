@@ -1,6 +1,13 @@
 # Lakomics Android client
 
-Current source version: **0.9.160 (297)**, declared in [AndroidManifest.xml](AndroidManifest.xml), checked on 2026-10-23 at `c4c0087a`. The [backlog](../docs/roadmap/lakomics-backlog.md#fav-char-001) separately records installation of 0.9.140 and pending favourite-character feedback; this pass did not inspect a device. Older releases below retain their dated evidence.
+Current source version: **0.9.166 (303)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Older releases below retain their dated evidence.
+
+## 0.9.166 — Somi source (installed; the user reported it working on the Tab S11, 2026-11-01)
+
+- Catalog adds Somi with local title/writer search, sorting, periods, bookmarks and the shared reader. Bookmark and reading changes save locally first and reconcile through the existing cloud credential using [Somi state v1](../docs/agents/somi-state-contract.md).
+- `KoneLoginActivity` and `KoneService` are private components in `:kone`, retaining the probe's `kone` WebView data-directory suffix. The main process keeps cookies disabled. The probe and its launcher entry have been removed.
+- The service uses a detached WebView, a fixed request allow-list, bounded response chunks and a 60-second idle teardown. Images use the existing native media cache without cookies; saved covers are reduced for the tablet's density.
+- Offline Java checks cover SEF request vectors, SQLite reopen/resume and transaction rollback, the persisted hourly gate, search/period rules and shared conflict handling. Bookmarks are viewed from the 북마크 section's `카탈로그 / 소미` switch, which is not yet checked on the device.
 
 ## Current functionality and remaining gates
 

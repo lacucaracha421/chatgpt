@@ -881,6 +881,9 @@ from api_auth import client_guard, publisher_guard
 require_client = client_guard(get_db, API_TOKEN)
 require_publisher = publisher_guard(get_db)
 
+import somi_state
+somi_state.register(app, require_client, DB_PATH.parent / "somi.sqlite3")
+
 import av_lookup_requests
 
 startup_av_lookup_requests = av_lookup_requests.register(

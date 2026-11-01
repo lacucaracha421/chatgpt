@@ -4,8 +4,8 @@ import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome
 import { MangaToolbar, MangaViewMenu, type MangaSource } from "./MangaToolbar";
 
 afterEach(cleanup);
-it.each(["all", "bookmarked", "local"] as MangaSource[])("keeps the %s toolbar bar inside the list and drops its trailing controls", source => {
-  const label = { all: "카탈로그", bookmarked: "북마크", local: "로컬" }[source];
+it.each(["all", "bookmarked", "local", "somi"] as MangaSource[])("keeps the %s toolbar bar inside the list and drops its trailing controls", source => {
+  const label = { all: "카탈로그", bookmarked: "북마크", local: "로컬", somi: "소미" }[source];
   render(<WorkspaceChromeProvider scope="manga"><ChromeTarget name="header" /><section className="manga-browser">
     <MangaToolbar source={source} onSourceChange={vi.fn()} localCount={30} bookmarkCount={280} chrome={{}} controls={<MangaViewMenu choices={[{ label: "정렬", value: "recent", onChange: vi.fn(), options: [{ value: "recent", label: "최근 변경순" }] }]} />} />
     <div className="manga-browser__content" data-testid="manga-scroll" style={{ overflowY: "auto" }}><p>Retained manga</p></div>

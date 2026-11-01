@@ -294,7 +294,13 @@ Completed record: [IMG-COVER-001](lakomics-completed.md#img-cover-001).
 <a id="somi-001--in-app-kone-somisoft-board-browsing-and-reading"></a>
 ## SOMI-001 — In-app kone.gg 소미소프트 board browsing and reading (2026-10-21)
 
-Status: `IDEA` (user, 2026-10-21) — inspired by the third-party VCK 0.8.0 launcher (Electron, based on project-violet's violet-web; reviewed read-only from the user's desktop copy, not run). Use it as a reference for behavior only; do not copy its code (license not checked) or its K-Hentai/hitomi catalog.
+Status: `PARTIAL` (user, 2026-11-01) — PC and tablet (0.9.166) are implemented, and the user reported both working: 소미 source in the manga section with kone login, a local board index, title/writer search, sorts, a period filter (1 week to 1 year, which selects 추천순) and reading. Bookmarks and reading position are shared between devices, and bookmarks are viewed from the 북마크 section's `카탈로그 / 소미` switch. That switch is not yet checked on the real app. The login is remembered without periodic checks, and new posts plus the counts of the last 90 days are read at most hourly, or on demand from 새 글 확인. Not started: vote/comment, download or save to library, title parsing into tags and artists.
+
+Shared state (user, 2026-11-01): bookmarks and reading position go through `/v1/somi/*`, stored in `data/somi.sqlite3` on the server, contract in `docs/agents/somi-state-contract.md`. Deployed 2026-11-01; rollback sources are in `/home/linuxuser/lakomics-somi-20261101/rollback/`.
+
+Tablet design (user, 2026-11-01): the tablet logs in to kone itself, in process `:kone` with its own WebView data, because the app's main WebView has cookies off and a session on the VPS is unwanted. `KoneService` runs a detached WebView and stops after 60 idle seconds, as the PC's hidden window does.
+
+Modelled on VCK 0.8.0, the user's own Electron launcher built on project-violet's violet-web (user, 2026-11-01). The kone code was rewritten for Lakomics. The violet-web license is still unchecked, so do not paste its code.
 
 - **Decided:** log in to kone.gg inside the Lakomics PC app (the user types credentials into kone's own page; Lakomics never sees the password); list the 소미소프트 board like a catalog with search and sort; open a work and read it in the Lakomics viewer directly from kone without importing first, with an explicit save into the library when the user wants it. PC first; tablet later (synced saved works only until then).
 - **Behavior to match from VCK:** a view is counted only when a work is opened, recommend/comment only on the user's explicit action, nothing visible while logged out, one request at a time, low rate.

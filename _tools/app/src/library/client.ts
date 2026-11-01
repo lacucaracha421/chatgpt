@@ -209,6 +209,16 @@ type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
 >>;
 
 export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
+  somiStatus: (collect = false) => invoke("somi_status", { collect }),
+  somiSyncNow: () => invoke("somi_sync_now"),
+  somiOpenLogin: () => invoke("somi_open_login"),
+  somiLogout: () => invoke("somi_logout"),
+  somiSearch: (query, sort, page, days, bookmarked = false) => invoke("somi_search", { query, sort, page, days, bookmarked }),
+  somiSyncState: (flush = false) => invoke("somi_sync_state", { flush }),
+  somiToggleBookmark: id => invoke("somi_toggle_bookmark", { id }),
+  somiFillCovers: ids => invoke("somi_fill_covers", { ids }),
+  somiOpenPost: id => invoke("somi_open_post", { id }),
+  somiSavePage: (id, page) => invoke("somi_save_page", { id, page }),
   autoJobsStatus: () => invoke("auto_jobs_status"),
   runAutoJob: id => invoke("run_auto_job", { id }),
   stopAutoJob: id => invoke("stop_auto_job", { id }),

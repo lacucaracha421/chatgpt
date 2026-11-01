@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway, MangaSeries } from "../library/types";
+import type { LibraryGateway, MangaSeries, SomiPost } from "../library/types";
 import { MangaBrowser } from "./MangaBrowser";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
@@ -22,7 +22,7 @@ function nativeDrop(event: NativeFileDropEvent) {
   act(() => { for (const handler of nativeDrops.handlers) handler(event); });
 }
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.useRealTimers(); });
 
 /** Stands in for the 찾기 palette: applies text through the view's registered search. */
 function SearchProbe() {
@@ -54,6 +54,61 @@ const series: MangaSeries[] = [
 ];
 
 describe("MangaBrowser", () => {
+  it("opens Somi bookmarks inside bookmarks, remembers the choice and reuses catalog cards", async () => {
+    const gateway = createGateway({ root: null, series: [] });
+    gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({ installed: true, workCount: 1 });
+    gateway.searchCatalogGroups = vi.fn(async (query, onEvent) => {
+      onEvent({ type: "page", page: { works: [{ provider: "kHentai", providerWorkId: "1", groupId: 1, versionCount: 1, hasBookmarkedVersion: true, title: query.scope === "bookmarked" ? "카탈로그 북마크 작품" : "카탈로그 작품", titleJpn: null, artists: [], series: [], thumbnailUrl: null, bookmarked: true, fileCount: 20, views: 0, posted: 1 }], page: 0, pageSize: 48 } });
+      onEvent({ type: "count", totalCount: 1 });
+    });
+    gateway.somiStatus = vi.fn().mockResolvedValue({ loggedIn: true, collected: 1, total: 1, complete: true, syncing: false });
+    let finish!: (value: { items: SomiPost[]; total: number }) => void;
+    gateway.somiSearch = vi.fn(() => new Promise<{ items: SomiPost[]; total: number }>(resolve => { finish = resolve; }));
+    const view = renderBrowser(gateway);
+    await screen.findByText("카탈로그 작품");
+    await userEvent.click(screen.getByRole("radio", { name: "북마크" }));
+    const catalogCard = await screen.findByText("카탈로그 북마크 작품");
+    expect(screen.getByRole("navigation", { name: "망가 목차" })).toBeVisible();
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "bookmarked", sort: "bookmarkAdded", language: "korean" }), expect.any(Function), expect.any(String));
+    const catalogCalls = vi.mocked(gateway.searchCatalogGroups).mock.calls.length;
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: "북마크 출처" })).getByRole("radio", { name: "소미" }));
+    expect(catalogCard).toBeVisible();
+    await waitFor(() => expect(gateway.somiSearch).toHaveBeenCalledWith("", "added", 1, null, true));
+    await act(async () => finish({ items: [{ id: "saved", title: "소미 북마크 작품", bookmarked: true, writerHandle: "writer", writerName: "작가", seconds: 1, nanos: 0, views: 0, votes: 0, comments: 0, coverKey: null, cover: null, pages: null }], total: 1 }));
+    expect(await screen.findByRole("button", { name: "소미 북마크 작품 읽기" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("region", { name: "소미 망가" })).toBeVisible());
+    expect(within(screen.getByRole("radiogroup", { name: "망가 출처" })).getByRole("radio", { name: "북마크" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("navigation", { name: "망가 목차" })).not.toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: "북마크 출처" })).getByRole("radio", { name: "카탈로그" }));
+    await waitFor(() => expect(catalogCard).toBeVisible());
+    expect(screen.getByText("카탈로그 북마크 작품")).toBe(catalogCard);
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(catalogCalls);
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: "북마크 출처" })).getByRole("radio", { name: "소미" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "소미 망가" })).toBeVisible());
+    view.unmount();
+    gateway.somiStatus = vi.fn().mockResolvedValue({ loggedIn: false });
+    renderBrowser(gateway);
+    await screen.findByText("카탈로그 작품");
+    await userEvent.click(screen.getByRole("radio", { name: "북마크" }));
+    expect(await screen.findByText("코네 로그인이 필요합니다")).toBeVisible();
+    expect(within(screen.getByRole("radiogroup", { name: "북마크 출처" })).getByRole("radio", { name: "소미" })).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: "북마크 출처" })).getByRole("radio", { name: "카탈로그" }));
+    expect(await screen.findByText("카탈로그 북마크 작품")).toBeVisible();
+  });
+  it("switches to Somi without searching the catalog and preserves the local view", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.somiStatus = vi.fn().mockResolvedValue({ loggedIn: false, handle: null, displayName: null, collected: 0, total: null, complete: false, syncing: false });
+    gateway.somiOpenLogin = vi.fn().mockResolvedValue(undefined);
+    renderBrowser(gateway);
+    await screen.findByText("온라인 카탈로그가 없습니다");
+    await userEvent.click(screen.getByRole("radio", { name: "소미" }));
+    expect(await screen.findByText("코네 로그인이 필요합니다")).toBeVisible();
+    expect(gateway.searchCatalogGroups).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
+    expect(await screen.findByText("T1")).toBeVisible();
+    await userEvent.click(screen.getByRole("radio", { name: "소미" }));
+    await waitFor(() => expect(screen.getByText("코네 로그인이 필요합니다")).toBeVisible());
+  });
   it("imports only drops on the shown local view, shows a target and an undo toast", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.importLocalManga = vi.fn().mockResolvedValue({ count: 2, undoToken: "import-1", archivesRetained: 1, failures: [{ path: "bad.rar", message: "ZIP, CBZ만 가져올 수 있습니다" }] });
@@ -463,14 +518,14 @@ describe("MangaBrowser", () => {
 
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
     const sourceButtons = screen.getByLabelText("망가 출처").querySelectorAll("button");
-    expect([...sourceButtons].map((button) => button.getAttribute("aria-label"))).toEqual(["카탈로그", "북마크", "로컬"]);
+    expect([...sourceButtons].map((button) => button.getAttribute("aria-label"))).toEqual(["카탈로그", "북마크", "로컬", "소미"]);
 
     await userEvent.click(screen.getByRole("radio", { name: /^로컬/ }));
     expect(await screen.findByText("T1")).toBeVisible();
     await userEvent.click(screen.getByRole("radio", { name: /^북마크/ }));
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
     expect(screen.getByRole("radio", { name: /^북마크/ })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "카탈로그" })).toHaveAttribute("aria-checked", "false");
+    expect(within(screen.getByRole("radiogroup", { name: "망가 출처" })).getByRole("radio", { name: "카탈로그" })).toHaveAttribute("aria-checked", "false");
   });
 });
 

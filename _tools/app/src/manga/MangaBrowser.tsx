@@ -17,6 +17,8 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { Menu } from "../shared/ui/Menu";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
+import { BookmarkSourceSwitch, readBookmarkSource, writeBookmarkSource, type BookmarkSource } from "./BookmarkSourceSwitch";
+import { SomiBrowser } from "./SomiBrowser";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaViewMenu, type MangaSource } from "./MangaToolbar";
 import { createKoreanMatcher } from "../shared/koreanSearch";
@@ -54,22 +56,40 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<MangaCatalogRecoveryPreview | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
-  const [source, setSource] = useState<"local" | "online">(initialMangaSource);
+  const [source, setSource] = useState<"local" | "online" | "somi">(initialMangaSource);
   const scanStatusVisible = useDelayedBusy(scanning && source === "local");
   const [onlineScope, setOnlineScope] = useState<CatalogScope>("all");
+  const [bookmarkSource, setBookmarkSource] = useState<BookmarkSource>(readBookmarkSource);
+  const [somiBookmarks, setSomiBookmarks] = useState(false);
   const [displayedSource, setDisplayedSource] = useState(source);
   const [localVisited, setLocalVisited] = useState(source === "local");
   const [onlineVisited, setOnlineVisited] = useState(source === "online");
+  const [somiVisited, setSomiVisited] = useState(false);
+  const [somiReady, setSomiReady] = useState(false);
+  const receiveSomiReady = useCallback(() => setSomiReady(true), []);
   const [onlineReadyScope, setOnlineReadyScope] = useState<CatalogScope | null>(null);
   const [bookmarkCount, setBookmarkCount] = useState<number | undefined>();
   const onlineReady = useCallback((scope: CatalogScope) => setOnlineReadyScope(scope), []);
   function selectSource(next: MangaSource) {
     if (next === "local") { setLocalVisited(true); setSource("local"); }
+    else if (next === "somi" || (next === "bookmarked" && bookmarkSource === "somi")) {
+      const bookmarks = next === "bookmarked";
+      if (source !== "somi" || bookmarks !== somiBookmarks) setSomiReady(false);
+      setSomiBookmarks(bookmarks); setSomiVisited(true); setSource("somi");
+    }
     else { setOnlineScope(next); setOnlineVisited(true); setSource("online"); }
   }
+  function selectBookmarkSource(next: BookmarkSource) {
+    setBookmarkSource(next); writeBookmarkSource(next);
+    if (next === "somi") { setSomiReady(false); setSomiBookmarks(true); setSomiVisited(true); setSource("somi"); }
+    else { setOnlineScope("bookmarked"); setOnlineVisited(true); setSource("online"); }
+  }
+  const bookmarkSwitch = <BookmarkSourceSwitch value={bookmarkSource} onChange={selectBookmarkSource} />;
+  const requestedSection = source === "somi" ? somiBookmarks ? "bookmarked" : "somi" : source === "local" ? "local" : onlineScope;
   // Local and online are one segment switch: the shown screen stays until the other is ready, then the
   // shared view swap moves it in from the side of the chosen source, with the source bar still.
   const onlineScreen = useRef<HTMLDivElement>(null), localScreen = useRef<HTMLElement>(null);
+  const somiScreen = useRef<HTMLDivElement>(null);
   const displayedRef = useRef(displayedSource); displayedRef.current = displayedSource;
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
   const thumbnailBusyVisible = useDelayedBusy(thumbnailBusy);
@@ -99,14 +119,15 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   useEffect(() => () => cancelSegmentSwap(sourceSwap), [sourceSwap]);
   useEffect(() => {
     const next = source === "local" && (root === null || series !== null || loadError) ? "local"
-      : source === "online" && onlineReadyScope === onlineScope ? "online" : null;
+      : source === "online" && onlineReadyScope === onlineScope ? "online"
+      : source === "somi" && somiReady ? "somi" : null;
     if (!next) return;
     if (next === displayedRef.current) { cancelSegmentSwap(sourceSwap); setDisplayedSource(next); return; }
-    const screens = [onlineScreen.current, localScreen.current];
+    const screens = [onlineScreen.current, localScreen.current, somiScreen.current];
     swapSegment(sourceSwap, { forward: next === "online", target: screens,
       still: screens.flatMap(screen => screen ? [...screen.querySelectorAll<HTMLElement>(".manga-section-bar.ui-section-bar--inline")] : []),
       commit: () => setDisplayedSource(next) });
-  }, [source, root, series, loadError, onlineReadyScope, onlineScope, sourceSwap]);
+  }, [source, root, series, loadError, onlineReadyScope, onlineScope, somiReady, sourceSwap]);
   const previousSource = useRef(displayedSource);
   useLayoutEffect(() => {
     if (previousSource.current !== displayedSource) {
@@ -238,15 +259,18 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       setRefreshedAt(new Date().toISOString());
     }} />;
   return <>
-    {workspace?.targets.navigation && createPortal(index, workspace.targets.navigation)}
+    {workspace?.targets.navigation && displayedSource !== "somi" && createPortal(index, workspace.targets.navigation)}
+    {somiVisited && <div ref={somiScreen} className="manga-browser__screen" style={displayedSource === "somi" ? undefined : source === "somi" && !somiReady ? { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" } : { display: "none" }}>
+      <SomiBrowser bookmarked={somiBookmarks} source={requestedSection} bookmarkSwitch={somiBookmarks ? bookmarkSwitch : undefined} active={displayedSource === "somi"} requested={source === "somi"} onReady={receiveSomiReady} onSourceChange={selectSource} />
+    </div>}
     {onlineVisited && <div ref={onlineScreen} className="manga-browser__screen" style={{ display: displayedSource === "online" ? undefined : "none" }}>
-      <OnlineCatalogBrowser initialScope={onlineScope} requestedSource={source === "local" ? "local" : onlineScope}
+      <OnlineCatalogBrowser initialScope={onlineScope} requestedSource={source === "somi" ? "somi" : requestedSection} toolbarSource={requestedSection} bookmarkSwitch={requestedSection === "bookmarked" ? bookmarkSwitch : undefined}
         onBookmarksChanged={() => setBookmarkRevision(n => n + 1)} indexFilter={indexFilter} onClearIndexFilter={() => setIndexFilter(null)}
         active={displayedSource === "online"} onSourceChange={selectSource} onSwitchLocal={() => selectSource("local")}
         onReady={onlineReady} localCount={series?.length} bookmarkCount={bookmarkCount} onBookmarkCount={setBookmarkCount} />
     </div>}
     {localVisited && <section ref={localScreen} className="manga-browser manga-browser__screen" aria-label="망가" style={{ display: localActive ? undefined : "none" }}>
-    {localActive && <MangaToolbar source={source === "local" ? "local" : onlineScope} onSourceChange={selectSource}
+    {localActive && <MangaToolbar source={requestedSection} onSourceChange={selectSource}
       localCount={series?.length} bookmarkCount={bookmarkCount} countLabel={series ? countLabel : undefined}
       refreshedAt={refreshedAt}
       controls={<MangaViewMenu choices={[{ label: "정렬", value: sort, onChange: next => setSort(next as typeof sort), options: [

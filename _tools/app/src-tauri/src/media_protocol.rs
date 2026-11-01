@@ -378,6 +378,17 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
+    if let Some(key) = path.strip_prefix("/somi-thumb/") {
+        if !crate::somi::thumbs::valid_key(key) {
+            return empty_response(StatusCode::BAD_REQUEST);
+        }
+        return match crate::somi::thumbs::read(key) {
+            Some((bytes, mime)) => Response::builder().status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime).header(CACHE_CONTROL, "no-store")
+                .body(bytes).expect("somi thumbnail response"),
+            None => empty_response(StatusCode::NOT_FOUND),
+        };
+    }
     if let Some(rest) = path.strip_prefix("/manga-spine-scan/") {
         let Some((isbn, part)) = rest.split_once('/') else { return empty_response(StatusCode::BAD_REQUEST); };
         if !crate::library::manga_spine_scans::valid_isbn(isbn) || !matches!(part, "side" | "back") {

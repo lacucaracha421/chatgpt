@@ -12,7 +12,7 @@ let sequence = 0;
 let foreground=true;
 window.addEventListener('lakomics-pause',()=>{foreground=false;});
 window.addEventListener('lakomics-resume',()=>{foreground=true;});
-const resumable=new Set(['thumbnail','media','collectionArtwork','catalogImage','mediaTickets']);
+const resumable=new Set(['thumbnail','media','collectionArtwork','catalogImage','somiImage','mediaTickets']);
 let developmentTransport: ((op: string, payload: Record<string, unknown>) => Promise<unknown>) | undefined;
 
 /**

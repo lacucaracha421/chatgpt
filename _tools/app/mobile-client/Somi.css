@@ -1,0 +1,5 @@
+.somi-results{position:relative}
+.somi-list-slot{width:100%}
+.catalog-card-container{position:relative;min-width:0}
+.catalog-card-container>.catalog-card{width:100%}
+.somi-card-bookmark{position:absolute;right:var(--space-1);top:var(--space-1)}

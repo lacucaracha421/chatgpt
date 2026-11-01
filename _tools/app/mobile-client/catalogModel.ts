@@ -20,7 +20,7 @@ export type CatalogDetail = {provider:'kHentai';providerWorkId:string;title:stri
 /** `representativePending`: a tablet representative choice the PC has not applied yet (PC 반영 대기). */
 export type CatalogEditions = {publicationRevision:string;groupId:string;selectedProviderWorkId:string|null;items:CatalogWork[];nextCursor:string|null;totalCount:number;representativePending?:boolean};
 export type CatalogReaderPage = {index:number;url:string;name:string|null;width:number|null;height:number|null;expiresAt:number|null};
-export type CatalogReaderManifest = {publicationRevision:string;provider:'kHentai';providerWorkId:string;pages:CatalogReaderPage[];manifestExpiresAt:number|null};
+export type CatalogReaderManifest = {publicationRevision:string;provider:'kHentai'|'somi';providerWorkId:string;pages:CatalogReaderPage[];manifestExpiresAt:number|null};
 
 /** The catalog capability this client needs before it can send device filters. */
 export const DISPLAY_PREFERENCES_VERSION = 1;

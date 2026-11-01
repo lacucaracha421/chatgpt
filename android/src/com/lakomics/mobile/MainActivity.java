@@ -27,6 +27,8 @@ public final class MainActivity extends Activity {
  }
  private void setVaultSnapshotSensitive(boolean value){vaultSnapshotSensitive=value;updateSecureWindow();}
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
+ private volatile SomiRepository somi;
+ private synchronized SomiRepository somi(){if(somi==null)somi=new SomiRepository(this,client,settings,media,this::emit);return somi;}
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(6,6,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
  private final ThreadPoolExecutor thumbnailWorkers=new ThreadPoolExecutor(8,8,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
@@ -109,7 +111,7 @@ public final class MainActivity extends Activity {
  private boolean batteryAllowsWarm(){try{JSONObject b=batteryState();return b.optBoolean("charging")||(b.optInt("level",-1)>=50&&!b.optBoolean("powerSave",true));}catch(Exception e){return false;}}
  private JSONObject connectionStatus()throws Exception{return settings.status().put("battery",batteryState());}
  private static JSONObject mediaBusy(){try{return new JSONObject().put("code","media_busy");}catch(JSONException e){return null;}}
- private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","homeCover","catalogImage","providerImage","mediaTickets","pickerRefresh").contains(op);}
+ private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","homeCover","catalogImage","somiImage","providerImage","mediaTickets","pickerRefresh").contains(op);}
  private void cancelOptional(String id,CancellationSignal signal){
   signal.cancel();nonEssential.remove(id,signal);
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
@@ -205,6 +207,7 @@ public final class MainActivity extends Activity {
   return connection;
  }
  private static String errorMessage(Exception e){
+  if(e instanceof IOException && Arrays.asList("SOMI_LOGIN_REQUIRED","SOMI_POST_GONE","SOMI_NO_IMAGES").contains(e.getMessage()))return e.getMessage();
   if(e instanceof ConnectionChanged)return "서버 연결이 바뀌어 전송을 미뤘습니다.";
   if(e instanceof VaultCrypto.Invalid || e instanceof ExchangeService.UserError || e instanceof NotesRepository.UserError)return e.getMessage();
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
@@ -356,12 +359,23 @@ public final class MainActivity extends Activity {
    // Small images use the separate eight-worker thumbnail lane; originals keep four workers.
    final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:small?thumbnailWorkers:mediaWorkers;
    final PerfLog.Op perf=PerfLog.enabled()&&(operation.equals("thumbnail")||operation.equals("media")||catalogCover||operation.equals("collectionArtwork"))?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;
-   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage") || operation.equals("providerImage");
+   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage") || operation.equals("somiImage") || operation.equals("providerImage");
    final MediaRepository.PreparedThumbnail[] prepared={null};
    final StartupPerf.Request startup=StartupPerf.submit(operation,payload,mediaWork?mediaLane:workers,mediaWork?(catalogCover?"catalogCover":small?"thumbnail":"media"):"bridge");
    final Runnable task=()->{if(startup!=null)startup.start();if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
     switch(operation){
+     case "somiStatus":data=somi().status(p.optBoolean("collect"));break;
+     case "somiLogin":data=somi().login();break;
+     case "somiLogout":data=somi().logout();break;
+     case "somiSearch":data=somi().search(p);break;
+     case "somiRefresh":data=somi().refresh();break;
+     case "somiFillCovers":data=somi().fill(p.getJSONArray("ids"),signal);break;
+     case "somiOpen":data=somi().open(p.getString("id"));break;
+     case "somiImage":data=somi().image(p.getString("id"),p.getInt("index"),signal);break;
+     case "somiBookmark":data=somi().toggle(p.getString("id"));break;
+     case "somiPage":data=somi().savePage(p.getString("id"),p.getInt("page"));break;
+     case "somiFlush":somi().flush();data=new JSONObject();break;
      case "vaultPick":data=vault.pick();break;
      case "vaultState":data=vault.inspect();break;
      case "vaultUnlock":data=vault.unlock(p.getString("secret"),p.optBoolean("recovery"),signal,vaultEpoch);break;
@@ -474,6 +488,7 @@ public final class MainActivity extends Activity {
   if(vault!=null&&level==TRIM_MEMORY_RUNNING_CRITICAL)vault.lock("메모리가 부족해 잠겼습니다");super.onTrimMemory(level);}
  @Override public void onLowMemory(){if(resumeCover!=null)resumeCover.clear();super.onLowMemory();}
  @Override protected void onActivityResult(int request,int result,Intent data){
+  if(request==SomiRepository.LOGIN_REQUEST){if(somi!=null)somi.loginResult(result==RESULT_OK);return;}
   if(request==EXCHANGE_TREE){
    final String target=exchangeTarget;final Uri tree=result==RESULT_OK&&data!=null?data.getData():null;
    if(tree!=null&&target==null)emitExchangeNotice("받는 기기를 다시 선택해 주세요.");
@@ -511,7 +526,7 @@ public final class MainActivity extends Activity {
   }else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_FULLSCREEN)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused){hideStatusBar();clipboardHandler.post(clearSecretClip);}}
- @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();stopped=false;foreground=true;hideStatusBar();if(web==null&&!destroyed)createWebView();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(resumeCover!=null)resumeCover.resume(web);if(Build.VERSION.SDK_INT>=33){long step=StartupPerf.clock();PickerLibrary.get(this).resume();StartupPerf.step("pickerFirstResume",step);}}
+ @Override protected void onResume(){super.onResume();if(somi!=null)somi.resume();if(vault!=null)vault.resumed();stopped=false;foreground=true;hideStatusBar();if(web==null&&!destroyed)createWebView();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(resumeCover!=null)resumeCover.resume(web);if(Build.VERSION.SDK_INT>=33){long step=StartupPerf.clock();PickerLibrary.get(this).resume();StartupPerf.step("pickerFirstResume",step);}}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});
@@ -526,5 +541,5 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);if(watchingClips){ClipboardManager clips=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(clips!=null)clips.removePrimaryClipChangedListener(secretClipReplaced);watchingClips=false;}stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();thumbnailPrepare.shutdownNow();thumbnailWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(somi!=null)somi.close();if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);if(watchingClips){ClipboardManager clips=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(clips!=null)clips.removePrimaryClipChangedListener(secretClipReplaced);watchingClips=false;}stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();thumbnailPrepare.shutdownNow();thumbnailWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

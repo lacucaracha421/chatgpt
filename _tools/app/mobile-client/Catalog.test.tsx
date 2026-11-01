@@ -291,7 +291,7 @@ describe('mobile catalog reads',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const sources=screen.getByRole('radiogroup',{name:'카탈로그 출처'});
     expect(sources.closest('.catalog-scroll > .section-shade-rows--inline')).toBeTruthy();
-    expect(within(sources).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['카탈로그','북마크']);
+    expect(within(sources).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['카탈로그','북마크','소미']);
     expect(within(sources).getByRole('radio',{name:'카탈로그'}).getAttribute('aria-checked')).toBe('true');
     expect(screen.queryByRole('button',{name:'북마크',exact:true})).toBeNull();
   });

@@ -80,6 +80,10 @@ def main():
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.
         sources.append(root / 'src/com/lakomics/mobile/Json.java')
+        # Somi's wire vectors and the shipped schema/conflict rules run on a plain JVM.
+        sources += [root / 'src/com/lakomics/mobile/SomiSef.java',
+                    root / 'src/com/lakomics/mobile/SomiStore.java',
+                    root / 'tests/SomiSefTest.java', root / 'tests/SomiStoreTest.java']
         if args.check_only:
             pass
         else:
@@ -95,6 +99,9 @@ def main():
             run(java_cmd, f'-Dvault.fixtures={root / "tests/fixtures/private-vault"}',
                 f'-Dnotes.fixtures={root.parent / "tests/fixtures/notes-v2"}',
                 '-cp', tests, f'com.lakomics.mobile.{name}Test')
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.SomiSefTest')
+        subprocess.run([str(java_cmd), '-cp', str(tests), 'com.lakomics.mobile.SomiStoreTest'],
+                       check=True, env=env, cwd=root)
         if args.check_only:
             print('Native compilation and offline exchange/policy checks passed; no APK created or signed.')
             return
