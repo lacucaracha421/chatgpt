@@ -1688,7 +1688,7 @@ impl Library {
                 )
                 .optional()?;
             // Repeating a person's own decision changes nothing. Confirming an automatic
-            // acceptance is new evidence: it becomes a manual decision.
+            // or legacy unknown acceptance is new evidence: it becomes a manual decision.
             let learning_disabled = request.decision == DecisionKind::AcceptedWrongRegion;
             if previous
                 .as_ref()
@@ -1696,7 +1696,7 @@ impl Library {
                     let prior_disabled = serde_json::from_str::<serde_json::Value>(snapshot)
                         .is_ok_and(|value| value["learningDisabled"] == true);
                     decision == request.decision.stored()
-                        && origin != "automatic"
+                        && origin == "manual"
                         && prior_disabled == learning_disabled
                 })
             {

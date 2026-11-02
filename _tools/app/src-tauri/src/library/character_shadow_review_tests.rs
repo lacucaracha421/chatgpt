@@ -1181,6 +1181,68 @@
         assert_eq!(earlier.summary.automatic, VerdictCounts::default());
     }
     #[test]
+    fn confirming_unknown_acceptance_removes_doubtful_item_durably() {
+        let f = Fixture::new();
+        let target = f.ready("Legacy placement");
+        {
+            let c = f.library.connection().unwrap();
+            // Existing libraries can carry legacy `unknown` origins, while a new
+            // library's CHECK only permits manual/automatic. Seed that legacy row.
+            c.execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            c.execute(
+                "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+                 VALUES(?1,'asset-5','asset-5',?2,'accepted',?3,'{}','unknown','2026-09-08T00:00:00Z')",
+                params![target.id, content_hash("asset-5"), target.fingerprint],
+            ).unwrap();
+            c.execute_batch("PRAGMA ignore_check_constraints=OFF")
+                .unwrap();
+        }
+        insert(
+            f.temp.path(),
+            &[(
+                "asset-5",
+                &target.id,
+                "recommended",
+                0.113,
+                "v1",
+                "accepted_automatic",
+                "2026-10-18T00:00:00Z",
+            )],
+        );
+        let before = items_in(&f.library, Some("doubtful"), None);
+        assert_eq!(before.items.len(), 1);
+        assert_eq!(before.items[0].asset_id, "asset-5");
+        assert_eq!(f.library.character_confirm_counts(None).unwrap().recheck, 1);
+
+        let request = || DecisionRequest {
+            target_id: target.id.clone(),
+            expected_fingerprint: target.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        };
+        assert_eq!(f.library.record_character_decisions(request()).unwrap(), 1);
+        let latest: (String, String) = f.library.connection().unwrap().query_row(
+                "SELECT decision,origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",
+                [&target.id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(latest, ("accepted".into(), "manual".into()));
+        // Repeating the person's own confirmation still appends nothing.
+        assert_eq!(f.library.record_character_decisions(request()).unwrap(), 0);
+        let after = items_in(&f.library, Some("doubtful"), None);
+        assert!(after.items.is_empty());
+        assert_eq!(after.summary.doubtful.accepted, 1);
+        assert_eq!(f.library.character_confirm_counts(None).unwrap().recheck, 0);
+
+        drop(f.library);
+        let reopened = Library::open(f.temp.path()).unwrap();
+        assert!(items_in(&reopened, Some("doubtful"), None).items.is_empty());
+        assert_eq!(reopened.character_confirm_counts(None).unwrap().recheck, 0);
+    }
+
+    #[test]
     fn confirm_counts_count_each_pair_once_under_its_highest_kind() {
         let f = Fixture::new();
         let target = f.ready("Count");
