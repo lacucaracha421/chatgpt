@@ -19,6 +19,7 @@ mod performance;
 mod motion;
 mod window_size;
 mod webview_memory;
+mod single_instance;
 mod workload;
 mod auto_jobs;
 pub use cloud::backfill::BackfillControlState;
@@ -39,6 +40,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let instance_event = single_instance::claim();
     perf_log::init();
     let app_state = commands::AppState::default();
     let extension_runtime = extension_api::ExtensionRuntime::default();
@@ -61,6 +63,7 @@ pub fn run() {
                 media_protocol::set_preview_disk_cache(cache.join("provider-previews-v1"));
             }
             workload::setup(app.handle())?;
+            single_instance::listen(instance_event, app.handle());
             activities::setup(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 window_size::restore(&window);

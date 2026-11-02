@@ -32,6 +32,10 @@ work is done there; the application itself is the same React/Vite + Tauri app as
 - Release build: the user builds pushed `main` with the desktop shortcut "라쿠믹스 릴리즈 빌드"; the
   running release (`target\release\lakomics.exe`) does not pick up source changes. Rebuild only when
   asked.
+- Login start: the Startup-folder shortcut `Lakomics.lnk` runs `C:\laku\autostart\start-lakomics.vbs`
+  (outside the repository), which waits up to 3 minutes for `V:` to attach and then starts the release
+  build. A second launch of the same build kind exits at once and brings the running window forward
+  (`src-tauri/src/single_instance.rs`); dev and release builds do not block each other.
 - Rust formatting rules from `AGENTS.md` apply unchanged (`rustfmt` per changed file, never write-mode
   `cargo fmt`).
 

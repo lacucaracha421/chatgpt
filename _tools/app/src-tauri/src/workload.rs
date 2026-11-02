@@ -463,7 +463,7 @@ pub(crate) fn set_received_indicator(app: &tauri::AppHandle, count: usize) {
         }
     });
 }
-fn open(app: &tauri::AppHandle) {
+pub(crate) fn open(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.show().is_ok() && window.unminimize().is_ok() {
             let focused = window.set_focus().is_ok();
