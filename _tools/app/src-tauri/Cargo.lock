@@ -2464,6 +2464,8 @@ dependencies = [
  "uuid",
  "webkit2gtk",
  "webp",
+ "webview2-com",
+ "windows 0.61.3",
  "windows-sys 0.61.2",
  "zeroize",
  "zip",

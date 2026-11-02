@@ -485,6 +485,7 @@ pub(crate) fn activity(app: &tauri::AppHandle, hidden: bool, focused: bool) {
     }
     drop(state);
     if changed {
+        crate::webview_memory::set_hidden(app, hidden);
         broadcast(app);
     }
 }

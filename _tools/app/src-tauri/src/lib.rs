@@ -18,6 +18,7 @@ pub mod perf_log;
 mod performance;
 mod motion;
 mod window_size;
+mod webview_memory;
 mod workload;
 mod auto_jobs;
 pub use cloud::backfill::BackfillControlState;
