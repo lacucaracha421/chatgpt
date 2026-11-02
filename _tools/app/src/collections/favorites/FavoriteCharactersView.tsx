@@ -195,13 +195,13 @@ export function FavoriteCharactersView({ root, state, catalog, catalogError, col
       { id: "remove", label: "캐릭터 목록에서 빼기", separatorBefore: true, disabled: state.busy, onSelect: () => { void change([{ op: "remove", ids: [chosen.id] }]).then(saved => { if (saved && detail?.id === chosen.id) { setDetail(null); setEditing(false); } }); } },
     ];
   };
-  const add = catalog && <Menu label="캐릭터 추가" open={adding} onOpenChange={setAdding} align="end" trigger={<><PlusIcon aria-hidden="true" />추가</>} contentClassName="favorite-add-menu" content={<FavoriteAddPicker catalog={catalog} entries={entries} busy={state.busy} onClose={() => setAdding(false)} onAdd={ids => change([{ op: "add", ids }])} onCreate={async name => {
+  const add = catalog && <Menu label="캐릭터 추가" open={adding} onOpenChange={setAdding} align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><PlusIcon aria-hidden="true" />추가</>} contentClassName="favorite-add-menu" content={<FavoriteAddPicker catalog={catalog} entries={entries} busy={state.busy} onClose={() => setAdding(false)} onAdd={ids => change([{ op: "add", ids }])} onCreate={async name => {
     const saved = await change([createFavoriteCommand(name)]);
     if (saved) setScope("all");
     return saved;
   }} />} />;
   const sectionDrop = useSectionDrop({ label: "분류함", options: scopes, value: effectiveScope, onChange: setScope,
-    trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{add}</> }, !target || !entry, "캐릭터");
+    trailing: <>{shortcuts}<div className="collection-shortcuts__end-slot">{add && <><span className="collection-shortcuts__divider" aria-hidden="true" />{add}</>}</div></> }, !target || !entry, "캐릭터");
   const message = error ?? state.error ?? catalogError;
   return <section className="favorite-view" aria-label="캐릭터">
     <ViewToolbar title={target && entry ? target.displayName : "캐릭터"} sectionDrop={target && entry ? undefined : sectionDrop}

@@ -470,7 +470,7 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
-  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, afterSwitch: avLibrary ? <PerformerViewSwitch value={performerView.view} onChange={view=>changePerformerView({view})}/> : undefined, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox && !(charactersOpen && charactersReady), "컬렉션", performerGrid ? sectionLabel : undefined);
+  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, afterSwitch: avLibrary ? <PerformerViewSwitch value={performerView.view} onChange={view=>changePerformerView({view})}/> : undefined, trailing: <>{shortcuts}<div className="collection-shortcuts__end-slot">{viewControls && <><span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</>}</div></> }, !inbox && !(charactersOpen && charactersReady), "컬렉션", performerGrid ? sectionLabel : undefined);
 
   const chrome: ViewChromeSpec = {
     actions: collectionActions,

@@ -531,8 +531,10 @@ describe("CollectionBrowser", () => {
     const shortcuts = screen.getByRole("group", { name: "컬렉션 바로가기" });
     expect(shortcuts.closest(".ui-section-bar__trailing")).not.toBeNull();
     expect(document.querySelector(".ui-section-bar__extra")).toBeNull();
-    expect(shortcuts.nextElementSibling).toHaveClass("collection-shortcuts__divider");
-    expect(shortcuts.parentElement?.lastElementChild).toHaveTextContent("보기");
+    const endSlot = shortcuts.nextElementSibling;
+    expect(endSlot).toHaveClass("collection-shortcuts__end-slot");
+    expect(endSlot?.firstElementChild).toHaveClass("collection-shortcuts__divider");
+    expect(endSlot?.lastElementChild).toHaveTextContent("보기");
     expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스", "캐릭터"] : ["쇼케이스", "캐릭터", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
     expect(shortcuts.querySelector(".is-new, .ui-segmented__thumb, [aria-checked], [aria-current]")).toBeNull();
     const showcase = within(shortcuts).getByRole("button", { name: "쇼케이스" });
