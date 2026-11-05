@@ -561,7 +561,13 @@ it("opens a view's own search editor from the palette with the typed draft", asy
   </WorkspaceChromeProvider></BackNavigationProvider>);
   // The online catalog keeps its own trigger in the index head.
   expect(screen.getByRole("button", { name: "온라인 만화 검색" })).toBeInTheDocument();
+  // Ctrl+Q goes straight to the catalog search; the rail button still opens the palette.
   await user.keyboard("{Control>}q{/Control}");
+  expect(await screen.findByRole("dialog", { name: "온라인 카탈로그에서 검색" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "온라인 카탈로그에서 검색" })).not.toBeInTheDocument());
+  await user.click(screen.getByRole("button", { name: "찾기" }));
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("온라인 카탈로그 검색 열기");
   await user.type(screen.getByRole("combobox"), "태그");
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("온라인 카탈로그에서 ‘태그’ 검색");

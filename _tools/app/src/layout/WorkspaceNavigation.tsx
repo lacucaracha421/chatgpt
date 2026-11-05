@@ -171,6 +171,9 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
   const openPalette = useCallback(() => { setPaletteOpen(true); queuesRequested.current?.(); }, []);
   const setFindAction = chrome?.setFindAction;
   useEffect(() => { setFindAction?.(openPalette); return () => setFindAction?.(null); }, [setFindAction, openPalette]);
+  // In 망가, Ctrl+Q opens the catalog's own search editor first (user, 2026-11-05); the rail 찾기 button still opens the palette.
+  const openSurfaceSearch = useRef<(() => void) | null>(null);
+  openSurfaceSearch.current = area === "manga" && searchInfo?.kind === "surface" && chrome ? () => chrome.openSearch("") : null;
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       // Ctrl+Q (user, 2026-10-05; replaced Ctrl+K / Ctrl+F). It has no text-editing meaning, so it also works from a field.
@@ -180,6 +183,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
       // Not over another dialog such as the asset viewer.
       if (event.defaultPrevented || modalDialogOpen()) return;
       event.preventDefault();
+      if (openSurfaceSearch.current) { openSurfaceSearch.current(); return; }
       setPaletteOpen(true);
       queuesRequested.current?.();
     };
