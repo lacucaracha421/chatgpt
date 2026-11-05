@@ -843,10 +843,11 @@ describe("OnlineCatalogBrowser", () => {
 
     await userEvent.type(search, "제독");
     await userEvent.click(await screen.findByRole("option", { name: /제독/ }));
-    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "character:teitoku" }),
+    // Browsing opens on 오늘 인기; a new search lists the newest first, and the menu can still change it.
+    expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(expect.objectContaining({ text: "", sort: "hotDay" }));
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "character:teitoku", sort: "latest" }),
     ));
-    expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(expect.objectContaining({ sort: "hotDay" }));
     await chooseMenu("정렬", "주간 인기");
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ sort: "hotWeek" }),

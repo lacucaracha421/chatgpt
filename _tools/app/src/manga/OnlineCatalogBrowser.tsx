@@ -226,6 +226,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   /** Load a view from its first page. A refresh passes the number of pages shown, so appended cards keep their place. */
   async function search(text: string, nextSort = sort, nextScope = scope, nextRevealBlocked = revealBlocked, nextLanguage = language, quiet = false, pages = 1) {
     if (!mounted.current) return false;
+    // A new catalog search lists the newest first (user, 2026-11-05); the sort menu can still change it afterwards.
+    if (text && text !== appliedQuery && nextScope !== "bookmarked" && nextSort !== "latest") { nextSort = "latest"; setSort("latest"); }
     setAppliedQuery(text);
     setSearchOpen(false);
     const request = ++searchRequest.current;
