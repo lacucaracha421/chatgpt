@@ -38,6 +38,8 @@ export default defineConfig(async ({ mode }) => {
       // loaded host (HOME-OPT-001). Timeouts only bound a genuine hang, they never wait on a pass.
       testTimeout: 20_000,
       hookTimeout: 20_000,
+      // Half the cores, so a test run does not stall the browser and other apps (user, 2026-11-05).
+      maxWorkers: "50%",
       css: { include: [/src\/styles\/(?:tokens|global)\.css$/] },
     },
   };
