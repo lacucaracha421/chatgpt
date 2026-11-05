@@ -448,7 +448,7 @@ pub(super) struct Worker {
 /// is borrowed for one query/asset, not for an entire historical inventory.
 #[derive(Default)]
 pub(super) struct Pool {
-    session: std::sync::Mutex<Option<(RuntimeConfig, Vec<String>, Worker, Value)>>,
+    session: std::sync::Mutex<Option<(RuntimeConfig, Vec<String>, Worker, Value, Instant)>>,
     manual_waiters: std::sync::atomic::AtomicUsize,
 }
 impl std::fmt::Debug for Pool {
@@ -460,6 +460,21 @@ impl Pool {
     /// Never interrupt a borrowed worker; its owner releases the session afterward.
     pub(super) fn release(&self) {
         if let Ok(mut session) = self.session.try_lock() { *session = None; }
+    }
+
+    /// Check and drop under the same lock, so a borrowed or recently used worker survives.
+    pub(super) fn release_if_idle(&self, idle: Duration) -> bool {
+        let Ok(mut session) = self.session.try_lock() else {
+            return false;
+        };
+        if session
+            .as_ref()
+            .is_some_and(|(_, _, _, _, last_used)| last_used.elapsed() >= idle)
+        {
+            *session = None;
+            return true;
+        }
+        false
     }
 
     pub(super) fn with<T>(
@@ -500,7 +515,7 @@ impl Pool {
         let performance_args = config.performance_args();
         if guard
             .as_ref()
-            .is_some_and(|(previous, args, _, _)| previous != config || *args != performance_args)
+            .is_some_and(|(previous, args, _, _, _)| previous != config || *args != performance_args)
         {
             *guard = None;
         }
@@ -510,11 +525,13 @@ impl Pool {
             if ready["type"] != "ready" || ready["baselineFingerprint"] != BASELINE {
                 return Err(Error::Worker("캐릭터 런타임 검증 실패".into()));
             }
-            *guard = Some((config.clone(), performance_args, worker, ready));
+            *guard = Some((config.clone(), performance_args, worker, ready, Instant::now()));
         }
-        let (_, _, worker, ready) = guard.as_mut().unwrap();
+        let (_, _, worker, ready, last_used) = guard.as_mut().unwrap();
         worker.cancel = cancel;
         let result = work(worker, ready);
+        // Count manual requests too, and start the idle period only after work finishes.
+        *last_used = Instant::now();
         if result.is_err() {
             *guard = None;
         }

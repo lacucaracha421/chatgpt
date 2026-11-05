@@ -28,6 +28,7 @@ const FRESH_JOB_BUDGET: Duration = Duration::from_secs(180);
 /// An idle owner re-checks the queue at least this often, so a change that no wake
 /// reported (for example a write from outside `Library::connection`) is delayed, not lost.
 const IDLE_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
+const WORKER_IDLE_RELEASE: Duration = Duration::from_secs(30 * 60);
 /// Cadence of the in-memory checks (stop, library lease, lightweight mode) while waiting,
 /// and of the re-check after a failed turn or a turn that only changed queue rows itself.
 /// No database work happens at this cadence.
@@ -685,6 +686,17 @@ impl Library {
                 && !matches!(attempt, Ok(true))
             {
                 crate::auto_jobs::finish_characters(self, attempt.is_ok());
+            }
+            if matches!(attempt, Ok(false))
+                && self.character_worker_pool.release_if_idle(WORKER_IDLE_RELEASE)
+            {
+                // Both caches are rebuilt lazily by the next eligible analysis.
+                let mut engine = self
+                    .character_incremental
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                engine.prepared_references = None;
+                engine.training = None;
             }
             let deadline = match attempt {
                 Ok(true) => continue,
