@@ -537,7 +537,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
       if (!zooming) return;
       if (key === "arrowright" || key === "d") { event.preventDefault(); void judge("accepted"); }
       else if (key === "arrowleft" || key === "a") { event.preventDefault(); void judge("rejected"); }
-      else if (key === "w") { event.preventDefault(); void judge("accepted_wrong_region"); }
+      else if (key === "arrowup" || key === "w") { event.preventDefault(); void judge("accepted_wrong_region"); }
       else if (key === "arrowdown" || key === "s") { event.preventDefault(); skip(); }
       else if (key === "f" && current) { event.preventDefault(); setOriginalKey(current.key); }
     }}>
@@ -581,7 +581,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
           <div className="confirm-list__actions">
             <Button variant="primary" disabled={busy} onClick={() => void judge("accepted")}>맞음 <kbd>→</kbd><kbd>D</kbd></Button>
             <Button disabled={busy} onClick={() => void judge("rejected")}>아님 <kbd>←</kbd><kbd>A</kbd></Button>
-            {current.crop && <Button disabled={busy} onClick={() => void judge("accepted_wrong_region")}>맞음 · 위치 틀림 <kbd>W</kbd></Button>}
+            {current.crop && <Button disabled={busy} onClick={() => void judge("accepted_wrong_region")}>맞음 · 위치 틀림 <kbd>↑</kbd><kbd>W</kbd></Button>}
             <Button variant="ghost" disabled={busy || !next} onClick={skip}>건너뛰기 <kbd>↓</kbd><kbd>S</kbd></Button>
           </div>
           <p className="confirm-list__meta">아님 = {current.targetName}에서 빼고 다시 넣지 않음</p>

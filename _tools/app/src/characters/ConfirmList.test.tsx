@@ -497,7 +497,8 @@ it("keeps 맞음 · 위치 틀림 for images that carry a person box, and stores
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /^히나 · w1\.png · 한 장씩 보기 필요/ }));
   expect(await screen.findByRole("img", { name: "히나 감지 영역" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: /맞음 · 위치 틀림/ }));
+  expect(screen.getByRole("button", { name: /맞음 · 위치 틀림/ })).toBeInTheDocument();
+  await user.keyboard("{ArrowUp}");
   await stored(() => expect(decisions.decide).toHaveBeenCalledWith(request("hina", "w1", "accepted_wrong_region")));
   // The next image has no box: the action is not offered.
   expect(await screen.findByText("w2.png")).toBeInTheDocument();
