@@ -10,6 +10,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {Collections} from './Collections';
 import {resetReleaseStore} from './releaseStore';
+import * as connection from './outboxConnection';
 import {resetMangaShelfDetails, TabletMangaShelf} from './CollectionMangaShelf';
 const item:CollectionDetail={id:'manga-1',name:'밤의 도서관',type:'game',showcase:true,selectedWorkArtworkId:'cover',volumes:[{id:'v2',volumeNumber:2,editionIndex:0,displayLabel:'2권',coverArtworkId:'c2'},{id:'e1',volumeNumber:1,editionIndex:1,displayLabel:'특별판 1권',coverArtworkId:'e1'},{id:'v1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1'}],artworks:[]};
 const page:CollectionPage={ready:true,filterVersion:1,revision:'r1',publishedAt:null,items:[item],nextCursor:null};
@@ -746,6 +747,8 @@ describe('read-only collections',()=>{
     }finally{Reflect.deleteProperty(document,'startViewTransition');}
   });
   it('keeps AV works until complete performer profiles arrive and uses the shared performer view options',async()=>{
+    // Start without the completed performer grid remembered by another test's connection.
+    vi.spyOn(connection,'outboxConnection').mockReturnValue('https://performer-grid-test.invalid');
     let resolvePerson!:(value:unknown)=>void;
     const personRead=new Promise(resolve=>{resolvePerson=resolve;});
     const work={...item,id:'grid-av-work',name:'Grid AV work',type:'av' as const,av:{people:[{id:'tablet-grid-person',name:'Grid performer',role:'performer' as const,order:0}],genres:[]}};
@@ -754,6 +757,7 @@ describe('read-only collections',()=>{
     await screen.findByText(item.name);
     pressTab('AV');
     await screen.findByText('Grid AV work');
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/people/tablet-grid-person')).toBe(true));
     fireEvent.click(screen.getByRole('tab',{name:'배우'}));
     expect(screen.getByText('Grid AV work')).toBeTruthy();
     expect(screen.queryByRole('group',{name:'AV 배우 목록'})).toBeNull();
