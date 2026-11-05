@@ -835,6 +835,25 @@ describe("OnlineCatalogBrowser", () => {
     expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
   });
 
+  it("starts a tag search from a namespace shortcut and clears the field in place", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: "온라인 만화 검색" }));
+    const search = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
+
+    await userEvent.click(within(screen.getByRole("group", { name: "분류로 찾기" })).getByRole("button", { name: /등장인물/ }));
+    expect(search).toHaveValue("c:");
+    expect(search).toHaveFocus();
+    await screen.findByRole("option", { name: /제독/ });
+    expect(gateway.suggestOnlineCatalog).toHaveBeenLastCalledWith("c:", 10);
+
+    await userEvent.click(screen.getByRole("button", { name: "검색어 지우기" }));
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    await waitFor(() => expect(screen.queryByRole("option")).not.toBeInTheDocument());
+    expect(gateway.searchOnlineCatalog).not.toHaveBeenCalledWith(expect.objectContaining({ text: "c:" }));
+  });
+
   it("searches by a Korean suggestion, changes sort, and opens a result", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);

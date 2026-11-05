@@ -1,12 +1,12 @@
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
-import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
-import { SearchSurface } from "../layout/SearchSurface";
+import { SearchSurface, SearchSurfaceField } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
 import { Menu } from "../shared/ui/Menu";
 import { useLibrary } from "../library/LibraryContext";
@@ -46,7 +46,8 @@ import { MangaToolbar, MangaViewMenu, type MangaSource } from "./MangaToolbar";
 import { MangaIndexToken } from "./MangaIndex";
 import { mangaIndexQuery, withMangaIndexQuery } from "./mangaIndexModel";
 import type { MangaIndexIdentity } from "../library/types";
-import { displayDateTime } from "../shared/displayDate";
+import { displayCount, displayDateTime } from "../shared/displayDate";
+import { matchedSpans } from "../shared/findModel";
 
 import { BOOKMARK_SORT_OPTIONS, readBookmarkSort, writeBookmarkSort, type BookmarkSort } from "./bookmarkSort";
 
@@ -119,6 +120,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const [suggestions, setSuggestions] = useState<CatalogSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const suggestionsListboxId = useId();
+  const searchFormRef = useRef<HTMLFormElement>(null);
   const [loading, setLoading] = useState(false);
   // Any search (quiet refresh included) still fetching its pages; appending waits for it.
   const [searchPending, setSearchPending] = useState(false);
@@ -399,7 +401,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   }, [gateway, query, status?.installed]);
 
   useEffect(() => {
-    // The list shows about four rows; arrow keys keep the active option in view.
+    // A short window can clip the list; arrow keys keep the active option in view.
     if (activeSuggestionIndex < 0) return;
     document.getElementById(`${suggestionsListboxId}-option-${activeSuggestionIndex}`)?.scrollIntoView?.({ block: "nearest" });
   }, [activeSuggestionIndex, suggestionsListboxId]);
@@ -670,10 +672,9 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     { id: "update", label: showUpdating ? "갱신 중…" : "신규 작품 갱신", disabled: updating, onSelect: () => void updateCatalog() },
     { id: "review", label: "중복 후보 검토", onSelect: () => setReviewOpen(true) },
   ]} /> : undefined;
-  const searchForm = (status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
-          <MagnifyingGlassIcon aria-hidden="true" />
-          <input
-            type="search"
+  const suggestionNeedle = tagNeedle(query);
+  const searchForm = (status?.installed && <form ref={searchFormRef} className="chrome-search-editor__form online-catalog__search" role="search" onSubmit={submit}>
+          <SearchSurfaceField
             autoFocus={Boolean(workspace)}
             role="combobox"
             aria-label="온라인 만화 검색"
@@ -684,27 +685,43 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
             placeholder={`제목 또는 ${language === "korean" ? "한국어" : "일본어"} 태그 검색`}
             value={query}
             onChange={(event) => {
+              // The shown suggestions stay until the next ones arrive, so the list does not blink while typing.
               setQuery(event.target.value);
-              setSuggestions([]);
               setActiveSuggestionIndex(-1);
             }}
+            onClear={() => { setQuery(""); closeSuggestions(); }}
             onKeyDown={handleSearchKeyDown}
             onBlur={closeSuggestions}
           />
-          {suggestions.length > 0 && <div id={suggestionsListboxId} className="online-catalog__suggestions" role="listbox" aria-label="검색 제안">
-            {suggestions.map((suggestion, index) => <button
-              id={`${suggestionsListboxId}-option-${index}`}
-              key={suggestion.value}
-              type="button"
-              role="option"
-              tabIndex={-1}
-              aria-selected={activeSuggestionIndex === index}
+          {suggestions.length > 0 ? <div id={suggestionsListboxId} className="online-catalog__suggestions" role="listbox" aria-label="검색 제안">
+            {suggestions.map((suggestion, index) => {
+              const tag = suggestionParts(suggestion);
+              return <button
+                id={`${suggestionsListboxId}-option-${index}`}
+                key={suggestion.value}
+                type="button"
+                role="option"
+                tabIndex={-1}
+                aria-selected={activeSuggestionIndex === index}
+                aria-label={`${tag.name}${tag.original ? ` (${tag.original})` : ""} · ${tag.namespace} · ${displayCount(suggestion.count)}개`}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveSuggestionIndex(index)}
+                onClick={() => selectSuggestion(suggestion)}
+              >
+                <span className="online-catalog__suggestion-namespace">{tag.namespace}</span>
+                <span className="online-catalog__suggestion-name">
+                  <Marked text={tag.name} query={suggestionNeedle} />
+                  {tag.original && <span className="online-catalog__suggestion-original"><Marked text={tag.original} query={suggestionNeedle} /></span>}
+                </span>
+                <span className="online-catalog__suggestion-count">{displayCount(suggestion.count)}</span>
+              </button>;
+            })}
+          </div> : !query.trim() && <div className="online-catalog__namespaces" role="group" aria-label="분류로 찾기">
+            {NAMESPACE_SHORTCUTS.map(([short, namespace]) => <Button key={short} type="button" size="sm" variant="quiet"
               onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveSuggestionIndex(index)}
-              onClick={() => selectSuggestion(suggestion)}
-            >
-              <span>{suggestion.label}</span><small>{suggestion.value} · {suggestion.count.toLocaleString()}</small>
-            </button>)}
+              onClick={() => { setQuery(`${short}:`); searchFormRef.current?.querySelector("input")?.focus(); }}>
+              {namespaceLabel(namespace)}<span className="online-catalog__namespace-key">{short}:</span>
+            </Button>)}
           </div>}
         </form>);
 
@@ -748,7 +765,10 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
           open: (draft) => { setQuery(draft.trim() || appliedQuery); setSearchOpen(true); },
           content: <SearchSurface label="온라인 만화 검색" scope={searchScope} active={Boolean(appliedQuery)} open={searchOpen}
             onOpen={() => { setQuery(appliedQuery); setSearchOpen(true); }} onClose={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>
-            {searchForm}<div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button></div>
+            {searchForm}<div className="ui-dialog__actions chrome-search-editor__foot">
+              <span className="chrome-search-editor__keys"><kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 검색 <kbd>Esc</kbd> 닫기</span>
+              <Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button>
+            </div>
           </SearchSurface>,
         } : undefined,
       }}
@@ -841,4 +861,40 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 
 function catalogSortLabel(sort: CatalogSort): string {
   return sort === "bookmarkAdded" ? BOOKMARK_SORT_OPTIONS[1].label : sort === "views" ? "조회순" : sort === "hotDay" ? "오늘 인기" : sort === "hotWeek" ? "주간 인기" : sort === "hotMonth" ? "월간 인기" : "최신순";
+}
+
+// Same words as the detail panel's tag groups (MangaDetail).
+const NAMESPACE_LABELS: Record<string, string> = {
+  artist: "작가", group: "그룹", language: "언어", parody: "원작", series: "시리즈",
+  character: "등장인물", female: "여성", male: "남성", mixed: "혼합", other: "기타",
+  misc: "기타", reclass: "분류", cosplayer: "코스플레이어", location: "장소", temp: "임시",
+};
+/** Short namespaces the search reads (`a:` is `artist:`), offered while the field is empty. */
+const NAMESPACE_SHORTCUTS: [string, string][] = [
+  ["a", "artist"], ["g", "group"], ["p", "parody"], ["c", "character"], ["f", "female"], ["m", "male"], ["o", "other"],
+];
+
+function namespaceLabel(namespace: string): string {
+  return NAMESPACE_LABELS[namespace] ?? namespace;
+}
+
+/** A suggestion as read: its namespace in words, the Korean name when there is one, else the tag with spaces. */
+function suggestionParts(suggestion: CatalogSuggestion): { namespace: string; name: string; original: string | null } {
+  const colon = suggestion.value.indexOf(":");
+  const namespace = colon > 0 ? suggestion.value.slice(0, colon) : "";
+  const tag = (colon > 0 ? suggestion.value.slice(colon + 1) : suggestion.value).replace(/_/g, " ");
+  const label = suggestion.label.startsWith(`${namespace}:`) ? suggestion.label.slice(namespace.length + 1) : suggestion.label;
+  // A translated label may list alternative names (`후지마루 리츠카|구다오`).
+  const translated = suggestion.label !== suggestion.value ? label.split("|").map(part => part.trim()).filter(Boolean).join(" · ") : "";
+  return { namespace: namespace ? namespaceLabel(namespace) : "태그", name: translated || tag, original: translated ? tag : null };
+}
+
+/** The typed text without its namespace (`f:futa` marks `futa`), with tag underscores read as spaces. */
+function tagNeedle(query: string): string {
+  const text = query.trim();
+  return (text.includes(":") ? text.slice(text.indexOf(":") + 1) : text).replace(/_/g, " ");
+}
+
+function Marked({ text, query }: { text: string; query: string }) {
+  return <>{matchedSpans(text, query).map((span, index) => span.matched ? <mark key={index}>{span.text}</mark> : span.text)}</>;
 }

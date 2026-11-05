@@ -163,9 +163,31 @@ html[data-input="pointer"] :is(.ui-anchored-panel, .ui-overlay-panel, .workspace
   .workspace-navigation *, .ui-anchored-panel { transition: none !important; animation: none !important; }
 }
 
-.chrome-search-editor .online-catalog__search { position: relative; display: flex; width: 100%; min-width: 0; max-width: none; margin: 0; }
-.chrome-search-editor .online-catalog__search input { width: 100%; min-width: 0; height: 40px; font-size: var(--text-lg); }
-.chrome-search-editor .online-catalog__suggestions { z-index: 1; }
+/* SearchSurface: anchored near the top like the 찾기 palette, so suggestions grow downward without moving the field;
+   the dialog itself never scrolls (its list does) and the actions stay in view. */
+.ui-dialog.ui-dialog:has(> .chrome-search-editor) {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  inset: min(12vh, 96px) 0 auto;
+  width: min(40rem, calc(100vw - var(--space-6)));
+  max-height: calc(100vh - 2 * min(12vh, 96px));
+  margin: 0 auto;
+  padding: var(--space-4);
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.chrome-search-editor { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+.chrome-search-editor__form { display: flex; flex-direction: column; gap: var(--space-2); flex: 0 1 auto; min-height: 0; }
+.chrome-search-editor__field { position: relative; flex: none; }
+.chrome-search-editor__field > .ui-text-input { width: 100%; }
+.chrome-search-editor__field:has(> .chrome-search-editor__clear) > .ui-text-input { padding-right: var(--control-height); }
+.chrome-search-editor__clear.ui-button { position: absolute; top: 50%; right: var(--space-1); transform: translateY(-50%); color: var(--color-faint); }
+.chrome-search-editor__clear.ui-button:hover { color: var(--color-text); }
+.chrome-search-editor__foot { flex: none; align-items: center; }
+.chrome-search-editor__keys { min-width: 0; margin-right: auto; overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); white-space: nowrap; text-overflow: ellipsis; }
+.chrome-search-editor__keys kbd { font: inherit; margin: 0 var(--space-1) 0 var(--space-2); padding: 0 var(--space-1); border: 1px solid var(--color-border); border-radius: var(--radius-tile); }
+.chrome-search-editor__keys kbd:first-child { margin-left: 0; }
 
 /* Chrome refinement: compact labels, squared symbols, quiet tree hierarchy. */
 .workspace-titlebar { padding-left: 0; }

@@ -104,46 +104,6 @@
   padding-left: var(--space-2);
 }
 
-:is(.view-toolbar__content, .collection-browser__library-controls) > .manga-browser__search {
-  display: flex;
-  align-items: center;
-  flex: 0 1 20rem;
-  min-width: 8rem;
-  height: var(--control-height-md);
-  margin-left: var(--space-2);
-  padding: 0 var(--space-2);
-  color: var(--color-muted);
-  background: var(--color-bg);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.manga-browser__search:focus-within {
-  border-color: var(--color-focus);
-}
-
-.manga-browser__search svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-}
-
-.manga-browser__search input {
-  min-width: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0 var(--space-2);
-  color: var(--color-text);
-  background: transparent;
-  border: 0;
-  outline: 0;
-  font-size: var(--text-sm);
-}
-
-.manga-browser__search input::placeholder {
-  color: var(--color-muted);
-}
-
 /* Manga cards are shared cover objects, with geometry independent of metadata. */
 .manga-browser__screen { height: 100%; min-height: 0; }
 .manga-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: var(--space-6) var(--space-4); padding: var(--space-4); }
@@ -194,44 +154,37 @@
 @container manga-section (max-width: 440px) { .manga-section-bar .ui-segmented__count { display: none; } }
 .manga-toolbar__count, .manga-toolbar__refresh time { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.online-catalog__search { position: relative; }
-
-.online-catalog__suggestions {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + var(--space-1));
-  left: 0;
-  width: min(28rem, 80vw);
-  padding: var(--space-1);
-  background: var(--color-surface-raised);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-floating);
-  /* About four rows show at once; the rest (up to 10) scroll inside the list. */
-  max-height: calc(4 * 2.5rem + 2 * var(--space-1));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.online-catalog__suggestions button {
-  display: flex;
-  min-height: 2.5rem;
+/* Catalog search suggestions (inside SearchSurface): namespace column, name with the typed part marked,
+   right-aligned count. The list sits under the field in the flow; only the list scrolls. */
+.online-catalog__suggestions { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.online-catalog__suggestions [role="option"] {
+  display: grid;
+  grid-template-columns: var(--catalog-namespace-column) minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
   gap: var(--space-3);
-  padding: var(--space-2);
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
   color: var(--color-text);
+  font: inherit;
   text-align: left;
   background: transparent;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-selection);
   cursor: pointer;
 }
-
-.online-catalog__suggestions button:hover,
-.online-catalog__suggestions button[aria-selected="true"] { background: var(--color-surface-hover); }
-.online-catalog__suggestions small { color: var(--color-muted); }
+/* The dialog face is the elevated surface, where the menus' hover face barely shows; the active row takes the pressed face. */
+.online-catalog__suggestions [role="option"][aria-selected="true"] { background: var(--color-surface-pressed); }
+.online-catalog__search { --catalog-namespace-column: 56px; }
+.online-catalog__suggestion-namespace { color: var(--color-faint); font-size: var(--type-meta); white-space: nowrap; }
+.online-catalog__suggestion-name { overflow: hidden; font-size: var(--type-body); white-space: nowrap; text-overflow: ellipsis; }
+.online-catalog__suggestion-original { margin-left: var(--space-2); color: var(--color-faint); font-size: var(--type-meta); }
+/* The accent alone is close to the text colour in the dark theme; the weight carries the match. */
+.online-catalog__suggestions mark { color: var(--color-accent); font-weight: 600; background: transparent; }
+.online-catalog__suggestion-count { color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+/* While the field is empty: the short namespaces, one press puts `a:` in the field. */
+.online-catalog__namespaces { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.online-catalog__namespace-key { margin-left: var(--space-1); color: var(--color-faint); }
 
 .online-catalog__sync-status {
   flex-shrink: 0;

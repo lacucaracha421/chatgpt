@@ -5,7 +5,7 @@ import type { SomiOpenedPost, SomiPost, SomiSearchPage, SomiSort, SomiStatus } f
 import { nativeMediaUrl } from "../assets/mediaUrl";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
-import { SearchSurface } from "../layout/SearchSurface";
+import { SearchSurface, SearchSurfaceField } from "../layout/SearchSurface";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -311,9 +311,9 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
       chrome={{ status: loggedIn ? <ChromeQueryBadge search={search} /> : undefined,
         searchSurface: loggedIn ? { ...search, open: text => { setDraft(text || query); setSearchOpen(true); },
           content: <SearchSurface label="소미 검색" scope="소미" active={Boolean(query)} open={searchOpen} onOpen={() => { setDraft(query); setSearchOpen(true); }} onClose={() => setSearchOpen(false)}>
-            <form onSubmit={event => { event.preventDefault(); apply(draft.trim()); }}>
-              <label>제목 또는 작가<input className="ui-input" aria-label="소미 검색어" value={draft} onChange={e => setDraft(e.target.value)} autoFocus /></label>
-              <div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => setSearchOpen(false)}>취소</Button><Button type="submit" variant="primary">검색</Button></div>
+            <form className="chrome-search-editor__form" role="search" onSubmit={event => { event.preventDefault(); apply(draft.trim()); }}>
+              <SearchSurfaceField aria-label="소미 검색어" placeholder="제목 또는 작가" value={draft} onChange={e => setDraft(e.target.value)} onClear={() => setDraft("")} autoFocus />
+              <div className="ui-dialog__actions chrome-search-editor__foot"><Button type="button" variant="ghost" onClick={() => setSearchOpen(false)}>취소</Button><Button type="submit" variant="primary">검색</Button></div>
             </form>
           </SearchSurface> } : undefined }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
