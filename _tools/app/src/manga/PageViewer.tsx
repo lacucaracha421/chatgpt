@@ -1,5 +1,5 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type PointerEvent, type WheelEvent } from "react";
 import { ArrowLeftIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { useCatalogMasked } from "../privacy/catalogMask";
@@ -37,6 +37,7 @@ type PageViewerProps = {
   onRetryPage?: () => Promise<void>;
 };
 
+const READER_CHROME_EDGE_PX = 96;
 const WHEEL_PAGE_THRESHOLD_PX = 48;
 const WHEEL_GESTURE_PAUSE_MS = 200;
 const WHEEL_LINE_PX = 16;
@@ -94,7 +95,6 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
   const overviewOpenedOnceRef = useRef(false);
   const overviewGridRef = useRef<HTMLDivElement>(null);
   const chrome = useIdleChrome();
-  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const wheelGesture = useRef({ delta: 0, axis: "y", turned: false, timer: null as number | null });
   useEffect(() => () => {
     if (wheelGesture.current.timer !== null) window.clearTimeout(wheelGesture.current.timer);
@@ -137,7 +137,7 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
       gesture.timer = null;
     }, WHEEL_GESTURE_PAUSE_MS);
     const ownDialog = event.currentTarget.closest('[role="dialog"]');
-    const blocked = overviewOpen || chrome.scrubbing.current || event.ctrlKey || event.metaKey
+    const blocked = overviewOpen || chrome.scrubbing || event.ctrlKey || event.metaKey
       || (event.target instanceof Element && !!event.target.closest('input[type="range"]'))
       || !!document.querySelector('[role="menu"]')
       || Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
@@ -286,11 +286,10 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
   };
 
   return <Dialog open variant="fullscreen" title={title} onClose={overviewOpen ? closeOverview : onClose} onKeyDown={(event) => {
-    if (event.key === "Tab") chrome.keyboardFocus.current = true;
+    if (event.key === "Tab" && !overviewOpen) { event.preventDefault(); return; }
     // The page scrubber moves with its own arrow keys.
-    if (event.target instanceof HTMLInputElement) { chrome.reveal(); return; }
+    if (event.target instanceof HTMLInputElement) return;
     const advance = arrowAdvance(event.key, direction);
-    if (!advance) chrome.reveal();
     if (advance) {
       event.preventDefault();
       if (advance === "next") goNext();
@@ -301,17 +300,12 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
     if (event.key.toLowerCase() === "t") { event.preventDefault(); setOverviewOpen((value) => !value); }
   }}>
     <div
-      className={`asset-viewer manga-reader${chrome.visible ? "" : " asset-viewer--chrome-hidden"}`}
+      className={`asset-viewer manga-reader${chrome.visible ? "" : " asset-viewer--chrome-hidden"}${!chrome.visible && chrome.cursorIdle ? " manga-reader--cursor-idle" : ""}`}
       data-chrome-visible={chrome.visible}
       onWheel={turnWithWheel}
-      onPointerMove={(event) => {
-        // Chromium sends a still pointer a move event when the page under it changes; only real movement reveals.
-        const last = lastPointer.current;
-        lastPointer.current = { x: event.clientX, y: event.clientY };
-        if (last && Math.abs(last.x - event.clientX) < 2 && Math.abs(last.y - event.clientY) < 2) return;
-        chrome.keyboardFocus.current = false; chrome.reveal();
-      }}
-      onPointerDown={() => { chrome.keyboardFocus.current = false; }}
+      ref={chrome.readerRef}
+      onPointerMove={chrome.move}
+      onPointerLeave={chrome.leave}
     >
       <div className="asset-viewer__stage manga-reader__stage">
         <div className="manga-reader__canvas">
@@ -326,10 +320,10 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
           {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true"
             onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />)}
         </div>
-        <div ref={chrome.ref} className="asset-viewer__chrome" onFocusCapture={chrome.reveal} onBlurCapture={chrome.reveal}>
-          <div className="asset-viewer__topbar" data-tauri-drag-region="deep" {...chrome.hover}
+        <div ref={chrome.ref} className="asset-viewer__chrome">
+          <div className="asset-viewer__topbar" data-tauri-drag-region="deep"
             onPointerDown={event => event.stopPropagation()}
-            onPointerMove={event => event.stopPropagation()}
+            onPointerMove={event => { chrome.move(event); event.stopPropagation(); }}
             onPointerUp={event => event.stopPropagation()}
             onPointerCancel={event => event.stopPropagation()}>
             <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ArrowLeftIcon aria-hidden="true" /></Button>
@@ -347,12 +341,12 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
           </div>
           {edge("left")}
           {edge("right")}
-          <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
+          <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr">
             <ReaderControlBar
               page={logicalSpread[0]} pageLabel={position} total={pageCount} direction={direction}
               sliderLabel="페이지 위치" onPageChange={goTo} onNext={goNext} onPrevious={goPrev}
               nextDisabled={(logicalSpread[logicalSpread.length - 1] ?? page) >= pageCount} previousDisabled={logicalSpread[0] <= 1}
-              onScrubbingChange={(active) => { chrome.scrubbing.current = active; chrome.reveal(); }}
+              onScrubbingChange={chrome.setScrubbing}
             />
           </div>
         </div>
@@ -407,37 +401,59 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
   </Dialog>;
 }
 
-/**
- * The reader's bars fade after the shared viewer idle time and come back on pointer movement or a key
- * press, like the 에셋 viewer; they stay while the pointer rests on them or a Tab-focused control is inside.
- */
+/** Bars follow the pointer's edge bands, except during scrubbing or an open chrome popup. */
 function useIdleChrome() {
-  const [visible, setVisible] = useState(true);
-  const ref = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<number | null>(null);
-  const pointerOverRef = useRef(false);
-  const keyboardFocus = useRef(false);
-  const scrubbing = useRef(false);
-  const reveal = useCallback(() => {
-    setVisible(true);
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      if (pointerOverRef.current || scrubbing.current) return;
-      if (keyboardFocus.current && ref.current?.contains(document.activeElement)) return;
-      setVisible(false);
-    }, VIEWER_CHROME_IDLE_MS);
+  const [pointerVisible, setPointerVisible] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const readerRef = useRef<HTMLDivElement>(null);
+  const [chromeElement, setChromeElement] = useState<HTMLDivElement | null>(null);
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
+  // The cursor hides only after the pointer rests, independent of the bars.
+  const [cursorIdle, setCursorIdle] = useState(false);
+  const cursorTimer = useRef<number | null>(null);
+  const restartCursorIdle = useCallback(() => {
+    setCursorIdle(false);
+    if (cursorTimer.current !== null) window.clearTimeout(cursorTimer.current);
+    cursorTimer.current = window.setTimeout(() => { cursorTimer.current = null; setCursorIdle(true); }, VIEWER_CHROME_IDLE_MS);
   }, []);
   useEffect(() => {
-    reveal();
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    };
-  }, [reveal]);
-  const hover = {
-    onPointerEnter: () => { pointerOverRef.current = true; setVisible(true); },
-    onPointerLeave: () => { pointerOverRef.current = false; reveal(); },
+    restartCursorIdle();
+    return () => { if (cursorTimer.current !== null) window.clearTimeout(cursorTimer.current); };
+  }, [restartCursorIdle]);
+  const leave = useCallback(() => {
+    lastPointer.current = null;
+    setPointerVisible(false);
+  }, []);
+
+  useEffect(() => {
+    // Popup triggers remain in the chrome even when their content uses a portal.
+    const chrome = chromeElement;
+    if (!chrome) return;
+    const updatePopup = () => setPopupOpen(!!chrome.querySelector('[aria-expanded="true"]'));
+    const observer = new MutationObserver(updatePopup);
+    observer.observe(chrome, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-expanded"] });
+    updatePopup();
+    window.addEventListener("blur", leave);
+    return () => { observer.disconnect(); window.removeEventListener("blur", leave); };
+  }, [chromeElement, leave]);
+
+  const move = (event: PointerEvent<HTMLDivElement>) => {
+    // Chromium sends synthetic moves when the page under a still pointer changes.
+    const last = lastPointer.current;
+    const { clientX: x, clientY: y } = event;
+    lastPointer.current = { x, y };
+    if (last && Math.abs(last.x - x) < 2 && Math.abs(last.y - y) < 2) return;
+    restartCursorIdle();
+    const reader = readerRef.current;
+    if (!reader) return;
+    const rect = reader.getBoundingClientRect();
+    const inside = (box: DOMRect) => x >= box.left && x < box.right && y >= box.top && y < box.bottom;
+    const inBand = inside(rect) && (y < rect.top + READER_CHROME_EDGE_PX || y >= rect.bottom - READER_CHROME_EDGE_PX);
+    // Use geometry so a captured slider drag into the middle does not count as hovering its bar.
+    const overBar = inside(rect) && Array.from(reader.querySelectorAll(".asset-viewer__topbar, .manga-reader__bottom"))
+      .some(bar => inside(bar.getBoundingClientRect()));
+    setPointerVisible(inBand || ((pointerVisible || scrubbing || popupOpen) && overBar));
   };
-  return { visible, reveal, hover, ref, keyboardFocus, scrubbing };
+  return { visible: pointerVisible || scrubbing || popupOpen, cursorIdle, move, leave, readerRef, ref: setChromeElement, scrubbing, setScrubbing };
 }

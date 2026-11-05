@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_UI_PREFERENCES, saveUiPreferences, UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
-import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { PageViewer } from "./PageViewer";
 import { BackNavigationProvider, useBackRequest } from "../shared/navigation/BackNavigation";
 
@@ -38,6 +37,12 @@ function viewerProps(overrides: object = {}) {
     onClose: vi.fn(),
     ...overrides,
   };
+}
+
+function readerWithRect() {
+  const reader = document.querySelector<HTMLElement>(".manga-reader")!;
+  vi.spyOn(reader, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 1000, 800));
+  return reader;
 }
 
 function shownImages(): string[] {
@@ -206,15 +211,16 @@ describe("PageViewer", () => {
       const props = viewerProps();
       render(<PageViewer {...props} />);
       const slider = screen.getByRole("slider");
-      const reader = document.querySelector(".manga-reader")!;
+      const reader = readerWithRect();
       const bottom = document.querySelector(".manga-reader__bottom")!;
       fireEvent.pointerDown(slider, { pointerId: 1 });
       fireEvent.change(slider, { target: { value: "5" } });
       expect(bottom).toHaveTextContent("5 / 6");
       expect(slider).toHaveAttribute("aria-valuetext", "5 / 6페이지");
       expect(props.onPageChange).not.toHaveBeenCalled();
-      fireEvent.pointerLeave(bottom);
-      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2); });
+      fireEvent.pointerMove(slider, { clientX: 600, clientY: 450 });
+      fireEvent.pointerLeave(reader);
+      act(() => { vi.advanceTimersByTime(3000); });
       expect(reader).toHaveAttribute("data-chrome-visible", "true");
       fireEvent.pointerUp(slider, { pointerId: 1 });
       expect(position()).toBe("5 / 6");
@@ -224,26 +230,28 @@ describe("PageViewer", () => {
       fireEvent.pointerCancel(slider, { pointerId: 2 });
       expect(slider).toHaveValue("5");
       expect(props.onPageChange).toHaveBeenCalledTimes(1);
-      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      act(() => { vi.advanceTimersByTime(1500); });
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
     } finally { vi.useRealTimers(); }
   });
 
-  it("keeps chrome during keyboard slider focus and leaves its native arrow keys unhandled", () => {
-    vi.useFakeTimers();
-    try {
-      const props = viewerProps();
-      render(<PageViewer {...props} />);
-      const slider = screen.getByRole("slider");
-      fireEvent.keyDown(document.querySelector(".manga-reader")!, { key: "Tab" });
-      act(() => slider.focus());
-      expect(fireEvent.keyDown(slider, { key: "ArrowLeft" })).toBe(true);
-      expect(props.onPageChange).not.toHaveBeenCalled();
-      fireEvent.change(slider, { target: { value: "3" } });
-      expect(props.onPageChange).toHaveBeenLastCalledWith(3);
-      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2); });
-      expect(document.querySelector(".manga-reader")).toHaveAttribute("data-chrome-visible", "true");
-    } finally { vi.useRealTimers(); }
+  it("blocks Tab without revealing chrome and preserves the slider's native arrow keys", async () => {
+    const user = userEvent.setup();
+    const props = viewerProps();
+    render(<PageViewer {...props} />);
+    const reader = document.querySelector(".manga-reader")!;
+    const slider = screen.getByRole("slider");
+    act(() => slider.focus());
+    await user.tab();
+    expect(slider).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(slider).toHaveFocus();
+    expect(fireEvent.keyDown(slider, { key: "Tab" })).toBe(false);
+    expect(fireEvent.keyDown(slider, { key: "ArrowLeft" })).toBe(true);
+    expect(props.onPageChange).not.toHaveBeenCalled();
+    fireEvent.change(slider, { target: { value: "3" } });
+    expect(props.onPageChange).toHaveBeenLastCalledWith(3);
+    expect(reader).toHaveAttribute("data-chrome-visible", "false");
   });
 
   it("keeps the painted page mounted while the next page is still loading", async () => {
@@ -596,6 +604,10 @@ describe("PageViewer", () => {
     );
     expect(buttons().map((button) => button.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
     expect(buttons()[0]).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(document.querySelector(".manga-viewer__overview-header button")).toHaveFocus();
+    await user.tab();
+    expect(buttons()[0]).toHaveFocus();
 
     await user.keyboard("{ArrowRight}");
     expect(buttons()[1]).toHaveFocus();
@@ -613,6 +625,9 @@ describe("PageViewer", () => {
     const onToggle = vi.fn();
     const { unmount } = render(<PageViewer {...viewerProps({ initialPage: 4, artist: "tatsuwaipu", bookmark: { bookmarked: false, onToggle } })} />);
 
+    const reader = readerWithRect();
+    fireEvent.pointerMove(reader, { clientX: 600, clientY: 60 });
+    expect(reader).toHaveAttribute("data-chrome-visible", "true");
     expect(position()).toBe("4 / 6");
     expect(document.querySelector(".asset-viewer__title strong")).toHaveTextContent("Remote");
     expect(document.querySelector(".asset-viewer__title small")).toHaveTextContent(/^tatsuwaipu$/);
@@ -647,62 +662,66 @@ describe("PageViewer", () => {
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("20");
   });
 
-  it("holds the window drag bar while hovered and preserves its controls", () => {
-    vi.useFakeTimers();
-    try {
-      const props = viewerProps();
-      render(<PageViewer {...props} />);
-      const reader = document.querySelector<HTMLElement>('.manga-reader')!;
-      const bar = document.querySelector<HTMLElement>('.asset-viewer__topbar')!;
-      expect(bar).toHaveAttribute('data-tauri-drag-region', 'deep');
-      fireEvent.pointerEnter(bar);
-      expect(fireEvent.pointerDown(bar, { button: 0, pointerId: 1, clientX: 600, clientY: 20 })).toBe(true);
-      fireEvent.pointerMove(bar, { pointerId: 1, clientX: 900, clientY: 200 });
-      fireEvent.pointerUp(bar, { pointerId: 1, clientX: 900, clientY: 200 });
-      act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
-      expect(reader).toHaveAttribute('data-chrome-visible', 'true');
-      expect(props.onPageChange).not.toHaveBeenCalled();
-      expect(props.onClose).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole('button', { name: '두 쪽 보기' }));
-      expect(screen.getByRole('button', { name: '두 쪽 보기' })).toHaveAttribute('aria-pressed', 'true');
-      fireEvent.pointerDown(screen.getByRole('button', { name: '읽기 설정' }), { button: 0, pointerType: 'mouse' });
-      expect(screen.getByRole('menu')).toBeInTheDocument();
-      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
-      fireEvent.pointerLeave(bar, { relatedTarget: reader });
-      act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
-      expect(reader).toHaveAttribute('data-chrome-visible', 'false');
-    } finally { vi.useRealTimers(); }
+  it("holds the bars while a chrome menu is open and reapplies the pointer rule on close", async () => {
+    const user = userEvent.setup();
+    const props = viewerProps();
+    render(<PageViewer {...props} />);
+    const reader = readerWithRect();
+    const bar = document.querySelector<HTMLElement>(".asset-viewer__topbar")!;
+    expect(bar).toHaveAttribute("data-tauri-drag-region", "deep");
+    // A bar can extend beyond the reveal band and still hold the chrome.
+    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 1000, 120));
+    fireEvent.pointerMove(reader, { clientX: 600, clientY: 60 });
+    fireEvent.pointerMove(bar, { clientX: 600, clientY: 160 });
+    expect(reader).toHaveAttribute("data-chrome-visible", "true");
+    expect(fireEvent.pointerDown(bar, { button: 0, pointerId: 1 })).toBe(true);
+    expect(props.onPageChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "읽기 설정" }));
+    const menu = screen.getByRole("menu");
+    fireEvent.pointerMove(menu, { clientX: 600, clientY: 400 });
+    fireEvent.pointerLeave(reader);
+    expect(reader).toHaveAttribute("data-chrome-visible", "true");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(reader).toHaveAttribute("data-chrome-visible", "false"));
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 
-  it("fades the bars after idle time, brings them back on pointer movement or a key, and keeps them hidden while turning pages", () => {
+  it("opens hidden, reveals only at the reader's edges, and ignores keys, focus and pointer jitter", () => {
     vi.useFakeTimers();
     try {
       render(<PageViewer {...viewerProps()} />);
-      const reader = document.querySelector<HTMLElement>(".manga-reader")!;
-      expect(reader).toHaveAttribute("data-chrome-visible", "true");
-
-      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      const reader = readerWithRect();
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
-      expect(reader).toHaveClass("asset-viewer--chrome-hidden");
-
-      fireEvent.pointerMove(reader, { clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 450 });
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 145 });
       expect(reader).toHaveAttribute("data-chrome-visible", "true");
-      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      act(() => vi.advanceTimersByTime(3000));
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 146 });
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 450 });
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
 
-      // Page turns by key or wheel, and the still-pointer move Chromium sends after them, keep the bars hidden.
       fireEvent.keyDown(reader, { key: "ArrowRight" });
       expect(position()).toBe("2 / 6");
       fireEvent.wheel(reader, { deltaY: 400 });
       expect(position()).toBe("3 / 6");
-      fireEvent.pointerMove(reader, { clientX: 10, clientY: 10 });
+      fireEvent.click(document.querySelector(".manga-reader__edge.asset-viewer__edge--right")!);
+      expect(position()).toBe("4 / 6");
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 450 });
+      fireEvent.keyDown(reader, { key: "v" });
+      act(() => screen.getByRole("slider").focus());
       expect(reader).toHaveAttribute("data-chrome-visible", "false");
 
-      fireEvent.keyDown(reader, { key: "v" });
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 755 });
       expect(reader).toHaveAttribute("data-chrome-visible", "true");
-    } finally {
-      vi.useRealTimers();
-    }
+      fireEvent.pointerLeave(reader);
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+      fireEvent.pointerMove(reader, { clientX: 600, clientY: 60 });
+      fireEvent.blur(window);
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+    } finally { vi.useRealTimers(); }
   });
 
   it("shows a page-shaped placeholder while a page loads and keeps the previous page until the next is ready", async () => {

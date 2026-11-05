@@ -56,9 +56,13 @@ describe("MangaViewer", () => {
     expect(position()).toBe("1 / 60");
   });
 
-  it("uses the shared reader chrome with 로컬 as the source and no bookmark", () => {
+  it("opens with hidden shared reader chrome with 로컬 as the source and no bookmark", () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" artist="tatsuwaipu" pageCount={60} onClose={vi.fn()} />);
-    expect(document.querySelector(".manga-reader.asset-viewer")).not.toBeNull();
+    const reader = document.querySelector<HTMLElement>(".manga-reader.asset-viewer")!;
+    expect(reader).toHaveAttribute("data-chrome-visible", "false");
+    vi.spyOn(reader, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1000, 800));
+    fireEvent.pointerMove(reader, { clientX: 500, clientY: 20 });
+    expect(reader).toHaveAttribute("data-chrome-visible", "true");
     expect(screen.getByText("tatsuwaipu")).toBeVisible();
     for (const name of ["뒤로", "두 쪽 보기", "페이지 목록", "읽기 설정", "망가 뷰어 닫기"]) expect(screen.getByRole("button", { name })).toBeVisible();
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("1");

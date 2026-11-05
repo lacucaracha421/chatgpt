@@ -1,5 +1,5 @@
 /* PC manga reader (screen C, docs/prototypes/pc-manga-20260929). One reader for local and online works.
-   The chrome is the 에셋 viewer's (asset-viewer__topbar, __edge, __filmstrip and its idle fade); these
+   The chrome is the 에셋 viewer's (asset-viewer__topbar, __edge, __filmstrip and its fade); these
    rules only fit it to pages: a compact bottom bar with the page scrubber, half-screen page-turn areas,
    and page-shaped boxes that hold a placeholder until the page has loaded. */
 
@@ -7,6 +7,14 @@
   --reader-top: 56px;
   --reader-bottom: calc(var(--control-height) + var(--type-meta) * 1.5 + var(--space-2));
 }
+
+/* The bars hide whenever the pointer leaves the edge bands; the cursor hides only once it rests. */
+.manga-reader.asset-viewer--chrome-hidden { cursor: auto; }
+.manga-reader.manga-reader--cursor-idle,
+.manga-reader.manga-reader--cursor-idle * { cursor: none; }
+
+/* The overview keeps its own keyboard focus indication. */
+.manga-reader .asset-viewer__chrome :focus-visible { outline: none; }
 
 .manga-reader__canvas {
   position: absolute;
