@@ -481,6 +481,49 @@ describe("Home server row", () => {
 });
 
 describe("Home wishlist arrivals", () => {
+  it.each([
+    { kind: "movie", date: "2026-09-26", listedDate: "2026-09-26" },
+    { kind: "movie", date: "2026-09-23", listedDate: "2026-09-22" },
+    { kind: "manga", date: "2026-09-23", listedDate: null },
+  ] as const)("keeps a confirmed $kind on $date after its unread notice disappears", async ({ kind, date, listedDate }) => {
+    const name = "Retained release";
+    const watched = title("wish", name, "movie", listedDate ?? "", { released: true,
+      unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: date, detectedAt: iso(12), readAt: null }] });
+    const work = { id: "manga", name, type: "manga", releaseDate: null, unreadReleaseCount: 1 } as HomeViewProps["collections"][number];
+    const collections = kind === "manga" ? [work] : [];
+    if (kind === "manga") gateway.collectionTracking.listInbox.mockResolvedValue([
+      { collectionId: work.id, provider: "kakao", event: { kind: "new_volume", volumeNumber: 3, currentValue: date } },
+    ]);
+    else gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);
+    gateway.releaseCalendar.acknowledge.mockResolvedValue(undefined);
+
+    const { view } = renderHome({ props: { collections } });
+    await pickDay(date);
+    await waitFor(() => expect(within(cell(date)).getAllByText(name)).toHaveLength(1));
+    const release = within(dayPanel()).getByRole("button", { name: new RegExp(name) });
+    expect(within(release).getByText("NEW")).toBeTruthy();
+    fireEvent.click(release);
+    if (kind !== "manga") fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(within(cell(date)).getAllByText(name)).toHaveLength(1);
+    expect(within(dayPanel()).getAllByRole("button", { name: new RegExp(name) })).toHaveLength(1);
+    expect(cell(date).querySelector("[data-new]")).toBeNull();
+    expect(within(dayPanel()).queryByText("NEW")).toBeNull();
+
+    // The server no longer returns the unread event when Home is revisited.
+    view.unmount();
+    gateway.collectionTracking.listInbox.mockResolvedValue([]);
+    gateway.releaseCalendar.wishlist.mockResolvedValue([{ ...watched, unread: [] }]);
+    resetReleaseDataForTests();
+    const revisit = renderHome({ props: { collections: collections.map(item => ({ ...item, unreadReleaseCount: 0 })) } });
+    await waitFor(() => expect(readWishlistCache("fixture")?.every(item => item.unread.length === 0)).toBe(true));
+    await pickDay(date);
+    expect(within(cell(date)).getAllByText(name)).toHaveLength(1);
+    expect(within(dayPanel()).getAllByRole("button", { name: new RegExp(name) })).toHaveLength(1);
+    expect(cell(date).querySelector("[data-new]")).toBeNull();
+    expect(within(dayPanel()).queryByText("NEW")).toBeNull();
+    revisit.view.unmount();
+  });
+
   it("acknowledges the displayed release notices when Home opens a title", async () => {
     const watched = title("wish", "관심 영화", "movie", "2026-09-23", { released: true, unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: "2026-09-23", detectedAt: iso(12), readAt: null }] });
     gateway.releaseCalendar.wishlist.mockResolvedValue([watched]);

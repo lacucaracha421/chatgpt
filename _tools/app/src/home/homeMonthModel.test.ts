@@ -84,11 +84,11 @@ describe("past releases", () => {
   const board = (volumes: { volumeNumber: number; date: string | null; status: string }[]) => new Map([["w", { releaseWatch: { enabled: true }, releaseSchedule: { kakao: { volumes, editionIndex: 0 } }, ownedVolumes: [] } as unknown as ReleaseBoardEntry]]);
   const wish = (id: string, date: string, extra: Partial<ReleaseWishlistItem> = {}) => ({ id, kind: "game", title: id, date, precision: "exact", muted: false, ...extra }) as ReleaseWishlistItem;
 
-  it("keeps released Korean volumes, exact wishlist dates and dated works on their day, before today only", () => {
+  it("keeps released Korean volumes, exact wishlist dates and dated works on their day, through today", () => {
     const rows = pastReleaseRows([work({}), work({ id: "g", name: "게임", type: "game", releaseDate: "2026-10-02" })],
       board([{ volumeNumber: 3, date: "2026-10-01", status: "released" }, { volumeNumber: 4, date: "2026-10-20", status: "upcoming" }]), new Map(),
       [wish("a", "2026-10-03"), wish("today", "2026-10-17"), wish("muted", "2026-10-04", { muted: true }), wish("old", "2026-08-01")], "2026-10-17", "2026-09-28", "2026-11-08");
-    expect(rows.map(row => `${row.date} ${row.name} ${row.detail}`.trim()).sort()).toEqual(["2026-10-01 작품 3권", "2026-10-02 게임", "2026-10-03 a"]);
+    expect(rows.map(row => `${row.date} ${row.name} ${row.detail}`.trim()).sort()).toEqual(["2026-10-01 작품 3권", "2026-10-02 게임", "2026-10-03 a", "2026-10-17 today"]);
   });
 });
 

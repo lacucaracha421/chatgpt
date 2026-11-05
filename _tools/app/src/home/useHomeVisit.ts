@@ -40,5 +40,5 @@ export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], t
     writeHomeVisit(scope, { ...next, lastVisit: readHomeVisit(scope).lastVisit });
     setState(previous => ({ ...previous, visit: next }));
   };
-  return { arrivals, opened };
+  return { arrivals, opened, openedTokens: visit.opened };
 }

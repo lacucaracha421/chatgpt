@@ -144,11 +144,12 @@ export type PastReleaseRow = { key: string; kind: ReleaseKind; date: string; nam
 /**
  * Releases that already came out and are dated inside `start`..`end`: Korean volumes of watched manga
  * that are not owned yet, wishlist titles with an exact date and local works with a release date.
- * NEW ones come from the visit list; this shaping lets the older ones stay visible on their day.
+ * Includes today. Opened arrival tokens retain dates that existed only in an unread notice;
+ * names and navigation targets still come from the current library and wishlist.
  */
 export function pastReleaseRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>,
-  wishlist: ReleaseWishlistItem[], today: string, start: string, end: string): PastReleaseRow[] {
-  const last = end < today ? end : addDays(today, -1);
+  wishlist: ReleaseWishlistItem[], today: string, start: string, end: string, openedTokens: readonly string[] = []): PastReleaseRow[] {
+  const last = end < today ? end : today;
   const inRange = (date: string | null | undefined): date is string => Boolean(date) && /^\d{4}-\d{2}-\d{2}$/.test(date!) && date! >= start && date! <= last;
   const rows: PastReleaseRow[] = [];
   for (const release of koreanReleases(collections.filter(work => work.type === "manga"), board, inbox, today))
@@ -160,6 +161,22 @@ export function pastReleaseRows(collections: CollectionSummary[], board: Map<str
     if (collection.type !== "av" && collection.type !== "manga" && inRange(collection.releaseDate)
       && !rows.some(row => row.collectionId === collection.id || (row.name === collection.name && row.date === collection.releaseDate)))
       rows.push({ key: `work:${collection.id}`, kind: collection.type, date: collection.releaseDate!, name: collection.name, detail: "", collectionId: collection.id });
+  for (const token of openedTokens) {
+    // Home already stores key:date:volume when an arrival is opened, even after its notice is read.
+    const match = /^(manga|work|title):(.+):(\d{4}-\d{2}-\d{2}):(\d*)$/.exec(token);
+    if (!match) continue;
+    const [, source, id, date, number] = match;
+    if (!inRange(date)) continue;
+    const volume = number ? Number(number) : undefined;
+    const title = source === "title" ? wishlist.find(item => item.id === id && !item.muted) : undefined;
+    const collection = source !== "title" ? collections.find(item => item.id === id && item.type !== "av") : undefined;
+    if (!title && !collection) continue;
+    const key = source === "manga" ? `manga:${id}:${volume ?? ""}` : `${source}:${id}`;
+    if (rows.some(row => row.date === date && (row.volume ?? null) === (volume ?? null)
+      && (row.key === key || Boolean(collection && row.collectionId === collection.id)))) continue;
+    rows.push({ key, kind: title?.kind ?? collection!.type as ReleaseKind, date, name: title?.title ?? collection!.name,
+      detail: volume ? `${volume}권` : "", volume, collectionId: collection?.id, titleId: title?.id });
+  }
   return rows;
 }
 

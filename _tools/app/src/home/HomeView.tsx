@@ -316,7 +316,7 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const arrivalsReady = collectionsReady && (!tracking || Boolean(release.data && !release.loading && !release.error))
     && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry && calendarRead.visit === visitNumber));
   const visit = useHomeVisit(root, arrivalItems, today, visible, at.toISOString(), arrivalsReady);
-  const upcoming = upcomingRows(collections, board, inbox, wishlist, today);
+  const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => row.date > today);
   const openRelease = (row: ReleaseRow & { token: string }) => {
     visit.opened(row.token);
     setReleaseNoticeError(null);
@@ -349,9 +349,9 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const ledgerRecords = useMemo(() => ledger ? ledgerEntries(monthNotesOf(ledgerNotes, ledger.id)) : NO_ENTRIES, [ledger, ledgerNotes]);
   const payments = useMemo(() => paymentEvents(ledgerNotes, gridStart, gridEnd), [ledgerNotes, gridStart, gridEnd]);
   const memos = useMemo(() => dayMemos(ledgerNotes, [...new Set(gridDates(month).map(monthOf))]), [ledgerNotes, month]);
-  const pastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, gridStart, gridEnd), [collections, board, inbox, wishlist, today, gridStart, gridEnd]);
+  const pastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, gridStart, gridEnd, visit.openedTokens), [collections, board, inbox, wishlist, today, gridStart, gridEnd, visit.openedTokens]);
   // The day panel reads its own day, so it stays right when the shown month moves away from it.
-  const dayPastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, selected, selected), [collections, board, inbox, wishlist, today, selected]);
+  const dayPastRows = useMemo(() => pastReleaseRows(collections, board, inbox, wishlist, today, selected, selected, visit.openedTokens), [collections, board, inbox, wishlist, today, selected, visit.openedTokens]);
   const dayPayments = useMemo(() => paymentEvents(ledgerNotes, selected, selected), [ledgerNotes, selected]);
   const dayMemo = useMemo(() => dayMemos(ledgerNotes, [monthOf(selected)]).get(selected) ?? '', [ledgerNotes, selected]);
   const dayEntries = useMemo(() => ledgerRecords.filter(entry => entry.date === selected), [ledgerRecords, selected]);
