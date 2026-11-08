@@ -586,6 +586,9 @@ impl SomiState {
         let mut page_urls = Vec::new();
         images(value.field(128).field(0), &mut page_urls);
         if page_urls.is_empty() {
+            image_nodes(value.field(128), &mut page_urls);
+        }
+        if page_urls.is_empty() {
             locked(&self.opened)?.insert(id.into(), (Instant::now(), Err("SOMI_NO_IMAGES".into())));
             locked(self.index(app)?)?.set_pages(id, 0)?;
             return Err("SOMI_NO_IMAGES".into());
@@ -714,10 +717,54 @@ fn images(nodes: &Value, out: &mut Vec<String>) {
         images(node.named("content"), out);
     }
 }
+/// Since 2026-11, kone sends the body as typed nodes: `ImageNode` keeps its address in field 2.
+fn image_nodes(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Union(name, inner) => {
+            let source = inner.field(2).text();
+            if name == "ImageNode" && thumbs::page_allowed(source) {
+                out.push(source.into());
+            }
+            image_nodes(inner, out);
+        }
+        Value::Array(items) => items.iter().for_each(|x| image_nodes(x, out)),
+        Value::Map(entries) => entries.iter().for_each(|(_, x)| image_nodes(x, out)),
+        _ => {}
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn somi_typed_body_yields_image_pages() {
+        let image = |url: &str| {
+            Value::Union(
+                "ImageNode".into(),
+                Box::new(Value::Map(vec![(
+                    Value::UInt(2),
+                    Value::String(url.into()),
+                )])),
+            )
+        };
+        let a = "https://gimel.mittere.io/aa?v=1";
+        let b = "https://gimel.mittere.io/bb?v=1";
+        let body = Value::Map(vec![(
+            Value::UInt(1),
+            Value::Array(vec![
+                image(a),
+                Value::Union(
+                    "ParagraphNode".into(),
+                    Box::new(Value::Map(vec![(Value::UInt(0), Value::Array(vec![]))])),
+                ),
+                image(b),
+                image("https://example.com/x"),
+            ]),
+        )]);
+        let mut out = Vec::new();
+        image_nodes(&body, &mut out);
+        assert_eq!(out, [a, b]);
+    }
     #[test]
     fn somi_new_fill_supersedes_previous_runs() {
         let state = SomiState::default();

@@ -106,12 +106,14 @@ final class SomiRepository {
     }
     private boolean hasCover(Map<String,Object> p){try{media.somiCached(SomiStore.s(p,"id"),SomiStore.s(p,"coverKey"));return true;}catch(Exception ignored){return false;}}
     private static void images(Object nodes,List<String> out){for(Object node:SomiSef.items(nodes)){String type=SomiSef.text(SomiSef.field(node,"type"));if(type.equals("image")||type.equals("image-extended")){Object attrs=SomiSef.field(node,"attrs");String url=SomiSef.text(SomiSef.field(attrs,"source"));if(url.isEmpty())url=SomiSef.text(SomiSef.field(attrs,"src"));try{NetworkPolicy.somiImage(url);out.add(url);}catch(Exception ignored){}}images(SomiSef.field(node,"content"),out);}}
+    // Since 2026-11, kone sends the body as typed nodes: ImageNode keeps its address in field 2.
+    private static void imageNodes(Object v,List<String> out){if(v instanceof SomiSef.Union){SomiSef.Union u=(SomiSef.Union)v;String url=SomiSef.text(SomiSef.field(u.value,2));if(u.name.equals("ImageNode"))try{NetworkPolicy.somiImage(url);out.add(url);}catch(Exception ignored){}imageNodes(u.value,out);}else if(v instanceof List)for(Object x:(List<?>)v)imageNodes(x,out);else if(v instanceof Map)for(Object x:((Map<?,?>)v).values())imageNodes(x,out);}
     JSONObject open(String raw)throws Exception{synchronized(openGate){return openPost(raw);}}
     private JSONObject openPost(String raw)throws Exception{
         String id=validId(raw);require();long e=epoch.get();Opened result;
         synchronized(opened){result=opened.get(id);if(result!=null&&System.currentTimeMillis()-result.at>=480000){opened.remove(id);result=null;}}
         if(result==null){Object v;try{v=call("get",SomiSef.get(id),e);}catch(IOException error){if("SOMI_POST_GONE".equals(error.getMessage()))store.gone(id);throw error;}
-            Map<String,Object> p=post(v);if(!id.equals(p.get("id")))throw SomiSef.invalid();List<String> urls=new ArrayList<>();images(SomiSef.field(SomiSef.field(v,128),0),urls);if(urls.size()>2000)throw SomiSef.invalid();
+            Map<String,Object> p=post(v);if(!id.equals(p.get("id")))throw SomiSef.invalid();List<String> urls=new ArrayList<>();images(SomiSef.field(SomiSef.field(v,128),0),urls);if(urls.isEmpty())imageNodes(SomiSef.field(v,128),urls);if(urls.size()>2000)throw SomiSef.invalid();
             current(e);store.record(Collections.singletonList(p),null,false,null,false,now());store.pages(id,urls.size());result=new Opened(SomiStore.s(p,"title"),SomiStore.s(p,"writerName").isEmpty()?SomiStore.s(p,"writerHandle"):SomiStore.s(p,"writerName"),urls,urls.isEmpty()?"SOMI_NO_IMAGES":"");
             synchronized(opened){opened.entrySet().removeIf(entry->System.currentTimeMillis()-entry.getValue().at>=480000);opened.put(id,result);while(opened.size()>24)opened.remove(opened.keySet().iterator().next());}
         }
