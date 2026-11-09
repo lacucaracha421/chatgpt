@@ -38,6 +38,7 @@ describe("month grid", () => {
     expect(by("2026-10-18").savedCount).toBe(0);
     expect(by("2026-10-21").payments).toHaveLength(1);
     expect(by("2026-10-03").hasMemo).toBe(true);
+    expect(by("2026-10-03").memo).toBe("옷 정리");
     expect(by("2026-10-17")).toMatchObject({ tense: "today", currentWeek: true });
     expect(by("2026-10-18").currentWeek).toBe(true);
     expect(by("2026-10-19").currentWeek).toBe(false);

@@ -36,6 +36,8 @@ export type MonthDay<T> = {
   /** Money out on this day (entries, not income). */
   spent: number;
   hasMemo: boolean;
+  /** The day memo's first non-empty line ('' when none), shown as the cell's memo bar. */
+  memo: string;
 };
 
 export const monthOf = (date: string) => date.slice(0, 7);
@@ -88,6 +90,7 @@ export function monthDays<T extends { date: string | null; fresh?: boolean }>(mo
       payments: payments.get(date) ?? [],
       spent: spent.get(date) ?? 0,
       hasMemo: activity.memos.has(date),
+      memo: (activity.memos.get(date) ?? "").split("\n").map(line => line.trim()).find(Boolean) ?? "",
     };
   });
 }

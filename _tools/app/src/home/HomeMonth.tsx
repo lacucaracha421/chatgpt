@@ -60,6 +60,11 @@ function Cell({ day, heat, selected, tabbable, hideAmounts, chargeAmounts }: { d
   // A charge is a release-shaped chip: name, then the amount (or 무료 끝남) on the same line.
   const chargeDetail = (payment: MonthDay<MonthRelease>["payments"][number]) => chargeAmounts || payment.kind === "trialEnd";
   const chips = [
+    // The day memo comes first: it is the user's own plan for that day.
+    ...(day.memo ? [<span key="memo" className="home-cal__chip home-cal__chip--memo">
+      <DocumentTextIcon />
+      <span className="home-cal__chip-title">{day.memo}</span>
+    </span>] : []),
     ...day.releases.map(release => <span key={`release:${release.key}`} className="home-cal__chip" data-new={release.fresh ? "" : undefined}>
       <span className="home-cal__chip-title">{releaseDisplayTitle(release.name)}</span>
       {volumeDetail(release.detail) && <span className="home-cal__chip-detail">{volumeDetail(release.detail)}</span>}
@@ -88,7 +93,6 @@ function Cell({ day, heat, selected, tabbable, hideAmounts, chargeAmounts }: { d
     <span className="home-cal__head" aria-hidden="true">
       <span className="home-cal__date numeric" aria-hidden="true">{head}</span>
       {day.holiday && <span className="home-cal__holiday">{day.holiday}</span>}
-      {day.hasMemo && <DocumentTextIcon className="home-cal__memo" />}
     </span>
     <span className="home-cal__chips" aria-hidden="true">
       {fitChips(chips)}

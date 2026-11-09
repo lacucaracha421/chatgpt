@@ -47,7 +47,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 <a id="home-accepted-2026-10-02"></a>
 ### Home (amended 2026-10-22)
 
-- Use compact daily tools and a Sunday–Saturday month calendar. The selected day shows saves/releases, a memo and ledger entry/edit controls; the month total respects privacy hiding. Subscriptions and wishlist start folded.
+- Use compact daily tools and a Sunday–Saturday month calendar. A day memo shows as the first bar in its cell (its first line, on the calendar memo face). The selected day shows saves/releases, a memo and ledger entry/edit controls; the month total respects privacy hiding. Subscriptions and wishlist start folded.
 - Daily cards and Transfer share the compact side column on PC; tablet adapts the same pieces for touch and portrait. Quick memo remains available; kept links are reached through More/Find.
 - The separate release calendar keeps its same-day cover blocks (see Release calendars below); Home uses the month grid. Korean lunar/election holidays are supplied for 2026–2027.
 - Collectible cards belong to their album/Trash, independent of Asset Like. Favourite characters belong beside Showcase, with ordered covers, profiles, related Works and gathered Assets; manual entries and cover-only images do not become another Work type or ordinary Asset gallery content.

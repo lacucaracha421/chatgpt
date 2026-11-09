@@ -34,7 +34,7 @@
 .home-cal--month {
   --cal-ink:#f5f6f7; --cal-ink-on:#17181a; --cal-muted:#a9aeb5; --cal-soft:#cdd1d6;
   --cal-line:#2e3135; --cal-sun:#f97770; --cal-sat:#6aa7f4; --cal-selected:#e8eaed;
-  --cal-new:#f8d14f; --cal-new-detail:#5a4a12; --cal-release:#385064; --cal-pay:#3a3e44; --cal-heat:#7f95b5;
+  --cal-new:#f8d14f; --cal-new-detail:#5a4a12; --cal-release:#385064; --cal-pay:#3a3e44; --cal-memo:#34503f; --cal-heat:#7f95b5;
   --cal-chip-text:13px; --cal-chip-line:18px; --cal-chip-height:20px;
   --cal-today-size:26px; --cal-cell-height:132px;
   grid-auto-rows:auto; gap:0; border-top:1px solid var(--cal-line);
@@ -52,7 +52,7 @@
 .home-cal--month .home-cal__day:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:-3px; z-index:2; }
 .home-cal--month .home-cal__day[aria-selected="true"]::after { content:""; position:absolute; inset:0; border:2px solid var(--cal-selected); pointer-events:none; }
 
-/* Date, holiday and memo share the top row. Today is the calendar's one round mark. */
+/* Date and holiday share the top row. Today is the calendar's one round mark. */
 .home-cal--month .home-cal__head { display:flex; flex:none; justify-content:flex-start; align-items:center; gap:var(--space-1); min-width:0; min-height:var(--cal-today-size); padding:0 0 0 2px; }
 .home-cal--month .home-cal__day .home-cal__date { display:inline-grid; flex:none; place-items:center; min-width:var(--cal-today-size); height:var(--cal-today-size); padding:0 2px; box-sizing:border-box; border-radius:50%; background:transparent;
   font-size:var(--type-body); font-weight:600; line-height:1; font-variant-numeric:tabular-nums; color:var(--cal-ink); }
@@ -61,7 +61,6 @@
 .home-cal--month .home-cal__day[data-holiday] .home-cal__date { color:var(--cal-sun); }
 .home-cal--month .home-cal__day[data-tense="today"] .home-cal__date { background:var(--cal-ink); color:var(--cal-ink-on); font-weight:700; }
 .home-cal__holiday { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--cal-sun); font-size:var(--type-meta); line-height:var(--line-meta); }
-.home-cal__memo { flex:none; margin-left:auto; width:14px; height:14px; color:var(--cal-muted); }
 
 /* Each entry occupies one line. Four or more entries become two chips and +N. */
 .home-cal__chips { display:flex; flex:none; flex-direction:column; gap:2px; min-width:0; }
@@ -74,6 +73,9 @@
 /* A charge has the release chip's shape (one line, a face, no outline) on a neutral face. */
 .home-cal__chip--pay { background:var(--cal-pay); color:var(--cal-soft); font-weight:400; }
 .home-cal__chip--pay svg { flex:none; width:12px; height:12px; }
+/* The day memo's first line, as a plan bar on its own face. */
+.home-cal__chip--memo { background:var(--cal-memo); color:var(--cal-ink); font-weight:500; }
+.home-cal__chip--memo svg { flex:none; width:12px; height:12px; }
 .home-cal__more { padding:0 var(--space-1); color:var(--cal-soft); font-size:var(--type-meta); font-weight:600; line-height:16px; font-variant-numeric:tabular-nums; }
 .home-cal__foot { display:flex; align-items:center; gap:var(--space-1); min-width:0; margin-top:auto; min-height:var(--line-meta); padding:0 2px; color:var(--cal-muted); font-size:var(--type-meta); line-height:var(--line-meta); font-variant-numeric:tabular-nums; }
 .home-cal__foot svg { flex:none; width:12px; height:12px; }

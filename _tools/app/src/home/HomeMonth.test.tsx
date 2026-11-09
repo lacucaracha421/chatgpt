@@ -9,9 +9,9 @@ const release = (key: string, fresh = false): MonthRelease => ({
   key, name: key, fresh, kind: "manga", detail: "12권", date: "2026-10-09", onOpen: vi.fn(),
 });
 
-function show(releases: MonthRelease[], hideAmounts = false) {
+function show(releases: MonthRelease[], hideAmounts = false, memo = "") {
   const days = monthDays("2026-10", "2026-10-18", {
-    releases, saved: [], memos: new Map([["2026-10-09", "메모"]]),
+    releases, saved: [], memos: new Map(memo ? [["2026-10-09", memo]] : []),
     entries: [{ id: "spent", date: "2026-10-09", amount: 8000, name: "점심", createdAt: "2026-10-09T12:00:00Z" }],
     payments: [{ key: "charge", date: "2026-10-09", noteId: "ledger", name: "구독", amount: 1000, kind: "charge" }],
   });
@@ -29,6 +29,15 @@ it("fits two releases and a one-line charge in the cell", () => {
   expect(content.getByText("구독")).toBeTruthy();
   expect(content.queryByText(/^\+\d/)).toBeNull();
   expect(cell.getAttribute("aria-label")).toContain("한글날");
+});
+
+it("shows the day memo's first line as the cell's first bar", () => {
+  const { cell } = show([release("첫 작품"), release("둘째 작품")], false, "\n  Copilot B 확인 \n둘째 줄");
+  const content = within(cell);
+  const memo = content.getByText("Copilot B 확인");
+  expect(memo.compareDocumentPosition(content.getByText("첫 작품")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(content.queryByText("둘째 줄")).toBeNull();
+  expect(content.getByText("+2")).toBeTruthy();
   expect(cell.getAttribute("aria-label")).toContain("메모 있음");
 });
 
