@@ -123,7 +123,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const [retryDelay,setRetryDelay]=useState(2000);
   useEffect(()=>{setRetryDelay(2000);},[pending]);
   const notesSignalled=useSyncSignal('notes',()=>void store.sync('background'),active&&state.unlocked&&!pending);
-  useVisibleInterval(()=>void store.sync('background'),active&&state.unlocked&&!pending?(notesSignalled?SIGNAL_FALLBACK_MS:60_000):null,true);
+  useVisibleInterval(()=>void store.sync(false),active&&state.unlocked&&!pending?(notesSignalled?SIGNAL_FALLBACK_MS:60_000):null,true);
   useVisibleInterval(()=>{void store.sync('background').finally(()=>setRetryDelay(delay=>Math.min(60_000,delay*2)));},active&&state.unlocked&&pending?retryDelay:null);
   useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void store.finish();};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[store]);
   // ---- Secret notes lock after 5 idle minutes, when the app goes to the background (native

@@ -676,6 +676,15 @@ describe('tablet Home day sheet', () => {
     expect(saves.at(-1)!.items).toEqual([{id: '2026-09-24', text: 'PC에서 쓴 메모', checked: false, order: 'V'}, {id: '2026-09-25', text: '엣지러너 정주행', checked: false, order: 'V'}]);
     expect(cell('2026-09-25').getAttribute('aria-label')).toContain('메모 있음');
   });
+  it('pulls a day memo the PC wrote while Home shows, without opening Notes', async () => {
+    const pcMemo = note('memo-1119', {type: 'checklist', title: '달력 메모 2026-09', pinned: false, archived: true, items: [{id: '2026-09-24', text: 'PC에서 쓴 메모', checked: false, order: 'V'}]});
+    const read = mocks.native.getMockImplementation()!;
+    mocks.native.mockImplementation(async (op: string, input?: unknown) => op === 'notesSync' ? {unlocked: true, notes: [...notes, pcMemo], lastSyncedAt: '2026-09-25T05:00:00Z'} : read(op, input));
+    render(<Home {...props()}/>);
+    await monthRegion();
+    await waitFor(() => expect(within(cell('2026-09-24')).getByText('PC에서 쓴 메모', {ignore: false})).toBeTruthy());
+    expect(mocks.native).toHaveBeenCalledWith('notesSync', expect.anything());
+  });
   it('lists the day\'s entries with the day total, and an entry opens the 가계부 sheet where it can be removed', async () => {
     const saves = notesBackend();
     render(<Home {...props()}/>);

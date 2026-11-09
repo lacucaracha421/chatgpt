@@ -43,6 +43,8 @@ import {StableImage} from '../src/shared/ui/StableImage';
 import {useLaunchReady} from '../src/shared/launch/LaunchSplash';
 import {deletedTrashNotes} from '../src/safety/trashSections';
 import {setTabletTrashCount} from './trashCounts';
+import {SIGNAL_FALLBACK_MS, useSyncSignal} from './syncSignals';
+import {useVisibleInterval} from './useVisibleInterval';
 import '../src/home/home.css';
 import './home.css';
 import './homeTablet/homeTablet.css';
@@ -261,6 +263,12 @@ export function Home(props: HomeProps) {
   const selected = shown.selected ?? today;
   const month = shown.month ?? monthOf(selected);
   const notesState = useSyncExternalStore(notesStore.subscribe, notesStore.snapshot);
+  // Pull notes changed on the PC (day memos, ledger) while Home shows, as Notes does; an edit in progress waits.
+  // A server signal pulls at once; showing Home (and the fallback poll) pulls at most once a minute, so switching
+  // between Home and Notes does not sync on every switch.
+  const pullNotes = !paused && notesState.unlocked && !notesState.keyringLocked;
+  const notesSignalled = useSyncSignal('notes', () => void notesStore.sync('background'), pullNotes);
+  useVisibleInterval(() => void notesStore.sync(false), pullNotes ? (notesSignalled ? SIGNAL_FALLBACK_MS : 60_000) : null, true);
   const grid = gridDates(month);
   const gridStart = grid[0]!, gridEnd = grid[grid.length - 1]!;
   const ledgerNotes = notesState.keyringLocked ? NO_NOTES : notesState.notes;
