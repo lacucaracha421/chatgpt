@@ -10,6 +10,9 @@ Reconciled 2026-10-18 against `main` at `9bb8e8ad`, using commit bodies since 20
 
 Updated 2026-10-18 against `main` at `9bb8e8ad`. PC remains canonical for design; tablet follows in the same round. Earlier orders are superseded; finished work is in the [2026-10-18 checkpoint](lakomics-completed.md#closure-checkpoint--2026-10-18--home-cards-tablet-structure-and-performance).
 
+Added 2026-11-10 at `57c2a35e`: [`PERF-AUDIT-20261110`](#perf-audit-20261110) heavy-load audit (static, re-verified) leads the order below; measure its stage 0 before fixing.
+
+0. **`PERF-AUDIT-20261110`** — measure stage 0, then stages 1–3 gated by those numbers; stage 4 needs deploy/install approval (see [section](#perf-audit-20261110)).
 1. **`PERF-20261018`** — only item 1 remains: measure PC/tablet pack opening, reveal and album performance before optimizing (see [section](#perf-20261018)).
 2. **`PERF-ALL-001`** — startup character DB holds reported resolved by the user (2026-10-18); retain other measured performance scenarios. Manga catalog UI freeze fixes are delivered (see [section](#perf-all-001--whole-app-benchmark-and-optimization-pass)).
 3. **`CHAR-CLAUDE-001`** — member runs and refined policy are delivered (`d6c5f752`, `0d955f1b`, `10d383a1`, `57e1eb1a`); tablet review/feed retirement remains low priority. See the [current scope](#char-claude-001) and [source checkpoint](lakomics-completed.md#source-checkpoint--2026-10-22).
@@ -145,6 +148,41 @@ Delivered folder/idle/startup/thumbnail-priority changes and their dated measure
 - **Remaining state cleanup:** move Collection release sync, personal-edit receipts and binding sync out of `notes_state` at a future planned migration (committed `collection_release_sync.rs` still uses `notes_state`; the shipped migration 0098 is not that migration).
 - **Measurement gap:** restore a native Notes scenario with a disposable Secret Service in the kit's private D-Bus; hidden-idle kit coverage remains unavailable. Use [native kit](../../_tools/app/scripts/native-check/README.md), [PC counters](../../_tools/app/scripts/perf/README.md), [tablet kit](../../android/tools/PERFORMANCE.md), [local API kit](../../server/lakomics-api/tools/PERFORMANCE.md).
 - **Immutable-thumbnail cleanup:** the full run `thumb-full` finished 2026-10-03 ~02:30 KST (8,960 committed, 0 errors; controller record). Wait at least 14 days (from ~2026-10-17) and obtain separate approval before deleting only journaled old `library/{id}/thumbnail` objects; never delete prefixes containing originals. ID-only-cover revisions and DocumentsUI/Picker follow-ups remain optional (`server/lakomics-api/ASSET_SEARCH.md` and thumbnail contract source).
+
+<a id="perf-audit-20261110"></a>
+## PERF-AUDIT-20261110 — Heavy-load audit: concurrent jobs and heavy assets (2026-11-10)
+
+Status: `TODO` — user request 2026-11-10. Static audit on `main` at `57c2a35e`, with two rounds. Round 1: six parallel areas (Codex Sol for jobs/DB, Claude for image, video, cards/WebGL and tablet/server). Round 2: cross-worker re-verification plus controller source checks. Nothing was measured, so every item is a suspected cost until stage 0 runs. Verdicts, evidence and the staged plan are in [perf-audit-heavy-load-20261110.md](../research/perf-audit-heavy-load-20261110.md).
+
+- **Confirmed or partial with real impact:**
+  - Tablet viewer closes and media cache clears on every server asset-row update (T1, high).
+  - Every catalog review decision runs a full catalog membership rebuild under the global lock (D4).
+  - Inspector selection recomputes the artist-style stamp over the whole library under the lock (N1).
+  - Nightly auto-tag import holds the lock for the whole import about 2 min after launch (J2).
+  - Sync commands run on the Windows UI thread: video-similarity poll every 1.2 s, Manga list, collection overlay (D1).
+  - Video preparation:
+    - holds `video_lock` across batches (V1);
+    - cannot stop or yield to playback (V3);
+    - shows first thumbnails late and in random order (V4);
+    - keeps full-size freeze canvases (V6).
+  - Video similarity re-scan re-hashes whole files (J8, V7).
+  - Media queue is FIFO within a view (I8); remote routes are unbounded and take the lock per card (I1); manga pages list the folder under the lock (I2).
+  - Tablet viewer has no pixel cap (T4).
+  - SQLite runs on defaults: FULL sync, no WAL size limit or quit checkpoint (D7).
+- **Refuted or narrowed:**
+  - Character review save hashing (D3, dead path).
+  - NL-search model memory (feature paused).
+  - Baseline ONNX threads (J3; the main PC uses DirectML).
+  - 4-reader pool starvation (D6).
+  - Upload bandwidth starving the tablet (T2, uncertain).
+  - Most card/WebGL items (fold into `PERF-20261018`).
+- **Order:**
+  - Stage 0: backend probe on a closed-app snapshot, a real-app Windows session, tablet meminfo.
+  - Stage 1: small confirmed structural fixes.
+  - Stage 2: lock and UI-thread holds, gated by measurement.
+  - Stage 3: media queue and memory, gated by measurement.
+  - Stage 4: tablet/server; needs deploy and device approval.
+- `synchronous=NORMAL` (D7) is a durability decision for the user.
 
 <a id="perf-audit-20261029"></a>
 ## PERF-AUDIT-20261029 — Static performance audit findings (2026-10-29)

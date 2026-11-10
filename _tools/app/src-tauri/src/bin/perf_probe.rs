@@ -26,7 +26,7 @@ use std::{
 
 use app_lib::library::{
     models::{AssetCursor, AssetPage, AssetQuery, AssetSort, MediaKindFilter},
-    Library, MediaVariant,
+    perf_hooks, Library, MediaVariant,
 };
 use rusqlite::ffi;
 use serde_json::{json, Value};
@@ -254,6 +254,7 @@ struct Options {
     snapshot_parent: PathBuf,
     iterations: usize,
     with_catalog: bool,
+    auto_tag_file: Option<PathBuf>,
     video_media: bool,
     idle_ticks: bool,
     disk_stats: bool,
@@ -276,6 +277,7 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut snapshot_parent = env::temp_dir();
     let mut iterations = DEFAULT_ITERATIONS;
     let mut with_catalog = false;
+    let mut auto_tag_file = None;
     let mut video_media = true;
     let mut idle_ticks = false;
     let mut disk_stats = false;
@@ -302,6 +304,13 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "--iterations" => iterations = args.next().ok_or("--iterations <n>")?.parse()?,
             "--with-catalog" => with_catalog = true,
+            "--auto-tag-file" => {
+                auto_tag_file = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("--auto-tag-file <path>")?,
+                )
+            }
             "--no-video-media" => video_media = false,
             "--idle-ticks" => idle_ticks = true,
             "--disk-stats" => disk_stats = true,
@@ -348,6 +357,7 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
         snapshot_parent,
         iterations,
         with_catalog,
+        auto_tag_file,
         video_media,
         idle_ticks,
         disk_stats,
@@ -364,7 +374,7 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
 
 fn usage() -> String {
     "usage: cargo run --release --bin perf_probe -- --library <path> [--snapshot-dir <dir>] \
-     [--iterations <n>] [--with-catalog] [--no-video-media] [--idle-ticks] [--disk-stats] [--keep-snapshot] [--only <substr>] [--skip <substr>] \
+     [--iterations <n>] [--with-catalog] [--auto-tag-file <copied-db>] [--no-video-media] [--idle-ticks] [--disk-stats] [--keep-snapshot] [--only <substr>] [--skip <substr>] \
      [--detail-ms <ms>] [--statistics <optimize|optimize-stat1|analyze>] [--character-idle <seconds> [--character-settings <character-runtime.json>]] [--reuse-snapshot <dir>]"
         .to_owned()
 }
@@ -386,6 +396,16 @@ fn fingerprint(root: &Path) -> Result<Fingerprint, Box<dyn std::error::Error>> {
             entry.file_name().to_string_lossy().into_owned(),
             &entry.path(),
         )?;
+    }
+    let style_cache = root.join(".cache/artist-style/features.sqlite");
+    for suffix in ["", "-wal", "-shm"] {
+        let path = PathBuf::from(format!("{}{suffix}", style_cache.display()));
+        if path.exists() {
+            push(
+                format!(".cache/artist-style/features.sqlite{suffix}"),
+                &path,
+            )?;
+        }
     }
     let catalogs = root.join("catalogs");
     for suffix in ["", "-wal", "-shm"] {
@@ -490,6 +510,21 @@ fn snapshot(options: &Options) -> Result<PathBuf, Box<dyn std::error::Error>> {
             bytes,
             started.elapsed().as_secs_f64() * 1000.0
         );
+    }
+    if options
+        .only
+        .as_deref()
+        .is_some_and(|s| "heavy_artist_style_inputs_suggestion".contains(s))
+        && options
+            .skip
+            .as_deref()
+            .is_none_or(|s| !"heavy_artist_style_inputs_suggestion".contains(s))
+    {
+        let relative = ".cache/artist-style/features.sqlite";
+        if library.join(relative).is_file() {
+            fs::create_dir_all(snapshot_root.join(".cache/artist-style"))?;
+            copy_database(&library.join(relative), &snapshot_root.join(relative))?;
+        }
     }
     Ok(snapshot_root)
 }
@@ -693,6 +728,56 @@ impl<'a> Bench<'a> {
                 return None;
             }
         };
+        // Mutating heavy probes must not receive hidden warmup/tracing repeats.
+        // The first measured call is sample 1; report each payload to expose cold state.
+        if group == "heavy" {
+            let iterations = match label.as_str() {
+                "heavy_catalog_rebuild" => 3,
+                "heavy_auto_tag_import"
+                | "heavy_commit_latency_default"
+                | "heavy_commit_latency_normal" => 1,
+                _ => self.options.iterations,
+            };
+            let mut samples = vec![first_ms];
+            println!("{group}/{label} sample=1 payload={value}");
+            for sample in 1..iterations {
+                let started = Instant::now();
+                match call() {
+                    Ok(payload) => {
+                        samples.push(started.elapsed().as_secs_f64() * 1000.0);
+                        println!("{group}/{label} sample={} payload={payload}", sample + 1);
+                    }
+                    Err(error) => {
+                        println!(
+                            "{group}/{label}: error on sample {}: {error}; incomplete, no summary",
+                            sample + 1
+                        );
+                        return None;
+                    }
+                }
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "{group}/{label}: samples={} median={:.3} p90={:.3} p95={:.3} ms",
+                samples.len(),
+                percentile(&samples, 50.0),
+                percentile(&samples, 90.0),
+                percentile(&samples, 95.0)
+            );
+            self.rows.push(Row {
+                group,
+                label,
+                outcome: describe(&value),
+                first_ms,
+                median_ms: percentile(&samples, 50.0),
+                p95_ms: percentile(&samples, 95.0),
+                min_ms: samples[0],
+                counters: Counters::default(),
+                counters_stable: false,
+                json_bytes: serde_json::to_vec(&value).ok().map(|v| v.len()),
+            });
+            return Some(value);
+        }
         let iterations = self.max_iterations.map_or(self.options.iterations, |cap| {
             cap.min(self.options.iterations)
         });
@@ -908,6 +993,15 @@ fn page(library: &Library, query: &AssetQuery) -> Result<Value, String> {
 }
 
 fn run_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    if bench
+        .options
+        .only
+        .as_deref()
+        .is_some_and(|s| s.contains("heavy"))
+    {
+        heavy_paths(bench, library, snapshot_root);
+        return;
+    }
     if bench
         .options
         .only
@@ -2753,6 +2847,181 @@ fn catalog_paths(bench: &mut Bench, library: &Library) {
     bench.run("catalog", "suggest_online_catalog", || {
         to_value(library.suggest_online_catalog("lo", 10))
     });
+}
+
+fn heavy_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
+    if bench.selected("heavy_artist_style_inputs") {
+        bench.run("heavy", "heavy_artist_style_inputs", || {
+            to_value(perf_hooks::artist_style_inputs(library))
+        });
+    }
+    if bench.selected("heavy_similarity_inventory") {
+        bench.run("heavy", "heavy_similarity_inventory", || {
+            to_value(perf_hooks::similarity_inventory(library))
+        });
+    }
+    if bench.selected("heavy_catalog_rebuild") {
+        if bench.options.with_catalog && snapshot_root.join("catalogs/kdata.db").is_file() {
+            bench.run("heavy", "heavy_catalog_rebuild", || {
+                to_value(perf_hooks::catalog_rebuild(library))
+            });
+        } else {
+            println!(
+                "heavy_catalog_rebuild: skipped; requires --with-catalog and a copied catalog"
+            );
+        }
+    }
+    if bench.selected("heavy_artist_style_inputs_suggestion") {
+        match perf_hooks::normal_image(library) {
+            Ok(Some(id)) => {
+                println!(
+                    "heavy_artist_style_inputs_suggestion: asset={id} cache_present={}",
+                    snapshot_root
+                        .join(".cache/artist-style/features.sqlite")
+                        .is_file()
+                );
+                bench.run("heavy", "heavy_artist_style_inputs_suggestion", || {
+                    to_value(library.artist_style_suggestion(&id))
+                });
+            }
+            Ok(None) => println!("heavy_artist_style_inputs_suggestion: skipped; no normal image"),
+            Err(e) => println!("heavy_artist_style_inputs_suggestion: error: {e}"),
+        }
+    }
+    // Run end-to-end first: the repair may consume unresolved links. Separate inner
+    // measurements afterwards explicitly describe the then-current snapshot state.
+    if bench.selected("heavy_manga_series") {
+        match perf_hooks::unresolved_recovery_links(library) {
+            Ok(before) => println!(
+                "heavy_manga_series initial_recovery_state={before} catalog_present={}",
+                snapshot_root.join("catalogs/kdata.db").exists()
+            ),
+            Err(e) => println!("heavy_manga_series initial_recovery_state error: {e}"),
+        }
+    }
+    bench.run("heavy", "heavy_manga_series", || {
+        let rows = library.list_manga_series().map_err(|e| e.to_string())?;
+        Ok(json!({"rows": rows.len(), "repairRan": true}))
+    });
+    bench.run("heavy", "heavy_manga_series_unresolved_count", || {
+        to_value(perf_hooks::unresolved_recovery_links(library))
+    });
+    bench.run("heavy", "heavy_manga_series_repair", || {
+        to_value(perf_hooks::manga_repair(library))
+    });
+    if bench.selected("heavy_manga_series_preview") {
+        if snapshot_root.join("catalogs/kdata.db").is_file() {
+            bench.run("heavy", "heavy_manga_series_preview", || {
+                let preview = library
+                    .preview_manga_catalog_recovery()
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"rows": preview.items.len()}))
+            });
+        } else {
+            println!("heavy_manga_series_preview: skipped; no snapshot catalog");
+        }
+    }
+    if bench.selected("heavy_video_similarity_poll") {
+        match library.latest_video_similarity_scan() {
+            Ok(Some(scan)) => {
+                bench.run("heavy", "heavy_video_similarity_poll", || {
+                    to_value(library.get_video_similarity_scan(&scan.id))
+                });
+            }
+            Ok(None) => println!("heavy_video_similarity_poll: skipped; no scan row"),
+            Err(e) => println!("heavy_video_similarity_poll: error: {e}"),
+        }
+    }
+    if bench.selected("heavy_collection_covers") {
+        match perf_hooks::largest_collection_source(library) {
+            Ok(target) => {
+                println!("heavy_collection_covers target={target}");
+                let id = target["collectionId"]
+                    .as_str()
+                    .expect("hook returns collection id");
+                bench.run("heavy", "heavy_collection_covers", || {
+                    let covers = library
+                        .list_collection_covers(id)
+                        .map_err(|e| e.to_string())?;
+                    Ok(json!({"rows": covers.len(), "target": target}))
+                });
+            }
+            Err(reason) => println!("heavy_collection_covers: skipped; {reason}"),
+        }
+    }
+    if bench.selected("heavy_auto_tag_import") {
+        if let Some(source) = &bench.options.auto_tag_file {
+            let prepare = (|| -> Result<PathBuf, Box<dyn std::error::Error>> {
+                let source = fs::canonicalize(source)?;
+                if source.starts_with(fs::canonicalize(&bench.options.library)?) {
+                    return Err("--auto-tag-file must be a controller-provided copy outside the live library".into());
+                }
+                let dir = snapshot_root.join("perf-probe-input");
+                fs::create_dir_all(&dir)?;
+                let target = dir.join("auto-tags.sqlite");
+                if target.exists() {
+                    return Err(
+                        "snapshot auto-tag input already exists; use a fresh snapshot".into(),
+                    );
+                }
+                copy_database(&source, &target)?;
+                Ok(target)
+            })();
+            match prepare {
+                Ok(path) => {
+                    bench.run("heavy", "heavy_auto_tag_import", || {
+                        perf_hooks::auto_tag_import(library, &path)
+                    });
+                }
+                Err(e) => println!("heavy_auto_tag_import: error: {e}"),
+            }
+        } else {
+            println!("heavy_auto_tag_import: skipped; requires --auto-tag-file <controller-provided-copy>");
+        }
+    }
+    for (label, normal) in [
+        ("heavy_commit_latency_default", false),
+        ("heavy_commit_latency_normal", true),
+    ] {
+        bench.run("heavy", label, || {
+            to_value(perf_hooks::commit_latency(library, normal))
+        });
+    }
+    if bench.selected("heavy_grid_under_writer") {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let background = {
+            let library = library.clone();
+            let stop = stop.clone();
+            std::thread::spawn(move || -> Result<(), String> {
+                let mut first = true;
+                while !stop.load(Ordering::Relaxed) {
+                    perf_hooks::hold_writer(&library, || {
+                        if first {
+                            let _ = sender.send(());
+                            first = false;
+                        }
+                    })
+                    .map_err(|e| e.to_string())?;
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Ok(())
+            })
+        };
+        if receiver.recv_timeout(Duration::from_secs(10)).is_ok() {
+            bench.run("heavy", "heavy_grid_under_writer", || {
+                page(library, &base_query())
+            });
+        } else {
+            println!("heavy_grid_under_writer: error: writer did not become ready");
+        }
+        stop.store(true, Ordering::Relaxed);
+        match background.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => println!("heavy_grid_under_writer: writer error: {e}"),
+            Err(_) => println!("heavy_grid_under_writer: writer panicked"),
+        }
+    }
 }
 
 /// All Library calls share one process-wide DB mutex. Measure a grid page while another

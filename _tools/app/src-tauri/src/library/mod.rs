@@ -1,3 +1,5 @@
+#[doc(hidden)]
+pub mod perf_hooks;
 pub(crate) mod aladin;
 mod aladin_flow;
 #[cfg(test)]

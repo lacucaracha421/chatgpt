@@ -201,6 +201,11 @@ struct Inputs {
     excluded_classifications: Vec<String>,
     stamp: String,
 }
+/// Measurement hook for `perf_probe`: the stamp work `artist_style_cached` repeats.
+pub(super) fn perf_inputs_assets(conn: &Connection) -> Result<usize, LibraryError> {
+    inputs(conn).map(|input| input.assets.len())
+}
+
 fn inputs(conn: &Connection) -> Result<Inputs, LibraryError> {
     let assets = conn.prepare("SELECT a.id, s.scope_ref, a.source_url, a.perceptual_hash, a.perceptual_hash_quality FROM assets a JOIN asset_artist_scope s ON s.asset_id=a.id WHERE a.status='normal' AND a.media_kind IN ('image','gif') ORDER BY a.id")?
         .query_map([], |r| Ok(Asset { id:r.get(0)?, scope:r.get(1)?, source:r.get(2)?, hash:r.get(3)?, quality:r.get(4)? }))?.collect::<Result<Vec<_>, _>>()?;

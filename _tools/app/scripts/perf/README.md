@@ -205,3 +205,83 @@ Run the suite in the same order and environment for before/after. Optional
 against ordinary runs (the wrapper rejects that). Wall times are descriptive. Keep the
 existing idle/cache gates; establish correlation with the native kit before creating
 any new tighten-only count thresholds. No native latency claim follows from these tests.
+
+
+## Heavy snapshot backend probes (PERF-AUDIT-20261110 stage 0a)
+
+These are opt-in measurements, selected with `--only heavy` or a `heavy_*`
+substring. Close the source app first. SQLite opens only the disposable snapshot;
+source databases are copied with file reads. No configured auto-tag inbox is read.
+Run from `V:\chatgpt\_tools\app\src-tauri` in Windows PowerShell:
+
+```powershell
+$env:CARGO_TARGET_DIR='V:\chatgpt\_tools\app\src-tauri\target-worker'
+# Replace these with controller-provided paths. The snapshot parent must be outside the source.
+$probeSource='V:\perf-input\closed-library'
+$probeSnapshots='V:\perf-snapshots'
+$probeTags='V:\perf-input\auto-tags-copy.sqlite'
+
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy --with-catalog --auto-tag-file $probeTags
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_catalog --with-catalog
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_artist_style_inputs
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_manga_series --with-catalog
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_video_similarity_poll
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_similarity_inventory
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_collection_covers
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_auto_tag_import --auto-tag-file $probeTags
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_commit_latency
+cargo run --release --bin perf_probe -- --library $probeSource --snapshot-dir $probeSnapshots --only heavy_grid_under_writer
+```
+
+Heavy calls use `Bench::run`, print each sample's small JSON payload and median/p90/p95
+wall milliseconds, and do not run hidden cold/warmup or SQL-tracing calls. The first
+call is sample 1. Catalog rebuild runs exactly three times; auto-tag import runs once;
+each commit mode runs one batch of 200 single-row transactions. Other probes use
+`--iterations` (default 15). Heavy SQL counters in the shared summary table are not
+collected (zero/unstable); use the payload counts, not those columns.
+
+- Catalog attaches the snapshot catalog with `attach_catalog_readonly`, holds the
+  catalog file read lock and `connection()`, then calls `catalog_groups::rebuild`
+  in a transaction as review decisions do. `rebuildMs` excludes member-diff/count
+  bookkeeping; `Bench` wall time includes it. `changedMembers` compares membership
+  before and after. Repeated rebuilds can legitimately report zero changed members.
+- `heavy_artist_style_inputs` times the stamp work `artist_style_cached` repeats on every
+  inspector selection (`artist_style::perf_inputs_assets`, under `connection()`), and
+  `heavy_similarity_inventory` the comparable inventory each automatic batch reloads
+  (`similarity_scan::perf_load_comparable_rows`). Both hooks only call the private
+  functions; they add no logic.
+- Artist-style suggestions call the public API for a normal image. A regular new
+  snapshot copies `.cache/artist-style/features.sqlite` when present. A reused snapshot
+  must already include it. `cache_present=false` means the end-to-end call measures
+  the missing-cache fast path, not stamp/ranking work.
+- Manga lists run before separately timing repair and preview. Initial recovery
+  state is printed outside the timed list call. `repairRan` indicates successful
+  repair invocation; the separate repair payload's `previewBranchEntered` is
+  inferred from the exact repair entry conditions (unresolved links and catalog
+  presence), not an instrumented production counter. Separate repair/preview timings
+  describe the state after the lists and may have no recovery work remaining.
+- Video polling uses the latest existing scan, never starts one, and skips an empty
+  scan table. Its untimed selection uses `latest_video_similarity_scan`.
+- Covers choose the readable collection source tree containing the most regular
+  files, recursively, without following directory symlinks. Selection is untimed;
+  `list_collection_covers` is timed. Source trees can be outside the snapshot and
+  are only read. Unreadable trees are counted; no readable tree produces a skip.
+- Auto-tag input must be an explicit controller-provided copy outside the source
+  library. It is copied again into the snapshot before SQLite opens it. A nonempty
+  input WAL is rejected. The hook uses `auto_tags::import_file` (including review
+  signals), suggestion-input notification, tagger-review preview and apply, always
+  exercising the inbox's apply-review-enabled path. It acquires the same global
+  database mutex explicitly and uses `unlocked_connection()` so `guardHeldMs`
+  includes connection open/close and all import/review work but excludes mutex wait.
+  `totalMs` includes mutex wait. It does not read or update machine inbox settings.
+- Commit payloads report the actual default/NORMAL `synchronous` values, journal
+  mode, and per-transaction median/p95. Transaction timing includes begin, insert
+  and commit; connection/table setup and table removal are excluded. Both fresh
+  connections use `db::open_database`. No production PRAGMA default is changed.
+- Grid contention waits for the background writer's first acquired transaction,
+  then times normal grid pages while it holds `connection()` for 300 ms per loop
+  with a 2 ms gap. Scratch writes are rolled back; thread errors are printed.
+
+Use a fresh snapshot for comparable cold-state results. `--reuse-snapshot` keeps
+mutations, including imports and recovery, across runs. These measurements are
+backend snapshot evidence, not native UI or production timing evidence.

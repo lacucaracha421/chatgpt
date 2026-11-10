@@ -257,6 +257,11 @@ impl Library {
     }
 }
 
+/// Measurement hook for `perf_probe`: the inventory each automatic batch reloads.
+pub(super) fn perf_load_comparable_rows(connection: &Connection) -> Result<usize, LibraryError> {
+    load_comparable(connection).map(|rows| rows.len())
+}
+
 /// Every image the explicit scan would compare, read now rather than from a frozen snapshot.
 fn load_comparable(connection: &Connection) -> Result<Vec<ScanAsset>, LibraryError> {
     let mut statement = connection.prepare(
