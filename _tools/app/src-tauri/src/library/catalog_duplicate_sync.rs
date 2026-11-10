@@ -1113,16 +1113,7 @@ impl Library {
         if !pending {
             return Ok(false);
         }
-        let _guard = self
-            .catalog_file_lock
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut c = self.connection()?;
-        super::catalog_preparation::attach_catalog_readonly(&c, &self.root)?;
-        let tx = c.transaction()?;
-        let changed = apply_pending(&tx)?;
-        tx.commit()?;
-        Ok(changed)
+        catalog_groups::write_decision(self, apply_pending).map(|(changed, _)| changed)
     }
 
     fn catalog_duplicate_fingerprint(&self) -> Result<String, LibraryError> {
@@ -1185,7 +1176,7 @@ impl Library {
             let tx = reader.transaction()?;
             cache.candidates(&tx)?.to_vec()
         };
-        let merged = self.with_catalog_write(|c| {
+        let (merged, _) = catalog_groups::write_decision(self, |c| {
             if membership_revision(c)? != revision {
                 return Ok(Vec::new()); // the catalog changed meanwhile: merge on the next pass
             }

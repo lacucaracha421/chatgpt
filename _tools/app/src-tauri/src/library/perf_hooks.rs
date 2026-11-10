@@ -209,3 +209,36 @@ pub fn hold_writer(library: &Library, ready: impl FnOnce()) -> Result<(), Librar
     tx.rollback()?;
     Ok(())
 }
+
+/// Original transaction shape, retained for an apples-to-apples D4 baseline.
+pub fn catalog_review_locked(library: &Library) -> Result<Value, LibraryError> {
+    let total = Instant::now();
+    let _file_guard = library
+        .catalog_file_lock
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = library
+        .database_lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let held = Instant::now();
+    let mut c = library.unlocked_connection()?;
+    catalog_preparation::attach_catalog_readonly(&c, library.root())?;
+    let tx = c.transaction()?;
+    super::catalog_review::probe_decision(&tx)?;
+    tx.commit()?;
+    drop(c);
+    drop(guard);
+    Ok(json!({"guardHeldMs": ms(held), "totalMs": ms(total)}))
+}
+
+/// D4 decision-equivalent compute/publication; reports the actual guard interval.
+pub fn catalog_review_prepared(library: &Library) -> Result<Value, LibraryError> {
+    let total = Instant::now();
+    let computations = std::cell::Cell::new(0);
+    let (_, held) = catalog_groups::write_decision(library, |c| {
+        computations.set(computations.get() + 1);
+        super::catalog_review::probe_decision(c)
+    })?;
+    Ok(json!({"guardHeldMs": held.as_secs_f64()*1000.0, "totalMs": ms(total), "computations": computations.get()}))
+}

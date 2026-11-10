@@ -1256,3 +1256,31 @@ fn the_decision_log_is_read_only_when_its_shared_head_moved() {
         .sync_catalog_duplicates_with(&dead, "publisher", Some("client"), endpoint)
         .is_err());
 }
+
+#[test]
+fn catalog_duplicate_pending_withdrawals_split_each_pair() {
+    let (_dir, c) = fixture();
+    add_triangle_work(&c);
+    auto_confirm(&c, &scan(&c).unwrap()).unwrap();
+    let generation = || {
+        c.query_row(
+            "SELECT generation FROM online_catalog_group_state WHERE provider='kHentai'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    let before = generation();
+    assert!(receive(
+        &c,
+        &[
+            entry(1, "1", "2", "notDuplicate"),
+            entry(2, "1", "3", "notDuplicate")
+        ]
+    ));
+    assert!(generation() > before);
+    assert!(!same_group(&c, "1", "2").unwrap());
+    assert!(!same_group(&c, "1", "3").unwrap());
+    assert_eq!(decision(&c, "1", "2").as_deref(), Some("falsePositive"));
+    assert_eq!(decision(&c, "1", "3").as_deref(), Some("falsePositive"));
+}

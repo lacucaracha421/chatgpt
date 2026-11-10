@@ -920,6 +920,38 @@ fn decide_row(c: &Connection, q: &ReviewDecision, row: ReviewRow) -> Result<(), 
     }
     Ok(())
 }
+/// A decision-equivalent measurement on the probe's disposable library.
+/// Queue discovery is excluded; validation and publication match a human decision.
+pub(super) fn probe_decision(c: &Connection) -> Result<(), LibraryError> {
+    catalog_groups::ensure_membership(c)?;
+    let ids = c.prepare("SELECT work_id FROM online_catalog_group_members WHERE provider='kHentai' ORDER BY work_id LIMIT 2")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if ids.len() != 2 {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    let row = make_row(
+        c,
+        ids[0].clone(),
+        ids[1].clone(),
+        "pending".into(),
+        ReviewEvidence {
+            left: work(c, &ids[0])?,
+            right: work(c, &ids[1])?,
+            reason: "Performance probe".into(),
+            algorithm: ALGORITHM.into(),
+        },
+        Some(candidate_context(c)?),
+    )?;
+    let query = ReviewDecision {
+        left_anchor: ids[0].clone(),
+        right_anchor: ids[1].clone(),
+        decision: "falsePositive".into(),
+        review_token: row.review_token.clone(),
+    };
+    decide_row(c, &query, row)
+}
+
 impl Library {
     fn catalog_review_cache_path(&self) -> std::path::PathBuf {
         self.root.join(".cache/catalog-review/queue-v1.json")
@@ -971,16 +1003,10 @@ impl Library {
                 .catalog_review_cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let _guard = self
-                .catalog_file_lock
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut c = self.connection()?;
-            super::catalog_preparation::attach_catalog_readonly(&c, &self.root)?;
-            let tx = c.transaction()?;
-            let row = queue_decision_row(&tx, &cache, &query)?;
-            decide_row(&tx, &query, row)?;
-            tx.commit()?;
+            catalog_groups::write_decision(self, |c| {
+                let row = queue_decision_row(c, &cache, &query)?;
+                decide_row(c, &query, row)
+            })?;
         }
         self.request_catalog_preparation();
         Ok(())

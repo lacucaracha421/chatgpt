@@ -2860,6 +2860,16 @@ fn heavy_paths(bench: &mut Bench, library: &Library, snapshot_root: &Path) {
             to_value(perf_hooks::similarity_inventory(library))
         });
     }
+    if bench.selected("heavy_catalog_review_prepared") && bench.options.with_catalog {
+        bench.run("heavy", "heavy_catalog_review_prepared", || {
+            to_value(perf_hooks::catalog_review_prepared(library))
+        });
+    }
+    if bench.selected("heavy_catalog_review_locked") && bench.options.with_catalog {
+        bench.run("heavy", "heavy_catalog_review_locked", || {
+            to_value(perf_hooks::catalog_review_locked(library))
+        });
+    }
     if bench.selected("heavy_catalog_rebuild") {
         if bench.options.with_catalog && snapshot_root.join("catalogs/kdata.db").is_file() {
             bench.run("heavy", "heavy_catalog_rebuild", || {
