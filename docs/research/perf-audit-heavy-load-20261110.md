@@ -148,6 +148,29 @@ Found while measuring; verified by Sol (`gpt-6.1-sol`, read-only) and by control
 
 Expected result: about 1.1 GB of predictions, a DB of about 2.5 GB, roughly halving backup time and size. First verify that no reader uses non-latest generations (decision snapshots copy their evidence into `character_decisions`).
 
+### N7 first implementation attempt (2026-11-10, not merged)
+
+Sol (batch F) wrote a per-publication prune plus a forward migration with a conservative keep rule, measured on the real-library copy. The patch is kept outside the repository.
+
+**Result:**
+- Predictions: 879,634 → 811,240 rows, only 8% removed.
+- Evidence rows: 80,663 → 64,439.
+- File size after VACUUM: 5.45 → 5.08 GB.
+- Migration time: 78–90 s at library open. VACUUM time: 132–169 s.
+
+**Why it removed so little.** The controller broke the keep rule down on the copy:
+- 71,976 evidence rows are superseded.
+- The job clause keeps 54,905 of them. That clause keeps every generation that shares the source generation of a non-superseded job, because a decision taken from an already open review page accepts any generation of the current source.
+- The reference-refresh base clause keeps 5,877.
+- The regions fallback clause keeps 1,685.
+
+**Decision:** not merged. One-time cleanup needs no protection for open review pages, since none are open at startup. Rework as:
+- a background, per-asset, small-transaction prune (no startup block) that drops the job clause for the one-time pass;
+- the narrow live rule at publication time;
+- a one-time VACUUM as an explicit, visible maintenance step.
+
+Expected result: about 205k prediction rows and a database of about 2.4 GB. This needs the user's go-ahead on how the VACUUM step is shown.
+
 ### User decisions (2026-11-10)
 
 - **N7:** approved. Prune superseded generations going forward and run a one-time cleanup migration behind the pre-migration backup.
@@ -155,6 +178,50 @@ Expected result: about 1.1 GB of predictions, a DB of about 2.5 GB, roughly halv
 - **T1:** the user has never seen the tablet viewer close by itself during PC imports. Keep it in stage 4 at lower priority, unless a device measurement shows the reloads.
 - **Commits:** approved once each batch is reviewed and tested.
 - **Tablet measurements:** wireless ADB over the tailnet when the user enables 무선 디버깅.
+
+## Delivered (2026-11-10)
+
+All numbers come from `perf_probe` on a copy of the real library (Windows release build). They are backend timings, not native window measurements.
+
+| Commit | Items | Before → after |
+| --- | --- | --- |
+| `f5f81604` | V1, V3, V4, V2a: video preparation is per-video locked, stoppable, quiet during playback, one video per call, newest first, below-normal FFmpeg priority | Structural; not timed |
+| `d571d058` | J2: auto-tag import prepares outside the lock and diff-publishes. J8/V7: cached fingerprint before the full hash. N4: per-source verification budget | J2 lock held 82.6 s → 1.93 s (1.27 s for an unchanged re-import), with identical results in 10 tables |
+| `5527eb81` | `perf_probe` heavy group and this record | — |
+| `e0a08a51` | V6, C6, C3: freeze and reveal canvases released, motes only on LR | Structural; memory not measured |
+| `a5121652` | D1: 19 lock-taking commands moved off the Windows UI thread; per-feature mutation ordering | Native responsiveness not measured |
+| `6b1129a1` | N1: artist-style input stamp memoized behind a write counter | Per selection: 135 ms → 0.29 ms |
+| `74ad5236` | D4: review and duplicate-sync membership computed in a private workspace; the lock is held only for a revalidated patch | Lock per decision: 1.18 s → about 10 ms. End to end: 1.2 s → 2.2 s |
+
+| `ed89627b` | J7: artwork backfill single-flighted per library and launch-settled. J5: no artist re-rank in lightweight mode | Structural; not timed |
+| `cf646816` | N7: per-publication prune, a one-time background pass, and a manual DB 최적화 (VACUUM) job | On the copy: predictions 879,634 → 270,864; file 5.45 → 2.06 GB after a 26 s VACUUM. The pass took 1,054 s in the background (longest transaction 204 ms). Review and candidate projections unchanged |
+
+Held after measuring or re-checking:
+- **I8** (FIFO within a view): thumbnail permit wait p95 12 ms, max 111 ms, below the 100 ms p95 gate.
+- **J1** (publication safety dispatch): the startup check of every lane is deliberate, and each check is light.
+- **J6** (inventory reload, 33 ms) and **N3** (manga list, 7 ms): below their gates.
+
+Review notes:
+- The controller fixed a Stop-reset bug (V3), a cover-scale bug (V6) and a writer that bypassed the change hooks (D4).
+- A read-only Sol review of D4 found a batch-ordering bug in a "rebuild once per pass" shortcut; the shortcut was reverted.
+- One pre-existing failing test is not caused by this work: `catalog_duplicate_pass_through_the_real_client_uploads_and_reports` expects a PUT where `f95a3314` added a representative GET.
+
+## Real-app session (Windows main PC, 2026-11-10 22:33)
+
+Release build of `cf646816` on the real library, with `LAKOMICS_PERF=1`, `LAKOMICS_MEDIA_TIMING=1` and the WebView2 DevTools port. The N7 background pass was running during the session.
+
+- **Idle 30 s:** no long tasks; app 3.6% CPU; total private memory 477 MB.
+- **Scripted grid scroll, 20 s, 48,000 px:** 2,399 frames, p50 8.3 ms, p95 8.4 ms, max 16.7 ms, 0 frames over 25 ms, one long animation frame of 51 ms.
+- **Thumbnail requests during the scroll (1,465):**
+  - permit wait p50 0 ms, p95 12.3 ms, max 111 ms;
+  - serve p50 6.1 ms, p95 8.6 ms;
+  - DB wait 0 ms.
+  - **About 6–7 ms of each serve is `file_open_ms`.** Opening the thumbnail file dominates, not the queue or the database. Real-time antivirus scanning is a plausible cause; this is unverified and a new candidate.
+- **Viewer, 20 ArrowRight steps over real images (I7):**
+  - WebView2 GPU process private memory went from about 152 MB to **819 MB** at peak, and was 535 MB after closing;
+  - the renderer stayed around 130 MB.
+
+  This meets the 300 MB gate for I7. How much of it comes from the speculative next/previous decodes, rather than from showing each original, is unmeasured. An A/B run with prefetch disabled would answer it.
 
 ## Fix plan
 
