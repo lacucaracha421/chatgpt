@@ -281,6 +281,7 @@ pub struct Library {
     trash_lock: Arc<Mutex<()>>,
     // ponytail: one video preparation at a time; add a bounded worker pool only if profiling needs it.
     video_lock: Arc<Mutex<()>>,
+    video_preparation_stop: Arc<std::sync::atomic::AtomicBool>,
     // Serializes backup operations and shares verification results across Library clones.
     backup_lock: Arc<Mutex<backup::BackupVerificationCache>>,
     // ponytail: one startup Release Watch run per Library; split only if provider latency demands it.
@@ -440,6 +441,7 @@ impl Library {
             manga_root_identity: Arc::default(),
             trash_lock: Arc::new(Mutex::new(())),
             video_lock: Arc::new(Mutex::new(())),
+            video_preparation_stop: Arc::default(),
             backup_lock: Arc::default(),
             release_watch_lock: Arc::new(Mutex::new(())),
             manga_scan_lock: Arc::new(Mutex::new(())),

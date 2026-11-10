@@ -331,6 +331,11 @@ impl Run {
         row.running = true;
         row.manual = manual;
         row.stop = false;
+        // A stopped video preparation stays stopped for automatic runs; only a
+        // manual run (or reopening the library) resumes it.
+        if id == "videos" && manual {
+            library.reset_video_preparation_stop();
+        }
         row.progress = None;
         row.waiting = None;
         row.unconfigured = None;
@@ -534,7 +539,7 @@ fn snapshot(library: Option<&Library>) -> Vec<AutoJobStatus> {
                 }
                 row.can_stop = matches!(
                     row.id.as_str(),
-                    "characters" | "cardCutouts" | "mangaSpines"
+                    "characters" | "cardCutouts" | "mangaSpines" | "videos"
                 );
             }
             if let Some(reason) = &active.waiting {
@@ -974,7 +979,10 @@ pub(crate) async fn run_auto_job(
     status.state = "running".into();
     status.overdue_since = None;
     status.waiting_reason = None;
-    status.can_stop = matches!(id.as_str(), "characters" | "cardCutouts" | "mangaSpines");
+    status.can_stop = matches!(
+        id.as_str(),
+        "characters" | "cardCutouts" | "mangaSpines" | "videos"
+    );
     Ok(status)
 }
 
@@ -1282,7 +1290,10 @@ pub(crate) async fn stop_auto_job(
     id: String,
     state: tauri::State<'_, crate::commands::AppState>,
 ) -> Result<AutoJobStatus, String> {
-    if !matches!(id.as_str(), "characters" | "cardCutouts" | "mangaSpines") {
+    if !matches!(
+        id.as_str(),
+        "characters" | "cardCutouts" | "mangaSpines" | "videos"
+    ) {
         return Err("중지할 수 없는 작업입니다".into());
     }
     let library = state.current_library().ok_or("라이브러리를 열어 주세요")?;
@@ -1296,6 +1307,9 @@ pub(crate) async fn stop_auto_job(
             .ok_or("실행 중인 작업이 없습니다")?;
         row.stop = true;
         row.manual = false;
+        if id == "videos" {
+            library.stop_video_preparation();
+        }
     }
     tauri::async_runtime::spawn_blocking(move || {
         snapshot(Some(&library))
@@ -1462,6 +1476,12 @@ mod tests {
             IDS
         );
         let first = Run::reserve(&library, "videos", true).unwrap();
+        let video_status = snapshot(Some(&library))
+            .into_iter()
+            .find(|row| row.id == "videos")
+            .unwrap();
+        assert_eq!(video_status.state, "running");
+        assert!(video_status.can_stop);
         assert!(Run::reserve(&library, "videos", true).is_err());
         assert!(Run::begin(&library, "videos").is_err());
         drop(first);

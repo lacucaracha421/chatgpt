@@ -64,7 +64,7 @@ import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 import { useSimilarityReviewInbound } from "../similarity/useSimilarityReviewInbound";
-import { useVideoPreparation } from "../video/useVideoPreparation";
+import { VideoPlaybackContext, useVideoPreparation } from "../video/useVideoPreparation";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
@@ -395,7 +395,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useSimilarityReviewInbound(gateway, handleSimilarityInbound);
   useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
   useExtensionIngest(subscribeExtensionIngest, handleIngested);
+  const [viewerVideoPlaying, setViewerVideoPlaying] = useState(false);
   const videoPreparation = useVideoPreparation({
+    playing: viewerVideoPlaying,
     enabled: maintenance === null && !workload.restricted,
     trigger: videoPreparationTrigger,
     prepare: gateway.preparePendingVideos,
@@ -772,6 +774,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   return (
     <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={setNsfwFilter} privacyMode={preferences.privacyMode} setPrivacyMode={setPrivacyMode}>
+      <VideoPlaybackContext.Provider value={setViewerVideoPlaying}>
       <FaultGameProvider>
       <FolderPrefetchContext.Provider value={folderPrefetchPlan}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
@@ -988,6 +991,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </FolderPrefetchContext.Provider>
       {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} artist={mangaViewer.artist} onClose={() => setMangaViewer(null)} /></Suspense>}
       </FaultGameProvider>
+      </VideoPlaybackContext.Provider>
     </PrivacyProvider>
   );
 }

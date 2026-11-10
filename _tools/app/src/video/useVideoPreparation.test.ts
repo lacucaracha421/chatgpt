@@ -38,8 +38,8 @@ it("prepares one pending video at a time until remaining is zero", async () => {
   );
 
   await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
-  expect(prepare).toHaveBeenNthCalledWith(1, 5);
-  expect(prepare).toHaveBeenNthCalledWith(2, 5);
+  expect(prepare).toHaveBeenNthCalledWith(1, 1);
+  expect(prepare).toHaveBeenNthCalledWith(2, 1);
   expect(maximumActiveCalls).toBe(1);
   expect(onChanged.mock.calls.map(([ids]) => ids)).toEqual([["v1"], ["v2"]]);
   expect(result.current.work?.status).toBe("completed");
@@ -184,7 +184,7 @@ it("keeps scheduling later runs while a preparation run is already active", asyn
   });
 
   await waitFor(() => expect(calls).toBeGreaterThan(1));
-  expect(prepare).toHaveBeenCalledWith(5);
+  expect(prepare).toHaveBeenCalledWith(1);
   expect(peak).toBe(1);
 });
 
@@ -208,4 +208,27 @@ it("does not schedule more preparation after a real unmount", async () => {
 
   expect(prepare).toHaveBeenCalledTimes(1);
   expect(onChanged).not.toHaveBeenCalled();
+});
+
+it("yields between videos during playback and resumes when playback ends", async () => {
+  const first = deferred<VideoPreparationProgress>();
+  const prepare = vi.fn().mockReturnValueOnce(first.promise)
+    .mockResolvedValue({ processed: 1, remaining: 0, failed: 0, changedAssetIds: ["v2"] });
+  const onChanged = vi.fn();
+  const { rerender } = renderHook(({ playing }) => useVideoPreparation({
+    enabled: true, playing, trigger: 0, prepare, retry: vi.fn(), onChanged,
+  }), { initialProps: { playing: true } });
+  await act(async () => {});
+  expect(prepare).not.toHaveBeenCalled();
+  rerender({ playing: false });
+  await waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+  rerender({ playing: true });
+  await act(async () => {
+    first.resolve({ processed: 1, remaining: 1, failed: 0, changedAssetIds: ["v1"] });
+  });
+  expect(onChanged).toHaveBeenCalledWith(["v1"]);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  rerender({ playing: false });
+  await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
+  expect(onChanged).toHaveBeenCalledWith(["v2"]);
 });

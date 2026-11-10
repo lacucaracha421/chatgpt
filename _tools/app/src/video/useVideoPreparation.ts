@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { LibraryGateway, VideoPreparationProgress } from "../library/types";
 import type { IngestionWork } from "../ingestion/useFileDrop";
+
+// Scoped to the App tree: viewers report playback without threading callbacks
+// through every browser that can open an AssetViewer.
+export const VideoPlaybackContext = createContext<((playing: boolean) => void) | null>(null);
 
 const WORK_ID = "video-preparation";
 
 type Options = {
   enabled: boolean;
+  playing?: boolean;
   trigger: number;
   prepare: LibraryGateway["preparePendingVideos"];
   retry: LibraryGateway["retryVideoPreparation"];
@@ -40,8 +45,10 @@ export function useVideoPreparation(options: Options) {
     if (progress.changedAssetIds.length > 0) {
       optionsRef.current.onChanged(progress.changedAssetIds);
     }
-    if (progress.processed === 0 && progress.remaining === 0) {
-      if (completedRef.current === 0) setWork(null);
+    // Nothing left, or no progress while stopped/restricted: do not leave a
+    // "running" status behind for work that is not running.
+    if (progress.processed === 0 && progress.failed === 0) {
+      if (completedRef.current === 0 || progress.remaining > 0) setWork(null);
       return false;
     }
     completedRef.current += progress.processed;
@@ -72,15 +79,15 @@ export function useVideoPreparation(options: Options) {
 
   runRef.current = () => {
     requestedRef.current = true;
-    if (runningRef.current || !activeRef.current || !optionsRef.current.enabled) return;
+    if (runningRef.current || !activeRef.current || !optionsRef.current.enabled || optionsRef.current.playing) return;
     runningRef.current = true;
     queueMicrotask(async () => {
       try {
         requestedRef.current = false;
-        while (activeRef.current && optionsRef.current.enabled) {
+        while (activeRef.current && optionsRef.current.enabled && !optionsRef.current.playing) {
           let progress: VideoPreparationProgress;
           try {
-            progress = await optionsRef.current.prepare(5);
+            progress = await optionsRef.current.prepare(1);
           } catch (error) {
             if (activeRef.current) {
               setWork({
@@ -111,13 +118,13 @@ export function useVideoPreparation(options: Options) {
   };
 
   useEffect(() => {
-    if (!options.enabled) return;
+    if (!options.enabled || options.playing) return;
     if (!runningRef.current) {
       completedRef.current = 0;
       failedAssetIdRef.current = null;
     }
     runRef.current();
-  }, [options.enabled, options.trigger]);
+  }, [options.enabled, options.playing, options.trigger]);
 
   const retryFailed = useCallback(async () => {
     const assetId = failedAssetIdRef.current;

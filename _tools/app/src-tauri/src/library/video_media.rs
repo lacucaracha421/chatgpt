@@ -3,6 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 #[cfg(windows)]
@@ -71,10 +72,30 @@ struct PendingVideo {
     audio_codec: Option<String>,
 }
 
-struct ProcessVideoTool;
+struct ProcessVideoTool<'a> {
+    cancel: &'a AtomicBool,
+}
+
+static NEVER_CANCEL: AtomicBool = AtomicBool::new(false);
+
+impl ProcessVideoTool<'_> {
+    fn uncancelled() -> Self {
+        Self {
+            cancel: &NEVER_CANCEL,
+        }
+    }
+
+    fn run<const N: usize>(
+        &self,
+        name: &str,
+        arguments: [OsString; N],
+    ) -> Result<Vec<u8>, LibraryError> {
+        run_tool_with_cancel(name, arguments, self.cancel)
+    }
+}
 
 pub(crate) fn probe_video(source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
-    ProcessVideoTool.probe(source, extension)
+    ProcessVideoTool::uncancelled().probe(source, extension)
 }
 
 fn ffmpeg_seek_seconds(seek_ms: u64) -> String {
@@ -243,9 +264,9 @@ impl Library {
     }
 }
 
-impl VideoTool for ProcessVideoTool {
+impl VideoTool for ProcessVideoTool<'_> {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
-        let output = run_tool(
+        let output = self.run(
             "ffprobe",
             [
                 "-v".into(),
@@ -268,7 +289,7 @@ impl VideoTool for ProcessVideoTool {
         destination: &Path,
     ) -> Result<(), LibraryError> {
         let seek_seconds = ffmpeg_seek_seconds(seek_ms);
-        run_tool(
+        self.run(
             "ffmpeg",
             [
                 "-y".into(),
@@ -306,7 +327,7 @@ impl VideoTool for ProcessVideoTool {
             .ok_or(LibraryError::VideoPreparationFailed)?;
         fs::create_dir(destination).map_err(|_| LibraryError::VideoPreparationFailed)?;
         let output_pattern = destination.join("%03d.webp");
-        run_tool(
+        self.run(
             "ffmpeg",
             [
                 "-y".into(),
@@ -332,7 +353,7 @@ impl VideoTool for ProcessVideoTool {
     }
 
     fn create_proxy(&self, source: &Path, destination: &Path) -> Result<(), LibraryError> {
-        run_tool(
+        self.run(
             "ffmpeg",
             [
                 "-y".into(),
@@ -358,6 +379,14 @@ impl VideoTool for ProcessVideoTool {
 }
 
 impl Library {
+    pub(crate) fn stop_video_preparation(&self) {
+        self.video_preparation_stop.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn reset_video_preparation_stop(&self) {
+        self.video_preparation_stop.store(false, Ordering::Relaxed);
+    }
+
     pub fn prepare_pending_videos(
         &self,
         limit: u32,
@@ -365,7 +394,14 @@ impl Library {
         crate::auto_jobs::tracked(
             self,
             "videos",
-            || self.prepare_pending_videos_with(&ProcessVideoTool, limit),
+            || {
+                self.prepare_pending_videos_with(
+                    &ProcessVideoTool {
+                        cancel: &self.video_preparation_stop,
+                    },
+                    limit,
+                )
+            },
             |result| (result.failed == 0, Some(result.processed as u64)),
         )
     }
@@ -375,10 +411,6 @@ impl Library {
         tool: &T,
         limit: u32,
     ) -> Result<VideoPreparationProgress, LibraryError> {
-        let _guard = self
-            .video_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut progress = VideoPreparationProgress {
             processed: 0,
             remaining: 0,
@@ -386,6 +418,13 @@ impl Library {
             changed_asset_ids: Vec::new(),
         };
         for _ in 0..limit.clamp(1, 10) {
+            let _guard = self
+                .video_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.video_preparation_stop.load(Ordering::Relaxed) {
+                break;
+            }
             if crate::workload::is_restricted() && !crate::auto_jobs::manual(self, "videos") {
                 break;
             }
@@ -393,7 +432,18 @@ impl Library {
                 break;
             };
             let asset_id = video.asset_id.clone();
-            if self.prepare_video(tool, video).is_err() {
+            if self
+                .prepare_video(tool, video, &self.video_preparation_stop)
+                .is_err()
+            {
+                if self.video_preparation_stop.load(Ordering::Relaxed) {
+                    self.remove_video_derivatives(&asset_id)?;
+                    self.connection()?.execute(
+                        "UPDATE video_assets SET preparation_state = 'pending', preparation_error = NULL WHERE asset_id = ?1",
+                        [&asset_id],
+                    )?;
+                    break;
+                }
                 self.mark_video_failed(&asset_id)?;
                 progress.failed += 1;
             } else if let Err(error) = self.requeue_cloud_asset_after_thumbnail_ready(&asset_id) {
@@ -536,7 +586,7 @@ impl Library {
 
     /// Only the video already claimed by the upload worker is eligible here.
     pub(crate) fn prepare_upload_video(&self, asset_id: &str) -> Result<(), LibraryError> {
-        self.prepare_upload_video_with(asset_id, &ProcessVideoTool)
+        self.prepare_upload_video_with(asset_id, &ProcessVideoTool::uncancelled())
     }
 
     fn prepare_upload_video_with<T: VideoTool>(
@@ -560,7 +610,7 @@ impl Library {
             return Ok(());
         }
         if let Some(video) = self.reserve_pending_video(Some(asset_id))? {
-            if let Err(error) = self.prepare_video(tool, video) {
+            if let Err(error) = self.prepare_video(tool, video, &NEVER_CANCEL) {
                 self.mark_video_failed(asset_id)?;
                 return Err(error);
             }
@@ -583,7 +633,7 @@ impl Library {
                     WHERE video_assets.preparation_state = 'pending'
                       AND (?1 IS NULL OR assets.id = ?1)
                       AND assets.status = 'normal'
-                    ORDER BY video_assets.asset_id LIMIT 1
+                    ORDER BY assets.collected_at DESC, video_assets.asset_id LIMIT 1
                  )
                  RETURNING asset_id, duration_ms, container, video_codec, audio_codec,
                     (SELECT relative_path FROM assets WHERE assets.id = video_assets.asset_id)",
@@ -608,6 +658,7 @@ impl Library {
         &self,
         tool: &T,
         video: PendingVideo,
+        cancel: &AtomicBool,
     ) -> Result<(), LibraryError> {
         let mut activity = crate::activities::Job::start(
             format!("preview:{}", video.asset_id),
@@ -629,11 +680,21 @@ impl Library {
                 .join(format!(".pending-{}", uuid::Uuid::new_v4()));
             fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
             let prepared = (|| {
+                let check_cancel = || {
+                    if cancel.load(Ordering::Relaxed) {
+                        Err(LibraryError::VideoPreparationFailed)
+                    } else {
+                        Ok(())
+                    }
+                };
+                check_cancel()?;
                 let poster = pending.join("poster.webp");
                 tool.create_poster(&source, poster_seek_ms(video.duration_ms), &poster)?;
+                check_cancel()?;
                 let timestamps = scrub_timestamps_ms(video.duration_ms);
                 let scrub = pending.join("scrub");
                 tool.create_scrub_frames(&source, &timestamps, &scrub)?;
+                check_cancel()?;
                 let playback_kind = if direct_playback(
                     &video.container,
                     &video.video_codec,
@@ -651,6 +712,7 @@ impl Library {
                 if playback_kind == "proxy" {
                     require_non_empty_file(&pending.join("playback.mp4"))?;
                 }
+                check_cancel()?;
                 Ok::<_, LibraryError>((playback_kind, timestamps.len()))
             })();
             let (playback_kind, scrub_frame_count) = match prepared {
@@ -725,10 +787,18 @@ fn safe_asset_id(asset_id: &str) -> bool {
 }
 
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
+    run_tool_with_cancel(name, arguments, &NEVER_CANCEL)
+}
+
+fn run_tool_with_cancel<const N: usize>(
+    name: &str,
+    arguments: [OsString; N],
+    cancel: &AtomicBool,
+) -> Result<Vec<u8>, LibraryError> {
     run_similarity_tool(
         name,
         &arguments,
-        &std::sync::atomic::AtomicBool::new(false),
+        cancel,
         std::time::Instant::now() + std::time::Duration::from_secs(30 * 60),
         None,
     )
@@ -953,7 +1023,7 @@ fn run_similarity_tool(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    command.creation_flags(0x08000000 | 0x00004000); // CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS
     let mut child = ReapedChild(command.spawn().map_err(|_| "tool_unavailable")?);
     // Kernel ownership also terminates this child if the application exits before
     // its cancellation worker can run. Ordinary completion still kill/waits below.
@@ -1412,6 +1482,102 @@ mod tests {
         assert!(parse_probe(audio_only, "mp4").is_err());
         assert!(parse_probe(zero_duration, "mp4").is_err());
         assert!(parse_probe(zero_duration, "mkv").is_err());
+    }
+
+    #[test]
+    fn stopped_preparation_requeues_and_removes_partial_derivatives() {
+        struct StopDuringPoster<'a>(&'a Library);
+        impl VideoTool for StopDuringPoster<'_> {
+            fn probe(&self, _: &Path, _: &str) -> Result<VideoProbe, LibraryError> {
+                unreachable!()
+            }
+            fn create_poster(
+                &self,
+                _: &Path,
+                _: u64,
+                destination: &Path,
+            ) -> Result<(), LibraryError> {
+                assert!(self.0.video_lock.try_lock().is_err());
+                fs::write(destination, b"partial").unwrap();
+                self.0.stop_video_preparation();
+                Ok(())
+            }
+            fn create_scrub_frames(
+                &self,
+                _: &Path,
+                _: &[u64],
+                _: &Path,
+            ) -> Result<(), LibraryError> {
+                unreachable!()
+            }
+            fn create_proxy(&self, _: &Path, _: &Path) -> Result<(), LibraryError> {
+                unreachable!()
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 2_000);
+        insert_pending_video(&library, "video-2", "mp4", "h264", Some("aac"), 2_000);
+        let progress = library
+            .prepare_pending_videos_with(&StopDuringPoster(&library), 10)
+            .unwrap();
+        assert_eq!(
+            (progress.processed, progress.remaining, progress.failed),
+            (0, 2, 0)
+        );
+        assert!(progress.changed_asset_ids.is_empty());
+        assert_eq!(
+            fs::read_dir(library.root().join("video-media"))
+                .unwrap()
+                .count(),
+            0
+        );
+        let states: Vec<String> = library
+            .connection()
+            .unwrap()
+            .prepare("SELECT preparation_state FROM video_assets ORDER BY asset_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(states, ["pending", "pending"]);
+        let automatic = crate::auto_jobs::Run::begin(&library, "videos").unwrap();
+        let still_stopped = library
+            .prepare_pending_videos_with(&FakeVideoTool::default(), 10)
+            .unwrap();
+        assert_eq!((still_stopped.processed, still_stopped.remaining), (0, 2));
+        drop(automatic);
+        library.reset_video_preparation_stop();
+        let resumed = library
+            .prepare_pending_videos_with(&FakeVideoTool::default(), 10)
+            .unwrap();
+        assert_eq!(
+            (resumed.processed, resumed.remaining, resumed.failed),
+            (2, 0, 0)
+        );
+    }
+
+    #[test]
+    fn preparation_picks_newest_import_then_asset_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for id in ["a-old", "b-new", "c-new"] {
+            insert_pending_video(&library, id, "mp4", "h264", Some("aac"), 2_000);
+        }
+        library.connection().unwrap().execute(
+            "UPDATE assets SET collected_at = '2026-11-10T00:00:00Z' WHERE id IN ('b-new', 'c-new')", [],
+        ).unwrap();
+        let tool = FakeVideoTool::default();
+        for id in ["b-new", "c-new", "a-old"] {
+            assert_eq!(
+                library
+                    .prepare_pending_videos_with(&tool, 1)
+                    .unwrap()
+                    .changed_asset_ids,
+                [id]
+            );
+        }
     }
 
     #[test]
@@ -1977,13 +2143,19 @@ fn linux_system_video_tools_create_and_probe_proxy() {
     )
     .unwrap();
     let proxy = temp.path().join("proxy.mp4");
-    ProcessVideoTool.create_proxy(&source, &proxy).unwrap();
-    let probe = ProcessVideoTool.probe(&proxy, "mp4").unwrap();
+    ProcessVideoTool::uncancelled()
+        .create_proxy(&source, &proxy)
+        .unwrap();
+    let probe = ProcessVideoTool::uncancelled()
+        .probe(&proxy, "mp4")
+        .unwrap();
     assert_eq!(probe.video_codec, "h264");
     assert_eq!((probe.width, probe.height), (64, 64));
     assert!(probe.duration_ms > 0);
     let poster = temp.path().join("poster.webp");
-    ProcessVideoTool.create_poster(&proxy, 0, &poster).unwrap();
+    ProcessVideoTool::uncancelled()
+        .create_poster(&proxy, 0, &poster)
+        .unwrap();
     assert!(poster.metadata().unwrap().len() > 0);
     let frame = render_video_frame_webp(&proxy, 250).unwrap();
     let decoded = image::load_from_memory_with_format(&frame, image::ImageFormat::WebP).unwrap();

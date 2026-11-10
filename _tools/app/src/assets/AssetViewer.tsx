@@ -1,3 +1,4 @@
+import { VideoPlaybackContext } from "../video/useVideoPreparation";
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import {
   ArrowDownTrayIcon,
@@ -13,7 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { ImageTextNotes, type ImageTextNotesHandle } from "../shared/viewer/ImageTextNotes";
@@ -107,6 +108,11 @@ export function AssetViewer({
   const privacyMode = masked(asset, requestedPrivacy);
   const motion = useViewerMotion(activeId, onClose, originRect, asset?.width && asset?.height ? asset.width / asset.height : 1, !privacyMode && activeId ? (mediaSource === "vault" ? vaultAssetUrl(activeId) : assetUrl(activeId)) : undefined, activeId, privacyMode, asset?.media.kind === "image" ? asset.width ?? undefined : undefined);
   const [videoPlaying, setVideoPlaying] = useState(false);
+  const reportVideoPlayback = useContext(VideoPlaybackContext);
+  useEffect(() => {
+    reportVideoPlayback?.(videoPlaying && asset?.media.kind === "video" && !privacyMode);
+    return () => reportVideoPlayback?.(false);
+  }, [reportVideoPlayback, videoPlaying, asset?.id, asset?.media.kind, privacyMode]);
   const stripActive = useRef(false);
   const [replacementFailed, setReplacementFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
