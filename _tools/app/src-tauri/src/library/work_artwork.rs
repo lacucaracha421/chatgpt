@@ -682,10 +682,38 @@ impl Library {
             return;
         }
 
+        // One pass per library at a time (library open and recovery both start one),
+        // and only after launch settles so first screens do not compete with decodes.
+        static RUNNING: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+        let root = self.root().to_path_buf();
+        {
+            let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+            if running.contains(&root) {
+                return;
+            }
+            running.push(root.clone());
+        }
+        struct Release(std::path::PathBuf);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                RUNNING
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .retain(|root| root != &self.0);
+            }
+        }
+        let release = Release(root);
         let library = self.clone();
         let _ = std::thread::Builder::new()
             .name("work-artwork-thumbnail-backfill".into())
             .spawn(move || {
+                let _release = release;
+                while !crate::workload::launch_maintenance_ready() {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+                if crate::workload::is_restricted() {
+                    return;
+                }
                 let _ = library.backfill_missing_work_artwork_thumbnails();
             });
     }

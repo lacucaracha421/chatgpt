@@ -578,6 +578,10 @@ impl Library {
     /// Ranks again on a background thread when the cached suggestions are stale. Reads that
     /// back quick UI (the index badge, the inspector) never wait for the ~7 s ranking.
     fn schedule_artist_style_refresh(&self) {
+        // Lightweight mode keeps serving the last ranking; re-rank once it ends.
+        if crate::workload::is_restricted() {
+            return;
+        }
         if self
             .artist_style_runtime
             .scheduled
