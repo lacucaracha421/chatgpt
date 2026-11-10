@@ -1,4 +1,4 @@
-export type AutoJobId = "catalog" | "releaseCalendar" | "releaseWatch" | "launchbox" | "autoTags" | "characters" | "similarity" | "videos" | "mangaSpines" | "cardCutouts" | "cloudBackfill" | "backup" | "trash";
+export type AutoJobId = "catalog" | "releaseCalendar" | "releaseWatch" | "launchbox" | "autoTags" | "characters" | "similarity" | "videos" | "mangaSpines" | "cardCutouts" | "cloudBackfill" | "backup" | "trash" | "characterEvidenceRetention" | "databaseOptimize";
 export type AutoJobState = "idle" | "running" | "waiting" | "failed" | "unconfigured" | "off";
 export interface AutoJobStatus {
   id: AutoJobId;

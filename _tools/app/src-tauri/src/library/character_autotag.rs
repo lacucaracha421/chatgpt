@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+#[path = "character_evidence_retention.rs"]
+pub(crate) mod retention;
+
 #[derive(Debug)]
 pub(super) struct Context {
     pub hash: String,
@@ -837,6 +840,7 @@ impl Library {
         }
         connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state=?2,claim_id=NULL,error=NULL WHERE asset_id=?1",
             params![job.asset_id,review.stored()])?;
+        retention::prune(connection, &job.asset_id, true)?;
         Ok(id)
     }
 }

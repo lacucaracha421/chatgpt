@@ -716,6 +716,7 @@ fn start_timers(app: tauri::AppHandle) {
             let Some(library) = current else {
                 continue;
             };
+            crate::auto_jobs::maintenance_tick(&app, &library);
             crate::library::av_link::tick(library.clone(), profile.restricted || !focused);
             // Bulk metadata is maintenance: never start it just because a work was opened.
             let idle = runtime()

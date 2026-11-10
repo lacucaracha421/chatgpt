@@ -32,6 +32,15 @@ function Harness({ gateway }: { gateway: LibraryGateway }) {
   return <AutoJobsSettings gateway={gateway} model={model} onConfigure={vi.fn()} />;
 }
 
+it("shows reclaimable DB space and starts optimization only on click", async () => {
+  const gateway = fixture([job("databaseOptimize", { pending: 1024 * 1024 * 1024 })]);
+  render(<Harness gateway={gateway} />);
+  expect(await screen.findByText(/회수 가능/)).toHaveTextContent("1.0 GB");
+  expect(gateway.runAutoJob).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "최적화" }));
+  expect(gateway.runAutoJob).toHaveBeenCalledWith("databaseOptimize");
+});
+
 it("shows quiet no-new-files feedback when a manual tag import leaves lastRunAt unchanged", async () => {
   const unchanged = job("autoTags", { lastRunAt: "2026-10-26T01:00:00Z", lastOk: true });
   const gateway = fixture([unchanged]);

@@ -1,5 +1,5 @@
 //! Settings snapshots and manual intent. Workers retain their provider and data-safety gates.
-use crate::library::{error::LibraryError, models::CatalogLanguage, Library};
+use crate::library::{character_autotag::retention, error::LibraryError, models::CatalogLanguage, Library};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::Manager;
 
-pub(crate) const IDS: [&str; 13] = [
+pub(crate) const IDS: [&str; 15] = [
     "catalog",
     "releaseCalendar",
     "releaseWatch",
@@ -24,6 +24,8 @@ pub(crate) const IDS: [&str; 13] = [
     "cloudBackfill",
     "backup",
     "trash",
+    retention::JOB,
+    retention::VACUUM_JOB,
 ];
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -99,6 +101,7 @@ impl AutoJobStatus {
             return;
         }
         let gap = match self.id.as_str() {
+            retention::VACUUM_JOB => None,
             "catalog" => self.interval_seconds.map(|seconds| seconds as i64 + 7200),
             "releaseCalendar" | "backup" | "trash" | "autoTags" => Some(26 * 3600),
             "releaseWatch" => Some(3 * 3600),
@@ -324,6 +327,12 @@ impl Run {
         let mut state = runtime()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.iter().any(|((root, job), row)| {
+            root == library.root() && row.running
+                && (id == retention::VACUUM_JOB || job == retention::VACUUM_JOB)
+        }) {
+            return Err(LibraryError::AutoJobBusy);
+        }
         let row = state.entry((library.root().into(), id.into())).or_default();
         if row.running {
             return Err(LibraryError::AutoJobBusy);
@@ -440,6 +449,40 @@ pub(crate) fn similarity_counts(library: &Library) -> Option<(u64, u64)> {
         count(&db,"SELECT COUNT(*) FROM assets WHERE status='normal' AND media_kind IN ('image','gif') AND perceptual_hash IS NULL AND perceptual_hash_error IS NULL")?,
         count(&db,"SELECT COUNT(*) FROM assets WHERE status='normal' AND media_kind IN ('image','gif') AND perceptual_hash_error IS NOT NULL")?,
     ))
+}
+
+/// Called by the existing native timer. One owner holds one reservation;
+/// every asset releases database_lock and yields, including after interruption.
+pub(crate) fn maintenance_tick(app: &tauri::AppHandle, library: &Library) {
+    if !crate::workload::launch_maintenance_ready()
+        || !crate::workload::startup_background_ready()
+        || crate::workload::is_restricted()
+        || running(library, retention::JOB)
+        || running(library, retention::VACUUM_JOB)
+    {
+        return;
+    }
+    let Ok(db) = read_db(library) else { return; };
+    if !retention::state(&db).is_ok_and(|state| !state.complete) {
+        return;
+    }
+    let Ok(mut run) = Run::begin(library, retention::JOB) else { return; };
+    let library = library.clone();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let result = retention_pass(&app, &library);
+        match result {
+            Ok(count) => run.finish(true, Some(count)),
+            Err(error) => run.finish_with_error(false, None, Some(error.to_string())),
+        }
+    });
+}
+
+fn retention_pass(app: &tauri::AppHandle, library: &Library) -> Result<u64, LibraryError> {
+    retention::run(library, || {
+        app.state::<crate::commands::AppState>().current_library()
+            .is_some_and(|current| current.root() == library.root())
+    })
 }
 
 fn snapshot(library: Option<&Library>) -> Vec<AutoJobStatus> {
@@ -598,6 +641,24 @@ fn populate(
     entry: Option<&crate::library::machine_settings::LibraryEntry>,
 ) {
     match row.id.as_str() {
+        retention::JOB => {
+            if let Ok(state) = retention::state(db) {
+                row.progress = Some(Progress { done: state.done, total: state.total });
+                row.pending = if state.complete { Some(0) } else if state.total > 0 {
+                    Some(state.total.saturating_sub(state.done).max(1))
+                } else { None };
+                if !state.complete && crate::workload::is_restricted() {
+                    row.state = "waiting".into();
+                    row.waiting_reason = Some("lightweight".into());
+                }
+                if state.complete { row.last_count = Some(state.done); }
+            }
+        }
+        retention::VACUUM_JOB => {
+            // Reuse the row's pending count for bytes; frontend labels this row
+            // explicitly. The successful result is the new database size.
+            if let Ok((free, _)) = retention::space(db) { row.pending = Some(free); }
+        }
         "catalog" => {
             if let Ok((enabled, interval, attempt, success, added, error)) = db.query_row("SELECT update_enabled,update_interval_seconds,last_attempt_at,last_success_at,last_added,last_error FROM online_catalog_settings WHERE singleton=1", [], |r| Ok((r.get::<_, bool>(0)?,number(r,1)?,r.get::<_, Option<String>>(2)?,r.get::<_, Option<String>>(3)?,number(r,4)?,r.get::<_, Option<String>>(5)?))) {
                 row.enabled = Some(enabled); row.interval_seconds = Some(interval);
@@ -913,11 +974,21 @@ pub(crate) async fn run_auto_job(
         .await
         .map_err(|_| "작업 상태를 읽지 못했습니다")?;
     let mut status = statuses.into_iter().find(|row| row.id == id).unwrap();
+    if id == retention::JOB && status.pending == Some(0) {
+        return Ok(status);
+    }
+    if id == retention::JOB && (!crate::workload::launch_maintenance_ready()
+        || !crate::workload::startup_background_ready() || crate::workload::is_restricted()) {
+        return Err("앱 준비가 끝나고 절약 모드를 끈 뒤 정리해 주세요.".into());
+    }
     if matches!(status.state.as_str(), "unconfigured" | "running") {
         return Ok(status);
     }
     let run = match Run::reserve(&library, &id, true) {
         Ok(run) => run,
+        Err(_) if id == retention::VACUUM_JOB || running(&library, retention::VACUUM_JOB) => {
+            return Err("다른 작업이 끝난 뒤 실행해 주세요.".into());
+        }
         Err(_) => {
             status.state = "running".into();
             status.overdue_since = None;
@@ -925,7 +996,7 @@ pub(crate) async fn run_auto_job(
             return Ok(status);
         }
     };
-    if let Some(total) = status.pending {
+    if let Some(total) = status.pending.filter(|_| id != retention::VACUUM_JOB) {
         progress(&library, &id, 0, total, Some(total), status.failed);
     }
     if matches!(id.as_str(), "characters" | "cardCutouts" | "mangaSpines") {
@@ -961,6 +1032,13 @@ pub(crate) async fn run_auto_job(
         tauri::async_runtime::spawn_blocking(move || {
             let mut run = run;
             let _manual = ManualScope::enter(&lib, &job);
+            if job == retention::VACUUM_JOB {
+                match retention::vacuum(&lib) {
+                    Ok(size) => run.finish(true, Some(size)),
+                    Err(error) => run.finish_with_error(false, None, Some(error)),
+                }
+                return;
+            }
             #[cfg(windows)]
             if job == "autoTags" {
                 let result = manual_auto_tags(&mut WindowsTagTask, std::thread::sleep, || {
@@ -1149,6 +1227,7 @@ where
 }
 fn dispatch(app: &tauri::AppHandle, library: &Library, id: &str) -> Result<u64, LibraryError> {
     match id {
+        retention::JOB => retention_pass(app, library),
         "releaseCalendar" => {
             if library.server_release_calendar_enabled() {
                 if !matches!(
@@ -1438,6 +1517,10 @@ mod tests {
         let recent = (now - chrono::Duration::hours(25)).to_rfc3339();
         daily.overdue(now, Some(&recent));
         assert!(daily.overdue_since.is_none());
+        let mut vacuum = AutoJobStatus::new(retention::VACUUM_JOB);
+        vacuum.pending = Some(1024 * 1024 * 1024);
+        vacuum.overdue(now, Some(&old));
+        assert!(vacuum.overdue_since.is_none());
         for id in [
             "characters",
             "similarity",
@@ -1500,7 +1583,7 @@ mod tests {
             )
             .unwrap();
         let rows = snapshot(Some(&library));
-        assert_eq!(rows.len(), 13);
+        assert_eq!(rows.len(), IDS.len());
         assert_eq!(rows[0].enabled, Some(false));
         assert_eq!(rows[0].interval_seconds, Some(21600));
         assert_eq!(rows[6].pending, Some(0));
@@ -1638,4 +1721,18 @@ mod tests {
         assert!(library.root().join("assets/recent.png").is_file());
         assert_eq!(library.list_trash(None, 20).unwrap().total_count, 1);
     }
+    #[test]
+    fn auto_jobs_vacuum_reservation_excludes_other_jobs_in_both_directions() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let backup = Run::reserve(&library, "backup", true).unwrap();
+        assert!(Run::reserve(&library, retention::VACUUM_JOB, true).is_err());
+        drop(backup);
+        let vacuum = Run::reserve(&library, retention::VACUUM_JOB, true).unwrap();
+        assert!(Run::begin(&library, retention::JOB).is_err());
+        assert!(Run::reserve(&library, "backup", true).is_err());
+        drop(vacuum);
+        assert!(Run::begin(&library, retention::JOB).is_ok());
+    }
+
 }

@@ -874,3 +874,117 @@ fn workload_light_claim_skips_reconsideration_and_manual_enrollment() {
     f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET cause='ingestion' WHERE asset_id='asset-5'", []).unwrap();
     assert_eq!(f.library.claim_character_autotag_with_profile(true).unwrap().unwrap().asset_id, "asset-5");
 }
+
+#[test]
+fn publishing_prunes_only_unprotected_generations_atomically() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    let mut job = queue(&f, "asset-5");
+    let initial = publish(&f, &job, &context(&f, &job), ReviewState::Unresolved);
+    f.library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
+    {
+        let c = f.library.connection().unwrap();
+        // The completed generation is retained as the explicit refresh base.
+        assert_eq!(c.query_row("SELECT base_evidence_id FROM character_reference_refresh_items WHERE asset_id='asset-5'", [], |r| r.get::<_, String>(0)).unwrap(), initial);
+        for (id, generation, source, hash) in [
+            (
+                "unused",
+                2,
+                job.source_generation,
+                job.content_hash.as_str(),
+            ),
+            ("old-content", 3, job.source_generation, "previous-bytes"),
+            (
+                "open-review",
+                4,
+                job.source_generation + 1,
+                job.content_hash.as_str(),
+            ),
+        ] {
+            c.execute("INSERT INTO character_autotag_evidence SELECT ?1,asset_id,?2,?3,?4,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at FROM character_autotag_evidence WHERE id=?5",
+                params![id,generation,source,hash,initial]).unwrap();
+            c.execute("INSERT INTO character_autotag_predictions SELECT ?1,target_id,series_id,target_fingerprint,result_json FROM character_autotag_predictions WHERE evidence_id=?2", params![id,initial]).unwrap();
+        }
+        job.generation = 5;
+        job.source_generation += 1;
+        c.execute("UPDATE character_autotag_jobs SET generation=?1,source_generation=?2,state='processing',claim_id=?3 WHERE asset_id=?4",
+            params![job.generation,job.source_generation,job.claim_id,job.asset_id]).unwrap();
+    }
+    let ctx = context(&f, &job);
+    let latest = publish(&f, &job, &ctx, ReviewState::Unresolved);
+    let mut c = f.library.connection().unwrap();
+    let ids = c.prepare("SELECT id FROM character_autotag_evidence WHERE asset_id='asset-5' ORDER BY generation").unwrap()
+        .query_map([], |r| r.get::<_, String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    assert_eq!(
+        ids,
+        [initial, "old-content".into(), "open-review".into(), latest]
+    );
+    assert!(!c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_autotag_predictions WHERE evidence_id='unused')",
+            [],
+            |r| r.get::<_, bool>(0)
+        )
+        .unwrap());
+    assert!(evidence_row(&c, "open-review", &target.id)
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        crate::library::db::SCHEMA_VERSION
+    );
+
+    // A rollback must restore both the old evidence and its children.
+    c.execute("INSERT INTO character_autotag_evidence SELECT 'rollback',asset_id,2,1,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at FROM character_autotag_evidence WHERE id='open-review'", []).unwrap();
+    c.execute("INSERT INTO character_autotag_predictions SELECT 'rollback',target_id,series_id,target_fingerprint,result_json FROM character_autotag_predictions WHERE evidence_id='open-review'", []).unwrap();
+    {
+        let tx = c.transaction().unwrap();
+        retention::prune(&tx, "asset-5", true).unwrap();
+        assert_eq!(
+            tx.query_row(
+                "SELECT COUNT(*) FROM character_autotag_evidence WHERE id='rollback'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+    assert_eq!(
+        c.query_row(
+            "SELECT COUNT(*) FROM character_autotag_predictions WHERE evidence_id='rollback'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn retention_pass_invalidates_an_open_review_without_recording_a_decision() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    let job = queue(&f, "asset-5");
+    let old = publish(&f, &job, &context(&f, &job), ReviewState::Unresolved);
+    {
+        let mut c = f.library.connection().unwrap();
+        c.execute("INSERT INTO character_autotag_evidence SELECT 'autotag:new',asset_id,generation+1,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at FROM character_autotag_evidence WHERE id=?1", [&old]).unwrap();
+        c.execute("INSERT INTO character_autotag_predictions SELECT 'autotag:new',target_id,series_id,target_fingerprint,result_json FROM character_autotag_predictions WHERE evidence_id=?1", [&old]).unwrap();
+        c.execute("UPDATE character_autotag_jobs SET generation=generation+1 WHERE asset_id='asset-5'", []).unwrap();
+        assert!(evidence_row(&c, &old, &target.id).unwrap().is_some());
+        let total = retention::count_assets(&c).unwrap();
+        retention::initialize(&mut c, total).unwrap();
+        retention::step(&mut c).unwrap();
+        assert!(evidence_row(&c, &old, &target.id).unwrap().is_none());
+    }
+    assert!(matches!(f.library.record_character_decisions(DecisionRequest {
+        target_id: target.id.clone(), expected_fingerprint: target.fingerprint,
+        asset_ids: vec!["asset-5".into()], decision: DecisionKind::Accepted,
+        baseline_fingerprint: Some("a".repeat(64)), scan_id: Some(old),
+    }), Err(Error::Stale)));
+    assert!(f.library.list_character_decisions(&target.id, None, 10).unwrap().is_empty());
+}
