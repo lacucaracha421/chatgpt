@@ -223,6 +223,34 @@ Release build of `cf646816` on the real library, with `LAKOMICS_PERF=1`, `LAKOMI
 
   This meets the 300 MB gate for I7. How much of it comes from the speculative next/previous decodes, rather than from showing each original, is unmeasured. An A/B run with prefetch disabled would answer it.
 
+### Follow-up: viewer memory and thumbnail opens (2026-11-10 23:00)
+
+**Viewer (I7): the A/B shows that speculative decodes are not the cost.**
+
+The same release build ran with a runtime toggle, from a fresh process each time, over the same 20 images (2–12 MP each):
+
+| Speculative next/previous decode | WebView2 GPU process peak | After closing |
+| --- | --- | --- |
+| Off | 620 MB | 508 MB |
+| On | 612 MB | 512 MB |
+
+The growth is Chromium's GPU-side image cache for the originals actually shown.
+- Bounding the prefetch would not help, so I7 is dropped.
+- The only lever left is to show a display-size rendition at fit and the original on zoom. With 24 GB of RAM this is not worth the quality and CPU trade-off.
+- The earlier 819 MB peak was taken with the perf log and media timing on and the N7 pass running.
+
+**Thumbnail `file_open_ms`: Windows Defender on-access scanning.** First-open timings on 300 real thumbnails, read-only:
+
+| Location | First open p50 / p95 | Second open |
+| --- | --- | --- |
+| `C:` NTFS (library location) | 3.76 / 5.25 ms | 0.04 ms |
+| `V:` Dev Drive (asynchronous scan) | 0.046 / 0.08 ms | 0.04 ms |
+
+`realpath` (`canonicalize`) costs about 0.15 ms either way.
+- Defender caches a clean result per file, so the cost repeats after cache resets, such as signature updates and reboots.
+- Real-time protection is on; the exclusion list needs admin rights to read.
+- No code change. The user can add Defender exclusions for the app-generated folders only (`thumbnails`, `video-media`, `collection-thumbnails`, `cache`; about 0.6 GB) to remove about 3.7 ms per cold thumbnail. Originals (`assets`) stay scanned.
+
 ## Fix plan
 
 Rules for every stage:
