@@ -162,6 +162,19 @@ function kickOutboxDelivery(command: string): void {
 const kickAlbumOutbox = () => kickOutboxDelivery("flush_album_outbox");
 const kickClassificationOutbox = () => kickOutboxDelivery("flush_classification_outbox");
 
+/** Preserve UI arrival order when blocking native commands run concurrently. */
+function mutationQueue() {
+  let pending: Promise<unknown> = Promise.resolve();
+  return <T>(run: () => Promise<T>): Promise<T> => {
+    const next = pending.then(run);
+    pending = next.catch(() => {});
+    return next;
+  };
+}
+const queueAlbumMutation = mutationQueue();
+const queueClassificationMutation = mutationQueue();
+const queueCollectionMembership = mutationQueue();
+
 /**
  * Run a local Album mutation and kick delivery of its durable intent.
  *
@@ -173,7 +186,7 @@ const kickClassificationOutbox = () => kickOutboxDelivery("flush_classification_
  * old structure.
  */
 async function albumMutation<T>(run: () => Promise<T>): Promise<T> {
-  const result = await run();
+  const result = await queueAlbumMutation(run);
   kickAlbumOutbox();
   return result;
 }
@@ -189,7 +202,7 @@ async function albumMutation<T>(run: () => Promise<T>): Promise<T> {
  * mutation cannot be added later that queues work nothing attempts to deliver.
  */
 async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
-  const result = await run();
+  const result = await queueClassificationMutation(run);
   kickClassificationOutbox();
   return result;
 }
@@ -668,7 +681,7 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getAssetCollections: (assetId) =>
     invoke<string[]>("get_asset_collections", { assetId }),
   patchAssetCollections: (patch: AssetCollectionPatch) =>
-    invoke<void>("patch_asset_collections", { patch }),
+    queueCollectionMembership(() => invoke<void>("patch_asset_collections", { patch })),
   getEncryptedVaultStatus: () => invoke<EncryptedVaultStatus>("encrypted_vault_status"),
   createEncryptedVault: (root, password, remember) =>
     invoke<CreatedEncryptedVault>("create_encrypted_vault", { root, password, remember }),

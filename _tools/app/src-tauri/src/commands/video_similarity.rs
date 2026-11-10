@@ -33,21 +33,24 @@ pub async fn start_video_similarity_scan(
         .map_err(Into::into)
 }
 #[tauri::command]
-pub fn get_video_similarity_scan(
+pub async fn get_video_similarity_scan(
     scan_id: String,
     state: State<'_, AppState>,
 ) -> Result<VideoScanProgress, CommandError> {
-    current_required(state)?
-        .get_video_similarity_scan(&scan_id)
-        .map_err(Into::into)
+    let library = current_required(state)?;
+    super::off_ui_thread(move || {
+        library
+            .get_video_similarity_scan(&scan_id)
+            .map_err(Into::into)
+    })
+    .await
 }
 #[tauri::command]
-pub fn latest_video_similarity_scan(
+pub async fn latest_video_similarity_scan(
     state: State<'_, AppState>,
 ) -> Result<Option<VideoScanProgress>, CommandError> {
-    current_required(state)?
-        .latest_video_similarity_scan()
-        .map_err(Into::into)
+    let library = current_required(state)?;
+    super::off_ui_thread(move || library.latest_video_similarity_scan().map_err(Into::into)).await
 }
 #[tauri::command]
 pub fn cancel_video_similarity_scan(

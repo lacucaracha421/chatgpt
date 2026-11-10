@@ -41,15 +41,22 @@ pub(crate) fn collection_source_root(
     connection: &rusqlite::Connection,
     library_root: &Path,
 ) -> Result<Option<String>, LibraryError> {
-    let value = connection
+    stored_collection_source_root(connection)?
+        .map(|path| resolve_source_root(library_root, &path))
+        .transpose()
+}
+
+fn stored_collection_source_root(
+    connection: &rusqlite::Connection,
+) -> Result<Option<String>, LibraryError> {
+    Ok(connection
         .query_row(
             "SELECT collection_source_root FROM library_settings WHERE singleton = 1",
             [],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?
-        .flatten();
-    value.map(|path| resolve_source_root(library_root, &path)).transpose()
+        .flatten())
 }
 
 pub(crate) fn set_collection_source_root(
@@ -355,7 +362,7 @@ impl Library {
     ) -> Result<Vec<CollectionCover>, LibraryError> {
         let connection = self.connection()?;
         let root =
-            collection_source_root(&connection, self.root())?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
+            stored_collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -365,6 +372,8 @@ impl Library {
             .optional()?
             .ok_or(LibraryError::CollectionNotFound)?;
         let source_path = source_path.ok_or(LibraryError::CollectionSourcePathNotSet)?;
+        drop(connection);
+        let root = resolve_source_root(self.root(), &root)?;
         let covers_dir = resolve_collection_dir(&root, &source_path).join(COVERS_DIR);
         if !covers_dir.is_dir() {
             return Ok(Vec::new());

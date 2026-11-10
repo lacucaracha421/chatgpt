@@ -741,33 +741,48 @@ pub async fn rename_classification(
 }
 
 #[tauri::command]
-pub fn update_classification_appearance(
+pub async fn update_classification_appearance(
     id: String,
     icon_key: Option<String>,
     color_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .update_classification_appearance(&id, icon_key.as_deref(), color_key.as_deref())
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .update_classification_appearance(&id, icon_key.as_deref(), color_key.as_deref())
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn move_classification(
+pub async fn move_classification(
     id: String,
     parent_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .move_classification(&id, parent_id.as_deref())
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .move_classification(&id, parent_id.as_deref())
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_classification(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?
-        .delete_classification(&id)
-        .map_err(CommandError::from)
+pub async fn delete_classification(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .delete_classification(&id)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1136,61 +1151,65 @@ pub async fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, 
 }
 
 #[tauri::command]
-pub fn ensure_likes_album(state: State<'_, AppState>) -> Result<AlbumEntry, CommandError> {
-    current_required(state)?
-        .ensure_likes_album()
-        .map_err(CommandError::from)
+pub async fn ensure_likes_album(state: State<'_, AppState>) -> Result<AlbumEntry, CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.ensure_likes_album().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn create_album(
+pub async fn create_album(
     request: CreateAlbum,
     state: State<'_, AppState>,
 ) -> Result<AlbumEntry, CommandError> {
-    current_required(state)?
-        .create_album(request)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.create_album(request).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn rename_album(
+pub async fn rename_album(
     id: String,
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .rename_album(&id, &name)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.rename_album(&id, &name).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn move_album(
+pub async fn move_album(
     id: String,
     parent_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .move_album(&id, parent_id.as_deref())
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .move_album(&id, parent_id.as_deref())
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_album_appearance(
+pub async fn update_album_appearance(
     id: String,
     icon_key: Option<String>,
     color_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .update_album_appearance(&id, icon_key.as_deref(), color_key.as_deref())
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .update_album_appearance(&id, icon_key.as_deref(), color_key.as_deref())
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_album(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?
-        .delete_album(&id)
-        .map_err(CommandError::from)
+pub async fn delete_album(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.delete_album(&id).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1573,13 +1592,17 @@ pub fn get_book_connection(collection_id: String, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
-pub fn get_release_watch_status(
+pub async fn get_release_watch_status(
     collection_id: String,
     state: State<'_, AppState>,
 ) -> Result<ReleaseWatchStatus, CommandError> {
-    current_required(state)?
-        .get_release_watch_status(&collection_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .get_release_watch_status(&collection_id)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1847,13 +1870,17 @@ pub async fn get_asset_collections(
 }
 
 #[tauri::command]
-pub fn patch_asset_collections(
+pub async fn patch_asset_collections(
     patch: AssetCollectionPatch,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .patch_asset_collections(patch)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .patch_asset_collections(patch)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1898,13 +1925,17 @@ pub fn set_kakao_partial_dismissed(collection_id: String, dismissed: bool, state
 }
 
 #[tauri::command]
-pub fn set_asset_classification(
+pub async fn set_asset_classification(
     request: SetAssetClassification,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_asset_classification(request)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .set_asset_classification(request)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2107,10 +2138,12 @@ pub async fn refresh_local_manga_thumbnails(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command(async)]
-pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
+#[tauri::command]
+pub async fn list_manga_series(
+    state: State<'_, AppState>,
+) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
-    library.list_manga_series().map_err(CommandError::from)
+    off_ui_thread(move || library.list_manga_series().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -3841,14 +3874,17 @@ pub async fn set_collection_source_root(
 }
 
 #[tauri::command]
-pub fn list_collection_covers(
+pub async fn list_collection_covers(
     collection_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<CollectionCover>, CommandError> {
     let library = current_required(state)?;
-    library
-        .list_collection_covers(&collection_id)
-        .map_err(CommandError::from)
+    off_ui_thread(move || {
+        library
+            .list_collection_covers(&collection_id)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -4470,13 +4506,17 @@ pub async fn sync_asset_authority(state: State<'_, AppState>) -> Result<crate::l
 }
 
 #[tauri::command]
-pub fn get_collection_work_record(
+pub async fn get_collection_work_record(
     collection_id: String,
     state: State<'_, AppState>,
 ) -> Result<crate::library::collection_pc::WorkRecord, CommandError> {
-    current_required(state)?
-        .collection_work_record(&collection_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .collection_work_record(&collection_id)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 /// The shelf's per-case data in one read, off the main thread: a list of a few hundred cases
 /// asking one by one blocked the window's frames.
@@ -4502,13 +4542,17 @@ pub fn save_collection_work_record(
         .map_err(CommandError::from)
 }
 #[tauri::command]
-pub fn list_collection_cover_focus(
+pub async fn list_collection_cover_focus(
     collection_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::library::collection_pc::CoverFocus>, CommandError> {
-    current_required(state)?
-        .collection_cover_focus(&collection_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .collection_cover_focus(&collection_id)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 #[tauri::command]
 pub async fn start_collection_cover_focus(

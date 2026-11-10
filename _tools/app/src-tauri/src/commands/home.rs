@@ -265,10 +265,11 @@ pub fn set_av_favorite(
 }
 
 #[tauri::command]
-pub fn list_av_favorites(state: State<'_, AppState>) -> Result<Vec<AvFavorite>, CommandError> {
-    current_required(state)?
-        .list_av_favorites()
-        .map_err(home_data_error)
+pub async fn list_av_favorites(
+    state: State<'_, AppState>,
+) -> Result<Vec<AvFavorite>, CommandError> {
+    let library = current_required(state)?;
+    super::off_ui_thread(move || library.list_av_favorites().map_err(home_data_error)).await
 }
 
 #[cfg(test)]

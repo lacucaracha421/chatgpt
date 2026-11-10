@@ -607,3 +607,35 @@ it("passes duration bounds through the native asset query", async () => {
   await libraryGateway.listAssets(query);
   expect(invoke).toHaveBeenLastCalledWith("list_assets", { query });
 });
+
+describe("blocking native mutation ordering", () => {
+  beforeEach(() => invoke.mockReset());
+  afterEach(() => invoke.mockReset());
+
+  it.each(["classification", "album", "collection"] as const)("serializes rapid %s edits and recovers after failure", async (feature) => {
+    let rejectFirst!: (reason: Error) => void;
+    const firstWrite = new Promise<void>((_, reject) => { rejectFirst = reject; });
+    const commands = feature === "classification" ? ["set_asset_classification", "set_asset_classification"]
+      : feature === "album" ? ["rename_album", "delete_album"]
+      : ["patch_asset_collections", "patch_asset_collections"];
+    let calls = 0;
+    invoke.mockImplementation((command: string) => {
+      if (command === commands[0] && calls++ === 0) return firstWrite;
+      return Promise.resolve();
+    });
+    const mutate = (second: boolean) => feature === "classification"
+      ? libraryGateway.setAssetClassification({ assetIds: ["asset"], classificationId: second ? "new" : "old" })
+      : feature === "album"
+        ? second ? libraryGateway.deleteAlbum("album") : libraryGateway.renameAlbum("album", "name")
+        : libraryGateway.patchAssetCollections({ assetIds: ["asset"], addCollectionIds: second ? [] : ["collection"], removeCollectionIds: second ? ["collection"] : [] });
+    const first = mutate(false);
+    const failed = expect(first).rejects.toThrow("first edit failed");
+    const second = mutate(true);
+    await Promise.resolve();
+    expect(invoke.mock.calls.filter(([command]) => commands.includes(command))).toHaveLength(1);
+    rejectFirst(new Error("first edit failed"));
+    await failed;
+    await second;
+    expect(invoke.mock.calls.filter(([command]) => commands.includes(command)).map(([command]) => command)).toEqual(commands);
+  });
+});
