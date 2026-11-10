@@ -216,7 +216,16 @@ struct Pair {
 // character tag in EACH vocabulary and completion by BOTH models, then take each
 // model's maximum over ALL mapped tags. Unprocessed assets are never negative evidence.
 const PAIRS_SQL: &str = r#"
-WITH known AS (
+WITH seeds AS (
+ -- Only an automatic acceptance can be vetoed; only a high PixAI score can
+ -- become a recommendation. Avoid the target-by-entire-library cross product.
+ SELECT target_id,source_asset_id asset_id FROM character_decisions
+ WHERE decision='accepted' AND origin='automatic'
+ UNION
+ SELECT m.target_id,s.asset_id FROM asset_tagger_character_scores s
+ JOIN character_target_tagger_tags m ON m.tag=s.tag
+ WHERE s.source='pixai' AND s.score>=0.85
+), known AS (
  SELECT t.id,t.display_name,t.series_classification_id,c.name
  FROM character_targets t JOIN classification_entries c ON c.id=t.series_classification_id
  WHERE t.role='character' AND EXISTS(SELECT 1 FROM character_target_tagger_tags m JOIN tagger_character_vocabulary v ON v.tag=m.tag WHERE m.target_id=t.id AND v.source='pixai')
@@ -226,9 +235,10 @@ WITH known AS (
  COALESCE((SELECT MAX(s.score) FROM character_target_tagger_tags m JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.asset_id=a.id AND s.source='pixai' WHERE m.target_id=t.id),0) pixai,
  COALESCE((SELECT MAX(s.score) FROM character_target_tagger_tags m JOIN asset_tagger_character_scores s ON s.tag=m.tag AND s.asset_id=a.id AND s.source='canary' WHERE m.target_id=t.id),0) canary,
  (SELECT MAX(d.sequence) FROM character_decisions d WHERE d.target_id=t.id AND d.source_asset_id=a.id) seq
- FROM known t CROSS JOIN asset_tagger_coverage p
+ FROM seeds seed CROSS JOIN known t ON t.id=seed.target_id
+ CROSS JOIN assets a ON a.id=seed.asset_id
+ JOIN asset_tagger_coverage p ON p.asset_id=seed.asset_id AND p.source='pixai'
  JOIN asset_tagger_coverage w ON w.asset_id=p.asset_id AND w.source='canary'
- JOIN assets a ON a.id=p.asset_id
  WHERE p.source='pixai' AND a.status='normal' AND a.media_kind='image'
  AND NOT EXISTS(SELECT 1 FROM character_tagger_candidates q WHERE q.target_id=t.id AND q.asset_id=a.id AND q.asset_hash=a.content_hash)
  AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=t.series_classification_id AND x.asset_id=a.id)

@@ -130,7 +130,16 @@ export function VideoSimilarityPanel({ assetIds, onClose, api = videoSimilarityA
   function decide(decision: VideoDecision) {
     if (!review) return;
     const epoch = generation.current;
-    void act(async () => { await api.decide(review.id, decision); await load(epoch); });
+    void act(async () => {
+      try { await api.decide(review.id, decision); }
+      catch (error) {
+        const message = commandErrorMessage(error, "영상 검토를 저장하지 못했습니다. 다시 시도해 주세요.");
+        throw new Error(message === "영상 분석을 완료하지 못했습니다."
+          ? "원본 영상 확인이 중단되거나 시간이 초과되었습니다. 검토는 유지됩니다. 다시 시도해 주세요."
+          : message);
+      }
+      await load(epoch);
+    });
   }
 
   return <section className="similarity-review video-similarity" aria-label="유사 영상 검토" onKeyDown={(event) => {

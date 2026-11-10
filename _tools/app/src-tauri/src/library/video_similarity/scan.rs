@@ -277,6 +277,14 @@ impl Library {
         cancel: &AtomicBool,
         deadline: Instant,
     ) -> std::result::Result<VerifiedSource, &'static str> {
+        let opened = self.open_video_similarity_source(source)?;
+        Self::hash_video_similarity_source(opened, source, cancel, deadline)
+    }
+
+    fn open_video_similarity_source(
+        &self,
+        source: &Source,
+    ) -> std::result::Result<VerifiedSource, &'static str> {
         if source.bytes > MAX_BYTES {
             return Err("out_of_scope");
         }
@@ -295,16 +303,25 @@ impl Library {
             // Other readers (FFmpeg) are allowed; writes and path replacement are not.
             options.share_mode(windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ);
         }
-        let mut file = options.open(&path).map_err(|_| "source_changed")?;
+        let file = options.open(&path).map_err(|_| "source_changed")?;
         let metadata = file.metadata().map_err(|_| "source_changed")?;
         if !metadata.is_file() || metadata.len() != source.bytes {
             return Err("source_changed");
         }
+        Ok(VerifiedSource { _file: file, path })
+    }
+
+    fn hash_video_similarity_source(
+        mut opened: VerifiedSource,
+        source: &Source,
+        cancel: &AtomicBool,
+        deadline: Instant,
+    ) -> std::result::Result<VerifiedSource, &'static str> {
         let mut hash = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
         loop {
             check_budget(cancel, deadline)?;
-            let n = file.read(&mut buffer).map_err(|_| "source_changed")?;
+            let n = opened._file.read(&mut buffer).map_err(|_| "source_changed")?;
             if n == 0 {
                 break;
             }
@@ -319,7 +336,7 @@ impl Library {
         {
             return Err("source_changed");
         }
-        Ok(VerifiedSource { _file: file, path })
+        Ok(opened)
     }
 
     fn run_video_similarity_scan(
@@ -441,7 +458,7 @@ impl Library {
         Ok(())
     }
 
-    fn fingerprint_video_source(
+    pub(super) fn fingerprint_video_source(
         &self,
         source: &Source,
         profile: &str,
@@ -449,13 +466,15 @@ impl Library {
         scan_deadline: Instant,
     ) -> std::result::Result<VideoFingerprint, &'static str> {
         let deadline = scan_deadline.min(Instant::now() + Duration::from_secs(60));
-        let verified = self.verify_video_similarity_source(source, cancel, deadline)?;
+        check_budget(cancel, deadline)?;
+        let opened = self.open_video_similarity_source(source)?;
         if let Some(cached) = self
             .load_video_fingerprint(source, profile)
             .map_err(|_| "database_failed")?
         {
             return Ok(cached);
         }
+        let verified = Self::hash_video_similarity_source(opened, source, cancel, deadline)?;
         let has_capacity: bool = self.connection().map_err(|_|"database_failed")?.query_row(
             "SELECT (SELECT COUNT(*) FROM video_similarity_fingerprints)<10000 OR EXISTS(SELECT 1 FROM video_similarity_fingerprints WHERE asset_id=?1)", [&source.id], |r|r.get(0)).map_err(|_|"database_failed")?;
         if !has_capacity {

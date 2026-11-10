@@ -783,3 +783,53 @@ fn auto_tag_content_rating_is_shared_by_list_refresh_and_get() {
         }
     }
 }
+
+#[test]
+fn unchanged_import_writes_no_machine_rows_and_one_score_change_writes_one_row() {
+    let (temp, library) = fixture(&["a"]);
+    let path = import_file(
+        temp.path(),
+        "incremental.sqlite",
+        "model",
+        VOCABULARY,
+        &[("a", "1girl", 0.9)],
+    );
+    library.import_auto_tags(&path).unwrap();
+    let prepared = super::auto_tags::prepare_import(&path).unwrap();
+    let c = library.connection().unwrap();
+    let before = c.total_changes();
+    super::auto_tags::import_file(&c, &prepared, "repeat").unwrap();
+    assert_eq!(
+        c.total_changes() - before,
+        1,
+        "only the import summary changes"
+    );
+    drop(c);
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE asset_tags SET score=0.8", [])
+        .unwrap();
+    // A tagger publishing another file after preparation cannot change this attempt.
+    let c = library.connection().unwrap();
+    let before = c.total_changes();
+    super::auto_tags::import_file(&c, &prepared, "snapshot").unwrap();
+    assert_eq!(c.total_changes() - before, 1);
+    drop(c);
+    let changed = super::auto_tags::prepare_import(&path).unwrap();
+    let c = library.connection().unwrap();
+    let before = c.total_changes();
+    super::auto_tags::import_file(&c, &changed, "changed").unwrap();
+    assert_eq!(
+        c.total_changes() - before,
+        2,
+        "one score plus the import summary"
+    );
+    let score: f64 = c
+        .query_row(
+            "SELECT score FROM asset_auto_tags WHERE asset_id='a' AND tag='1girl'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(score, 0.8);
+}

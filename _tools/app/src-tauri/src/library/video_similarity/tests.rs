@@ -597,3 +597,125 @@ fn native_ffmpeg_reencode_and_negative_timeline() {
         1
     );
 }
+
+#[test]
+fn cached_scan_checks_paths_and_size_but_acceptance_still_checks_bytes() {
+    let f = fixture();
+    let (id, left, _) = add_review(&f.library);
+    let fingerprint = sequence();
+    {
+        let c = f.library.connection().unwrap();
+        c.execute("INSERT INTO video_similarity_fingerprints(asset_id,source_hash,profile,duration_ms,width,height,created_at) VALUES(?1,?2,?3,12000,640,480,'fixture')", params![left.id,left.hash,PROFILE]).unwrap();
+        for (index, frame) in fingerprint.frames.iter().enumerate() {
+            c.execute(
+                "INSERT INTO video_similarity_frames VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    left.id,
+                    index as i64,
+                    frame.at_ms as i64,
+                    frame.hash.to_stored_bytes().as_slice(),
+                    frame.hash.quality
+                ],
+            )
+            .unwrap();
+        }
+    }
+    // Same-length edits cannot make candidate generation read/hash the whole file.
+    let path = f.library.root().join(&left.path);
+    let mut changed = std::fs::read(&path).unwrap();
+    changed[0] ^= 1;
+    std::fs::write(&path, &changed).unwrap();
+    let cancel = AtomicBool::new(false);
+    assert!(f
+        .library
+        .fingerprint_video_source(
+            &left,
+            PROFILE,
+            &cancel,
+            Instant::now() + Duration::from_secs(1)
+        )
+        .is_ok());
+    assert!(matches!(
+        f.library
+            .decide_video_similarity_review(VideoDecisionRequest {
+                review_id: id,
+                decision: VideoReviewDecision::KeepRight
+            }),
+        Err(Error::Stale)
+    ));
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM video_similarity_fingerprints WHERE asset_id=?1",
+            [&left.id],
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            f.library.fingerprint_video_source(
+                &left,
+                PROFILE,
+                &cancel,
+                Instant::now() + Duration::from_secs(1)
+            ),
+            Err("source_changed")
+        ),
+        "a cache miss must still hash the original"
+    );
+    std::fs::write(&path, b"short").unwrap();
+    assert!(matches!(
+        f.library.fingerprint_video_source(
+            &left,
+            PROFILE,
+            &cancel,
+            Instant::now() + Duration::from_secs(1)
+        ),
+        Err("source_changed")
+    ));
+    let mut outside = left.clone();
+    outside.path = "library.sqlite".into();
+    assert!(matches!(
+        f.library.fingerprint_video_source(
+            &outside,
+            PROFILE,
+            &cancel,
+            Instant::now() + Duration::from_secs(1)
+        ),
+        Err("source_changed")
+    ));
+}
+
+#[test]
+fn verification_budget_failure_keeps_review_open_for_retry() {
+    let f = fixture();
+    let (id, left, _) = add_review(&f.library);
+    for cancelled in [false, true] {
+        let reason = f
+            .library
+            .verify_video_similarity_source(&left, &AtomicBool::new(cancelled), Instant::now())
+            .err()
+            .unwrap();
+        assert!(matches!(
+            f.library.video_review_verification_error(&id, reason),
+            Err(Error::Processing)
+        ));
+        let state: String = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT state FROM video_similarity_reviews WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "open");
+    }
+    f.library
+        .decide_video_similarity_review(VideoDecisionRequest {
+            review_id: id,
+            decision: VideoReviewDecision::KeepBoth,
+        })
+        .unwrap();
+}

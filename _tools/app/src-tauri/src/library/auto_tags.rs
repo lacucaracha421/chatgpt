@@ -384,26 +384,27 @@ fn read_meta(source: &Connection, key: &str) -> Result<Option<String>, LibraryEr
         .map_err(|_| import_error("자동 태그 파일 형식이 아닙니다"))
 }
 
-/// Replace the active tagger output with the file's content in one transaction.
-/// User edits are kept; rows for assets that are not in this library are skipped.
-pub(crate) fn import_file(
-    connection: &Connection,
-    path: &Path,
-    now_utc: &str,
-) -> Result<AutoTagImportSummary, LibraryError> {
+pub(crate) fn prepare_import(path: &Path) -> Result<ImportSource, LibraryError> {
     let source = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|_| import_error("자동 태그 파일을 열 수 없습니다"))?;
-    let source = source.unchecked_transaction()?;
-    if read_meta(&source, "format")?.as_deref() != Some(IMPORT_FORMAT) {
+    let mut staged = Connection::open_in_memory()?;
+    rusqlite::backup::Backup::new(&source, &mut staged)?.run_to_completion(
+        256,
+        std::time::Duration::ZERO,
+        None,
+    )?;
+    let source = staged;
+    let transaction = source.unchecked_transaction()?;
+    if read_meta(&transaction, "format")?.as_deref() != Some(IMPORT_FORMAT) {
         return Err(import_error("자동 태그 파일 형식이 아닙니다"));
     }
-    if read_meta(&source, "version")?.as_deref() != Some(IMPORT_VERSION) {
+    if read_meta(&transaction, "version")?.as_deref() != Some(IMPORT_VERSION) {
         return Err(import_error("지원하지 않는 자동 태그 파일 버전입니다"));
     }
-    let model = read_meta(&source, "model")?
+    let model = read_meta(&transaction, "model")?
         .map(|model| model.trim().to_owned())
         .filter(|model| !model.is_empty() && model.chars().count() <= MAX_MODEL_CHARS)
         .ok_or_else(|| import_error("자동 태그 파일에 모델 이름이 없습니다"))?;
@@ -412,18 +413,49 @@ pub(crate) fn import_file(
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
 
+    transaction.commit()?;
+    Ok(ImportSource {
+        source,
+        model,
+        source_name,
+    })
+}
+
+/// An immutable copy of the external export, prepared without the global database lock.
+pub(crate) struct ImportSource {
+    source: Connection,
+    model: String,
+    source_name: String,
+}
+
+/// Publish only changed machine rows in one transaction; user edits are never touched.
+pub(crate) fn import_file(
+    connection: &Connection,
+    prepared: &ImportSource,
+    now_utc: &str,
+) -> Result<AutoTagImportSummary, LibraryError> {
+    let source = &prepared.source;
     let library_assets: HashSet<String> = {
         let mut statement = connection.prepare("SELECT id FROM assets")?;
         let ids = statement.query_map([], |row| row.get::<_, String>(0))?;
         ids.collect::<Result<_, _>>()?
     };
 
+    let mut existing_tags: HashMap<(String, String), f64> = connection
+        .prepare("SELECT asset_id,tag,score FROM asset_auto_tags")?
+        .query_map([], |row| Ok(((row.get(0)?, row.get(1)?), row.get(2)?)))?
+        .collect::<Result<_, _>>()?;
     let transaction = connection.unchecked_transaction()?;
-    transaction.execute("DELETE FROM asset_auto_tags", [])?;
-    transaction.execute("DELETE FROM auto_tag_vocabulary", [])?;
+    delete_missing_machine_rows(
+        &transaction,
+        source,
+        "auto_tag_vocabulary",
+        "vocabulary",
+        &["tag"],
+    )?;
     {
         let mut insert = transaction.prepare(
-            "INSERT OR REPLACE INTO auto_tag_vocabulary (tag, category) VALUES (?1, ?2)",
+            "INSERT INTO auto_tag_vocabulary (tag, category) VALUES (?1, ?2) ON CONFLICT(tag) DO UPDATE SET category=excluded.category WHERE category<>excluded.category",
         )?;
         let mut rows = source
             .prepare("SELECT tag, category FROM vocabulary")
@@ -447,7 +479,7 @@ pub(crate) fn import_file(
     let mut tag_rows = 0_u64;
     {
         let mut insert = transaction.prepare(
-            "INSERT OR REPLACE INTO asset_auto_tags (asset_id, tag, score) VALUES (?1, ?2, ?3)",
+            "INSERT INTO asset_auto_tags (asset_id, tag, score) VALUES (?1, ?2, ?3) ON CONFLICT(asset_id,tag) DO UPDATE SET score=excluded.score WHERE score<>excluded.score",
         )?;
         let mut rows = source
             .prepare("SELECT asset_id, tag, score FROM asset_tags")
@@ -466,16 +498,25 @@ pub(crate) fn import_file(
             if !(0.0..=1.0).contains(&score) {
                 return Err(import_error("태그 점수가 0과 1 사이가 아닙니다"));
             }
-            insert.execute(params![asset_id, tag, score])?;
+            if existing_tags.remove(&(asset_id.clone(), tag.clone())) != Some(score) {
+                insert.execute(params![asset_id, tag, score])?;
+            }
             tagged.insert(asset_id);
             tag_rows += 1;
         }
     }
-    import_review_signals(&transaction, &source, &library_assets)?;
+    {
+        let mut delete =
+            transaction.prepare("DELETE FROM asset_auto_tags WHERE asset_id=?1 AND tag=?2")?;
+        for ((asset, tag), _) in existing_tags {
+            delete.execute(params![asset, tag])?;
+        }
+    }
+    import_review_signals(&transaction, source, &library_assets)?;
     let summary = AutoTagImportSummary {
-        model,
+        model: prepared.model.clone(),
         imported_at: now_utc.to_owned(),
-        source_name,
+        source_name: prepared.source_name.clone(),
         tagged_assets: tagged.len() as u64,
         tag_rows,
         skipped_assets: skipped.len() as u64,
@@ -499,6 +540,45 @@ pub(crate) fn import_file(
     Ok(summary)
 }
 
+/// Compare keys in memory so unchanged rows do not cause disk-index probes or writes.
+fn delete_missing_machine_rows(
+    destination: &Connection,
+    source: &Connection,
+    table: &str,
+    source_table: &str,
+    keys: &[&str],
+) -> Result<(), LibraryError> {
+    let columns = keys.join(",");
+    let read_key = |row: &rusqlite::Row<'_>| {
+        (0..keys.len())
+            .map(|i| row.get::<_, String>(i))
+            .collect::<rusqlite::Result<Vec<_>>>()
+    };
+    let desired = source
+        .prepare(&format!("SELECT {columns} FROM {source_table}"))?
+        .query_map([], read_key)?
+        .collect::<rusqlite::Result<HashSet<_>>>()?;
+    let missing = destination
+        .prepare(&format!("SELECT {columns} FROM {table}"))?
+        .query_map([], read_key)?
+        .filter_map(|key| match key {
+            Ok(key) if desired.contains(&key) => None,
+            other => Some(other),
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let predicate = keys
+        .iter()
+        .enumerate()
+        .map(|(i, key)| format!("{key}=?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let mut delete = destination.prepare(&format!("DELETE FROM {table} WHERE {predicate}"))?;
+    for key in missing {
+        delete.execute(rusqlite::params_from_iter(key))?;
+    }
+    Ok(())
+}
+
 /// Optional version-1 review extension. A legacy import clears raw signals,
 /// never character-tag links, user edits or already-applied review candidates.
 /// Any malformed extension rolls the entire machine-output replacement back.
@@ -507,13 +587,35 @@ fn import_review_signals(
     source: &Connection,
     library_assets: &HashSet<String>,
 ) -> Result<(), LibraryError> {
-    transaction.execute("DELETE FROM asset_tagger_character_scores", [])?;
-    transaction.execute("DELETE FROM asset_tagger_coverage", [])?;
-    transaction.execute("DELETE FROM tagger_character_vocabulary", [])?;
     match read_meta(source, "tagger_review_version")?.as_deref() {
-        None => return Ok(()),
+        None => {
+            transaction.execute_batch(
+                "DELETE FROM asset_tagger_character_scores;
+                DELETE FROM asset_tagger_coverage; DELETE FROM tagger_character_vocabulary;",
+            )?;
+            return Ok(());
+        }
         Some("1") => {}
         _ => return Err(import_error("지원하지 않는 태거 검토 파일 버전입니다")),
+    }
+    for (table, source_table, keys) in [
+        (
+            "asset_tagger_character_scores",
+            "character_scores",
+            &["asset_id", "source", "tag"][..],
+        ),
+        (
+            "asset_tagger_coverage",
+            "tagger_assets",
+            &["asset_id", "source"][..],
+        ),
+        (
+            "tagger_character_vocabulary",
+            "tagger_vocabulary",
+            &["source", "tag"][..],
+        ),
+    ] {
+        delete_missing_machine_rows(transaction, source, table, source_table, keys)?;
     }
     let valid_source = |name: &str| -> Result<(), LibraryError> {
         if matches!(name, "pixai" | "canary") {
@@ -523,10 +625,11 @@ fn import_review_signals(
         }
     };
     {
+        let mut seen = HashSet::new();
         let mut read = source.prepare("SELECT source,tag FROM tagger_vocabulary")?;
         let mut rows = read.query([])?;
         let mut insert =
-            transaction.prepare("INSERT INTO tagger_character_vocabulary VALUES(?1,?2)")?;
+            transaction.prepare("INSERT INTO tagger_character_vocabulary VALUES(?1,?2) ON CONFLICT(source,tag) DO NOTHING")?;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
             let tag: String = row.get(1)?;
@@ -536,27 +639,35 @@ fn import_review_signals(
                 "SELECT EXISTS(SELECT 1 FROM auto_tag_vocabulary WHERE tag=?1 AND category='character')",
                 [&tag], |r| r.get::<_, bool>(0),
             )? { return Err(import_error("PixAI 캐릭터 태그 목록이 일치하지 않습니다")); }
+            if !seen.insert((name.clone(), tag.clone())) {
+                return Err(rusqlite::Error::InvalidQuery.into());
+            }
             insert.execute(params![name, tag])?;
         }
     }
     {
+        let mut seen = HashSet::new();
         let mut read = source.prepare("SELECT asset_id,source FROM tagger_assets")?;
         let mut rows = read.query([])?;
-        let mut insert = transaction.prepare("INSERT INTO asset_tagger_coverage VALUES(?1,?2)")?;
+        let mut insert = transaction.prepare("INSERT INTO asset_tagger_coverage VALUES(?1,?2) ON CONFLICT(asset_id,source) DO NOTHING")?;
         while let Some(row) = rows.next()? {
             let asset: String = row.get(0)?;
             let name: String = row.get(1)?;
             valid_source(&name)?;
             if library_assets.contains(&asset) {
+                if !seen.insert((asset.clone(), name.clone())) {
+                    return Err(rusqlite::Error::InvalidQuery.into());
+                }
                 insert.execute(params![asset, name])?;
             }
         }
     }
     {
+        let mut seen = HashSet::new();
         let mut read = source.prepare("SELECT asset_id,source,tag,score FROM character_scores")?;
         let mut rows = read.query([])?;
         let mut insert =
-            transaction.prepare("INSERT INTO asset_tagger_character_scores VALUES(?1,?2,?3,?4)")?;
+            transaction.prepare("INSERT INTO asset_tagger_character_scores VALUES(?1,?2,?3,?4) ON CONFLICT(asset_id,source,tag) DO UPDATE SET score=excluded.score WHERE score<>excluded.score")?;
         while let Some(row) = rows.next()? {
             let asset: String = row.get(0)?;
             let name: String = row.get(1)?;
@@ -569,6 +680,9 @@ fn import_review_signals(
                 return Err(import_error("태거 점수 범위가 올바르지 않습니다"));
             }
             if library_assets.contains(&asset) {
+                if !seen.insert((asset.clone(), name.clone(), tag.clone())) {
+                    return Err(rusqlite::Error::InvalidQuery.into());
+                }
                 insert.execute(params![asset, name, tag, score])?;
             }
         }
@@ -616,7 +730,8 @@ impl super::Library {
             .ingestion_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let result = import_file(&*self.connection()?, path, &now_utc())?;
+        let prepared = prepare_import(path)?;
+        let result = import_file(&*self.connection()?, &prepared, &now_utc())?;
         self.publication_inputs.signal(&[11]);
         // Tagger scores, vocabulary and tag links are WITHOUT ROWID tables.
         self.character_changes.suggestion_inputs_changed();

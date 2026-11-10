@@ -170,3 +170,15 @@ fn inbox_profiles_keep_initial_delay_recovery_gate_and_error_backoff_without_cat
         assert!(!schedule.tick(Some(&f.library), false, failed + Duration::from_secs(3600)));
     }
 }
+
+#[test]
+fn unchanged_review_extension_writes_no_machine_evidence() {
+    let (f, _) = fixture();
+    let path = f.temp.path().join(FILES[0]);
+    let prepared = crate::library::auto_tags::prepare_import(&path).unwrap();
+    let c = f.library.connection().unwrap();
+    crate::library::auto_tags::import_file(&c, &prepared, "first").unwrap();
+    let before = c.total_changes();
+    crate::library::auto_tags::import_file(&c, &prepared, "repeat").unwrap();
+    assert_eq!(c.total_changes() - before, 1, "only the import summary changes");
+}

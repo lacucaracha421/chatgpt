@@ -1,5 +1,6 @@
 //! Machine-local nightly inbox. All callers share the existing ingestion gate;
-//! tag import and review additionally hold one database connection throughout.
+//! Source preparation is outside the database lock; import publication and review
+//! additionally hold one database connection throughout.
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -212,10 +213,12 @@ impl Library {
                     return Err("가져올 경로가 파일이 아닙니다.".into());
                 }
                 if name == FILES[0] {
+                    let prepared =
+                        super::auto_tags::prepare_import(&path).map_err(|e| e.to_string())?;
                     let mut connection = self.connection().map_err(|e| e.to_string())?;
                     let summary = super::auto_tags::import_file(
                         &connection,
-                        &path,
+                        &prepared,
                         &now.to_rfc3339(),
                     ).map_err(|e| e.to_string())?;
                     self.character_changes.suggestion_inputs_changed();

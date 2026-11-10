@@ -689,7 +689,16 @@ fn start_timers(app: tauri::AppHandle) {
             }
             let current = app.state::<crate::commands::AppState>().current_library();
             watcher.tick(current.as_ref(), Instant::now());
-            if inbox.tick(current.as_ref(), profile.restricted, Instant::now()) {
+            let inbox_idle = runtime()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .inactive_since
+                .is_some_and(|since| since.elapsed() >= Duration::from_secs(120));
+            if inbox.tick(
+                current.as_ref(),
+                profile.restricted || !inbox_idle,
+                Instant::now(),
+            ) {
                 if let Some(library) = current.clone() {
                     let handle = app.clone();
                     let (finished, completion) = std::sync::mpsc::channel();

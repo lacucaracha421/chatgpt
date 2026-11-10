@@ -121,6 +121,22 @@ impl Library {
         })
     }
 
+    pub(super) fn video_review_verification_error(
+        &self,
+        review_id: &str,
+        reason: &str,
+    ) -> Result<()> {
+        // Budget exhaustion says nothing about whether the saved evidence is stale.
+        if matches!(reason, "timeout" | "cancelled") {
+            return Err(Error::Processing);
+        }
+        self.connection()?.execute(
+            "UPDATE video_similarity_reviews SET state='stale' WHERE id=?1 AND state='open'",
+            [review_id],
+        )?;
+        Err(Error::Stale)
+    }
+
     pub fn decide_video_similarity_review(&self, request: VideoDecisionRequest) -> Result<()> {
         let (left_id,right_id,left_hash,right_hash,state,stored_decision) = self.connection()?.query_row(
             "SELECT left_asset_id,right_asset_id,left_hash,right_hash,state,decision FROM video_similarity_reviews WHERE id=?1",
@@ -144,21 +160,25 @@ impl Library {
             return Err(Error::Stale);
         }
         let cancel = AtomicBool::new(false);
-        let deadline = Instant::now() + Duration::from_secs(60);
         // Verify the bytes, not merely the saved assets.content_hash. Handles prevent a
         // Windows writer from replacing either file before the decision commits.
         let verified = (|| {
             Ok::<_, &'static str>((
-                self.verify_video_similarity_source(&left, &cancel, deadline)?,
-                self.verify_video_similarity_source(&right, &cancel, deadline)?,
+                self.verify_video_similarity_source(
+                    &left,
+                    &cancel,
+                    Instant::now() + Duration::from_secs(60),
+                )?,
+                self.verify_video_similarity_source(
+                    &right,
+                    &cancel,
+                    Instant::now() + Duration::from_secs(60),
+                )?,
             ))
         })();
         let _sources = match verified {
             Ok(sources) => sources,
-            Err(_) => {
-                self.connection()?.execute("UPDATE video_similarity_reviews SET state='stale' WHERE id=?1 AND state='open'",[&request.review_id])?;
-                return Err(Error::Stale);
-            }
+            Err(reason) => return self.video_review_verification_error(&request.review_id, reason),
         };
         let _guard = self
             .trash_lock
