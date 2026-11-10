@@ -115,8 +115,12 @@ final class ThumbnailCache {
   }
  }
  private void forgetUsage(String key){if(usage.remove(key)!=null)saveUsage(key,null);}
+ // Recency only orders eviction of a year-long cache; an hourly touch keeps that order
+ // without a metadata write on every hit (hits run under this cache's lock).
+ private static final long TOUCH_EVERY=60L*60*1000;
  private void used(File file,Kind kind){
-  long now=clock.getAsLong();file.setLastModified(now);
+  long now=clock.getAsLong();long modified=file.lastModified();
+  if(now-modified>=TOUCH_EVERY || now<modified)file.setLastModified(now);
   String key=file.getName();Usage previous=usage.get(key);
   long day=Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay();
   if(kind==null)kind=previous==null?Kind.VIEW:previous.kind;
@@ -281,6 +285,11 @@ final class ThumbnailCache {
     bytes+=size;count++;used(cached,kind);
    }
   }finally{synchronized(this){temporary.delete();reserved-=maximum;}}
+ }
+ /** A read-only hit check: no usage or recency write (the later read records the use). */
+ synchronized boolean has(String key,long expected)throws IOException{
+  check(expected);File file=entry(key);
+  return file.isFile() && clock.getAsLong()-file.lastModified()<=MAX_AGE;
  }
  synchronized File file(String key,long expected)throws IOException{
   return file(key,expected,null);

@@ -17,10 +17,20 @@ final class SecureSettings {
   if(!ks.containsAlias("lakomics.connection")){KeyGenerator g=KeyGenerator.getInstance("AES","AndroidKeyStore");g.init(new KeyGenParameterSpec.Builder("lakomics.connection",KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());g.generateKey();}
   return (SecretKey)ks.getKey("lakomics.connection",null);
  }
+ // Every media request reads the connection under CONNECTION_LOCK. A Keystore decrypt costs
+ // milliseconds of IPC, so remember the plaintext for the exact stored ciphertext. Any writer
+ // (any instance, write or clear) changes the stored string, which forces a fresh decrypt.
+ private static final Object DECRYPTED_LOCK=new Object();
+ private static String decryptedFrom;
+ private static String decrypted;
  synchronized JSONObject read() throws Exception {
   String stored=context.getSharedPreferences("connection",0).getString("encrypted",null);if(stored==null)return new JSONObject();
+  synchronized(DECRYPTED_LOCK){if(stored.equals(decryptedFrom))return new JSONObject(decrypted);}
   JSONObject envelope=new JSONObject(stored);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(envelope.getString("iv"),0)));
-  return new JSONObject(new String(c.doFinal(Base64.decode(envelope.getString("data"),0)),"UTF-8"));
+  String plain=new String(c.doFinal(Base64.decode(envelope.getString("data"),0)),"UTF-8");
+  JSONObject value=new JSONObject(plain);
+  synchronized(DECRYPTED_LOCK){decryptedFrom=stored;decrypted=plain;}
+  return value;
  }
  static void validateToken(String token){if(token==null || token.isEmpty() || token.length()>4096 || token.contains("\r") || token.contains("\n"))throw new IllegalArgumentException("Invalid token");}
  synchronized void write(String endpoint,String token,boolean allow) throws Exception {
@@ -68,6 +78,6 @@ final class SecureSettings {
   if(!preferences.edit().putString(name,encrypted).commit())throw new java.io.IOException("Cannot store exchange token");
  }
  synchronized void clearExchangeTokens()throws Exception{if(!context.getSharedPreferences("exchange-tokens",0).edit().clear().commit())throw new Exception("Cannot clear exchange tokens");}
- synchronized void clear() throws Exception {if(!context.getSharedPreferences("connection",0).edit().clear().commit())throw new Exception("Cannot clear connection");}
+ synchronized void clear() throws Exception {synchronized(DECRYPTED_LOCK){decryptedFrom=null;decrypted=null;}if(!context.getSharedPreferences("connection",0).edit().clear().commit())throw new Exception("Cannot clear connection");}
  JSONObject status() throws Exception {JSONObject s=read();return new JSONObject().put("configured",s.has("token")).put("endpoint",s.optString("endpoint",""));}
 }

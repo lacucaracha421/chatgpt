@@ -145,7 +145,8 @@ final class MediaRepository {
   try{
    // A fill already in progress owns this key; browser rechecks it after that fill.
    if(!locked)return new PreparedThumbnail(scope,null);
-   try{cache().file(scope.key,scope.generation,scope.kind);return new PreparedThumbnail(scope,null);}catch(FileNotFoundException ignored){}
+   // Prepare runs on one thread for every visible tile: check without writing.
+   if(cache().has(scope.key,scope.generation))return new PreparedThumbnail(scope,null);
    synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
     if(scope.generation!=cache().generation())throw new IOException("Cache invalidated");
     return new PreparedThumbnail(scope,thumbnailTickets.submit(scope.ticketGroup,scope,id,"thumbnail",()->signal.isCanceled() || scope.generation!=cache().generation()));
