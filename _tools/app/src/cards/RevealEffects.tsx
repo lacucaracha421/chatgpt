@@ -14,9 +14,10 @@ export function RevealEffects({ tier, reduced }: { tier: CardTier; reduced: bool
   useEffect(() => {
     if (reduced || tier === "n" || tier === "r") return;
     const spec = specs[tier], u = under.current!, o = over.current!;
+    const release = () => { u.width = u.height = o.width = o.height = 0; };
     const rect = { width: u.offsetWidth, height: u.offsetHeight }, dpr = Math.min(2, devicePixelRatio || 1);
     [u, o].forEach(canvas => { canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr); });
-    const a = u.getContext("2d"), b = o.getContext("2d"); if (!a || !b) return;
+    const a = u.getContext("2d"), b = o.getContext("2d"); if (!a || !b) { release(); return; }
     const w = u.width, h = u.height, cx = w / 2, cy = h / 2, radius = w * .3;
     const sparks = Array.from({ length: spec.sparks + spec.shards }, (_, i) => {
       const angle = i * 2.39996, speed = (80 + i * 37 % 180) * dpr;
@@ -26,7 +27,7 @@ export function RevealEffects({ tier, reduced }: { tier: CardTier; reduced: bool
     const draw = (now: number) => {
       const t = (now - start) / spec.duration;
       a.clearRect(0, 0, w, h); b.clearRect(0, 0, w, h);
-      if (t >= 1.3) return;
+      if (t >= 1.3) { release(); return; }
       const alpha = Math.max(0, Math.min(1, t / .1) * (1 - t));
       a.globalCompositeOperation = b.globalCompositeOperation = "lighter";
       a.globalAlpha = alpha * .7;
@@ -47,7 +48,7 @@ export function RevealEffects({ tier, reduced }: { tier: CardTier; reduced: bool
       });
       frame = requestAnimationFrame(draw);
     };
-    frame = requestAnimationFrame(draw); return () => cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(draw); return () => { cancelAnimationFrame(frame); release(); };
   }, [tier, reduced]);
   if (reduced || tier === "n" || tier === "r") return null;
   return <><canvas ref={under} className="card-reveal-fx card-reveal-fx--under" aria-hidden="true" /><canvas ref={over} className="card-reveal-fx card-reveal-fx--over" aria-hidden="true" /></>;

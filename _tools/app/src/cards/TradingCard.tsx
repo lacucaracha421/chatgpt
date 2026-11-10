@@ -74,7 +74,7 @@ export function TradingCard({ card, faceDown = false, onReveal }: TradingCardPro
             {masked ? <span className="f-bg privacy-mask" aria-label="이미지 숨김" /> : art && <StableImage className="f-bg" src={art} alt="" draggable={false} respectReducedMotion />}
             <div className="f-sheen" /><div className="f-etch" /><div className="f-shade" /><div className="f-frame" style={{ backgroundImage: frame }} /><div className="f-glare" /><div className="f-rainbow" /><div className="f-depth" />
             {!masked && cutout && <div className="f-subjwrap"><StableImage className="f-subj" src={cutout} alt="" draggable={false} respectReducedMotion /></div>}
-            <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>
+            {card.tier === "lr" && <div className="f-motes">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ left: `${6 + i * 37 % 86}%`, top: `${42 + i * 23 % 52}%`, "--d": `${7 + i * 7 % 5}s`, "--w": `${-i * .83}s` } as CSSProperties} />)}</div>}
             <div className="f-cost"><span className="num">{rank + 1}</span></div>
             <div className={`f-dup${card.count > 9 ? " two" : ""}`}><span className="num">{card.count}</span></div>
             <div className="f-power"><b className="num">{power >= 1000 ? Math.floor(power / 1000) : power}</b><span className="pw-tail"><i>PW</i>{power >= 1000 && <small className="num">{String(power % 1000).padStart(3, "0")}</small>}</span></div>

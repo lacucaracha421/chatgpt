@@ -209,7 +209,15 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     frozenRef.current = false;
     setFrozen(false);
   }, []);
-  useEffect(() => releaseFrame, [releaseFrame]);
+  // Clear only after React hides the cover, so the presented replacement stays visible.
+  useEffect(() => {
+    const canvas = freezeRef.current;
+    if (!frozen && !frozenRef.current && canvas) canvas.width = canvas.height = 0;
+  }, [frozen]);
+  useEffect(() => {
+    const canvas = freezeRef.current;
+    return () => { if (canvas) canvas.width = canvas.height = 0; };
+  }, []);
   /** Keep a good frame through decoder flushes, until the replacement frame is presented. */
   const holdFrame = () => {
     // While a frame is already held (a drag seeks many times), keep that good frame: a capture taken
@@ -220,9 +228,13 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
     const context = canvas.getContext?.("2d");
     if (!context) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    try { context.drawImage(video, 0, 0); } catch { return; }
+    const bounds = video.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const scale = Math.min(1, Math.max(1, bounds.width) * dpr / video.videoWidth,
+      Math.max(1, bounds.height) * dpr / video.videoHeight, 2048 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    try { context.drawImage(video, 0, 0, canvas.width, canvas.height); }
+    catch { canvas.width = canvas.height = 0; return; }
     frozenRef.current = true;
     setFrozen(true);
   };

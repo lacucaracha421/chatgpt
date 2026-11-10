@@ -98,8 +98,14 @@ describe("VideoPlayer", () => {
     const video = screen.getByLabelText("sample.webm 영상") as HTMLVideoElement;
     const timeline = screen.getByRole("slider", { name: "재생 위치" });
     presentFrame(video);
+    vi.spyOn(video, "getBoundingClientRect").mockReturnValue({ width: 1280, height: 720 } as DOMRect);
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 3840 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 2160 });
     const freeze = container.querySelector("canvas")!;
     fireEvent.change(timeline, { target: { value: "50" } });
+    expect(freeze.width).toBe(1280);
+    expect(freeze.height).toBe(720);
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0, freeze.width, freeze.height);
     fireEvent.seeked(video);
     fireEvent.playing(video);
     act(() => vi.advanceTimersByTime(2_000));
@@ -107,12 +113,18 @@ describe("VideoPlayer", () => {
     fireEvent.change(timeline, { target: { value: "20" } });
     presentFrame(video, 50);
     expect(freeze.style.display).not.toBe("none");
+    expect(freeze.width).toBe(1280);
     expect(drawImage).toHaveBeenCalledOnce();
     fireEvent.seeked(video);
     presentFrame(video, 20);
     expect(freeze.style.display).toBe("none");
+    expect(freeze.width).toBe(0);
+    expect(freeze.height).toBe(0);
     fireEvent.change(timeline, { target: { value: "30" } });
+    expect(freeze.width).toBeGreaterThan(0);
     unmount();
+    expect(freeze.width).toBe(0);
+    expect(freeze.height).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
   });
 

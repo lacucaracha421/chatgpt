@@ -1,6 +1,6 @@
 import {useAssetMask} from "../privacy/PrivacyContext";
 import { formatDuration } from "./formatDuration";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
 import type { AssetSummary } from "../library/types";
 import { assetThumbnailUrl, playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
@@ -18,6 +18,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const privacyMode=useAssetMask(asset,requestedPrivacy);
   const videoRef = useRef<HTMLVideoElement>(null);
   const freezeRef = useRef<HTMLCanvasElement>(null);
+  const setFreezeRef = useCallback((canvas: HTMLCanvasElement | null) => {
+    const previous = freezeRef.current;
+    if (previous && previous !== canvas) previous.width = previous.height = 0;
+    freezeRef.current = canvas;
+  }, []);
   const [frozen, setFrozen] = useState(false);
   const frozenRef = useRef(false);
   const wantedStill = useRef<string | null>(null);
@@ -38,6 +43,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   /** The hover preview plays the video itself; the still stays until its first frame is on screen. */
   const [videoShown, setVideoShown] = useState(false);
   const [videoDuration, setVideoDuration] = useState(asset.media.durationMs / 1_000);
+  // Release only once the replacement is ready and React has hidden the freeze cover.
+  useEffect(() => {
+    const canvas = freezeRef.current;
+    if (!frozen && !frozenRef.current && canvas) canvas.width = canvas.height = 0;
+  }, [frozen]);
   const clearTimers = () => {
     if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
@@ -113,13 +123,16 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (presented.current && !frozenRef.current && video && canvas && video.readyState >= 2 && video.videoWidth) {
       const context = canvas.getContext("2d");
       if (context) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        const bounds = video.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+        // The tile shows the frame with object-fit: cover, so match the covering scale.
+        const scale = Math.min(1, dpr * Math.max(Math.max(1, bounds.width) / video.videoWidth, Math.max(1, bounds.height) / video.videoHeight));
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
         try {
-          context.drawImage(video, 0, 0);
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
           frozenRef.current = true;
           setFrozen(true);
-        } catch { /* The existing still remains available if capture is unsupported. */ }
+        } catch { canvas.width = canvas.height = 0; /* The existing still remains available if capture is unsupported. */ }
       }
     }
     cancelFrame.current?.();
@@ -239,7 +252,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       onSeeked={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) { setVideoDuration(d); onDurationKnown?.(Math.round(d * 1_000)); } }}
     />}
-    <canvas ref={freezeRef} aria-hidden="true" style={{display: frozen ? undefined : "none", position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none"}} />
+    <canvas ref={setFreezeRef} aria-hidden="true" style={{display: frozen ? undefined : "none", position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none"}} />
     {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(shownDurationMs)}` : formatDuration(shownDurationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
     <div
       className="video-tile__scrub"
