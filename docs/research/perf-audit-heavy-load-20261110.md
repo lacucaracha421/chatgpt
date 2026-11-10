@@ -251,6 +251,22 @@ The growth is Chromium's GPU-side image cache for the originals actually shown.
 - Real-time protection is on; the exclusion list needs admin rights to read.
 - No code change. The user can add Defender exclusions for the app-generated folders only (`thumbnails`, `video-media`, `collection-thumbnails`, `cache`; about 0.6 GB) to remove about 3.7 ms per cold thumbnail. Originals (`assets`) stay scanned.
 
+### Tablet session (Galaxy Tab S11, 2026-11-10 23:30)
+
+Wireless ADB, `LakomicsPerf` DEBUG, WebView DevTools. Turned off again afterwards.
+
+- **Connectivity first.** The tablet's Tailscale VPN was off, so every API request failed: the asset screen errored and its tab did not switch. After the user turned it on, the tablet reached the server.
+- **T4, viewer memory over 20 images.**
+  - App PSS rose from 252 MB to a peak of 571 MB and was 425 MB after closing.
+  - The WebView renderer rose from 147 MB to a peak of 250 MB and was 183 MB after closing.
+  - Memory oscillates and is released; with 4 GB available out of 11.8 GB there was no pressure. Dropped.
+- **T1.** No viewer close and no grid reload while browsing; the list-generation poll ran about 3 times a minute. Held, as the user never observed it.
+- **New finding: cached thumbnails waited about 100 ms each.**
+  - Symptom: tiles already in the local cache took 101 ms median (153 ms p90) when "모든 에셋" opened, growing about 4 ms per queued tile.
+  - Cause: every media request read the connection through `SecureSettings.read()` under `CONNECTION_LOCK`, which means an Android Keystore open plus an AES-GCM decrypt each time.
+  - Fix, commit `0.9.172`: the plaintext is cached per exact ciphertext. Cache-hit checks are also read-only, and recency is refreshed hourly.
+  - Result: cached thumbnails 0.67 ms median (1.9 ms p90); screen images ready in 90 ms instead of 425 ms.
+
 ## Fix plan
 
 Rules for every stage:
