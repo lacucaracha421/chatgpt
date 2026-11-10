@@ -471,3 +471,20 @@ fn boundary_rule_and_single_artist() {
     assert_eq!(ranked.len(), 1);
     assert!(ranked[0].runner.is_none());
 }
+#[test]
+fn stamp_inputs_are_reused_until_any_write() {
+    let (_dir, lib) = basic();
+    let (first, _) = lib.artist_style_cached().unwrap().unwrap();
+    let (again, _) = lib.artist_style_cached().unwrap().unwrap();
+    assert!(Arc::ptr_eq(&first, &again));
+    lib.connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO artist_style_dismissals(asset_id,artist_id,dismissed_at) VALUES('c','alice','2026-11-10T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    let (after, _) = lib.artist_style_cached().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&first, &after));
+    assert_ne!(first.stamp, after.stamp);
+}

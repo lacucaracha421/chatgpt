@@ -16,8 +16,8 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 const MODEL: &str = "kaloscope2";
@@ -201,6 +201,37 @@ struct Inputs {
     excluded_classifications: Vec<String>,
     stamp: String,
 }
+/// The last stamp inputs, reused while no library write has been prepared since.
+/// `connection()`'s update hook and authorizer call `changed` for every write (the
+/// authorizer runs when a write is prepared, before it executes), and restores call it
+/// too, so a reused value can never describe data older than the last commit.
+#[derive(Default)]
+pub(crate) struct InputsMemo {
+    writes: AtomicU64,
+    slot: Mutex<Option<(u64, Arc<Inputs>)>>,
+}
+
+impl std::fmt::Debug for InputsMemo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InputsMemo")
+            .field("writes", &self.writes.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+impl InputsMemo {
+    pub(crate) fn changed(&self) {
+        self.writes.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn get(&self, writes: u64) -> Option<Arc<Inputs>> {
+        let slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        slot.as_ref()
+            .filter(|(at, _)| *at == writes)
+            .map(|(_, input)| input.clone())
+    }
+}
+
 /// Measurement hook for `perf_probe`: the stamp work `artist_style_cached` repeats.
 pub(super) fn perf_inputs_assets(conn: &Connection) -> Result<usize, LibraryError> {
     inputs(conn).map(|input| input.assets.len())
@@ -572,12 +603,24 @@ impl Library {
     }
 
     /// The cached inputs and whether the cached suggestions match them; `None` without a store.
-    fn artist_style_cached(&self) -> Result<Option<(Inputs, bool)>, LibraryError> {
+    fn artist_style_cached(&self) -> Result<Option<(Arc<Inputs>, bool)>, LibraryError> {
         let path = self.artist_style_path();
         if !path.exists() {
             return Ok(None);
         }
-        let input = inputs(&*self.connection()?)?;
+        let memo = &self.artist_style_inputs;
+        let input = match memo.get(memo.writes.load(Ordering::Acquire)) {
+            Some(input) => input,
+            None => {
+                // Writers wait on this lock, so the counter cannot move while computing.
+                let connection = self.connection()?;
+                let writes = memo.writes.load(Ordering::Acquire);
+                let input = Arc::new(inputs(&connection)?);
+                *memo.slot.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((writes, input.clone()));
+                input
+            }
+        };
         let fresh = meta(&read_only(&path)?, "inputs")?.as_deref() == Some(&input.stamp);
         if !fresh {
             self.schedule_artist_style_refresh();

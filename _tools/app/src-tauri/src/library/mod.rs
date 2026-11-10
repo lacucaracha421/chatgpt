@@ -296,6 +296,7 @@ pub struct Library {
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
     asset_count_cache: Arc<asset_count_cache::AssetCountCache>,
+    artist_style_inputs: Arc<artist_style::InputsMemo>,
     // Lock-free read connections for the media protocol's per-request row lookups.
     // When combined with database_lock: database_lock -> media_reads (file replacement only).
     media_reads: Arc<media_reads::MediaReads>,
@@ -450,6 +451,7 @@ impl Library {
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
             asset_count_cache: Arc::default(),
+            artist_style_inputs: Arc::default(),
             media_reads: Arc::default(),
             asset_sync_lock: Arc::new(Mutex::new(())),
             album_flush_lock: Arc::new(Mutex::new(())),
@@ -622,8 +624,10 @@ impl Library {
         let publication_inputs = self.publication_inputs.clone();
         let character_changes = self.character_changes.clone();
         let asset_count_cache = self.asset_count_cache.clone();
+        let artist_style_inputs = self.artist_style_inputs.clone();
         connection.update_hook(Some(
             move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                artist_style_inputs.changed();
                 publication_inputs.changed_table(table);
                 character_changes.changed_table(table);
                 asset_count_cache.changed_table(table);
@@ -656,6 +660,7 @@ impl Library {
             },
         ))?;
         let asset_count_cache = self.asset_count_cache.clone();
+        let artist_style_inputs = self.artist_style_inputs.clone();
         connection.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
             // The update hook omits WITHOUT ROWID tables and truncate-optimized
             // deletes. Also invalidate at write preparation: database_lock prevents
@@ -664,6 +669,7 @@ impl Library {
                 rusqlite::hooks::AuthAction::Insert { table_name }
                 | rusqlite::hooks::AuthAction::Delete { table_name }
                 | rusqlite::hooks::AuthAction::Update { table_name, .. } => {
+                    artist_style_inputs.changed();
                     asset_count_cache.changed_table(table_name);
                 }
                 _ => {}
