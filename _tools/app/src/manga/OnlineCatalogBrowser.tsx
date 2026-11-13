@@ -793,7 +793,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     {active && <MangaToolbar source={toolbarSource ?? requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
       countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}${appliedQuery || indexFilter ? "개 결과" : "개 작품"}` : countError ? "결과 수 확인 실패" : undefined}
-      controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate}
+      controls={bookmarkSwitch || catalogControls ? <>{bookmarkSwitch}{catalogControls}</> : undefined} refreshedAt={refreshedAt ?? latestUpdate}
       ariaLabel="온라인 망가 도구" actions={catalogMenu} chrome={{
         summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,
         status: <ChromeQueryBadge search={{ scope: "온라인 카탈로그", label: "온라인 만화 검색", query: appliedQuery, onApply: (text) => { setQuery(text); void search(text); } }} />,
@@ -821,7 +821,6 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="online-catalog__workspace">
     <div ref={gridScroll} tabIndex={0} className="manga-browser__content online-catalog__content">
-      {bookmarkSwitch}
       <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local" || requestedSource === "somi"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />

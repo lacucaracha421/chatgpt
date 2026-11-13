@@ -299,10 +299,10 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
   const search = { scope: "소미", label: "소미 검색", query, onApply: (text: string) => apply(text) };
   return <section className="manga-browser online-catalog" aria-label="소미 망가">
     {active && <MangaToolbar source={source} onSourceChange={onSourceChange} countLabel={countLabel}
-      controls={loggedIn && <MangaViewMenu choices={[
+      controls={(bookmarkSwitch || loggedIn) && <>{bookmarkSwitch}{loggedIn && <MangaViewMenu choices={[
         { label: "정렬", value: sort, options: bookmarked ? [{ value: "added", label: "추가순" }, ...sorts] : sorts, onChange: value => apply(query, value as SomiSort) },
         { label: "기간", value: String(days ?? "all"), options: periods, onChange: value => { if (value === "all") apply(query, sort, null); else apply(query, "votes", Number(value)); } },
-      ]} />}
+      ]} />}</>}
       actions={loggedIn && <Menu label="소미 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "account", label: `@${status!.handle}`, disabled: true, onSelect: () => {} },
         { id: "sync", label: "새 글 확인", disabled: status!.syncing, onSelect: () => void syncNow() },
@@ -318,7 +318,6 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
           </SearchSurface> } : undefined }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div ref={gridScroll} className="manga-browser__content online-catalog__content" tabIndex={0} style={{ position: "relative" }}>
-      {bookmarkSwitch}
       {status && !loggedIn ? <EmptyState title="코네 로그인이 필요합니다" hint="코네에 로그인하면 소미소프트 동인 게시글을 볼 수 있습니다." action={<Button onClick={() => { void gateway.somiOpenLogin?.().catch(() => setMessage("코네 로그인 창을 열 수 없습니다")); }}>코네 로그인</Button>} />
         : loggedIn && loadError && !current ? <EmptyState title="소미 목록을 불러오지 못했습니다" action={<Button onClick={() => void load(query, sort, days)}>다시 시도</Button>} />
         : !status || (!current && loading) || (loggedIn && !bookmarked && status.collected === 0 && status.syncing && !query) ? <MangaSkeletonGrid /> : null}

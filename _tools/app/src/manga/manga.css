@@ -151,6 +151,9 @@
 .view-toolbar:has(.manga-toolbar__refresh) .view-toolbar__actions { order: 2; }
 .manga-section-bar { container: manga-section / inline-size; }
 @container manga-section (max-width: 560px) { .manga-section-bar .asset-toolbar__quiet-menu > span { display: none; } }
+/* The bookmark source is a sub-choice of 북마크: a smaller, quieter switch beside 보기, not a second section bar. */
+.manga-section-bar .ui-section-bar__trailing > .ui-segmented { height: var(--control-height-compact); margin-right: var(--space-2); }
+.manga-section-bar .ui-section-bar__trailing > .ui-segmented .ui-segmented__cell { padding: 0 var(--space-2); font-size: var(--type-meta); }
 @container manga-section (max-width: 440px) { .manga-section-bar .ui-segmented__count { display: none; } }
 .manga-toolbar__count, .manga-toolbar__refresh time { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
