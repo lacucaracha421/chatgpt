@@ -1,5 +1,4 @@
-import { BusyLabel } from "../src/shared/ui/BusyLabel";
-import {useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {japanReleaseLedger, koreanReleaseLedger, releaseLedgerCounts, type ReleaseLedgerRow} from '../src/collections/releaseLedger';
 import {groupInbox, releaseLine} from '../src/collections/releaseCaption';
@@ -16,8 +15,8 @@ import {ArtworkMemoryContext} from './collectionArtwork';
 import {Scrubber} from './Scrubber';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
-import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
-import {acknowledgeReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem, supportedReleaseEvents, type ReleaseCounts} from './collectionReleasesModel';
+import {commitReleases, confirmReleaseEvents, releaseSnapshot, subscribeReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
+import {actionableReleases, passiveReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem} from './collectionReleasesModel';
 
 type Region = 'kr' | 'jp';
 export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 정보가 보여요';
@@ -30,15 +29,12 @@ export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 
  * MangaDex volumes ahead of it. 확인 marks a work's events read on the server (the PC follows) and
  * the information stays. Owned counts come from `ownedOf`, which includes queued tracking edits.
  */
-export function CollectionReleases({active, counts, refresh, revision: listRevision, onCounts, onRevision, onOpen, cover, ownedOf, watching}: {
+export function CollectionReleases({active, refresh, revision: listRevision, onRevision, onOpen, cover, ownedOf, watching}: {
   active: boolean;
-  counts: ReleaseCounts;
   /** Bumped by the parent after it invalidated the shared release store; re-checks what to read. */
   refresh: number;
   /** The release list revision the parent last saw (it moves when the PC publishes or anything is confirmed). */
   revision: number | null;
-  /** The screen learned newer counts (a read, or a confirmed 확인). */
-  onCounts(counts: ReleaseCounts): void;
   /** The screen learned a newer release list revision (a read, or its own 확인). */
   onRevision(revision: number | null): void;
   onOpen(collectionId: string): void;
@@ -52,18 +48,14 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const [region, setRegion] = useState<Region>('kr');
   const [shownRegion, setShownRegion] = useState<Region>('kr');
   const artworks = useContext(ArtworkMemoryContext);
-  const [data, setData] = useState<ReleaseStore>(() => releaseStore.current);
+  const data = useSyncExternalStore(subscribeReleases, releaseSnapshot);
   const [status, setStatus] = useState({busy: false, error: ''});
   const [nonce, setNonce] = useState(0);
-  const [working, setWorking] = useState<string | null>(null);
   const [ackError, setAckError] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
-  const latest = useRef(data); latest.current = data;
-  const countsRef = useRef(counts); countsRef.current = counts;
-  const report = useRef(onCounts); report.current = onCounts;
   const reportRevision = useRef(onRevision); reportRevision.current = onRevision;
-  const commit = (next: ReleaseStore) => { commitReleases(next); setData(next); };
+  const commit = (next: ReleaseStore) => { commitReleases(next); };
 
   // Only what is out of date is read (the store is shared with Home, which may already have
   // read the shelf): the whole manga shelf when the publication (or a personal edit) moved,
@@ -73,7 +65,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
     const current = releaseStore.current, at = releaseEpoch();
     const wantShelf = !current.shelf || current.shelfEpoch !== at;
     const wantEvents = current.eventsEpoch !== at || current.eventsRevision !== listRevision;
-    if (!wantShelf && !wantEvents) { setData(current); return; }
+    if (!wantShelf && !wantEvents) return;
     const controller = new AbortController();
     setStatus({busy: true, error: ''});
     void Promise.all([wantShelf ? loadShelf(controller.signal) : null, wantEvents ? allUnreadReleases(controller.signal) : null]).then(([shelf, releases]) => {
@@ -83,7 +75,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       if (releases) Object.assign(next, {events: releases.items, eventsEpoch: at, eventsRevision: releases.revision});
       commit(next);
       setStatus({busy: false, error: ''});
-      if (releases) { report.current(releases.counts); reportRevision.current(releases.revision); }
+      if (releases) reportRevision.current(releases.revision);
     }).catch(reason => {
       if (!controller.signal.aborted) setStatus({busy: false, error: errorText(reason) || '신간 정보를 불러오지 못했습니다.'});
     });
@@ -97,39 +89,12 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   }, []);
   const pull = usePullToRefresh(scroller, reload, status.busy, !active);
 
-  /**
-   * Drop confirmed Collections' events here, in the kept copy and from the counts; the
-   * information stays. A 확인 that moved the list revision by exactly its own step keeps the
-   * copy current; any other step means something else changed too, so the next show re-reads.
-   */
-  const settle = (collectionId: string, after?: number) => {
-    const current = releaseStore.current;
-    const own = typeof after === 'number' && current.eventsRevision !== null && (after === current.eventsRevision || after === current.eventsRevision + 1);
-    commit({...current, events: current.events.filter(event => event.collectionId !== collectionId), eventsRevision: own ? after : current.eventsRevision});
-    if (own) reportRevision.current(after);
-    const byCollection = {...countsRef.current.byCollection};
-    delete byCollection[collectionId];
-    const next = {unread: Object.values(byCollection).reduce((sum, n) => sum + n, 0), byCollection};
-    countsRef.current = next;
-    report.current(next);
-  };
-
-  const acknowledgeWork = async (collectionId: string) => {
-    setWorking(collectionId); setAckError('');
-    try { settle(collectionId, (await acknowledgeReleases({collectionId})).revision); }
-    catch (reason) { setAckError(errorText(reason) || '확인하지 못했습니다.'); }
-    finally { setWorking(null); }
-  };
-
-  /** 모두 확인: the per-Collection form for every Collection with unread events, one by one. */
-  const acknowledgeAll = async () => {
-    setConfirmAll(false); setWorking('all'); setAckError('');
-    const ids = [...new Set([...Object.keys(countsRef.current.byCollection), ...latest.current.events.map(event => event.collectionId)])];
+  const acknowledge = async (items: typeof data.events) => {
+    setAckError('');
     try {
-      for (const id of ids) settle(id, (await acknowledgeReleases({collectionId: id})).revision);
-    } catch (reason) {
-      setAckError(errorText(reason) || '확인하지 못했습니다.');
-    } finally { setWorking(null); }
+      await confirmReleaseEvents(items);
+      reportRevision.current(releaseStore.current.eventsRevision);
+    } catch (reason) { setAckError(errorText(reason) || '확인하지 못했습니다.'); }
   };
 
   const today = localToday();
@@ -140,19 +105,27 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const absent = !!shelf && works.length > 0 && !works.some(work => work.releaseSchedule !== undefined);
   // The shared ledger reads the PC's board and inbox; the rows carry the published work back.
   const board = new Map(works.map(work => [work.id, releaseBoardEntry(work, ownedOf, watching)]));
-  const inbox = groupInbox(supportedReleaseEvents(data.events).map(releaseInboxItem));
+  const actionable = actionableReleases(data.events, works, watching);
+  const inbox = groupInbox(actionable.map(releaseInboxItem));
   const shared = works as unknown as SharedSummary[];
   const korean = koreanReleaseLedger(shared, board, inbox, today);
   const japan = japanReleaseLedger(shared, board, inbox, today);
-  const rows = shownRegion === 'kr' ? korean : japan;
+  const ordered = shownRegion === 'kr' ? korean : japan;
+  // Confirmations change highlights, not the row positions beneath the finger.
+  const order = useRef<{shelf: typeof shelf; region: Region; signature: string; ids: string[]} | null>(null);
+  const signature = JSON.stringify(works.map(work => [work.id, watching(work), ownedOf(work, work.releaseSchedule?.kakao?.editionIndex ?? 0)]));
+  if (!order.current || order.current.shelf !== shelf || order.current.region !== shownRegion || order.current.signature !== signature)
+    order.current = {shelf, region: shownRegion, signature, ids: ordered.map(row => row.work.id)};
+  const positions = new Map(order.current.ids.map((id, index) => [id, index]));
+  const rows = [...ordered].sort((a, b) => (positions.get(a.work.id) ?? Infinity) - (positions.get(b.work.id) ?? Infinity));
   const volumeCounts = releaseLedgerCounts(rows);
   // A work either tab lists keeps its notifications there; the rest are listed plainly below.
   const shown = new Set([...korean, ...japan].map(row => row.work.id));
-  const others = [...groupInbox(supportedReleaseEvents(data.events).filter(event => !shown.has(event.collectionId)).map(releaseInboxItem)).entries()];
-  const unread = Math.max(counts.unread, data.events.length);
+  const unmatched = [...groupInbox(actionable.filter(event => !shown.has(event.collectionId)).map(releaseInboxItem)).entries()];
+  const others = [...groupInbox(passiveReleases(data.events, works, watching).map(releaseInboxItem)).entries()];
+  const unread = actionable.length;
   const checkedAt = works.map(work => work.releaseSchedule?.[shownRegion === 'kr' ? 'kakao' : 'mangadex']?.checkedAt).filter((value): value is string => !!value).sort().reverse()[0];
-  const scrubberSort=useMemo(()=>({kind:'date' as const,values:data.events.map(event=>event.detectedAt)}),[data.events]);
-  const busy = working !== null;
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:actionable.map(event=>event.detectedAt)}),[data.events, signature]);
   const revision = shelf?.revision ?? '';
   const workOf = (id: string) => works.find(work => work.id === id);
   // 한국 정발 ⇄ 일본 is a category switch: the shown ledger stays until the other region's first
@@ -178,7 +151,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   if (active !== visit.current.active) visit.current = {active, count: visit.current.count + (active ? 1 : 0)};
   useFirstAppearance(scroller, rows.length, active && data.loaded, 'collection-releases', '.collection-releases__ledger tbody tr', visit.current.count);
 
-  const confirmButton = (id: string, name: string) => <Button variant="ghost" size="sm" className="collection-release-action" disabled={busy} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledgeWork(id); }}><BusyLabel busy={!!(working === id)} idle={'확인'}>확인 중…</BusyLabel></Button>;
+  const confirmButton = (id: string, name: string) => <Button variant="ghost" size="sm" className="collection-release-action" aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(actionable.filter(item => item.collectionId === id)); }}>확인</Button>;
   // The PC ledger's row (`src/collections/CollectionReleases.tsx`) with its stylesheet; the tablet sizes it.
   const row = (entry: ReleaseLedgerRow) => {
     const work = entry.work as unknown as CollectionSummary;
@@ -215,7 +188,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
         onChange={setRegion}
       />
       {checkedAt && <span className="collection-releases__checked">{displayDateTime(checkedAt)} 확인</span>}
-      <Button variant="ghost" size="sm" className="collection-releases-all" disabled={busy || unread === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
+      <Button variant="ghost" size="sm" className="collection-releases-all" disabled={unread === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
     </div>
     {status.error && <div className="inline-error" role="alert"><span>{status.error}</span><Button variant="ghost" onClick={reload}>다시 시도</Button></div>}
     {ackError && <div className="inline-error" role="alert"><span>{ackError}</span></div>}
@@ -227,7 +200,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       <span><strong>{displayCount(volumeCounts.unowned)}</strong>나왔지만 아직 없음</span>
       <span><strong>{displayCount(volumeCounts.upcoming)}</strong>발매 예정</span>
     </div>}
-    {data.loaded && shelf?.ready && !absent && !watched.length && !others.length && <EmptyState icon={BellIcon} title="신간 알림을 켠 만화가 없습니다" />}
+    {data.loaded && shelf?.ready && !absent && !watched.length && !others.length && !unmatched.length && <EmptyState icon={BellIcon} title="신간 알림을 켠 만화가 없습니다" />}
     {data.loaded && !absent && watched.length > 0 && !rows.length && <EmptyState icon={BellIcon} title={shownRegion === 'jp' ? '일본 발매 정보가 없습니다' : '소장하지 않은 정발 권이 없습니다'} />}
     {rows.length > 0 && <table className="collection-releases__ledger" aria-label={`${shownRegion === 'jp' ? '일본' : '한국 정발'} 신간`}>
       <colgroup><col className="collection-releases__cover-col"/><col className="collection-releases__title-col"/><col className="collection-releases__owned-col"/><col/><col className="collection-releases__date-col"/><col className="collection-releases__state-col"/></colgroup>
@@ -235,9 +208,9 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       <tbody>{rows.map(row)}</tbody>
     </table>}
 
-    {data.loaded && others.length > 0 && <>
+    {data.loaded && unmatched.length > 0 && <>
       <h3 className="collection-releases__others">{shown.size ? '그 밖의 새 알림' : '새 알림'}</h3>
-      {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
+      {unmatched.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
         <button type="button" onClick={() => onOpen(id)}><span className="collection-releases__cover">{cover(workOf(id), revision, items[0]!.collectionName)}</span>{items[0]!.collectionName}</button>
         <span className="numeric">{items.map(releaseLine).join(' · ')}</span>
         <Badge variant="accent" aria-label={`새 알림 ${items.length}개`}>NEW</Badge>
@@ -245,11 +218,19 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       </div>)}
     </>}
 
-    <Scrubber scrollRef={scroller} total={data.events.length} sort={scrubberSort} hidden={!active||!data.loaded||confirmAll}/>
+    {data.loaded && others.length > 0 && <>
+      <h3 className="collection-releases__others">다른 작품 신간</h3>
+      {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
+        <button type="button" onClick={() => onOpen(id)}><span className="collection-releases__cover">{cover(workOf(id), revision, items[0]!.collectionName)}</span>{items[0]!.collectionName}</button>
+        <span>{[...new Set(items.map(item => item.event.volumeNumber))].map(volume => `${displayCount(volume)}권 새로 나옴`).join(' · ')}</span>
+      </div>)}
+    </>}
+
+    <Scrubber scrollRef={scroller} total={actionable.length} sort={scrubberSort} hidden={!active||!data.loaded||confirmAll}/>
 
     {confirmAll && <Dialog open title="모두 확인할까요?" onClose={() => setConfirmAll(false)}><DialogDescription className="collection-sheet-label">새 알림 {unread.toLocaleString()}개를 읽음으로 바꿉니다. 발매 정보는 그대로 남고, PC에서도 읽음으로 바뀝니다.</DialogDescription>
       <div className="library-sheet collection-memo-choice">
-        <Button variant="primary" onClick={() => void acknowledgeAll()}>모두 확인</Button>
+        <Button variant="primary" onClick={() => { setConfirmAll(false); void acknowledge(actionable); }}>모두 확인</Button>
         <Button variant="ghost" onClick={() => setConfirmAll(false)}>취소</Button>
       </div>
     </Dialog>}

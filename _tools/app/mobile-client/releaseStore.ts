@@ -1,4 +1,5 @@
-import {allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleasesModel';
+import {useEffect, useRef, useSyncExternalStore} from 'react';
+import {acknowledgeReleases, allUnreadReleases, allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleasesModel';
 
 export const HOME_RELEASE_SHELF_KEY = 'lakomics.mobile.homeReleaseShelf.v1';
 type HomeShelf = {scope: string; libraryId: string | null; value: MangaShelf};
@@ -46,11 +47,63 @@ let observed: string | null = null;
 let inflight: {epoch: number; promise: Promise<MangaShelf>; controller: AbortController; waiters: number} | null = null;
 const listeners = new Set<() => void>();
 export const releaseStore: {current: ReleaseStore} = {current: emptyReleaseStore()};
+let hidden = new Set<string>();
+export const releaseSnapshot = () => releaseStore.current;
 
 const notify = () => Array.from(listeners).forEach(listener => listener());
 export function releaseEpoch() { return epoch; }
 export function subscribeReleases(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
-export function commitReleases(next: ReleaseStore) { releaseStore.current = next; notify(); }
+export function commitReleases(next: ReleaseStore) { releaseStore.current = {...next, events: next.events.filter(event => !hidden.has(event.eventId))}; notify(); }
+
+/** Exact IDs leave every shared consumer at once. Stale in-flight reads cannot restore them.
+ * The existing HTTP command commits read state durably before returning; failures restore
+ * only the unsent batch, so the user can retry without losing successful confirmations.
+ */
+export async function confirmReleaseEvents(events: readonly ReleaseEvent[]) {
+  const scope = hidden;
+  const fresh = events.filter(event => !hidden.has(event.eventId));
+  for (const event of fresh) hidden.add(event.eventId);
+  commitReleases(releaseStore.current);
+  let offset = 0;
+  try {
+    for (; offset < fresh.length; offset += 500) {
+      const reply = await acknowledgeReleases({eventIds: fresh.slice(offset, offset + 500).map(event => event.eventId)});
+      if (scope !== hidden) return;
+      const current = releaseStore.current;
+      if (reply.revision != null && current.eventsRevision != null && reply.revision >= current.eventsRevision && reply.revision <= current.eventsRevision + 1)
+        commitReleases({...current, eventsRevision: reply.revision});
+    }
+  } catch (error) {
+    if (scope !== hidden) throw error;
+    const restored = fresh.slice(offset);
+    for (const event of restored) hidden.delete(event.eventId);
+    const ids = new Set(releaseStore.current.events.map(event => event.eventId));
+    commitReleases({...releaseStore.current, events: [...releaseStore.current.events, ...restored.filter(event => !ids.has(event.eventId))]});
+    throw error;
+  }
+}
+
+/** Counts need the complete shelf and inbox, never the server's unfiltered unread total. */
+export function useReleaseSnapshot(enabled: boolean, revision: number | null, refresh: number, onRead?: (error?: unknown) => void) {
+  const snapshot = useSyncExternalStore(subscribeReleases, releaseSnapshot);
+  const report = useRef(onRead); report.current = onRead;
+  const at = releaseEpoch();
+  useEffect(() => {
+    if (!enabled) return;
+    const current = releaseStore.current;
+    const wantShelf = !current.shelf || current.shelfEpoch !== at;
+    const wantEvents = current.eventsEpoch !== at || revision !== null && current.eventsRevision !== revision;
+    if (!wantShelf && !wantEvents) return;
+    const controller = new AbortController();
+    void Promise.all([wantShelf ? loadShelf(controller.signal) : null, wantEvents ? allUnreadReleases(controller.signal) : null]).then(([shelf, releases]) => {
+      if (controller.signal.aborted) return;
+      commitReleases({...releaseStore.current, ...(shelf ? {shelf, shelfEpoch: at} : {}), ...(releases ? {events: releases.items, eventsEpoch: at, eventsRevision: releases.revision} : {}), loaded: true});
+      report.current?.();
+    }).catch(error => { if (!controller.signal.aborted) report.current?.(error); });
+    return () => controller.abort();
+  }, [enabled, revision, refresh, at]);
+  return snapshot;
+}
 /** The publication moved (or a pull): everything is read again on its next show. */
 export function invalidateReleases() { epoch++; notify(); }
 /** The shelf read under the current epoch, if any. */
@@ -73,6 +126,7 @@ export function observePublication(revision: string | null | undefined) {
 export function resetReleaseStore() {
   inflight?.controller.abort(); inflight = null;
   epoch = 0; observed = null;
+  hidden = new Set();
   commitReleases(emptyReleaseStore());
 }
 

@@ -5,12 +5,12 @@ import {loadedPerformerNames} from './personNameCache';
  *
  * The PC detects release events and publishes its unread ones; this device lists them and
  * confirms (확인) them. Read state is shared: a 확인 here leaves the unread list at once and
- * the PC marks the event read when it next syncs. There is no push; the Collections tab is
- * the only place they show (user decision, 2026-09-25).
+ * the PC marks the event read when it next syncs. Watched manga supply the actionable
+ * notifications in Collections and Home; recent unwatched events are passive information.
  *
  * Only the two client routes are used: the unread list read and the acknowledge command.
- * The tablet reads all three kinds (a 발매됨 status change counts too), and the per-Collection
- * acknowledge form names the same three kinds, so 확인 clears exactly what was shown.
+ * The tablet reads all three kinds (a release-status change counts too). Confirmation sends
+ * exact event IDs from the visible snapshot, preserving events that arrive after the tap.
  *
  * The 신간 screen also reads each manga's `releaseSchedule` (published by an upgraded PC) to
  * list unowned Korean volumes and how far the Japanese edition is ahead; the pure helpers for
@@ -88,7 +88,8 @@ export async function allUnreadReleases(signal?: AbortSignal): Promise<{items: R
   const items: ReleaseEvent[] = [];
   const seen = new Set<string>();
   let cursor: string | null = null, counts = NO_RELEASES, revision: number | null = null;
-  for (let page = 0; page < 20; page++) {
+  // The existing server retains at most 5,000 events; every page must contribute to totals.
+  for (let page = 0; page < 50; page++) {
     const reply: ReleaseList = await releasesPage(cursor, signal);
     if (page === 0) { counts = releaseCounts(reply); revision = releaseRevision(reply); }
     for (const event of reply.items ?? []) if (!seen.has(event.eventId)) { seen.add(event.eventId); items.push(event); }
@@ -195,7 +196,7 @@ export type ReleaseCaption = {kind: 'new' | 'out' | 'ahead'; text: string; date:
  */
 export function releaseCaption(work: CollectionSummary, unread: number, owned: number | null, watching: boolean, today: string): ReleaseCaption | null {
   if (work.type !== 'manga') return unread > 0 ? {kind: 'new', text: `신간 알림 ${unread}`, date: null} : null;
-  if (unread <= 0 && !watching) return null;
+  if (!watching) return null;
   const volumes = work.releaseSchedule?.kakao ? koreanReleases([work], () => owned, [], today)[0]?.volumes ?? [] : [];
   const out = volumes.filter(volume => volume.released);
   if (out.length) {
@@ -228,6 +229,24 @@ export function releaseBoardEntry(work: CollectionSummary, ownedOf: (work: Colle
 /** Events from providers the apps still support; Aladin was retired (2026-10-09) and its stored events stay hidden, as on the PC. */
 export function supportedReleaseEvents(events: readonly ReleaseEvent[]): (ReleaseEvent & {provider: 'kakao' | 'mangadex'})[] {
   return events.filter((event): event is ReleaseEvent & {provider: 'kakao' | 'mangadex'} => event.provider !== 'aladin');
+}
+
+/** Only watched manga produce things to check; passive events remain stored unread. */
+export function actionableReleases(events: readonly ReleaseEvent[], works: readonly CollectionSummary[], watching = (work: CollectionSummary) => !!work.releaseWatch?.enabled) {
+  const ids = new Set(works.filter(work => work.type === 'manga' && watching(work)).map(work => work.id));
+  return supportedReleaseEvents(events).filter(event => ids.has(event.collectionId));
+}
+
+export function countsForEvents(events: readonly ReleaseEvent[]): ReleaseCounts {
+  const byCollection: Record<string, number> = {};
+  for (const event of events) byCollection[event.collectionId] = (byCollection[event.collectionId] ?? 0) + 1;
+  return {unread: events.length, byCollection};
+}
+
+export function passiveReleases(events: readonly ReleaseEvent[], works: readonly CollectionSummary[], watching = (work: CollectionSummary) => !!work.releaseWatch?.enabled, now = Date.now()) {
+  const ids = new Set(works.filter(work => work.type === 'manga' && !watching(work)).map(work => work.id));
+  const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 30);
+  return supportedReleaseEvents(events).filter(event => ids.has(event.collectionId) && Date.parse(event.detectedAt) >= cutoff.getTime() && Date.parse(event.detectedAt) <= now);
 }
 /** A published unread event in the PC's inbox shape. */
 export function releaseInboxItem(event: ReleaseEvent & {provider: 'kakao' | 'mangadex'}): ReleaseInboxItem {

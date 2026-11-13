@@ -29,7 +29,25 @@ const works: CollectionSummary[] = [
   {id: 'sea', name: '바다의 시간', type: 'manga', showcase: false, releaseWatch: {enabled: true, available: true}, ownedVolumes: [{editionIndex: 0, count: 1}], releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: [{volumeNumber: 2, date: '2026-10-15', status: 'upcoming'}]}, mangadex: null}},
 ];
 const item = (id: string, at = '2026-09-25T11:00:00Z'): Asset => ({id, kind: 'image', width: 600, height: 800, collected_at: at, thumbnail_available: true});
-const releaseReply = {version: 1, revision: 1, counts: {unread: 2, collections: [{collectionId: 'night', unread: 2}]}, items: [], nextCursor: null, hasMore: false};
+const releaseReply = {version: 1, revision: 1, counts: {unread: 2, collections: [{collectionId: 'night', unread: 2}]}, items: [
+  {eventId: 'night-4', collectionId: 'night', collectionName: '밤의 도서관', provider: 'kakao', kind: 'new_volume', volumeNumber: 4, previousValue: null, currentValue: '2026-09-23', detectedAt: '2026-09-24T00:00:00Z'},
+  {eventId: 'night-date', collectionId: 'night', collectionName: '밤의 도서관', provider: 'kakao', kind: 'release_date_changed', volumeNumber: 5, previousValue: null, currentValue: '2026-10-08', detectedAt: '2026-09-24T00:00:00Z'},
+], nextCursor: null, hasMore: false};
+
+it('keeps unwatched manga out of Home arrivals even with unread server counts and events',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  const passive={...works[0],id:'passive',name:'Passive manga',releaseWatch:{enabled:false,available:true}};
+  mocks.api.mockImplementation(async(path,...args)=>{
+    const reply=await original(path,...args);
+    if(path.startsWith('/v1/collections/releases?'))return {...releaseReply,counts:{unread:3,collections:[...releaseReply.counts.collections,{collectionId:'passive',unread:1}]},items:[...releaseReply.items,{...releaseReply.items[0],eventId:'passive-4',collectionId:'passive',collectionName:passive.name}]};
+    if(path.startsWith('/v1/collections?')&&path.includes('type=manga'))return {...reply,items:[...works,passive]};
+    return reply;
+  });
+  render(<Home {...props()}/>);
+  const day=await openDay('2026-09-23');
+  expect(within(day).getByRole('button',{name:/밤의 도서관/})).toBeTruthy();
+  expect(screen.queryByText('Passive manga')).toBeNull();
+});
 const revisitReply = {bundles: [{kind: 'date', title: '과거의 이날', items: [item('d1', '2025-09-25T03:00:00Z'), item('d2', '2025-09-25T05:00:00Z')]}, {kind: 'creator', title: '다시 만난 작가', groups: [{creator_key: 'ranzu', creator_name: 'Ranzu', creator_handle: 'ranzu', asset_count: 38, items: [item('r1'), item('r2')]}]}]};
 const upcomingEntry = {id: 'game-1', kind: 'game' as const, title: 'Hades II', originalTitle: 'Hades II', date: '2026-10-01', precision: 'exact', platforms: ['PC'], cover: {url: 'https://img.example/hades.jpg'}};
 type Server = {savedDays?: (path: string) => unknown; upcoming: unknown; avPick: unknown; artists: unknown; summary: unknown; offline: boolean; review?: unknown};

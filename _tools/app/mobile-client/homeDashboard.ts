@@ -1,8 +1,8 @@
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {rowView, type ExchangeSnapshot} from './exchangeModel';
-import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
+import {actionableReleases, countsForEvents, koreanReleases, localToday, RELEASE_COUNTS_PATH, releaseCaption, releaseRevision, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
 import type {CollectionSummary} from './collectionModel';
-import {currentShelf, forgetHomeShelf, invalidateReleases, loadShelf, observePublication, readHomeShelf, releaseEpoch, rememberHomeShelf, subscribeReleases} from './releaseStore';
+import {currentShelf, forgetHomeShelf, invalidateReleases, loadShelf, observePublication, readHomeShelf, releaseEpoch, rememberHomeShelf, subscribeReleases, useReleaseSnapshot} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useCharacterReviewCountState} from './useCharacterReview';
 import {useDuplicateCount} from './CatalogDuplicates';
@@ -57,7 +57,7 @@ export function releaseRows(shelf: MangaShelf | null, counts: ReleaseCounts, tod
   const works = new Map((shelf?.works ?? []).map(work => [work.id, work]));
   return Object.entries(counts.byCollection).flatMap(([id, unread]) => {
     const work = works.get(id);
-    if (!work) return [];
+    if (!work || !watching(work)) return [];
     const kakao = work.releaseSchedule?.kakao;
     return [{id, name: work.name, unread, caption: releaseCaption(work, unread, kakao ? ownedOf(work, kakao.editionIndex) : null, watching(work), today)}];
   }).sort((a, b) => b.unread - a.unread || a.name.localeCompare(b.name, 'ko'));
@@ -354,9 +354,9 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, review
   const similar = useSimilarityReviewCount(enabled, similarityKey, scope, refreshKey);
   const duplicates = useDuplicateCount(enabled, scope, refreshKey);
   const confirm = useCharacterReviewCountState(enabled && !!review?.enabled, null, `${scope}|${String(review?.refreshKey ?? 0)}|${refreshKey}`);
-  const {value: counts, ready: countsReady} = useCachedHomeSourceRead<ReleaseCounts | null>({
+  const {value: releaseReply, ready: countsReady} = useCachedHomeSourceRead<unknown>({
     enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
-    read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: reason => result('releases', reason),
+    read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply; }, onError: reason => result('releases', reason),
   });
   const {value: collectionStatus, ready: collectionsReady} = useCachedHomeSourceRead<{revision?: string | null; libraryId?: string | null} | null>({
     enabled, scope, source: 'collectionsStatus', signalKey: 'collections', initial: null, forceKey: refreshKey,
@@ -406,10 +406,13 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, review
   const offline = !online || Object.values(problems).includes('offline');
   const serverProblem = Object.values(problems).includes('server');
   const live: Record<TodoKey, number | null> = {pending, character: review?.enabled ? confirm.count : null, similar, duplicates};
+  const releaseSnapshot = useReleaseSnapshot(enabled && shelfEnabled && countsReady, releaseRevision(releaseReply), refreshKey, error => result('releaseInbox', error));
+  const counts = releaseSnapshot.loaded && shelf ? countsForEvents(actionableReleases(releaseSnapshot.events, shelf.works)) : null;
   const releases = counts && shelf ? releaseRows(shelf, counts) : null;
   const upcoming = shelf ? upcomingReleases(shelf) : null;
 
   // Keep the last fresh values for an offline Home (only what was actually read).
+  const keptReleases = shelf ? (snapshot.releases?.value ?? []).filter(row => shelf.works.some(work => work.id === row.id && watching(work))) : [];
   const freshKey = offline ? '' : JSON.stringify([live, counts?.unread ?? null, releases, upcoming, summary ?? null]);
   useEffect(() => {
     if (!freshKey) return;
@@ -428,12 +431,12 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, review
     /** The 확인 count is known, or known to be unavailable (no PC list, or the read answered without one). */
     characterSettled: !review?.enabled || confirm.settled,
     applicable: TODO_ORDER.filter(key => key !== 'character' || !!review?.enabled),
-    unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
+    unreadWorks: counts ? Object.keys(counts.byCollection).length : shelf ? keptReleases.length : null,
     // A kept publication is display input only; loadShelf still refreshes the
     // shared store in the background, including when the status revision moved.
-    releasesReady: Boolean(savedShelf?.ready || (countsReady && collectionsReady && freshShelf?.ready && (!collectionRevision || freshShelf.revision === collectionRevision))),
+    releasesReady: Boolean(savedShelf?.ready || (releaseSnapshot.loaded && countsReady && collectionsReady && freshShelf?.ready && (!collectionRevision || freshShelf.revision === collectionRevision))),
     shelf,
-    releases: pick(releases, snapshot.releases),
+    releases: releases ?? (shelf ? keptReleases : null),
     releasesAt: offline || !releases ? snapshot.releases?.at ?? null : null,
     upcoming: pick(upcoming, snapshot.upcoming),
     upcomingAt: offline || !upcoming ? snapshot.upcoming?.at ?? null : null,

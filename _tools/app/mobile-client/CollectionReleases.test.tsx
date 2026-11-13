@@ -19,8 +19,8 @@ vi.mock('../src/shared/motion/viewSwap',async()=>{
 import {ApiError} from './transport';
 import {Collections} from './Collections';
 import {SCHEDULE_ABSENT_NOTE} from './CollectionReleases';
-import {loadShelf, resetReleaseStore} from './releaseStore';
-import {koreanReleases, releaseBoardEntry, releaseCaption, releaseCounts, releaseInboxItem} from './collectionReleasesModel';
+import {commitReleases, confirmReleaseEvents, loadShelf, releaseStore, resetReleaseStore} from './releaseStore';
+import {actionableReleases, countsForEvents, koreanReleases, passiveReleases, releaseBoardEntry, releaseCaption, releaseCounts, releaseInboxItem} from './collectionReleasesModel';
 import {groupInbox, koreanVolumeLine, releaseLine} from '../src/collections/releaseCaption';
 import {japanReleaseLedger, koreanReleaseLedger} from '../src/collections/releaseLedger';
 import type {CollectionSummary as SharedSummary} from '../src/library/types';
@@ -45,7 +45,7 @@ const initialWorks=():CollectionSummary[]=>[
 ];
 let works:CollectionSummary[];
 const event=(eventId:string,collectionId:string,provider:ReleaseEvent['provider'],kind:ReleaseEvent['kind'],volumeNumber:number,previousValue:string|null,currentValue:string|null):ReleaseEvent=>
-  ({eventId,collectionId,collectionName:initialWorks().find(work=>work.id===collectionId)!.name,provider,kind,volumeNumber,previousValue,currentValue,detectedAt:'2026-09-25T10:00:00Z',read:false,readAt:null});
+  ({eventId,collectionId,collectionName:initialWorks().find(work=>work.id===collectionId)!.name,provider,kind,volumeNumber,previousValue,currentValue,detectedAt:new Date().toISOString(),read:false,readAt:null});
 let events:ReleaseEvent[], offline:boolean, editsOffline:boolean, publication:string;
 const acks=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/releases/acknowledge').map(([, ,body])=>body as Record<string,unknown>);
 const releaseReads=()=>mocks.api.mock.calls.map(([path])=>String(path)).filter(path=>path.startsWith('/v1/collections/releases?'));
@@ -104,7 +104,7 @@ const notices=(name:string)=>screen.getByRole('region',{name}).querySelector('sp
 async function openReleases(backRef?:{current:(()=>boolean)|null}){
   const view=renderTab(backRef);
   selectManga();
-  fireEvent.click(await waitForEntry('4'));
+  fireEvent.click(await waitForEntry('3'));
   await workRow('밤의 도서관');
   return view;
 }
@@ -154,7 +154,7 @@ it('always shows the 신간 entry, with a count only while something is unread',
   expect(button.querySelector('.collection-shortcuts__count')).toBeNull();
   // Status changes count too: every read names all three kinds.
   expect(releaseReads().every(path=>new URLSearchParams(path.split('?')[1]).get('kinds')===KINDS.join(','))).toBe(true);
-  cleanup();
+  cleanup(); resetReleaseStore();
   events=[event('e2','sea','kakao','release_status_changed',2,'upcoming','released')];
   renderTab();
   selectManga();
@@ -174,7 +174,10 @@ it('lists watched works as ledger rows with their unowned Korean volumes, new on
   // Unread first, by date; fully owned and watch-off works are not rows.
   expect(workOrder()).toEqual(['밤의 도서관','바다의 시간']);
   // The watch-off work's unread event still has a place, as a plain notification.
-  expect(notices('조용한 숲')).toBe('2권 새로 나옴 · 10.1');
+  const passive = screen.getByRole('region',{name:'조용한 숲'});
+  expect(passive.textContent).toContain('2권 새로 나옴');
+  expect(within(passive).queryByText('NEW')).toBeNull();
+  expect(within(passive).queryByRole('button',{name:'조용한 숲 확인'})).toBeNull();
 });
 
 it('shows how far the Japanese edition is ahead, newly found volumes marked',async()=>{
@@ -189,27 +192,79 @@ it('shows how far the Japanese edition is ahead, newly found volumes marked',asy
   expect(workOrder()).toEqual(['가득 찬 서가','밤의 도서관']);
 });
 
+it('keeps passive events only for 30 days, without counting unknown works or retired providers',()=>{
+  const recent=events[3];
+  const samples=[recent,
+    {...recent,eventId:'edge',detectedAt:new Date(Date.now()-30*86400000).toISOString()},
+    {...recent,eventId:'old',detectedAt:new Date(Date.now()-31*86400000).toISOString()},
+    {...recent,eventId:'future',detectedAt:new Date(Date.now()+86400000).toISOString()},
+    {...recent,eventId:'invalid',detectedAt:'invalid'},
+    {...recent,eventId:'unknown',collectionId:'unknown'},
+    {...recent,eventId:'retired',provider:'aladin' as const}];
+  expect(passiveReleases(samples,works).map(item=>item.eventId)).toEqual(['e4','edge']);
+  expect(countsForEvents(actionableReleases([...events,...samples],works))).toEqual({unread:3,byCollection:{night:1,sea:1,full:1}});
+  expect(acks()).toEqual([]);
+});
+
+it('clears NEW immediately, keeps other buttons and row positions, and masks stale re-reads',async()=>{
+  await openReleases();
+  const original=mocks.api.getMockImplementation()!;
+  let finish!: (value: unknown)=>void;
+  mocks.api.mockImplementation((path,...args)=>path==='/v1/collections/releases/acknowledge'
+    ? new Promise(resolve=>{finish=resolve;}) : original(path,...args));
+  const before=workOrder(), reads=releaseReads().length;
+  const old=releaseStore.current;
+  fireEvent.click(screen.getByRole('button',{name:'밤의 도서관 확인'}));
+  expect(screen.queryByRole('button',{name:'밤의 도서관 확인'})).toBeNull();
+  expect((screen.getByRole('button',{name:'바다의 시간 확인'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(workOrder()).toEqual(before);
+  expect(ledger(await workRow('밤의 도서관')).state).not.toContain('NEW');
+  act(()=>commitReleases({...old,events:[...old.events,{...events[0],eventId:'later'}]}));
+  expect(releaseStore.current.events.map(item=>item.eventId)).toEqual(['e2','e3','e4','later']);
+  await act(async()=>finish({acknowledged:['e1'],alreadyRead:[],missing:[],revision:2}));
+  expect(acks()[0].eventIds).toEqual(['e1']);
+  expect(releaseReads()).toHaveLength(reads);
+  act(()=>commitReleases({...old,events:[...old.events,{...events[0],eventId:'later'}]}));
+  expect(releaseStore.current.events.map(item=>item.eventId)).toEqual(['e2','e3','e4','later']);
+});
+
+it('restores only failed confirmations while another work succeeds',async()=>{
+  await openReleases();
+  let fail!: (reason: Error)=>void;
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path,...args)=>path==='/v1/collections/releases/acknowledge' && (args[1] as {eventIds:string[]}).eventIds.includes('e1')
+    ? new Promise((_resolve,reject)=>{fail=reject;}) : original(path,...args));
+  let pending!: Promise<unknown>;
+  act(()=>{pending=confirmReleaseEvents([events[0]]).catch(error=>error);});
+  fireEvent.click(screen.getByRole('button',{name:'바다의 시간 확인'}));
+  await waitFor(()=>expect(acks()).toHaveLength(2));
+  await act(async()=>{fail(new Error('offline'));await pending;});
+  expect(screen.getByRole('button',{name:'밤의 도서관 확인'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
+});
+
 it('confirms one work with all three kinds and keeps its release information',async()=>{
   await openReleases();
   fireEvent.click(screen.getByRole('button',{name:'바다의 시간 확인'}));
   await waitFor(async()=>expect(ledger(await workRow('바다의 시간')).state).toBe('미보유 2'));
-  expect(acks()).toEqual([{version:1,operationId:expect.any(String),collectionId:'sea',kinds:KINDS}]);
+  expect(acks()).toEqual([{version:1,operationId:expect.any(String),eventIds:['e2']}]);
   expect(ledger(await workRow('바다의 시간')).chips).toEqual(['1권','2권']);
   expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'신간 닫기'}));
-  await waitForEntry('3');
+  await waitForEntry('2');
 });
 
-it('confirms everything with the per-Collection form, the information staying',async()=>{
+it('confirms only watched events by exact ID, the passive information staying',async()=>{
   await openReleases();
   fireEvent.click(screen.getByRole('button',{name:'모두 확인'}));
   const dialog=await screen.findByRole('dialog',{name:'모두 확인할까요?'});
   fireEvent.click(within(dialog).getByRole('button',{name:'모두 확인'}));
   await waitFor(()=>expect((screen.getByRole('button',{name:'모두 확인'}) as HTMLButtonElement).disabled).toBe(true));
-  expect(acks().map(body=>[body.collectionId,body.kinds])).toEqual([['full',KINDS],['night',KINDS],['quiet',KINDS],['sea',KINDS]]);
+  expect(acks()).toEqual([{version:1,operationId:expect.any(String),eventIds:['e1','e2','e3']}]);
+  expect(events.map(item=>item.eventId)).toEqual(['e4']);
   expect(ledger(await workRow('밤의 도서관')).chips).toEqual(['4권','5권 10.10','+1']);
   expect(screen.queryByText('NEW')).toBeNull();
-  expect(screen.queryByRole('region',{name:'조용한 숲'})).toBeNull();
+  expect(screen.getByRole('region',{name:'조용한 숲'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'신간 닫기'}));
   expect((await emptyEntry()).querySelector('.collection-shortcuts__count')).toBeNull();
 });
@@ -235,7 +290,7 @@ it('says the PC needs an update when no release schedule is published, still lis
   works=initialWorks().map(({releaseSchedule:_schedule,...work})=>work);
   renderTab();
   selectManga();
-  fireEvent.click(await waitForEntry('4'));
+  fireEvent.click(await waitForEntry('3'));
   expect((await screen.findByRole('note')).textContent).toBe(SCHEDULE_ABSENT_NOTE);
   await screen.findByRole('region',{name:'밤의 도서관'});
   expect(notices('밤의 도서관')).toBe('5권 새로 나옴 · 10.10');
@@ -248,7 +303,7 @@ it('offers a retry when the release information cannot be read',async()=>{
   await waitFor(()=>expect(releaseReads().length).toBeGreaterThan(0));
   offline=true;
   selectManga();
-  const button=await waitForEntry('4');
+  const button=await waitForEntry();
   fireEvent.click(button);
   const alert=await screen.findByRole('alert');
   expect(alert.textContent).toContain('연결을 확인한 뒤 다시 시도해 주세요.');
@@ -267,7 +322,7 @@ it('words the grid 신간 marker from the unread count and the schedule, in prio
   expect(releaseCaption(night,2,1,true,today)).toEqual({kind:'new',text:'신간 2–4권',date:'9.16'});
   // No owned count: only the newest volume is named.
   expect(releaseCaption(sea,1,null,true,today)).toEqual({kind:'new',text:'신간 2권',date:'9.20'});
-  expect(releaseCaption(quiet,1,0,false,today)).toEqual({kind:'new',text:'신간 1권',date:'9.1'});
+  expect(releaseCaption(quiet,1,0,false,today)).toBeNull();
   // Unread news the schedule cannot name (a MangaDex volume): the count.
   expect(releaseCaption(full,1,2,true,today)).toEqual({kind:'new',text:'신간 알림 1',date:null});
   // (b) Nothing unread, watched: Korean volumes out but not owned, as on the 신간 screen.
@@ -290,7 +345,7 @@ it('shows the 신간 marker after the year and stars in the manga grid, with not
   works=works.map(work=>({...work,year:2020,myScore:work.id==='night'?4.5:null}));
   renderTab();
   selectManga();
-  await waitForEntry('4');
+  await waitForEntry('3');
   const tile=(name:string)=>screen.getByText(name,{selector:'.collection-grid .collection-title'}).closest('button')!;
   await waitFor(()=>expect(tile('밤의 도서관').querySelector('.collection-release-line.is-new')?.textContent).toBe('신간 4권 · 9.16'));
   // One meta line: the year, the stars, then the marker (DOM reversed for the narrow-tile drop).
@@ -300,7 +355,7 @@ it('shows the 신간 marker after the year and stars in the manga grid, with not
   expect(meta.querySelector('.collection-card-meta__tail')!.textContent).toBe('4.5·신간 4권 · 9.16');
   expect(tile('밤의 도서관').querySelector('.collection-art .collection-release-badge,.collection-release-badge')).toBeNull();
   expect(tile('가득 찬 서가').querySelector('.collection-release-line')!.textContent).toBe('신간 알림 1');
-  cleanup();
+  cleanup(); resetReleaseStore();
   // Everything read: a watched work shows its unowned Korean volume out, or the next pre-registered one.
   events=[];
   works=works.map(work=>work.id==='sea'?{...work,ownedVolumes:[{editionIndex:0,count:2}],releaseSchedule:{kakao:kakao(0,[[1,'2026-08-01','released'],[2,'2026-09-20','released'],[3,'2026-11-02',null]]),mangadex:null}}:work);
@@ -324,7 +379,7 @@ it('reopens the 신간 screen from what it read, reading again only after the pu
   const reopen=async()=>{
     act(()=>{expect(backRef.current!()).toBe(true);});
     await waitFor(()=>expect(screen.queryByRole('row',{name:'밤의 도서관'})).toBeNull());
-    fireEvent.click(await waitForEntry('4'));
+    fireEvent.click(await waitForEntry('3'));
     return workRow('밤의 도서관');
   };
   const calls=mocks.api.mock.calls.length;
@@ -338,13 +393,12 @@ it('reopens the 신간 screen from what it read, reading again only after the pu
   await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/status')).toBe(true));
   act(()=>{expect(backRef.current!()).toBe(true);});
   publication='r2';
-  // Returning to the active tab refreshes the shortcut count. The full inbox snapshot
-  // is read when its overlay opens again.
+  // Returning refreshes the shared shelf and inbox for the shortcut and card counts.
   view.rerender(<Collections active={false} paused={false} backRef={backRef}/>);
   view.rerender(<Collections active paused={false} backRef={backRef}/>);
   await waitFor(()=>expect(gridReads()).toBeGreaterThan(grid));
-  expect([shelfReads(),eventReads()]).toEqual([1,1]);
-  fireEvent.click(await waitForEntry('4'));
+  await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([2,2]));
+  fireEvent.click(await waitForEntry('3'));
   await workRow('밤의 도서관');
   await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([2,2]));
 });
@@ -386,7 +440,7 @@ it('keeps Collections Back inside the tab when the screen was not opened from Ho
   const backRef:{current:(()=>boolean)|null}={current:null};
   await openReleases(backRef);
   act(()=>{expect(backRef.current!()).toBe(true);});
-  await waitForEntry('4');
+  await waitForEntry('3');
   expect(backRef.current!()).toBe(false);
 });
 

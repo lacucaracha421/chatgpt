@@ -34,8 +34,8 @@ import {WorkManage, type ManageSheet} from './CollectionWorkManage';
 import { lifecycleIntents, useCollectionTrash} from './CollectionTrash';
 import {lifecycleInFlight} from './collectionCommandOutbox';
 import {CollectionReleases} from './CollectionReleases';
-import {invalidateReleases, observePublication} from './releaseStore';
-import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
+import {invalidateReleases, observePublication, useReleaseSnapshot} from './releaseStore';
+import {actionableReleases, countsForEvents, localToday, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseRevision, type ReleaseCaption} from './collectionReleasesModel';
 import {normalizeReleaseCalendarReply, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
@@ -426,12 +426,12 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   // The large 작품 연결 panel (not yet connected) spans the width under the cover and info.
   const [bindHost,setBindHost]=useState<HTMLDivElement|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
-  const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
+  const [inboxOpen,setInboxOpen]=useState(false);
   const [kakaoReviewOpen,setKakaoReviewOpen]=useState(false);
   // The release list revision (moves when the PC publishes events or anything is confirmed). The
   // 신간 screen's last read lives in the shared release store (Home reads the same shelf).
   const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null);
-  const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
+  const takeReleaseCounts=useCallback((reply:unknown)=>{setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(directWork??null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail;entityRevision?:number;readAt?:number}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
@@ -634,10 +634,12 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     if(request.kind==='releases'){setSelected(null);setInboxOpen(true);}
     else {setInboxOpen(false);setOrder([request.id]);setSelected(request.id);}
   },[request]);
+  const releaseSnapshot=useReleaseSnapshot(active&&!paused&&tab==='manga'&&!inboxOpen&&releaseListRevision!==null,releaseListRevision,refresh);
   const unreadOf=(work:CollectionSummary)=>releases.byCollection[work.id]??0;
   // The 신간 screen reads owned counts and 신간 알림 through the edit outbox, so a queued change shows at once.
   const ownedOf=(work:CollectionSummary,edition:number)=>edits.visible(work.id,'ownedVolumes',{editionIndex:edition,count:work.ownedVolumes?.find(entry=>entry.editionIndex===edition)?.count??null}).value.count;
   const watching=(work:CollectionSummary)=>work.type==='manga'&&!!work.releaseWatch&&edits.visible(work.id,'releaseWatch',work.releaseWatch.enabled).value;
+  const releases=countsForEvents(actionableReleases(releaseSnapshot.events,releaseSnapshot.shelf?.works??[],watching));
   const today=localToday();
   const captionOf=(work:CollectionSummary)=>{
     const kakao=work.releaseSchedule?.kakao;
@@ -839,7 +841,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <KakaoReviewOverlay open={kakaoReviewOpen} active={live} onClose={()=>setKakaoReviewOpen(false)} queue={kakaoQueue} authority={edits.authority}
       cover={(work,revision)=><Artwork item={work} id={collectionCover(work)} revision={revision} active={live&&kakaoReviewOpen} label={work.name}/>}/>
     <Overlay open={inboxOpen} covered={!live||!!performer} title="신간" count={releases.unread} onClose={closeInbox}>
-    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
+    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} refresh={refresh} revision={releaseListRevision} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     </Overlay>
     <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={columns(avPerformerView(viewOf('av')).perRow)} order={performerOrder} authority={edits.authority} managementRequest={performerManagementRequest}

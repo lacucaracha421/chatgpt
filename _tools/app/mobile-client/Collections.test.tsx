@@ -1418,10 +1418,10 @@ describe('collection shortcut overlays',()=>{
   const serve=()=>mocks.api.mockImplementation(async(path:string)=>{
     if(path==='/v1/home/upcoming')return upcoming;
     if(path.endsWith('/status'))return {revision:'r1'};
-    if(path.startsWith('/v1/collections/releases'))return {revision:1,counts:{unread:3,collections:[{collectionId:item.id,unread:3}]},items:[],nextCursor:null,hasMore:false};
+    if(path.startsWith('/v1/collections/releases'))return {revision:1,counts:{unread:3,collections:[{collectionId:item.id,unread:3}]},items:[1,2,3].map(volumeNumber=>({eventId:`release-${volumeNumber}`,collectionId:item.id,collectionName:item.name,provider:'kakao',kind:'new_volume',volumeNumber,detectedAt:new Date().toISOString()})),nextCursor:null,hasMore:false};
     if(path.startsWith('/v1/collections?')){
       const type=new URL(path,'https://example.invalid').searchParams.get('type') as CollectionDetail['type'];
-      return {...page,totalCount:path.includes('showcase=true')?12:1,items:[{...item,type}]};
+      return {...page,totalCount:path.includes('showcase=true')?12:1,items:[{...item,type,releaseWatch:{enabled:true,available:true}}]};
     }
     return {revision:'r1',item};
   });
@@ -1431,6 +1431,7 @@ describe('collection shortcut overlays',()=>{
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
     pressTab(type);
     await screen.findByRole('button',{name:'쇼케이스'});
+    if(other) await within(shortcuts()).findByRole('button',{name:other});
     // 쇼케이스 · 정렬 · 내 별점 · 보기 are the same on every type, so they live in the fixed top bar.
     expect(topTools().closest('.ui-section-bar__trailing')).not.toBeNull();
     expect(within(topTools()).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['쇼케이스','캐릭터',...(other?[other]:[]),'보기']);
@@ -1452,8 +1453,8 @@ describe('collection shortcut overlays',()=>{
     const shortcut=await within(shortcuts()).findByRole('button',{name:other});expect(shortcut.querySelector('.is-new')?.textContent).toBe(other.endsWith('3')?'3':other.endsWith('2')?'2':'1');
     for(const button of buttons){expect(button.getAttribute('aria-pressed')).toBeNull();expect(button.getAttribute('data-segmented-active')).toBeNull();expect(button.querySelector('svg')).toBeTruthy();}
     expect(document.querySelector('.collection-showcase-fold,.collection-news-section')).toBeNull();
-    // Counts do not fetch the retired manga news preview.
-    expect(mocks.api.mock.calls.some(([path])=>path.startsWith('/v1/collections/releases?limit=100'))).toBe(false);
+    // Manga counts use the shared inbox so unwatched events cannot inflate them.
+    expect(mocks.api.mock.calls.some(([path])=>path.startsWith('/v1/collections/releases?limit=100'))).toBe(type==='만화');
   });
   it('carries the type shortcuts in the shade row, and the top bar tools open their sheets over the retained list', async()=>{
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
