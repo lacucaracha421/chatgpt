@@ -89,6 +89,7 @@
 .catalog-tags dd{margin:0;display:flex;flex-wrap:wrap;gap:6px}
 .catalog-tag{min-height:32px;padding:0 12px;border:0;border-radius:var(--radius-mark);background:var(--color-surface);color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .catalog-tag:active{background:var(--color-selected)}
+.catalog-tag.catalog-tag--excluded{color:var(--color-faint);text-decoration:line-through;}
 .catalog-tags .hint{margin:10px 0 0;font-size:12px}
 @media(prefers-reduced-motion:reduce){.catalog-banner svg{animation:none}}
 

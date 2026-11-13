@@ -11,6 +11,7 @@
 .manga-detail__tags dd { display: flex; flex-wrap: wrap; gap: var(--space-1); min-width: 0; margin: 0; }
 /* The approved tag chip is a shared button with a mark-sized, face-only surface. */
 .manga-detail .manga-detail__tag { min-height: var(--space-6); max-width: 100%; padding: var(--space-1) var(--space-2); background: var(--color-surface); border: 0; border-radius: var(--radius-mark); font-size: var(--type-meta); text-align: left; overflow-wrap: anywhere; }
+.manga-detail .manga-detail__tag--blocked { color: var(--color-faint); text-decoration: line-through; }
 .manga-detail__edition:focus-visible, .manga-detail__extra > summary:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 .manga-detail__editions > .ui-section-label, .manga-detail__extra > summary { margin: 0 0 var(--space-2); }
 .manga-detail__edition-row { display: flex; align-items: start; gap: var(--space-2); overflow-x: auto; padding: var(--space-1); }

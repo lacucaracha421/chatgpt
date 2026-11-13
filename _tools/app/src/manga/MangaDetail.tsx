@@ -2,7 +2,7 @@ import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { formatBytes } from "../assets/assetMetadata";
 import { useLayoutEffect, useRef } from "react";
-import type { CatalogWork, CatalogWorkDetail } from "../library/types";
+import type { CatalogBlockedTag, CatalogWork, CatalogWorkDetail } from "../library/types";
 import { displayDate } from "../shared/displayDate";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Button } from "../shared/ui/Button";
@@ -33,6 +33,8 @@ type Props = {
   reading: boolean;
   onBookmark: (bookmarked: boolean) => void;
   onTagSearch: (query: string) => void;
+  blockedTags?: ReadonlySet<string>;
+  onTagBlock?: (tag: CatalogBlockedTag, blocked: boolean) => void;
   onRead: () => void;
   editionCount: number;
   editions: MangaDetailEdition[];
@@ -44,7 +46,7 @@ type Props = {
 };
 
 /** Shared detail contents for the PC overlay and the tablet's sheet. */
-export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onBookmark, onTagSearch, onRead,
+export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onBookmark, onTagSearch, blockedTags, onTagBlock, onRead,
   editionCount, editions, editionsLoading, editionsError, hasMoreEditions, onEdition, onMoreEditions }: Props) {
   const stripWheel = useHorizontalWheel();
   const extraRef = useRef<HTMLDetailsElement>(null);
@@ -78,8 +80,15 @@ export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onB
         <dt>{namespaceLabels[group.namespace] ?? group.namespace}</dt>
         <dd>{group.values.map(value => {
           const query = `${group.namespace}:${value}`;
+          const blocked = blockedTags?.has(query) ?? false;
           const label = (group.labels?.[value] ?? (group.namespace === "language" ? languageLabels[value] : undefined) ?? value).replace(/_/g, " ");
-          return <Button className="manga-detail__tag" key={value} size="sm" variant="ghost" type="button" aria-description={query} aria-label={`${query} 검색`} onClick={() => onTagSearch(query)}>{label}</Button>;
+          return <Button className={`manga-detail__tag${blocked ? " manga-detail__tag--blocked" : ""}`} key={value} size="sm" variant="ghost" type="button"
+            aria-description={query} aria-label={`${query} 검색${blocked ? " (차단됨)" : ""}`} onClick={() => onTagSearch(query)}
+            onContextMenu={(event) => {
+              if (group.namespace === "language" || !onTagBlock) return;
+              event.preventDefault();
+              onTagBlock({ namespace: group.namespace, value }, !blocked);
+            }}>{label}</Button>;
         })}</dd>
       </div>)}
     </dl>}

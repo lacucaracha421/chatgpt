@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { CatalogGroupedSearchEvent, CatalogSearchQuery, CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
+import type { CatalogGroupedSearchEvent, CatalogSearchQuery, CatalogStatus, CatalogVisibilityPolicy, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
 import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
@@ -50,6 +50,82 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("blocks and unblocks a detail tag, refreshing quietly without closing the work", async () => {
+    const gateway = createGateway(true);
+    const tag = { namespace: "character", value: "teitoku" };
+    const save = deferred<CatalogVisibilityPolicy>();
+    vi.mocked(gateway.setCatalogTagBlocked).mockReturnValueOnce(save.promise)
+      .mockResolvedValueOnce({ hiddenCategories: [], blockedTags: [] });
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+    const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+    const button = within(panel).getByRole("button", { name: "character:teitoku 검색" });
+    fireEvent.contextMenu(button);
+    fireEvent.contextMenu(button);
+    expect(gateway.setCatalogTagBlocked).toHaveBeenCalledExactlyOnceWith(tag, true);
+    expect(button).toHaveAccessibleName("character:teitoku 검색");
+    const refresh = deferred<void>();
+    let emit!: (event: CatalogGroupedSearchEvent) => void;
+    vi.mocked(gateway.searchCatalogGroups).mockImplementationOnce((_query, onEvent) => { emit = onEvent; return refresh.promise; });
+    await act(async () => save.resolve({ hiddenCategories: [], blockedTags: [tag] }));
+    expect(button).toHaveAccessibleName("character:teitoku 검색 (차단됨)");
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(2);
+    expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
+    expect(panel).toBeVisible();
+    expect(within(panel).getByRole("heading", { name: work.title })).toBeVisible();
+    await act(async () => {
+      emit({ type: "page", page: { works: [], page: 0, pageSize: 48 } });
+      emit({ type: "end", cancelled: false });
+      refresh.resolve();
+    });
+    expect(screen.queryByRole("button", { name: `${work.title} 상세 보기` })).not.toBeInTheDocument();
+    expect(panel).toBeVisible();
+    fireEvent.contextMenu(button);
+    await waitFor(() => expect(button).toHaveAccessibleName("character:teitoku 검색"));
+    expect(gateway.setCatalogTagBlocked).toHaveBeenLastCalledWith(tag, false);
+    expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    expect(panel).toBeVisible();
+  });
+
+  it("leaves language tags alone and preserves marked tags when saving fails", async () => {
+    const gateway = createGateway(true);
+    const tag = { namespace: "character", value: "teitoku" };
+    vi.mocked(gateway.getCatalogVisibilityPolicy).mockResolvedValue({ hiddenCategories: [], blockedTags: [tag] });
+    vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail,
+      tagGroups: [...detail.tagGroups, { namespace: "language", values: ["korean"] }] });
+    vi.mocked(gateway.setCatalogTagBlocked).mockRejectedValue(new Error("태그 차단 설정을 저장하지 못했습니다."));
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+    const language = await screen.findByRole("button", { name: "language:korean 검색" });
+    expect(fireEvent.contextMenu(language)).toBe(true);
+    expect(gateway.setCatalogTagBlocked).not.toHaveBeenCalled();
+    const blocked = screen.getByRole("button", { name: "character:teitoku 검색 (차단됨)" });
+    fireEvent.contextMenu(blocked);
+    expect(await screen.findByText("태그 차단 설정을 저장하지 못했습니다.")).toBeVisible();
+    expect(blocked).toHaveAccessibleName("character:teitoku 검색 (차단됨)");
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
+    fireEvent.contextMenu(blocked);
+    await waitFor(() => expect(gateway.setCatalogTagBlocked).toHaveBeenCalledTimes(2));
+  });
+
+  it("refetches policy when opening details and ignores an older mount response", async () => {
+    const gateway = createGateway(true);
+    const old = deferred<CatalogVisibilityPolicy>();
+    const tag = { namespace: "character", value: "teitoku" };
+    vi.mocked(gateway.getCatalogVisibilityPolicy).mockReturnValueOnce(old.promise)
+      .mockResolvedValueOnce({ hiddenCategories: [], blockedTags: [tag] })
+      .mockResolvedValueOnce({ hiddenCategories: [], blockedTags: [] });
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+    const blocked = await screen.findByRole("button", { name: "character:teitoku 검색 (차단됨)" });
+    await act(async () => old.resolve({ hiddenCategories: [], blockedTags: [] }));
+    expect(blocked).toHaveAccessibleName("character:teitoku 검색 (차단됨)");
+    await userEvent.click(screen.getByRole("button", { name: "상세 닫기" }));
+    await userEvent.click(screen.getByRole("button", { name: `${work.title} 상세 보기` }));
+    expect(await screen.findByRole("button", { name: "character:teitoku 검색" })).toBeVisible();
+    expect(gateway.getCatalogVisibilityPolicy).toHaveBeenCalledTimes(3);
+  });
+
   it("defaults bookmarks to newest-added, offers both orders and remembers the device choice", async () => {
     localStorage.clear();
     onTestFinished(() => localStorage.clear());

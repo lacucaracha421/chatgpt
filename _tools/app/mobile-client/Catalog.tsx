@@ -1,4 +1,5 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import {useLongPress} from '../src/shared/useLongPress';
 import {displayCount} from '../src/shared/displayDate';
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
@@ -38,7 +39,7 @@ import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './Catalo
 import {useBookmarks,usePendingRetry} from './useBookmarks';
 import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
 import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,supportsDisplayPreferences,supportsSuggestions,supportsRepresentativeWrite,catalogRepresentativeBody,CATALOG_REPRESENTATIVE_PATH,type CatalogRepresentativeReply,catalogSuggestionPath,suggestionQuery,utf8Bytes,SUGGESTION_LIMIT,SUGGESTION_TEXT_MAX_BYTES,type CatalogSuggestion,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
-import {DEFAULT_CATALOG_PREFERENCES,clearCatalogPreferences,readCatalogPreferences,writeCatalogPreferences,type CatalogPreferences} from './catalogPreferences';
+import {DEFAULT_CATALOG_PREFERENCES,EXCLUDED_TAG_MAX,catalogPreferencesFit,validExcludedTag,clearCatalogPreferences,readCatalogPreferences,writeCatalogPreferences,type CatalogPreferences} from './catalogPreferences';
 import {BOOKMARK_SORT_OPTIONS,readBookmarkSort,writeBookmarkSort,type BookmarkSort} from '../src/manga/bookmarkSort';
 import './Catalog.css';
 import {CatalogCard as ArrivingCard} from './CatalogCard';
@@ -86,6 +87,7 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
   const [countRetry,setCountRetry]=useState(0);
   const [selected,setSelected]=useState<CatalogItem|null>(null),[detail,setDetail]=useState<CatalogDetail|null>(null);
   const selectedKey=selected?`${selected.provider}:${selected.providerWorkId}`:null;
+  const [heldDetail,setHeldDetail]=useState<{context:string;publicationRevision:string;filterKey:string}|null>(null);
   const [detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [editions,setEditions]=useState<CatalogEditions|null>(null),[editionCursor,setEditionCursor]=useState<string|null>(null),[editionError,setEditionError]=useState('');
   const privacy = useTabletCatalogMasked();
@@ -179,6 +181,28 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
   // publication. A work the user just excluded is rejected by the server for this
   // filter, so a cache entry written under a wider filter must not be served for it.
   const filterKey=JSON.stringify([query.categories,query.excludedTags]);
+  // A device exclusion refreshes the list while the open work keeps its original read context.
+  const detailContext=heldDetail?.context??page?.context;
+  const detailRevision=heldDetail?.publicationRevision??page?.publicationRevision;
+  const detailFilterKey=heldDetail?.filterKey??filterKey;
+  const tagPress=useLongPress({enabled:capability==='supported',onLongPress:({target})=>{
+    const button=target instanceof Element?target.closest<HTMLElement>('[data-tag-namespace]'):null;
+    if(!button)return;
+    const tag={namespace:button.dataset.tagNamespace!,value:button.dataset.tagValue!};
+    if(tag.namespace==='language')return;
+    const excluded=preferences.excludedTags.some(item=>item.namespace===tag.namespace&&item.value===tag.value);
+    if(!validExcludedTag(tag)){setReaderError('이 태그는 회피 태그로 저장할 수 없습니다.');return;}
+    const next={...preferences,excludedTags:excluded?preferences.excludedTags.filter(item=>item.namespace!==tag.namespace||item.value!==tag.value):[...preferences.excludedTags,tag]};
+    if(!excluded&&(next.excludedTags.length>EXCLUDED_TAG_MAX||!catalogPreferencesFit(next))){setReaderError('회피 태그가 너무 많습니다.');return;}
+    if(!detailContext||!detailRevision)return;
+    setHeldDetail({context:detailContext,publicationRevision:detailRevision,filterKey:detailFilterKey});
+    setReaderError('');
+    setPreferences(next);writeCatalogPreferences(endpoint,next);
+    for(const controller of prefetches.current.values())controller.abort();
+    prefetches.current.clear();pageCache.current.clear();
+    resetMore();scroll.current=0;
+    setQuery(current=>({...current,categories:next.categories,excludedTags:next.excludedTags}));
+  }});
   const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null),readerPrefetch=useRef<ReaderPrefetch|null>(null);
   // A setting this server cannot honor must not become an unfiltered list.
   const preferencesBlocked=activePreferences&&capability==='unsupported';
@@ -305,36 +329,36 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
   // Back from a work shows the list where it was, before the first paint.
   useLayoutEffect(()=>{if(!selected&&list.current)list.current.scrollTop=scroll.current;},[selected]);
   useEffect(()=>{
-    if(!selected||!page?.context||!page.publicationRevision||!active||paused)return;
-    const cacheKey=`${page.publicationRevision}:${filterKey}:${selected.provider}:${selected.providerWorkId}`,cached=lruGet(detailCache.current,cacheKey);
+    if(!selected||!detailContext||!detailRevision||!active||paused)return;
+    const cacheKey=`${detailRevision}:${detailFilterKey}:${selected.provider}:${selected.providerWorkId}`,cached=lruGet(detailCache.current,cacheKey);
     if(cached){setDetail(cached);setDetailError('');return;}
     const controller=new AbortController();setDetail(null);setDetailError('');
-    void api<{publicationRevision:string;item:CatalogDetail&{bookmarkRevision?:number}}>(catalogDetailPath(selected,page.context),controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(detailCache.current,cacheKey,result.item,48);setDetail(result.item);if(typeof result.item.bookmarkRevision==='number')bookmarks.observe(result.item.provider,result.item.providerWorkId,result.item.bookmarkRevision,result.item.bookmarked);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(catalogError(reason)||errorText(reason));});
+    void api<{publicationRevision:string;item:CatalogDetail&{bookmarkRevision?:number}}>(catalogDetailPath(selected,detailContext),controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===detailRevision){lruSet(detailCache.current,cacheKey,result.item,48);setDetail(result.item);if(typeof result.item.bookmarkRevision==='number')bookmarks.observe(result.item.provider,result.item.providerWorkId,result.item.bookmarkRevision,result.item.bookmarked);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(catalogError(reason)||errorText(reason));});
     return()=>controller.abort();
   // Keyed by the work's identity, not the object: a bookmark toggle replaces `selected` with a
   // copy carrying the new mark, and that must not re-run the detail load under the open page.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[selectedKey,page?.context,page?.publicationRevision,active,paused,detailRefresh,filterKey]);
+  },[selectedKey,detailContext,detailRevision,active,paused,detailRefresh,detailFilterKey]);
   useEffect(()=>{
-    if(!selected||!page?.context||!page.publicationRevision||!active||paused)return;
-    const requestPath=catalogEditionsPath(selected.groupId,page.context,editionCursor),cacheKey=`${page.publicationRevision}:${filterKey}:${requestPath}`,cached=lruGet(editionCache.current,cacheKey);
+    if(!selected||!detailContext||!detailRevision||!active||paused)return;
+    const requestPath=catalogEditionsPath(selected.groupId,detailContext,editionCursor),cacheKey=`${detailRevision}:${detailFilterKey}:${requestPath}`,cached=lruGet(editionCache.current,cacheKey);
     if(cached){setEditions(cached);setEditionError('');return;}
     const controller=new AbortController();setEditionError('');
-    void api<CatalogEditions>(requestPath,controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(editionCache.current,cacheKey,result,48);setEditions(result);}}).catch(reason=>{if(!controller.signal.aborted)setEditionError(catalogError(reason)||errorText(reason));});
+    void api<CatalogEditions>(requestPath,controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===detailRevision){lruSet(editionCache.current,cacheKey,result,48);setEditions(result);}}).catch(reason=>{if(!controller.signal.aborted)setEditionError(catalogError(reason)||errorText(reason));});
     return()=>controller.abort();
-  },[selected?.groupId,page?.context,page?.publicationRevision,editionCursor,active,paused,detailRefresh,filterKey]);
+  },[selected?.groupId,detailContext,detailRevision,editionCursor,active,paused,detailRefresh,detailFilterKey]);
   useEffect(()=>{
     // The detail page is already open, so the reader manifest can be fetched while the
     // user decides. This is manifest-only: page bytes stay demand-driven. It waits for
     // the settled list identity so a request is not issued for a context that the
     // capability decision is about to invalidate.
-    if(privacy||!active||paused||!listReady||!selected||!detail||!page?.context||!page.publicationRevision||reader)return;
-    const owner=readerOwner,revision=page.publicationRevision,cacheKey=readerCacheKey(selected,revision,filterKey);
+    if(privacy||!active||paused||!listReady||!selected||!detail||!detailContext||!detailRevision||reader)return;
+    const owner=readerOwner,revision=detailRevision,cacheKey=readerCacheKey(selected,revision,detailFilterKey);
     if(readerPrefetch.current?.cacheKey===cacheKey&&readerPrefetch.current.owner===owner)return;
     readerPrefetch.current?.controller.abort();readerPrefetch.current=null;
     if(lruGet(readerCache.current,cacheKey))return;
     const controller=new AbortController();
-    const promise=api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal);
+    const promise=api<CatalogReaderManifest>(catalogReaderPath(selected,detailContext),controller.signal);
     readerPrefetch.current={cacheKey,owner,controller,promise};
     // A transport that ignores abort must still be unable to publish stale work.
     void promise.then(result=>{
@@ -343,13 +367,13 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
     }).catch(()=>{/* Background work stays invisible; the 읽기 action is the retry path. */}).finally(()=>{if(readerPrefetch.current?.controller===controller)readerPrefetch.current=null;});
   // Identity keys, so a bookmark toggle (a new `selected`/`detail` copy) does not re-request it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[privacy,active,paused,listReady,selectedKey,!!detail,page?.context,page?.publicationRevision,reader,readerOwner,filterKey]);
+  },[privacy,active,paused,listReady,selectedKey,!!detail,detailContext,detailRevision,reader,readerOwner,detailFilterKey]);
 
   function closeReader(){readerRequest.current?.abort();readerRequest.current=null;setReaderBusy(false);setReader(null);}
   useEffect(()=>{if(privacy){closeReader();readerPrefetch.current?.controller.abort();readerPrefetch.current=null;}},[privacy]);
   const loadReader=(force=false)=>{
     if(!force)beginScreenTiming('catalog.reader','open');
-    if(privacy||!active||paused||!selected||!page?.context||!page.publicationRevision)return;const owner=readerOwner;const cacheKey=readerCacheKey(selected,page.publicationRevision,filterKey);
+    if(privacy||!active||paused||!selected||!detailContext||!detailRevision)return;const owner=readerOwner;const cacheKey=readerCacheKey(selected,detailRevision,detailFilterKey);
     if(!force){const cached=lruGet(readerCache.current,cacheKey);if(cached){setReader(cached);setReaderError('');return;}}
     readerRequest.current?.abort();const controller=new AbortController();readerRequest.current=controller;setReaderBusy(true);setReaderError('');
     // An explicit Read adopts the request that is already in flight for this exact
@@ -359,9 +383,9 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
     // A forced refresh must not adopt the background request, and the background request
     // must not publish itself after the user asked for fresh data.
     if(running&&!reusable){running.controller.abort();readerPrefetch.current=null;}
-    const request=reusable?reusable.promise:api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal);
+    const request=reusable?reusable.promise:api<CatalogReaderManifest>(catalogReaderPath(selected,detailContext),controller.signal);
     void request.then(result=>{
-      if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==page.publicationRevision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
+      if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==detailRevision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
     }).catch(reason=>{if(!controller.signal.aborted)setReaderError(catalogError(reason)||errorText(reason));}).finally(()=>{if(readerRequest.current===controller){readerRequest.current=null;setReaderBusy(false);}});
   };
   function visibleEditionBookmark(item:CatalogEditions['items'][number]){
@@ -484,7 +508,7 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
     }catch(reason){setRepresentativeError({message:catalogError(reason)||errorText(reason)||'대표 판본을 바꾸지 못했습니다.',selected:selectedId});}
     finally{setRepresentativeSaving(false);}
   }
-  function open(item:CatalogItem){scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setRepresentativeError(null);setReader(null);setReaderError('');}
+  function open(item:CatalogItem){setHeldDetail(null);scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setRepresentativeError(null);setReader(null);setReaderError('');}
   function refreshBookmarks(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();committed.current='';setRefresh(n=>n+1);if(selected)setDetailRefresh(n=>n+1);}
   function reload(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();readerCache.current.clear();committed.current='';resetMore();setSelected(null);setReader(null);setRefresh(n=>n+1);}
   // The endpoint identifies the server whose filters these are, so a different
@@ -590,7 +614,11 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
         <Button variant="quiet" aria-pressed={editions.selectedProviderWorkId===detail.providerWorkId} disabled={representativeSaving||editions.selectedProviderWorkId===detail.providerWorkId} onClick={()=>void chooseRepresentative(detail.providerWorkId)}><BusyLabel busy={representativeSaving} idle="대표로 지정">저장 중…</BusyLabel></Button>
         <Button variant="quiet" aria-pressed={editions.selectedProviderWorkId===null} disabled={representativeSaving||editions.selectedProviderWorkId===null} onClick={()=>void chooseRepresentative(null)}>자동 선택</Button>
       </>:undefined}/>{(representativeError||editions?.representativePending)&&<p className="catalog-representative-state" role={representativeError?'alert':'status'}>{representativeError?<>{representativeError.message}<Button variant="quiet" onClick={()=>void chooseRepresentative(representativeError.selected)}>다시 시도</Button></>:'PC 반영 대기'}</p>}{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:<div ref={editionWheel} className="catalog-edition-row">{editions?.items.map(item=>{const state=visibleEditionBookmark(item);return <button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><div className="catalog-cover"><CatalogCover item={{...selected,...item}} revision={revision} active={active&&!paused&&!reader}/></div><span>{catalogDisplayTitle(item.title)}</span><small className="catalog-edition-meta" aria-label={`${item.fileCount}p${editions.selectedProviderWorkId===item.providerWorkId?' · 대표':''}${state.desired?' · 북마크':''}${state.pending?' · 저장 대기':''}`}><span className="numeric" aria-hidden="true">{item.fileCount}p</span>{editions.selectedProviderWorkId===item.providerWorkId&&<span className="catalog-edition-representative" aria-hidden="true">대표</span>}<BookmarkSolidIcon aria-hidden="true" className={`catalog-edition-mark${state.desired?' is-on':''}${state.pending?' is-pending':''}`}/></small></button>;})}</div>}{(editionCursor||editions?.nextCursor)&&<div className="catalog-edition-paging">{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</div>}</section>
-      {detail&&detail.tagGroups.length>0&&<section className="catalog-tags" aria-label="태그"><SectionLabel as="h3" title="태그"/><dl>{detail.tagGroups.map(group=><div key={group.namespace}><dt>{group.namespace}</dt><dd>{group.values.map(value=><button key={value} className="catalog-tag" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);search(text);}}>{group.labels?.[value]??value}</button>)}</dd></div>)}</dl><p className="hint">태그를 누르면 같은 태그로 검색합니다.</p></section>}
+      {detail&&detail.tagGroups.length>0&&<section className="catalog-tags" aria-label="태그" {...tagPress.bind}><SectionLabel as="h3" title="태그"/><dl>{detail.tagGroups.map(group=><div key={group.namespace}><dt>{group.namespace}</dt><dd>{group.values.map(value=>{
+        const excluded=group.namespace!=='language'&&preferences.excludedTags.some(tag=>tag.namespace===group.namespace&&tag.value===value);
+        const label=group.labels?.[value]??value;
+        return <button key={value} className={`catalog-tag${excluded?' catalog-tag--excluded':''}`} data-tag-namespace={group.namespace} data-tag-value={value} aria-label={excluded?`${label} (회피 중)`:undefined} onClick={tagPress.click(()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);search(text);})}>{label}</button>;
+      })}</dd></div>)}</dl><p className="hint">태그를 누르면 같은 태그로 검색하고, 길게 누르면 이 기기에서 숨깁니다.</p></section>}
     </div>}
     {!privacy&&reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy} bookmark={(()=>{const item=detail??selected;const state=bookmarks.stateFor(item.provider,item.providerWorkId,item.bookmarked,'bookmarkRevision' in item?item.bookmarkRevision:undefined);return {desired:state.desired,pending:state.pending,disabled:!authority&&!state.pending,failure:bookmarks.failure,toggle:()=>{const desired=!state.desired;bookmarks.toggle(item.provider,item.providerWorkId,desired);applyBookmarkPresentation(item.provider,item.providerWorkId,desired);}};})()}/>}
     {sheet==='view'&&<BottomSheet title="보기" onClose={()=>setSheet(null)}><div className="ui-view-options__content">

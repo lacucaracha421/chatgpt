@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CatalogWorkDetail } from "../library/types";
@@ -16,6 +16,23 @@ const detail: CatalogWorkDetail = {
 };
 const props = { detail, bookmarkPending: false, reading: false, editionCount: 0, editions: [], editionsLoading: false,
   editionsError: false, hasMoreEditions: false, onBookmark: vi.fn(), onRead: vi.fn(), onTagSearch: vi.fn(), onEdition: vi.fn(), onMoreEditions: vi.fn() };
+
+it("toggles tags by right click while preserving left-click search and the language context menu", async () => {
+  const onTagBlock = vi.fn();
+  const onTagSearch = vi.fn();
+  const { rerender } = render(<MangaDetail {...props} blockedTags={new Set()} onTagBlock={onTagBlock} onTagSearch={onTagSearch} />);
+  expect(fireEvent.contextMenu(screen.getByRole("button", { name: "character:teitoku 검색" }))).toBe(false);
+  expect(onTagBlock).toHaveBeenLastCalledWith({ namespace: "character", value: "teitoku" }, true);
+  rerender(<MangaDetail {...props} blockedTags={new Set(["character:teitoku"])} onTagBlock={onTagBlock} onTagSearch={onTagSearch} />);
+  const blocked = screen.getByRole("button", { name: "character:teitoku 검색 (차단됨)" });
+  fireEvent.contextMenu(blocked);
+  expect(onTagBlock).toHaveBeenLastCalledWith({ namespace: "character", value: "teitoku" }, false);
+  await userEvent.click(blocked);
+  expect(onTagSearch).toHaveBeenCalledWith("character:teitoku");
+  onTagBlock.mockClear();
+  expect(fireEvent.contextMenu(screen.getByRole("button", { name: "language:korean 검색" }))).toBe(true);
+  expect(onTagBlock).not.toHaveBeenCalled();
+});
 
 it("shows compact metadata, grouped tag faces and collapsed extra information, without a dialog or first pages", async () => {
   const onTagSearch = vi.fn();

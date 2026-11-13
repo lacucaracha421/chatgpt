@@ -16,6 +16,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import { nativeMediaUrl } from "../assets/mediaUrl";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import type {
+  CatalogBlockedTag,
   CatalogLanguage,
   CatalogGroupedPage,
   CatalogGroupedSearchEvent,
@@ -157,6 +158,9 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const detailRequest = useRef(0);
   const readRequest = useRef(0);
   const bookmarkRequests = useRef(new Set<string>());
+  const [blockedTags, setBlockedTags] = useState<ReadonlySet<string>>(() => new Set());
+  const policyRequest = useRef(0);
+  const tagBlockRequests = useRef(new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
   const latestUpdate = status?.installed ? latestCatalogUpdate(status) : null;
@@ -184,8 +188,41 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       detailRequest.current += 1;
       editionRequest.current += 1;
       readRequest.current += 1;
+      policyRequest.current += 1;
     };
   }, [gateway]);
+
+  const loadVisibilityPolicy = useCallback(async () => {
+    const request = ++policyRequest.current;
+    try {
+      const policy = await gateway.getCatalogVisibilityPolicy();
+      if (mounted.current && request === policyRequest.current) {
+        setBlockedTags(new Set(policy.blockedTags.map(tag => `${tag.namespace}:${tag.value}`)));
+      }
+    } catch {
+      // Keep the last known marks; the tag still blocks or unblocks from them.
+    }
+  }, [gateway]);
+
+  useEffect(() => { void loadVisibilityPolicy(); }, [loadVisibilityPolicy]);
+
+  async function blockTag(tag: CatalogBlockedTag, blocked: boolean) {
+    const key = `${tag.namespace}:${tag.value}`;
+    if (tag.namespace === "language" || tagBlockRequests.current.has(key)) return;
+    tagBlockRequests.current.add(key);
+    policyRequest.current += 1;
+    try {
+      const policy = await gateway.setCatalogTagBlocked(tag, blocked);
+      if (!mounted.current) return;
+      policyRequest.current += 1;
+      setBlockedTags(new Set(policy.blockedTags.map(tag => `${tag.namespace}:${tag.value}`)));
+      void refreshSearch.current(true);
+    } catch (error) {
+      if (mounted.current) setMessage(commandErrorMessage(error, "태그 차단 설정을 저장하지 못했습니다."));
+    } finally {
+      tagBlockRequests.current.delete(key);
+    }
+  }
 
   function applyCount(event: Extract<CatalogGroupedSearchEvent, { type: "count" | "countError" }>, view: CatalogView) {
     if (event.type === "countError") { setTotalCount(null); setCountError(event.message); return; }
@@ -457,6 +494,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 
   /** Commit the detail and its edition row together, retaining the previous body meanwhile. */
   async function openDetail(work: CatalogWork, group: CatalogGroupedWork | null = null, opener?: HTMLButtonElement) {
+    void loadVisibilityPolicy();
     const request = ++detailRequest.current;
     editionRequest.current += 1;
     readRequest.current += 1;
@@ -830,6 +868,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
         {detail && <div inert={Boolean(openingWorkKey) || !detailOpen} aria-busy={Boolean(openingWorkKey)}>
           <MangaDetail detail={{ ...detail, thumbnailUrl: detail.thumbnailUrl ? nativeMediaUrl(detail.thumbnailUrl) : null }} privacyMode={privacyMode}
             bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(detail))} reading={reading}
+            blockedTags={blockedTags} onTagBlock={(tag, blocked) => void blockTag(tag, blocked)}
             onBookmark={(bookmarked) => void bookmarkDetail(bookmarked)} onTagSearch={searchTag} onRead={() => void readDetail()}
             editionCount={detailGroup?.versionCount ?? 0} editions={(detailEditions?.works ?? []).map(edition => ({ ...edition,
               thumbnailUrl: edition.thumbnailUrl ? nativeMediaUrl(edition.thumbnailUrl) : null, language: editionQuery.current?.language ?? language }))}

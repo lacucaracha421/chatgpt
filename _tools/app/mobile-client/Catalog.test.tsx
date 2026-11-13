@@ -7,6 +7,8 @@ import {Catalog} from './Catalog';
 import {forgetCatalogCovers} from './CatalogCover';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
 import * as catalogMedia from './catalogMedia';
+import {LONG_PRESS_MS} from '../src/shared/useLongPress';
+import {readCatalogPreferences} from './catalogPreferences';
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
 function catalogSearch(role:'textbox'|'combobox'){if(!screen.queryByRole(role,{name:'카탈로그 검색'}))openScreenSearch();return screen.getByRole(role,{name:'카탈로그 검색'});}
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),decode:vi.fn()}));
@@ -38,6 +40,80 @@ function shownSort(){const sheet=openView();const radio=within(within(sheet).get
 /** Whether the 보기 sheet's sort rows can be chosen. */
 function sortEnabled(){const sheet=openView();const enabled=within(within(sheet).getByRole('radiogroup',{name:'카탈로그 정렬'})).getAllByRole('radio').every(item=>!(item as HTMLButtonElement).disabled);closeView();return enabled;}
 afterEach(()=>{cleanup();forgetCatalogCovers();vi.unstubAllGlobals();});
+describe('detail tag device exclusions',()=>{
+  async function hold(tag:HTMLElement){
+    vi.useFakeTimers();
+    try{
+      fireEvent.pointerDown(tag,{pointerId:1,pointerType:'touch',clientX:10,clientY:10});
+      await act(async()=>{vi.advanceTimersByTime(LONG_PRESS_MS);});
+      fireEvent.pointerUp(tag,{pointerId:1,pointerType:'touch'});
+    }finally{vi.useRealTimers();}
+    fireEvent.click(tag);
+  }
+  async function openDetail(){
+    const backRef={current:null as (()=>boolean)|null};
+    render(<Catalog active paused={false} endpoint="https://tablet.invalid" backRef={backRef}/>);
+    fireEvent.click(await screen.findByText(item.title));
+    await screen.findByRole('region',{name:'태그'});
+    return backRef;
+  }
+  it('adds and removes a device exclusion in subsequent requests without hiding the open detail',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,...args:unknown[])=>{
+      if(path.includes('/search?')&&searchParams(path).has('excludedTags'))return {...page,items:[],context:'excluded-context'};
+      return original(path,...args);
+    });
+    const backRef=await openDetail();
+    const tag=screen.getByRole('button',{name:'작가'});
+    const detailRequests=()=>mocks.api.mock.calls.filter(([path])=>path.includes('/works/')).length;
+    const requests=detailRequests(),missing:string[]=[];
+    const watch=new MutationObserver(()=>{
+      if(!screen.queryByRole('heading',{name:item.title})||!screen.queryByRole('button',{name:/^작가/}))missing.push('detail disappeared');
+    });
+    watch.observe(document.body,{subtree:true,childList:true});
+    try{
+      await hold(tag);
+      await waitFor(()=>expect(JSON.parse(searchParams(lastSearch()).get('excludedTags')!)).toEqual([{namespace:'artist',value:'작가'}]));
+      expect(readCatalogPreferences('https://tablet.invalid').excludedTags).toEqual([{namespace:'artist',value:'작가'}]);
+      expect(screen.getByRole('button',{name:'작가 (회피 중)'})).toBe(tag);
+      await hold(tag);
+      await waitFor(()=>expect(searchParams(lastSearch()).has('excludedTags')).toBe(false));
+      expect(readCatalogPreferences('https://tablet.invalid').excludedTags).toEqual([]);
+      expect(screen.getByRole('button',{name:'작가'})).toBe(tag);
+      expect(detailRequests()).toBe(requests);
+      expect(missing).toEqual([]);
+    }finally{watch.disconnect();}
+    await hold(tag);
+    act(()=>{backRef.current?.();});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));
+    expect(await screen.findByRole('button',{name:'artist:작가 회피 해제'})).toBeTruthy();
+  });
+  it('swallows the click after a hold and keeps ordinary tag search working',async()=>{
+    await openDetail();
+    const tag=screen.getByRole('button',{name:'작가'});
+    await hold(tag);
+    await waitFor(()=>expect(searchParams(lastSearch()).has('excludedTags')).toBe(true));
+    expect(searchParams(lastSearch()).get('text')).toBe('');
+    expect(screen.getByRole('heading',{name:item.title})).toBeTruthy();
+    fireEvent.click(tag);
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:"작가"'));
+  });
+  it('leaves language tags unchanged on a hold and searchable on a normal tap',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,...args:unknown[])=>{
+      const reply=await original(path,...args);
+      return path.includes('/works/')?{...reply,item:{...reply.item,tagGroups:[{namespace:'language',values:['korean']}]}}:reply;
+    });
+    await openDetail();
+    const searches=mocks.api.mock.calls.filter(([path])=>path.includes('/search?')).length;
+    const tag=screen.getByRole('button',{name:'korean'});
+    await hold(tag);
+    expect(readCatalogPreferences('https://tablet.invalid').excludedTags).toEqual([]);
+    expect(mocks.api.mock.calls.filter(([path])=>path.includes('/search?'))).toHaveLength(searches);
+    fireEvent.click(tag);
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('language:"korean"'));
+  });
+});
 describe('catalog cover retention',()=>{
   const preview='https://app.lakomics.local/media-cache/cover';
   const props={active:true,paused:false,backRef:{current:null}};
@@ -703,7 +779,6 @@ describe('mobile catalog layout',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));
     const read=await screen.findByRole('button',{name:'읽기'});
     expect(screen.queryByRole('button',{name:/이어\s*읽기/})).toBeNull();
-    expect(screen.getByText('태그를 누르면 같은 태그로 검색합니다.')).toBeTruthy();
     fireEvent.click(read);await screen.findByRole('img',{name:'1페이지'});
     fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));await screen.findByRole('img',{name:'2페이지'});
     fireEvent.click(screen.getByRole('button',{name:'읽기 닫기'}));
