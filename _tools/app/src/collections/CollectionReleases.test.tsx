@@ -148,6 +148,57 @@ it("keeps the real cached ledger until an invalidated read completes", async () 
   await waitFor(() => expect(screen.queryByRole("table")).not.toBeInTheDocument());
 });
 
+it("shows only recent passive works without actions and acknowledges watched events only", async () => {
+  const passive = entry("passive", 0, []); passive.releaseWatch.enabled = false;
+  const old = { ...notice("old", 3), event: { ...notice("old", 3).event, detectedAt: "2026-08-30T15:59:59" } };
+  const boundary = { ...notice("boundary", 4), event: { ...notice("boundary", 4).event, detectedAt: "2026-08-30T16:00:00" } };
+  const inbox = [...data.inbox, notice("passive", 2), old, boundary];
+  const { api, props, wrap, onOpen } = setup({ releaseBoard: vi.fn().mockResolvedValue([...data.board.values(), passive]), listInbox: vi.fn().mockResolvedValue(inbox) });
+  const allWorks = [...works, work("passive"), work("old"), work("boundary")];
+  function View() {
+    const release = useReleaseData(api, allWorks, true);
+    return <CollectionReleases {...props} collections={allWorks} data={release.data} loading={release.loading} />;
+  }
+  render(wrap(<View />));
+  const row = await screen.findByRole("region", { name: "passive" });
+  expect(within(row).queryByRole("button", { name: /확인/ })).not.toBeInTheDocument();
+  expect(within(row).queryByText("NEW")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "old" })).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "boundary" })).toBeInTheDocument();
+  await userEvent.click(within(row).getByText("2권 새로 나옴"));
+  expect(onOpen).toHaveBeenCalledWith("passive");
+  await userEvent.click(screen.getByRole("button", { name: "모두 확인" }));
+  await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "모두 확인" }));
+  await waitFor(() => expect(api.acknowledge).toHaveBeenCalledTimes(1));
+  expect(api.acknowledge).toHaveBeenCalledWith("새 권", ["새 권-24"]);
+  expect(screen.getByRole("region", { name: "passive" })).toBe(row);
+});
+
+it("clears NEW immediately without a reload, leaves other actions usable and survives stale reads", async () => {
+  let complete!: () => void;
+  const notices = [notice("새 권", 24), notice("지난 미보유", 6)];
+  const { api, props, wrap, onChanged } = setup({ releaseBoard: vi.fn().mockResolvedValue([...data.board.values()]), listInbox: vi.fn().mockResolvedValue(notices), acknowledge: vi.fn().mockImplementation(() => new Promise<void>(resolve => { complete = resolve; })) });
+  function View() {
+    const release = useReleaseData(api, works, true);
+    return <CollectionReleases {...props} data={release.data} loading={release.loading} />;
+  }
+  render(wrap(<View />));
+  await screen.findByRole("button", { name: "새 권 확인" });
+  const rows = screen.getAllByRole("row");
+  const other = screen.getByRole("row", { name: "지난 미보유" });
+  await userEvent.click(screen.getByRole("button", { name: "새 권 확인" }));
+  expect(within(screen.getByRole("row", { name: "새 권" })).queryByText("NEW")).not.toBeInTheDocument();
+  expect(within(other).getByRole("button", { name: "지난 미보유 확인" })).toBeEnabled();
+  expect(screen.getAllByRole("row")).toEqual(rows);
+  expect(api.listInbox).toHaveBeenCalledTimes(1);
+  expect(onChanged).not.toHaveBeenCalled();
+  act(() => invalidateReleaseData());
+  await waitFor(() => expect(api.listInbox).toHaveBeenCalledTimes(2));
+  await act(async () => complete());
+  await waitFor(() => expect(screen.getByRole("button", { name: "지난 미보유 확인" })).toBeEnabled());
+  expect(within(screen.getByRole("row", { name: "새 권" })).queryByText("NEW")).not.toBeInTheDocument();
+});
+
 it("shows +N instead of scrolling when volume chips exceed the two-chip limit", () => {
   const { props, wrap } = setup();
   const volumes: [number, string | null, "released" | "upcoming" | null][] = [1, 2, 3, 4, 5].map(number => [number, "2026-09-01", "released"]);

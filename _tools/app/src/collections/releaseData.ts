@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import type { CollectionTrackingGateway, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
 
 /**
@@ -11,7 +11,7 @@ import type { CollectionTrackingGateway, ReleaseBoardEntry, ReleaseInboxItem } f
  *   release check, provider refresh, mobile read-state sync and Collection edit;
  * - `invalidateReleaseData()` is called: an owned count or 신간 알림 changed in a work, which does
  *   not replace the Collection list;
- * - the 신간 view asks for it (업데이트 확인), or after 확인 (which also refreshes the list).
+ * - the 신간 view asks for it (업데이트 확인).
  * While a re-read is in flight the previous data stays on screen.
  */
 export type ReleaseData = { board: Map<string, ReleaseBoardEntry>; inbox: ReleaseInboxItem[] };
@@ -21,6 +21,35 @@ let current: Entry | null = null;
 let generation = 0;
 const listeners = new Set<() => void>();
 const notify = () => { for (const listener of listeners) listener(); };
+let acknowledgements = new WeakMap<CollectionTrackingGateway, Set<string>>();
+const eventKey = (item: ReleaseInboxItem) => JSON.stringify([item.collectionId, item.event.id]);
+
+/** Hide exact events immediately, including stale reads racing the native acknowledgement.
+ * Native reads also project queued authority acknowledgements, including after a restart.
+ */
+export async function acknowledgeReleaseItems(api: CollectionTrackingGateway, items: ReleaseInboxItem[]) {
+  let hidden = acknowledgements.get(api);
+  if (!hidden) { hidden = new Set(); acknowledgements.set(api, hidden); }
+  const fresh = items.filter(item => !hidden.has(eventKey(item)));
+  for (const item of fresh) hidden.add(eventKey(item));
+  notify();
+  const remaining = new Set(fresh.map(eventKey));
+  try {
+    const batches = new Map<string, ReleaseInboxItem[]>();
+    for (const item of fresh) batches.set(item.collectionId, [...(batches.get(item.collectionId) ?? []), item]);
+    for (const [id, events] of batches) {
+      for (let offset = 0; offset < events.length; offset += 2000) {
+        const batch = events.slice(offset, offset + 2000);
+        await api.acknowledge(id, batch.map(item => item.event.id));
+        for (const item of batch) remaining.delete(eventKey(item));
+      }
+    }
+  } catch (error) {
+    for (const key of remaining) hidden.delete(key);
+    notify();
+    throw error;
+  }
+}
 
 /** Marks the cached 신간 data stale; the next reader (or the mounted one) reads again. */
 export function invalidateReleaseData() {
@@ -44,27 +73,24 @@ function ensure(api: CollectionTrackingGateway, source: unknown): Entry {
   return entry;
 }
 
-/** Replaces the cached inbox (after 확인) without a read; the board is unchanged by acknowledging. */
-export function updateCachedInbox(update: (inbox: ReleaseInboxItem[]) => ReleaseInboxItem[]) {
-  if (!current?.data) return;
-  current = { ...current, data: { ...current.data, inbox: update(current.data.inbox) } };
-  notify();
-}
-
 export function useReleaseData(api: CollectionTrackingGateway | undefined, source: unknown, enabled: boolean) {
-  const [, rerender] = useReducer((value: number) => value + 1, 0);
+  const [revision, rerender] = useReducer((value: number) => value + 1, 0);
   useEffect(() => {
     if (!enabled) return;
     listeners.add(rerender);
     return () => { listeners.delete(rerender); };
   }, [enabled]);
   const entry = api && enabled ? ensure(api, source) : null;
+  const data = useMemo(() => entry?.data && api ? {
+    ...entry.data, inbox: entry.data.inbox.filter(item => !acknowledgements.get(api)?.has(eventKey(item))),
+  } : null, [entry?.data, api, revision]);
   const reload = useCallback(() => invalidateReleaseData(), []);
-  return { data: entry?.data ?? null, loading: entry?.loading ?? false, error: entry?.error ?? null, reload };
+  return { data, loading: entry?.loading ?? false, error: entry?.error ?? null, reload };
 }
 
 /** Test seam: forget the shared cache between tests. */
 export function resetReleaseDataForTests() {
   current = null;
   generation = 0;
+  acknowledgements = new WeakMap();
 }

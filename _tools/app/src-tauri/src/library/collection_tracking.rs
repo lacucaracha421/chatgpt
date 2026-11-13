@@ -192,7 +192,17 @@ impl Library {
 
     pub fn list_release_inbox(&self) -> Result<Vec<ReleaseInboxItem>, LibraryError> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare("SELECT e.id,e.event_kind,e.volume_number,e.previous_value,e.current_value,e.detected_at,e.collection_id,c.name,e.provider FROM release_watch_events e JOIN collections c ON c.id=e.collection_id WHERE e.read_at IS NULL ORDER BY e.detected_at DESC,e.rowid DESC")?;
+        // PC read projection only: keep committed events and cloud publications intact while
+        // an exact acknowledgement is queued or awaiting its replica update.
+        let mut statement = connection.prepare("SELECT e.id,e.event_kind,e.volume_number,e.previous_value,e.current_value,e.detected_at,e.collection_id,c.name,e.provider FROM release_watch_events e JOIN collections c ON c.id=e.collection_id
+            WHERE e.read_at IS NULL AND NOT EXISTS (
+                SELECT 1 FROM collection_authority_outbox o
+                JOIN collection_authority_sync s ON s.singleton=1 AND o.library_id=s.library_id
+                    AND o.epoch=s.epoch AND o.contract_version=s.contract_version,
+                    json_each(o.payload, '$.eventIds') acknowledged
+                WHERE o.command_type='acknowledgeReleaseEvents' AND o.entity_key=e.collection_id
+                    AND o.state IN ('pending','blocked','accepted') AND acknowledged.value=e.id
+            ) ORDER BY e.detected_at DESC,e.rowid DESC")?;
         let result = statement.query_map([], |row| Ok(ReleaseInboxItem {
             provider: row.get(8)?,
             collection_id: row.get(6)?, collection_name: row.get(7)?, event: release_watch_event_from_row(row)?,

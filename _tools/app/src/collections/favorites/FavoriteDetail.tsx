@@ -15,6 +15,8 @@ import { SectionLabel } from "../../shared/ui/SectionLabel";
 import { Toast } from "../../shared/ui/Toast";
 import { ContextMenu } from "../../shared/ui/ContextMenu";
 import { CollectionCard } from "../CollectionCard";
+import { useReleaseData } from "../releaseData";
+import { groupInbox, localDay, releaseCaption } from "../releaseCaption";
 import { collectionCoverUrl } from "../CollectionBrowser";
 import { FavoriteProfileEditor } from "./FavoriteProfileEditor";
 import { birthdayDays, favoriteFacts, hasFavoriteProfile, isManualFavorite } from "./model";
@@ -28,6 +30,8 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
   linkPicker: ReactNode;
 }) {
   const { gateway } = useLibrary();
+  const releases = useReleaseData(gateway.collectionTracking, collections, collections.some(work => work.type === "manga"));
+  const inbox = groupInbox(releases.data?.inbox ?? []);
   const { privacyMode } = usePrivacy();
   const [page, setPage] = useState(initialPage);
   const [viewer, setViewer] = useState<string | null>(null);
@@ -72,7 +76,7 @@ export function FavoriteDetail({ target, entry, catalog, initialPage, collection
       <div className="favorite-detail__right">
         {(works.length > 0 || entry.extraWorks.length > 0) && <section className="favorite-works" aria-label="등장 작품">
           <SectionLabel title="등장 작품" />
-          <div className="favorite-works__covers">{works.map(work => <CollectionCard key={work.id} collection={work} selected={false} coverUrl={collectionCoverUrl(work)} meta={false} onClick={() => onWork(work)} />)}</div>
+          <div className="favorite-works__covers">{works.map(work => <CollectionCard key={work.id} collection={work} releaseCaption={releaseCaption(work, releases.data?.board.get(work.id), inbox.get(work.id) ?? [], localDay())} selected={false} coverUrl={collectionCoverUrl(work)} meta={false} onClick={() => onWork(work)} />)}</div>
           {!!entry.extraWorks.length && <ul className="favorite-works__extra">{entry.extraWorks.map(name => <li key={name}>{name}</li>)}</ul>}
         </section>}
         {manual ? <div className="favorite-manual-assets"><span>에셋에 없는 캐릭터</span>{linkPicker}</div> : <ContextMenu items={[{ id: "representative", label: "대표 이미지로", disabled: !contextAsset || busy, onSelect: () => { if (contextAsset) void onSave({ coverAssetId: contextAsset, coverY: 50 }); } }]}><section className="favorite-assets" aria-label="캐릭터 에셋" onContextMenuCapture={event => {

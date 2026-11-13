@@ -43,8 +43,8 @@ export type ReleaseRow = { key: string; kind: ReleaseKind; name: string; caption
 export function releaseRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string): ReleaseRow[] {
   const mangaSchedules = new Map(koreanReleases(collections.filter((work) => work.type === "manga"), board, inbox, today).map((row) => [row.work.id, row]));
   const manga = collections
-    .filter((work) => work.type === "manga" && Math.max(work.unreadReleaseCount, inbox.get(work.id)?.length ?? 0) > 0)
-    .map((work) => ({ work, unread: Math.max(work.unreadReleaseCount, inbox.get(work.id)?.length ?? 0) }))
+    .filter((work) => work.type === "manga" && board.get(work.id)?.releaseWatch.enabled && (inbox.get(work.id)?.length ?? 0) > 0)
+    .map((work) => ({ work, unread: inbox.get(work.id)!.length }))
     .sort((a, b) => b.unread - a.unread || a.work.name.localeCompare(b.work.name, "ko"))
     .map(({ work }): ReleaseRow => {
       const events = inbox.get(work.id) ?? [];

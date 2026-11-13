@@ -179,7 +179,7 @@ export function CollectionBrowser({
   // Manga tiles and the 신간 view share one cached read of the release board and inbox.
   const releases = useReleaseData(tracking, collections, Boolean(tracking) && (typeFilter === "manga" || Boolean(releaseProvider)));
   const inboxByWork = useMemo(() => groupInbox(releases.data?.inbox ?? []), [releases.data]);
-  const unreadTotal = collections.reduce((sum, collection) => sum + (collection.type === "manga" ? collection.unreadReleaseCount : 0), 0);
+  const unreadTotal = collections.reduce((sum, collection) => sum + (collection.type === "manga" && releases.data?.board.get(collection.id)?.releaseWatch.enabled ? inboxByWork.get(collection.id)?.length ?? 0 : 0), 0);
   const today = localDay();
   const openInbox = (provider: CollectionUpdateProvider) => { closeCharacters(); onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider }); };
   const closeInbox = () => onViewChange({ kind: "collections", typeFilter, showcase });

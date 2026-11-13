@@ -1,5 +1,4 @@
 import { useDelayedBusy } from "../shared/useDelayedBusy";
-import { BusyLabel } from "../shared/ui/BusyLabel";
 import { ArrowLeftIcon, ArrowPathIcon, BookOpenIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
@@ -19,7 +18,7 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { groupInbox, localDay, releaseLine } from "./releaseCaption";
 import { japanReleaseLedger, koreanReleaseLedger, releaseLedgerCounts, type ReleaseLedgerRow } from "./releaseLedger";
-import { updateCachedInbox, type ReleaseData } from "./releaseData";
+import { acknowledgeReleaseItems, type ReleaseData } from "./releaseData";
 import "./collectionReleases.css";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 
@@ -109,30 +108,36 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
   const korean = koreanReleaseLedger(works, board, byWork, today);
   const japan = japanReleaseLedger(works, board, byWork, today);
   const watched = works.filter(work => board.get(work.id)?.releaseWatch.enabled);
+  const watchedIds = new Set(snapshot.collections.filter(work => work.type === "manga" && board.get(work.id)?.releaseWatch.enabled).map(work => work.id));
+  const actionable = inbox.filter(item => watchedIds.has(item.collectionId));
   const shown = new Set([...korean, ...japan].map(row => row.work.id));
-  const rows = provider === "mangadex" ? japan : korean;
+  const orderedRows = provider === "mangadex" ? japan : korean;
+  // Acknowledging changes highlights, not the positions of the rows under the pointer.
+  const rowOrder = useRef<{ board: typeof board; provider: typeof provider; query: string; ids: string[] } | null>(null);
+  if (!rowOrder.current || rowOrder.current.board !== board || rowOrder.current.provider !== provider || rowOrder.current.query !== query) {
+    rowOrder.current = { board, provider, query, ids: orderedRows.map(row => row.work.id) };
+  }
+  const positions = new Map(rowOrder.current.ids.map((id, index) => [id, index]));
+  const rows = [...orderedRows].sort((a, b) => (positions.get(a.work.id) ?? Infinity) - (positions.get(b.work.id) ?? Infinity));
   const counts = releaseLedgerCounts(rows);
   const checkedAt = status?.finishedAt ?? [...board.values()].map(entry => entry.releaseSchedule[provider]?.checkedAt).filter((value): value is string => !!value).sort().reverse()[0];
-  const others = [...groupInbox(inbox.filter(item => !shown.has(item.collectionId) && matchesQuery(item.collectionName))).entries()];
+  const unmatched = [...groupInbox(actionable.filter(item => !shown.has(item.collectionId) && matchesQuery(item.collectionName))).entries()];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const others = [...groupInbox(inbox.filter(item => !watchedIds.has(item.collectionId)
+    && snapshot.collections.some(work => work.id === item.collectionId && work.type === "manga")
+    && Date.parse(item.event.detectedAt) >= cutoff.getTime() && Date.parse(item.event.detectedAt) <= Date.now()
+    && matchesQuery(item.collectionName))).entries()];
   const waiting = Boolean(status?.retryAt && Date.parse(status.retryAt) > Date.now());
   const busy = working !== null;
   const byId = new Map(snapshot.collections.map(work => [work.id, work]));
 
-  async function acknowledge(key: string, items: ReleaseInboxItem[]) {
-    if (!api || busy || loading || !items.length) return;
-    setWorking(key); setMessage(null);
+  async function acknowledge(items: ReleaseInboxItem[]) {
+    if (!api || loading || !items.length) return;
+    setMessage(null);
     try {
-      // Exact event IDs from this snapshot, per work, so later events stay unread.
-      const batches = new Map<string, string[]>();
-      for (const item of items) batches.set(item.collectionId, [...(batches.get(item.collectionId) ?? []), item.event.id]);
-      for (const [id, ids] of batches) {
-        for (let offset = 0; offset < ids.length; offset += 2000) await api.acknowledge(id, ids.slice(offset, offset + 2000));
-        const done = new Set(ids);
-        updateCachedInbox(current => current.filter(item => !done.has(item.event.id)));
-      }
-      void Promise.resolve(onChanged()).catch(() => undefined);
+      await acknowledgeReleaseItems(api, items);
     } catch (err) { setMessage(commandErrorMessage(err, "신간 알림을 확인 처리하지 못했습니다.")); }
-    finally { setWorking(null); }
   }
 
   async function check() {
@@ -190,7 +195,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     return <span className="collection-releases__cover">{url ? <StableImage src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true" />}</span>;
   };
   const showChecking = useDelayedBusy(working === "check");
-  const confirm = (key: string, name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(key, items); }}><BusyLabel busy={!!(working === key)} idle={"확인"}>확인 중…</BusyLabel></Button>;
+  const confirm = (name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(items); }}>확인</Button>;
   const renderRow = (row: ReleaseLedgerRow) => {
     const chips = row.chips.slice(0, 2);
     const fresh = row.chips.find(chip => chip.kind === "new");
@@ -211,18 +216,18 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     <td><div className="collection-releases__state"><div>
       {row.status === "NEW" ? <Badge variant="accent" aria-label={`새 알림 ${row.items.length}개`}>NEW</Badge> : <span className={row.status.startsWith("D-") || row.status === "오늘" ? "collection-releases__soon" : "collection-releases__muted"}>{row.status}</span>}
       {row.ahead && <small>{row.ahead}</small>}
-    </div>{row.items.length > 0 && confirm(row.work.id, row.work.name, row.items)}</div></td>
+    </div>{row.items.length > 0 && confirm(row.work.name, row.items)}</div></td>
   </tr>;
   };
 
   return <section className="collection-releases" aria-label="신간">
     <ViewToolbar title="신간" titleContent={<span className="collection-releases__heading">신간</span>} ariaLabel="컬렉션 도구" chrome={chrome}
       leadingAction={onBack ? <Button variant="ghost" size="icon" aria-label="컬렉션으로 돌아가기" onClick={onBack}><ArrowLeftIcon aria-hidden="true" /></Button> : undefined}
-      titleAccessory={<><span className="collection-toolbar__count">{displayCount(rows.length + others.length)}</span><div className="collection-releases__actions">
+      titleAccessory={<><span className="collection-toolbar__count">{displayCount(rows.length + unmatched.length)}</span><div className="collection-releases__actions">
         <SegmentedControl label="신간 지역" options={[{ value: "kakao", label: "한국 정발", count: korean.length }, { value: "mangadex", label: "일본", count: japan.length }]} value={provider} onChange={onProviderChange} />
         {checkedAt && <span className="collection-releases__checked">{displayDateTime(checkedAt)} 확인</span>}
         {api?.runUpdates && <Button size="sm" variant="quiet" aria-label={showChecking ? "처리 중…" : waiting ? "재시도 대기" : "새로고침"} aria-description={checkedAt ? `${displayDateTime(checkedAt)} 확인` : undefined} disabled={busy || waiting || restricted || loading} onClick={() => void check()}><ArrowPathIcon aria-hidden="true" /></Button>}
-        <Button size="sm" variant="quiet" disabled={busy || loading || inbox.length === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
+        <Button size="sm" variant="quiet" disabled={busy || loading || actionable.length === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
       </div></>}
     />
     {status && (status.busy || status.remaining > 0 || status.stopReason || status.lastFailure) && <div className="collection-releases__status" role="status">
@@ -244,24 +249,31 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
         <thead><tr><th aria-label="표지" /><th scope="col">작품</th><th scope="col">소장</th><th scope="col">안 가진 권</th><th scope="col">날짜</th><th scope="col">상태</th></tr></thead>
         <tbody>{rows.map(renderRow)}</tbody>
       </table>}
-      {shownData && !loading && !watched.length && !others.length && <EmptyState icon={BookOpenIcon} title="신간 알림 켠 만화 없음" />}
+      {shownData && !loading && !watched.length && !others.length && !unmatched.length && <EmptyState icon={BookOpenIcon} title="신간 알림 켠 만화 없음" />}
       {shownData && !loading && watched.length > 0 && !rows.length && <EmptyState icon={BookOpenIcon} title={provider === "mangadex" ? "일본 발매 정보 없음" : "소장하지 않은 정발 권 없음"} />}
-      {shownData && others.length > 0 && <>
+      {shownData && unmatched.length > 0 && <>
         <h3 className="collection-releases__others">{shown.size ? "그 밖의 새 알림" : "새 알림"}</h3>
-        {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
+        {unmatched.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
           <Button variant="quiet" size="sm" disabled={loading} onClick={() => onOpen(id)}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
           <span>{items.map(releaseLine).join(" · ")}</span>
           <Badge variant="accent" aria-label={`새 알림 ${items.length}개`}>NEW</Badge>
-          {confirm(id, items[0]!.collectionName, items)}
+          {confirm(items[0]!.collectionName, items)}
+        </div>)}
+      </>}
+      {shownData && others.length > 0 && <>
+        <h3 className="collection-releases__others">다른 작품 신간</h3>
+        {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName} onClick={() => { if (!loading) onOpen(id); }}>
+          <Button variant="quiet" size="sm" disabled={loading} onClick={event => { event.stopPropagation(); onOpen(id); }}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
+          <span>{[...new Set(items.map(item => item.event.volumeNumber))].map(volume => `${displayCount(volume)}권 새로 나옴`).join(" · ")}</span>
         </div>)}
       </>}
     </div>
     {confirmAll && <Dialog open title="모두 확인할까요?" onClose={() => setConfirmAll(false)}>
       <div className="collection-releases__dialog">
-        <p>새 알림 {inbox.length.toLocaleString()}개를 읽음으로 바꿉니다. 발매 정보는 그대로 남습니다.</p>
+        <p>새 알림 {actionable.length.toLocaleString()}개를 읽음으로 바꿉니다. 발매 정보는 그대로 남습니다.</p>
         <div className="ui-dialog__actions">
           <Button onClick={() => setConfirmAll(false)}>취소</Button>
-          <Button variant="primary" disabled={loading || busy} onClick={() => { setConfirmAll(false); void acknowledge("all", inbox); }}>모두 확인</Button>
+          <Button variant="primary" disabled={loading || busy} onClick={() => { setConfirmAll(false); void acknowledge(actionable); }}>모두 확인</Button>
         </div>
       </div>
     </Dialog>}

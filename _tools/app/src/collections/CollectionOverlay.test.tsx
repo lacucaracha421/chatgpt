@@ -98,6 +98,7 @@ const unread: ReleaseWatchEvent[] = [
 
 function tracking(events: ReleaseWatchEvent[] = []) {
   return {
+    releaseBoard: vi.fn().mockResolvedValue([{ collectionId: "collection-1", releaseWatch: { enabled: true, available: true }, ownedVolumes: [], releaseSchedule: { kakao: null, mangadex: null } }]),
     setOwnedCount: vi.fn().mockResolvedValue([]),
     listOwnership: vi.fn().mockResolvedValue([]),
     setOwnership: vi.fn().mockResolvedValue([]),
@@ -400,17 +401,19 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(summary).toHaveTextContent("출간 상태 변경: 11권 출간 예정 → 출간됨");
     expect(onChanged).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));
-    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "새 출간 정보" })).not.toBeInTheDocument());
+    expect(onChanged).not.toHaveBeenCalled();
     expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
   });
 
-  it("contains card refresh failures after taking unread release changes", async () => {
+  it("acknowledges without refreshing the full collection list", async () => {
     const onChanged = vi.fn().mockRejectedValue(new Error("refresh failed"));
     renderOverlay({ collectionTracking: tracking(unread) }, onChanged);
 
     expect(await screen.findByRole("region", { name: "새 출간 정보" })).toHaveTextContent("새 권: 13권");
     await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));
-    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "새 출간 정보" })).not.toBeInTheDocument());
+    expect(onChanged).not.toHaveBeenCalled();
   });
 
   it("renders no release summary and does not refresh cards when there are no unread changes", async () => {

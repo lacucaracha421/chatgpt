@@ -55,10 +55,11 @@ it("(b) a watched work with released but unowned volumes is muted; (c) otherwise
   expect(shortReleaseDate("2027-01-05", today)).toBe("2027.1.5");
 });
 
-it("names unread new volumes from the inbox when the board is unavailable", () => {
-  expect(releaseCaption(work("w", 3), undefined, [item("w", 5, "2026-09-10"), item("w", 7, "2026-09-12"), item("w", 6, null)], today)).toEqual({ kind: "new", text: "신간 5–7권", date: "9.12" });
-  expect(releaseCaption(work("w", 1), undefined, [item("w", 9, "2026-11-20")], today)).toEqual({ kind: "new", text: "신간 알림 1", date: null });
-  expect(releaseCaption(work("w", 0), undefined, [], today)).toBeNull();
+it("does not announce unread manga without enabled release watch", () => {
+  const events = [item("w", 5, "2026-09-10")];
+  expect(releaseCaption(work("w", 3), undefined, events, today)).toBeNull();
+  expect(releaseCaption(work("w", 3), entry("w", { watch: false, kakao }), events, today)).toBeNull();
+  expect(releaseCaption(work("w", 3), entry("w", { kakao: null }), [], today)).toBeNull();
 });
 
 it("한국 정발 lists each watched work's unowned Kakao volumes, soonest upcoming first", () => {

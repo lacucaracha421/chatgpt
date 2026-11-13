@@ -24,7 +24,7 @@ import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
 import { MangaConnections } from "./MangaConnections";
-import { invalidateReleaseData, useReleaseData } from "./releaseData";
+import { acknowledgeReleaseItems, invalidateReleaseData, useReleaseData } from "./releaseData";
 import { latestKoreanRelease, localDay } from "./releaseCaption";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CollectionWorkScreen, type CollectionWorkData } from "./work/CollectionWorkScreen";
@@ -144,7 +144,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
 
   useEffect(() => {
     if (!isManga || !releases.data) return;
-    setReleaseChanges(releases.data.inbox.filter(item => item.collectionId === collectionId).map(item => item.event));
+    setReleaseChanges(releases.data.inbox.filter(item => item.collectionId === collectionId && releases.data!.board.get(collectionId)?.releaseWatch.enabled).map(item => item.event));
   }, [releases.data, collectionId, isManga]);
 
   useEffect(() => {
@@ -402,7 +402,7 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
       case: { title: collection.name, platform: "other", privacy: privacyMode, front: picked?.coverArtworkId ? workArtworkUrl(picked.coverArtworkId) : null, spine: null, back: null },
       manga: { volumes: visible, activeVolumeId: picked?.id ?? null, editionIndex, latestKoreanVolume: latestKoreanRelease(releases.data?.board.get(collectionId), editionIndex, localDay()), focuses: focus.focuses, ownedNumbers: ownership?.id === collectionId ? ownership.rows.filter(row => row.editionIndex === editionIndex && (row.physical || row.digital)).map(row => row.volumeNumber) : null, scope: library?.root ?? "", revision: "", // Covers have immutable artwork identities; record saves must not recreate the renderer.
         ownership: <section className="work-manga-ownership"><SectionLabel title="소장" /><CollectionOwnershipPanel compact collectionId={collectionId} volumes={volumes} editionIndex={editionIndex} onOwnershipChanged={rows => setOwnership({ id: collectionId, rows })} releaseWatch={{ enabled: releaseWatchStatus?.enabled ?? false, disabled: !kakaoConnection || !releaseWatchStatus || releaseWatchSaving, unavailableReason: !kakaoConnection ? "Kakao 연결 후 설정할 수 있습니다." : undefined, onChange: enabled => void toggleReleaseWatch(enabled) }} /><CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={selectEdition} /></section>,
-        management: <section className="work-manga-management"><SectionLabel title="발매 정보" /><MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection} mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing} onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()} onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()} hideConnectionPrompt={collection.hideConnectionPrompt} /><ReleaseWatchSummary events={releaseChanges} />{releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => { setReleaseWatchSaving(true); try { await gateway.collectionTracking!.acknowledge(collectionId, releaseChanges.map(event => event.id)); setReleaseChanges([]); void onChangedRef.current().catch(() => undefined); } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); } finally { setReleaseWatchSaving(false); } }}>표시된 신간 알림 확인</Button>}</section>,
+        management: <section className="work-manga-management"><SectionLabel title="발매 정보" /><MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection} mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing} onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()} onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()} hideConnectionPrompt={collection.hideConnectionPrompt} /><ReleaseWatchSummary events={releaseChanges} />{releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => { setReleaseWatchSaving(true); try { await acknowledgeReleaseItems(gateway.collectionTracking!, (releases.data?.inbox ?? []).filter(item => item.collectionId === collectionId && releaseChanges.some(event => event.id === item.event.id))); } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); } finally { setReleaseWatchSaving(false); } }}>표시된 신간 알림 확인</Button>}</section>,
       },
     };
     lastMangaData.current = value;

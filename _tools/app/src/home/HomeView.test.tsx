@@ -491,6 +491,7 @@ describe("Home wishlist arrivals", () => {
       unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: date, detectedAt: iso(12), readAt: null }] });
     const work = { id: "manga", name, type: "manga", releaseDate: null, unreadReleaseCount: 1 } as HomeViewProps["collections"][number];
     const collections = kind === "manga" ? [work] : [];
+    if (kind === "manga") gateway.collectionTracking.releaseBoard.mockResolvedValue([{ collectionId: work.id, releaseWatch: { enabled: true, available: true }, ownedVolumes: [], releaseSchedule: { kakao: null, mangadex: null } }]);
     if (kind === "manga") gateway.collectionTracking.listInbox.mockResolvedValue([
       { collectionId: work.id, provider: "kakao", event: { kind: "new_volume", volumeNumber: 3, currentValue: date } },
     ]);

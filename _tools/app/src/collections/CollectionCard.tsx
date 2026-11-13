@@ -30,7 +30,7 @@ export function CollectionCard({
   meta?: boolean;
   shelf?: boolean;
   lightCase?: boolean;
-  /** 신간 marker after the year and stars; without it an unread count still reads "신간 알림 N". */
+  /** Manga captions require the shared board/inbox projection, including its watch state. */
   releaseCaption?: ReleaseCaption | null;
 }) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export function CollectionCard({
   const date = meta ? collectionCardDate(collection) : "";
   const score = meta ? collection.myScore : null;
   const caption = releaseCaption !== undefined ? releaseCaption
-    : collection.unreadReleaseCount > 0 ? { kind: "new" as const, text: `신간 알림 ${collection.unreadReleaseCount}`, date: null } : null;
+    : collection.type !== "manga" && collection.unreadReleaseCount > 0 ? { kind: "new" as const, text: `신간 알림 ${collection.unreadReleaseCount}`, date: null } : null;
   const captionText = caption ? `${caption.text}${caption.date ? ` · ${caption.date}` : ""}` : undefined;
 
   return (

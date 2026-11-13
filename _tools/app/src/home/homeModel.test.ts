@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { CollectionSummary, ReleaseWishlistItem } from '../library/types';
+import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from '../library/types';
 import { cloudLine, daysAfter, newlyReleasedRows, releaseRows, upcomingRows } from './homeModel';
 const title = (id: string, date: string, extra: Partial<ReleaseWishlistItem> = {}) => ({ id, title: id, kind:'game', provider:'igdb', date, precision:'exact', platforms:[], unread:[], muted:false, released:false, ...extra }) as ReleaseWishlistItem;
 describe('Home release sources', () => {
+  it('ignores unread passive manga and stale summary counts while watched unread events count', () => {
+    const works = ['on', 'off'].map(id => ({ id, name: id, type: 'manga', unreadReleaseCount: 99 })) as CollectionSummary[];
+    const board = new Map(works.map(work => [work.id, { collectionId: work.id, releaseWatch: { enabled: work.id === 'on', available: true }, ownedVolumes: [], releaseSchedule: { kakao: null, mangadex: null } } as ReleaseBoardEntry]));
+    const inbox = new Map(works.map(work => [work.id, [{ collectionId: work.id, collectionName: work.name, provider: 'mangadex', event: { id: work.id, kind: 'new_volume', volumeNumber: 3, detectedAt: '2026-10-01', previousValue: null, currentValue: null } } as ReleaseInboxItem]]));
+    expect(releaseRows(works, board, inbox, [], '2026-10-02').map(row => row.name)).toEqual(['on']);
+    expect(newlyReleasedRows(works, board, inbox, [], '2026-10-02').map(row => row.name)).toEqual(['on']);
+    inbox.set('on', []);
+    expect(releaseRows(works, board, inbox, [], '2026-10-02')).toEqual([]);
+  });
   it('includes existing unread NEW notices and dated releases without a new read', () => {
     const wishlist = [title('new', '2026-10-01', { released:true, unread:[{id:'event',itemId:'new',readAt:null,kind:'released',detectedAt:'2026-10-01',currentValue:'2026-10-01',previousValue:null}] }), title('past','2026-09-30'), title('future','2026-10-03'), title('muted','2026-10-01',{muted:true})];
     const rows = newlyReleasedRows([], new Map(), new Map(), wishlist, '2026-10-02');

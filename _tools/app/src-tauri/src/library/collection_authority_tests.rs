@@ -1320,8 +1320,10 @@ fn collection_authority_release_ack_is_shared_and_deduplicated() {
     let mut w = work("w", 1);
     w["derived"]["releaseEvents"] = json!([{"eventId":"e","provider":"mangadex","kind":"new_volume","volumeNumber":2,"previousValue":null,"currentValue":null,"detectedAt":NOW,"readAt":null}]);
     adopt(&l, &s, json!({"works":[w.clone()]}));
+    assert_eq!(l.list_release_inbox().unwrap().len(), 1);
     l.take_unread_release_changes("w").unwrap();
     l.acknowledge_release_events("w", vec!["e".into()]).unwrap();
+    assert!(l.list_release_inbox().unwrap().is_empty());
     assert_eq!(
         l.connection()
             .unwrap()
@@ -1334,9 +1336,16 @@ fn collection_authority_release_ack_is_shared_and_deduplicated() {
         1
     );
     assert_eq!(l.list_unread_release_changes().unwrap().len(), 1);
+    // A fresh server snapshot still has the event unread until acknowledgement delivery.
     w["entityRevision"] = json!(2);
+    l.apply_collection_changes(&changes(&s, 1, json!([change(1, json!({"works":[w.clone()]}))])))
+        .unwrap();
+    assert!(l.list_release_inbox().unwrap().is_empty());
+    l.connection().unwrap().execute("UPDATE collection_authority_outbox SET state='accepted'", []).unwrap();
+    assert!(l.list_release_inbox().unwrap().is_empty());
+    w["entityRevision"] = json!(3);
     w["derived"]["releaseEvents"][0]["readAt"] = json!(NOW);
-    l.apply_collection_changes(&changes(&s, 1, json!([change(1, json!({"works":[w]}))])))
+    l.apply_collection_changes(&changes(&s, 2, json!([change(2, json!({"works":[w]}))])))
         .unwrap();
     assert!(l.list_unread_release_changes().unwrap().is_empty());
 }

@@ -172,7 +172,7 @@ export function pastReleaseRows(collections: CollectionSummary[], board: Map<str
     if (!inRange(date)) continue;
     const volume = number ? Number(number) : undefined;
     const title = source === "title" ? wishlist.find(item => item.id === id && !item.muted) : undefined;
-    const collection = source !== "title" ? collections.find(item => item.id === id && item.type !== "av") : undefined;
+    const collection = source !== "title" ? collections.find(item => item.id === id && item.type !== "av" && (item.type !== "manga" || board.get(item.id)?.releaseWatch.enabled)) : undefined;
     if (!title && !collection) continue;
     const key = source === "manga" ? `manga:${id}:${volume ?? ""}` : `${source}:${id}`;
     if (rows.some(row => row.date === date && (row.volume ?? null) === (volume ?? null)

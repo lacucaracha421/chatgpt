@@ -145,14 +145,14 @@ export function releaseLine(item: ReleaseInboxItem): string {
  *   cannot name (a MangaDex volume, a date change, a game or movie) reads "신간 알림 N".
  * - `out` (watched, nothing unread): the same wording for Korean volumes out but not owned.
  * - `ahead` (watched, nothing unread or out): "9권 예약 · 11.20", the soonest dated pre-registered volume.
- * Owned volumes are never announced. Without board data (an older gateway) the unread new-volume
- * events name what they can.
+ * Owned volumes are never announced. Manga captions require enabled release watch; unread
+ * counts come from the PC inbox projection, not the committed count published to other clients.
  */
 export function releaseCaption(collection: CollectionSummary, entry: ReleaseBoardEntry | undefined, events: ReleaseInboxItem[], today: string): ReleaseCaption | null {
-  const unread = Math.max(collection.unreadReleaseCount, events.length);
-  if (collection.type !== "manga") return unread > 0 ? { kind: "new", text: `신간 알림 ${unread}`, date: null } : null;
+  const unread = events.length;
+  if (collection.type !== "manga") return collection.unreadReleaseCount > 0 ? { kind: "new", text: `신간 알림 ${collection.unreadReleaseCount}`, date: null } : null;
   const watching = entry?.releaseWatch.enabled ?? false;
-  if (unread <= 0 && !watching) return null;
+  if (!watching) return null;
   const owned = kakaoOwned(entry);
   const volumes = entry?.releaseSchedule.kakao
     ? unownedKorean(entry, events, today)
