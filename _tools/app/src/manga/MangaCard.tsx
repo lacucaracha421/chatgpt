@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Badge } from "../shared/ui/Badge";
@@ -55,14 +55,37 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
 export function MangaCover({ src, title, privacyMode, className = "", reportBusy = true }: { src: string | null; title: string; privacyMode?: boolean; className?: string; reportBusy?: boolean }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [retryingSrc, setRetryingSrc] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const masked = useCatalogMasked(privacyMode);
+  useEffect(() => {
+    setFailedSrc(null);
+    setRetryingSrc(null);
+    setAttempt(0);
+  }, [src, masked]);
+  useEffect(() => {
+    if (!retryingSrc || retryingSrc !== src) return;
+    const timer = window.setTimeout(() => {
+      setRetryingSrc(null);
+      setAttempt(1);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [retryingSrc, src]);
   if (masked) return <Skeleton className={`${className} privacy-mask`} label="비공개 모드" />;
+  const handleError = (erroredSrc: string | null) => {
+    if (!erroredSrc || erroredSrc !== src) return;
+    setLoadedSrc(null);
+    if (attempt === 0) setRetryingSrc(erroredSrc);
+    else setFailedSrc(erroredSrc);
+  };
+  const showImage = Boolean(src && src !== failedSrc && src !== retryingSrc);
   // Lazy grid covers must not hold area readiness; the area prepares its viewport images.
   return <span className={`${className} manga-cover`} aria-busy={reportBusy ? Boolean(src && src !== loadedSrc && src !== failedSrc) : undefined}>
-    {src && src !== failedSrc && <StableImage src={src} alt={`${title} 표지`} referrerPolicy="no-referrer" draggable={false}
+    {showImage && <StableImage key={attempt} src={src!} alt={`${title} 표지`} referrerPolicy="no-referrer" draggable={false}
       loading="lazy" className="manga-cover__image" style={loadedSrc ? undefined : { visibility: "hidden" }}
       onLoad={(event) => setLoadedSrc(event.currentTarget.getAttribute("src"))}
-      onError={(event) => setFailedSrc(event.currentTarget.getAttribute("src"))} />}
+      onError={(event) => handleError(event.currentTarget.getAttribute("src"))}
+      onPreloadError={() => handleError(src)} />}
   </span>;
 }
 

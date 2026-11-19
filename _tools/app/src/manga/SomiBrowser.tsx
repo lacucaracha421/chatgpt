@@ -6,6 +6,7 @@ import { nativeMediaUrl } from "../assets/mediaUrl";
 import { useCatalogMasked } from "../privacy/catalogMask";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
 import { SearchSurface, SearchSurfaceField } from "../layout/SearchSurface";
+import { Badge } from "../shared/ui/Badge";
 import { BookmarkToggle } from "../shared/ui/BookmarkToggle";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -104,7 +105,7 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
       const items = more && previous ? [...previous.result.items, ...result.items.filter(p => !previous.result.items.some(old => old.id === p.id))] : result.items;
       const base = bookmarks ? 2 : 0;
       const slot = shownRef.current === base ? base + 1 : base;
-      setSlots(old => { const next = [...old]; next[slot] = { request, fillIds: result.items.filter(post => post.cover === null && Boolean(post.coverKey)).map(post => post.id), result: { ...result, items }, query: text, sort: order, days: period, bookmarked: bookmarks, page }; return next; });
+      setSlots(old => { const next = [...old]; next[slot] = { request, fillIds: result.items.filter(post => post.cover === null && Boolean(post.coverKey) && !post.gone).map(post => post.id), result: { ...result, items }, query: text, sort: order, days: period, bookmarked: bookmarks, page }; return next; });
       setPending(slot);
     } catch (error) {
       if (!alive.current || generation.current !== request) return;
@@ -143,7 +144,7 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
     if (cached !== null) {
       if (gridScroll.current && currentRef.current?.bookmarked !== bookmarked) { scrollPositions.current[1 - mode] = gridScroll.current.scrollTop; restoreScroll.current = scrollPositions.current[mode]; }
       const request = ++generation.current;
-      setSlots(old => old.map((view, slot) => slot === cached && view ? { ...view, request, fillIds: view.result.items.filter(post => !post.cover && post.coverKey).map(post => post.id) } : view));
+      setSlots(old => old.map((view, slot) => slot === cached && view ? { ...view, request, fillIds: view.result.items.filter(post => !post.cover && post.coverKey && !post.gone).map(post => post.id) } : view));
       setShown(cached); readyRef.current();
     } else if (statusRef.current?.loggedIn && !busy.current) void load(query, sort, days, false, bookmarked);
   }, [bookmarked, requested, load]);
@@ -234,8 +235,18 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
       if (alive.current && requestedRef.current && sessionEpoch.current === request && optionsRef.current.bookmarked === readingBookmarks && statusRef.current?.loggedIn) setViewer({ ...result, id: post.id, bookmarked: post.bookmarked });
     } catch (error) {
       if (alive.current) {
-        if (String(error).includes("SOMI_LOGIN_REQUIRED")) clearSession();
-        if (String(error).includes("SOMI_POST_GONE")) void load(query, sort, days);
+        const value = String(error);
+        if (value.includes("SOMI_LOGIN_REQUIRED")) clearSession();
+        if (value.includes("SOMI_POST_GONE") || value.includes("SOMI_NO_IMAGES")) {
+          cachedSlots.current[1 - mode] = null;
+          setSlots(old => old.map(view => {
+            if (!view || !view.result.items.some(item => item.id === post.id)) return view;
+            if (view.bookmarked) {
+              return { ...view, result: { ...view.result, items: view.result.items.map(item => item.id === post.id ? { ...item, gone: true } : item) } };
+            }
+            return { ...view, result: { items: view.result.items.filter(item => item.id !== post.id), total: Math.max(0, view.result.total - 1) } };
+          }));
+        }
         setMessage(errorText(error));
       }
     } finally { openingRef.current = false; if (alive.current) setOpening(false); }
@@ -246,10 +257,10 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
     try { await gateway.somiLogout?.(); } catch { setMessage("코네 로그아웃을 완료하지 못했습니다"); }
     finally { loggingOut.current = false; }
   }
-  async function syncNow() {
+  async function syncNow(full = false) {
     if (statusRef.current?.syncing) return;
     try {
-      await gateway.somiSyncNow?.();
+      await gateway.somiSyncNow?.(full);
       if (!alive.current || !statusRef.current?.loggedIn) return;
       setStatus(previous => previous ? { ...previous, syncing: true, syncError: null } : previous);
       statusRef.current = { ...statusRef.current, syncing: true, syncError: null };
@@ -305,7 +316,8 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
       ]} />}</>}
       actions={loggedIn && <Menu label="소미 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
         { id: "account", label: `@${status!.handle}`, disabled: true, onSelect: () => {} },
-        { id: "sync", label: "새 글 확인", disabled: status!.syncing, onSelect: () => void syncNow() },
+        { id: "sync", label: "새 글 확인", disabled: status!.syncing, onSelect: () => void syncNow(false) },
+        { id: "full-sync", label: "전체 목차 다시 점검", disabled: status!.syncing, onSelect: () => void syncNow(true) },
         { id: "logout", label: "로그아웃", onSelect: () => void logout() },
       ]} />}
       chrome={{ status: loggedIn ? <ChromeQueryBadge search={search} /> : undefined,
@@ -345,8 +357,8 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
   </section>;
 }
 function SomiCard({ post, masked, disabled, bookmarkPending, onBookmark, onRead }: { post: SomiPost; masked: boolean; disabled: boolean; bookmarkPending: boolean; onBookmark(): void; onRead(): void }) {
-  return <article className="manga-card"><button type="button" className="manga-card__body" aria-label={`${post.title} 읽기`} disabled={disabled} onClick={onRead}>
-    <span className="manga-card__frame"><MangaCover className="manga-card__cover" src={post.cover ? nativeMediaUrl(post.cover) : null} title={post.title} privacyMode={masked} reportBusy={false} /></span>
+  return <article className={post.gone ? "manga-card manga-card--gone" : "manga-card"}><button type="button" className="manga-card__body" aria-label={post.gone ? `${post.title} (삭제됨)` : `${post.title} 읽기`} disabled={disabled} onClick={onRead}>
+    <span className="manga-card__frame"><MangaCover className="manga-card__cover" src={post.cover ? nativeMediaUrl(post.cover) : null} title={post.title} privacyMode={masked} reportBusy={false} />{post.gone && <Badge variant="scrim" className="manga-card__pages">삭제됨</Badge>}</span>
     <strong className="manga-card__title">{post.title}</strong>
     <span className="manga-card__artist">{post.writerName || post.writerHandle}</span>
     <span className="manga-card__artist">조회 {post.views.toLocaleString()} · 추천 {post.votes.toLocaleString()}</span>

@@ -1,16 +1,20 @@
 use std::{
+    collections::HashSet,
     io::{Read, Write},
-    path::Path,
-    sync::OnceLock,
+    path::{Path, PathBuf},
+    sync::{Condvar, Mutex, OnceLock},
     time::Duration,
 };
 
 use super::{
     error::LibraryError,
+    online_catalog::validated_thumbnail_url,
     remote_gallery::{manifest_path, RemoteGalleryManifest, RemotePageDescriptor},
 };
 
 const MAX_REMOTE_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+/// Bound concurrent outbound thumbnail fetches to `ehgt.org`, matching the tablet's six-slot cap.
+const MAX_CATALOG_THUMB_CONCURRENCY: usize = 6;
 
 pub(crate) struct RemoteMedia {
     pub(crate) bytes: Vec<u8>,
@@ -125,6 +129,72 @@ where
     publish_cached_image(&cache_path, bytes)
 }
 
+struct CatalogThumbLimiter {
+    state: Mutex<(usize, HashSet<PathBuf>)>,
+    ready: Condvar,
+}
+
+impl CatalogThumbLimiter {
+    fn global() -> &'static Self {
+        static LIMITER: OnceLock<CatalogThumbLimiter> = OnceLock::new();
+        LIMITER.get_or_init(|| Self {
+            state: Mutex::new((0, HashSet::new())),
+            ready: Condvar::new(),
+        })
+    }
+
+    /// Wait until either no other request is downloading `key`, then acquire a network slot
+    /// only if the file is still absent on disk.
+    fn acquire_if_uncached(&self, cache_path: &Path) -> Option<CatalogThumbGuard<'_>> {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if guard.1.contains(cache_path) {
+                guard = self
+                    .ready
+                    .wait(guard)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                continue;
+            }
+            if cache_path.is_file() {
+                return None;
+            }
+            if guard.0 < MAX_CATALOG_THUMB_CONCURRENCY {
+                guard.0 += 1;
+                guard.1.insert(cache_path.to_path_buf());
+                return Some(CatalogThumbGuard {
+                    limiter: self,
+                    key: cache_path.to_path_buf(),
+                });
+            }
+            guard = self
+                .ready
+                .wait(guard)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+struct CatalogThumbGuard<'a> {
+    limiter: &'a CatalogThumbLimiter,
+    key: PathBuf,
+}
+
+impl Drop for CatalogThumbGuard<'_> {
+    fn drop(&mut self) {
+        let mut guard = self
+            .limiter
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.0 = guard.0.saturating_sub(1);
+        guard.1.remove(&self.key);
+        self.limiter.ready.notify_all();
+    }
+}
+
 /// 카탈로그 표지(게시판 썸네일)를 `cache/remote-manga/catalog-thumbs`에
 /// 디스크 캐시한다. kHentai 검색 결과 카드가 CDN 직접 URL 대신 이 캐시를 쓴다.
 pub(crate) fn load_catalog_thumbnail(
@@ -132,6 +202,18 @@ pub(crate) fn load_catalog_thumbnail(
     identity: &super::catalog_provider::CatalogWorkIdentity,
     url: &str,
 ) -> Result<RemoteMedia, LibraryError> {
+    load_catalog_thumbnail_with(root, identity, url, fetch_catalog_thumbnail_bytes)
+}
+
+fn load_catalog_thumbnail_with<F>(
+    root: &Path,
+    identity: &super::catalog_provider::CatalogWorkIdentity,
+    url: &str,
+    mut fetch: F,
+) -> Result<RemoteMedia, LibraryError>
+where
+    F: FnMut(&str) -> Result<Vec<u8>, LibraryError>,
+{
     // URL은 카탈로그 DB에서 검증된 ehgt.org 값만 들어온다(online_catalog::validated_thumbnail_url).
     let digest = format!("{:x}", url_hash(url.as_bytes()));
     let cache_path = root
@@ -142,18 +224,90 @@ pub(crate) fn load_catalog_thumbnail(
         let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
         return Ok(RemoteMedia { bytes, mime });
     }
-    let mut response = image_agent().get(url).call().map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
-    let mut bytes = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .take((MAX_REMOTE_IMAGE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
-    if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
-        return Err(LibraryError::UnsupportedImage);
+    let _permit = CatalogThumbLimiter::global().acquire_if_uncached(&cache_path);
+    if let Ok(bytes) = std::fs::read(&cache_path) {
+        let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
+        return Ok(RemoteMedia { bytes, mime });
     }
+    let bytes = fetch(url)?;
     publish_cached_image(&cache_path, bytes)
+}
+
+fn fetch_catalog_thumbnail_bytes(url: &str) -> Result<Vec<u8>, LibraryError> {
+    let mut last_error = LibraryError::RemoteGalleryUnavailable;
+    for attempt in 0..2 {
+        match fetch_catalog_thumbnail_once(url) {
+            Ok(bytes) => return Ok(bytes),
+            Err(LibraryError::MediaNotFound) => return Err(LibraryError::MediaNotFound),
+            Err(LibraryError::UnsupportedImage) => return Err(LibraryError::UnsupportedImage),
+            Err(error) => {
+                last_error = error;
+                if attempt == 0 {
+                    std::thread::sleep(Duration::from_millis(350));
+                }
+            }
+        }
+    }
+    Err(last_error)
+}
+
+fn fetch_catalog_thumbnail_once(initial_url: &str) -> Result<Vec<u8>, LibraryError> {
+    let mut current = initial_url.to_owned();
+    for _ in 0..3 {
+        let mut response = catalog_thumb_agent()
+            .get(&current)
+            .header(
+                "User-Agent",
+                format!("Lakomics/{}", env!("CARGO_PKG_VERSION")),
+            )
+            .call()
+            .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+        let status = response.status().as_u16();
+        if matches!(status, 301 | 302 | 303 | 307 | 308) {
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|value| value.to_str().ok())
+                .ok_or(LibraryError::RemoteGalleryUnavailable)?;
+            let next = url::Url::parse(&current)
+                .and_then(|base| base.join(location))
+                .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+            current = validated_thumbnail_url(Some(next.to_string()))
+                .ok_or(LibraryError::RemoteGalleryUnavailable)?;
+            continue;
+        }
+        if matches!(status, 404 | 410) {
+            return Err(LibraryError::MediaNotFound);
+        }
+        if status != 200 {
+            return Err(LibraryError::RemoteGalleryUnavailable);
+        }
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .as_reader()
+            .take((MAX_REMOTE_IMAGE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+        if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
+            return Err(LibraryError::UnsupportedImage);
+        }
+        return Ok(bytes);
+    }
+    Err(LibraryError::RemoteGalleryUnavailable)
+}
+
+fn catalog_thumb_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build()
+            .into()
+    })
 }
 
 fn publish_cached_image(cache_path: &Path, bytes: Vec<u8>) -> Result<RemoteMedia, LibraryError> {
@@ -250,7 +404,8 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat};
 
-    use super::{clear_remote_cache, load_remote_page_with};
+    use super::{clear_remote_cache, load_catalog_thumbnail_with, load_remote_page_with};
+    use crate::library::catalog_provider::CatalogWorkIdentity;
     use crate::library::remote_gallery::{
         parse_khentai_gallery, write_manifest, RemoteGalleryManifest,
     };
@@ -403,5 +558,38 @@ mod tests {
 
         assert!(clear_remote_cache(root.path()).is_err());
         assert!(assets.join("remote-manga/keep.txt").is_file());
+    }
+
+    #[test]
+    fn concurrent_catalog_thumbnail_requests_share_one_network_fetch() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (root, png) = fixture();
+        let identity = CatalogWorkIdentity::khentai(99);
+        let url = "https://ehgt.org/w/00/099/cover.png";
+        let calls = AtomicUsize::new(0);
+        let barrier = std::sync::Barrier::new(6);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..6)
+                .map(|_| {
+                    let (root, identity, png, calls, barrier) =
+                        (&root, &identity, &png, &calls, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        load_catalog_thumbnail_with(root.path(), identity, url, |_| {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(30));
+                            Ok(png.clone())
+                        })
+                    })
+                })
+                .collect();
+            for handle in handles {
+                let media = handle.join().unwrap().unwrap();
+                assert_eq!(media.bytes, png);
+                assert_eq!(media.mime, "image/png");
+            }
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

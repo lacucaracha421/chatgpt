@@ -369,7 +369,7 @@ public final class MainActivity extends Activity {
      case "somiLogin":data=somi().login();break;
      case "somiLogout":data=somi().logout();break;
      case "somiSearch":data=somi().search(p);break;
-     case "somiRefresh":data=somi().refresh();break;
+     case "somiRefresh":data=somi().refresh(p.optBoolean("full"));break;
      case "somiFillCovers":data=somi().fill(p.getJSONArray("ids"),signal);break;
      case "somiOpen":data=somi().open(p.getString("id"));break;
      case "somiImage":data=somi().image(p.getString("id"),p.getInt("index"),signal);break;

@@ -14,6 +14,7 @@ impl SomiIndex {
         mut list: F,
         may_go_on: Continue,
         refresh_since: Option<i64>,
+        full: bool,
     ) -> Result<(), String>
     where
         F: FnMut(Option<Cursor>) -> Fut,
@@ -30,12 +31,16 @@ impl SomiIndex {
         if !may_go_on() {
             return Ok(());
         }
-        let mut known = locked(index)?.record(&page, first_walk)?;
-        if !first_walk {
-            // Counts on known posts only change when they are read again, so a refresh walks
-            // past the first known post down to `refresh_since`.
+        let mut known = locked(index)?.record_window(
+            None,
+            &page,
+            first_walk || (full && !page.has_more),
+        )?;
+        if !first_walk || full {
+            // Counts on known posts only change when they are read again, so a routine refresh
+            // walks past the first known post down to `refresh_since`; a full check walks to the end.
             let reaches_back = |page: &ListPage| {
-                refresh_since.is_some_and(|since| {
+                full || refresh_since.is_some_and(|since| {
                     page.items.iter().map(|post| post.seconds).min() >= Some(since)
                 })
             };
@@ -48,7 +53,11 @@ impl SomiIndex {
                 if next.next_cursor == cursor && next.has_more {
                     return Err("소미 수집 위치가 진행되지 않습니다".into());
                 }
-                known = locked(index)?.record(&next, false)?;
+                known = locked(index)?.record_window(
+                    cursor.as_ref(),
+                    &next,
+                    full && !next.has_more,
+                )?;
                 page = next;
             }
         }
@@ -67,7 +76,7 @@ impl SomiIndex {
             if page.next_cursor.as_ref() == Some(&cursor) && page.has_more {
                 return Err("소미 수집 위치가 진행되지 않습니다".into());
             }
-            locked(index)?.record(&page, true)?;
+            locked(index)?.record_window(Some(&cursor), &page, true)?;
         }
         if may_go_on() {
             locked(index)?.mark_synced(chrono::Utc::now().timestamp())?;
@@ -173,7 +182,11 @@ impl SomiIndex {
     pub fn progress(&self) -> Result<(i64, Option<i64>, bool, Option<Cursor>), String> {
         let count = self
             .db
-            .query_row("SELECT count(*) FROM posts WHERE gone=0", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0)",
+                [],
+                |r| r.get(0),
+            )
             .map_err(db_error)?;
         let (total, complete, resume): (Option<i64>, bool, Option<String>) = self
             .db
@@ -190,6 +203,25 @@ impl SomiIndex {
     }
     /// Page rows and the resume point commit together; a crash replays at most one page.
     pub fn record(&mut self, page: &ListPage, advance: bool) -> Result<bool, String> {
+        self.record_in_window(None, page, advance, false)
+    }
+    /// Record a `/v1/article/list` page and mark previously indexed posts missing from its
+    /// covered `(cursor, oldest_item]` range as `gone=1` in the same transaction.
+    pub fn record_window(
+        &mut self,
+        cursor: Option<&Cursor>,
+        page: &ListPage,
+        advance: bool,
+    ) -> Result<bool, String> {
+        self.record_in_window(cursor, page, advance, true)
+    }
+    fn record_in_window(
+        &mut self,
+        cursor: Option<&Cursor>,
+        page: &ListPage,
+        advance: bool,
+        reconcile_window: bool,
+    ) -> Result<bool, String> {
         let tx = self.db.transaction().map_err(db_error)?;
         let mut known = false;
         for post in &page.items {
@@ -201,6 +233,46 @@ impl SomiIndex {
                 .map_err(db_error)?
                 .is_some();
             tx.execute("INSERT INTO posts(id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,seen_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,unixepoch()) ON CONFLICT(id) DO UPDATE SET seconds=excluded.seconds,nanos=excluded.nanos,title=excluded.title,writer_handle=excluded.writer_handle,writer_name=excluded.writer_name,views=excluded.views,votes=excluded.votes,comments=excluded.comments,cover_key=COALESCE(excluded.cover_key,posts.cover_key),gone=0,seen_at=excluded.seen_at",params![post.id,post.seconds,post.nanos,post.title,post.writer_handle,post.writer_name,post.views,post.votes,post.comments,post.cover_key]).map_err(db_error)?;
+        }
+        if reconcile_window {
+            let min_place = page
+                .items
+                .iter()
+                .map(|p| (p.seconds, p.nanos, p.id.as_str()))
+                .min();
+            // Never wipe the whole index on an empty head page; only prune a bounded range
+            // or a confirmed tail after an explicit cursor.
+            if min_place.is_some() || (cursor.is_some() && !page.has_more) {
+                let mut sql = String::from("UPDATE posts SET gone=1 WHERE gone=0");
+                let mut args: Vec<rusqlite::types::Value> = Vec::new();
+                if let Some(upper) = cursor {
+                    sql.push_str(" AND (seconds,nanos,id)<(?,?,?)");
+                    args.push(upper.seconds.into());
+                    args.push(i64::from(upper.nanos).into());
+                    args.push(upper.id.clone().into());
+                }
+                if page.has_more {
+                    if let Some((seconds, nanos, id)) = min_place {
+                        sql.push_str(" AND (seconds,nanos,id)>=(?,?,?)");
+                        args.push(seconds.into());
+                        args.push(i64::from(nanos).into());
+                        args.push(id.to_owned().into());
+                    }
+                }
+                if !page.items.is_empty() {
+                    sql.push_str(" AND id NOT IN (");
+                    for (index, post) in page.items.iter().enumerate() {
+                        if index > 0 {
+                            sql.push(',');
+                        }
+                        sql.push('?');
+                        args.push(post.id.clone().into());
+                    }
+                    sql.push(')');
+                }
+                tx.execute(&sql, rusqlite::params_from_iter(args))
+                    .map_err(db_error)?;
+            }
         }
         if let Some(total) = page.count {
             tx.execute("UPDATE state SET total=? WHERE id=1", [total])
@@ -242,9 +314,15 @@ impl SomiIndex {
             _ => return Err("소미 정렬 방식 오류".into()),
         };
         // Stored bookmark metadata keeps missing and gone posts available in this view.
-        let source = "(SELECT p.id,p.seconds,p.nanos,p.title,p.writer_handle,p.writer_name,p.views,p.votes,p.comments,p.cover_key,p.pages,p.gone,COALESCE(b.bookmarked,0) AS bookmarked,COALESCE(b.changed_at,0) AS bookmark_changed FROM posts p LEFT JOIN bookmarks b ON b.id=p.id
-            UNION ALL SELECT b.id,b.post_seconds,0,b.title,b.writer_handle,b.writer_name,0,0,0,b.cover_key,NULL,1,b.bookmarked,b.changed_at FROM bookmarks b WHERE NOT EXISTS(SELECT 1 FROM posts p WHERE p.id=b.id))";
-        let mut filter = if bookmarked { "bookmarked=1" } else { "gone=0" }.to_string();
+        // A synced bookmark missing from `posts` is only marked gone once full collection finishes.
+        let source = "(SELECT p.id,p.seconds,p.nanos,p.title,p.writer_handle,p.writer_name,p.views,p.votes,p.comments,p.cover_key,p.pages,CASE WHEN p.gone!=0 OR p.pages=0 THEN 1 ELSE 0 END AS gone,COALESCE(b.bookmarked,0) AS bookmarked,COALESCE(b.changed_at,0) AS bookmark_changed,1 AS in_posts FROM posts p LEFT JOIN bookmarks b ON b.id=p.id
+            UNION ALL SELECT b.id,b.post_seconds,0,b.title,b.writer_handle,b.writer_name,0,0,0,b.cover_key,NULL,COALESCE((SELECT complete FROM state WHERE id=1),0),b.bookmarked,b.changed_at,0 AS in_posts FROM bookmarks b WHERE NOT EXISTS(SELECT 1 FROM posts p WHERE p.id=b.id))";
+        let mut filter = if bookmarked {
+            "bookmarked=1"
+        } else {
+            "in_posts=1 AND gone=0 AND (pages IS NULL OR pages>0)"
+        }
+        .to_string();
         let mut args: Vec<rusqlite::types::Value> = Vec::new();
         for word in query.split_whitespace() {
             filter.push_str(" AND (instr(lower(title),?)>0 OR instr(lower(writer_name),?)>0 OR instr(lower(writer_handle),?)>0)");
@@ -266,7 +344,7 @@ impl SomiIndex {
             .map_err(db_error)?;
         args.push(limit.into());
         args.push(offset.into());
-        let mut stmt=self.db.prepare(&format!("SELECT id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,pages,bookmarked FROM {source} WHERE {filter} ORDER BY {order} LIMIT ? OFFSET ?")).map_err(db_error)?;
+        let mut stmt=self.db.prepare(&format!("SELECT id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,pages,bookmarked,gone FROM {source} WHERE {filter} ORDER BY {order} LIMIT ? OFFSET ?")).map_err(db_error)?;
         let items = stmt
             .query_map(rusqlite::params_from_iter(&args), |r| Self::read_post(r))
             .map_err(db_error)?
@@ -289,10 +367,11 @@ impl SomiIndex {
             pages: r.get(10)?,
             cover: None,
             bookmarked: r.get(11)?,
+            gone: r.get(12)?,
         })
     }
     pub fn posts_by_ids(&self, ids: &[String]) -> Result<Vec<Post>, String> {
-        let mut stmt = self.db.prepare("SELECT id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,pages,COALESCE((SELECT bookmarked FROM bookmarks b WHERE b.id=posts.id),0) FROM posts WHERE gone=0 AND id=?").map_err(db_error)?;
+        let mut stmt = self.db.prepare("SELECT id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,pages,COALESCE((SELECT bookmarked FROM bookmarks b WHERE b.id=posts.id),0),CASE WHEN gone!=0 OR pages=0 THEN 1 ELSE 0 END FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0) AND id=?").map_err(db_error)?;
         let mut posts = Vec::new();
         for id in ids {
             if let Some(post) = stmt
@@ -308,14 +387,14 @@ impl SomiIndex {
     pub fn rank_of(&self, post: &Post) -> Result<u32, String> {
         self.db
             .query_row(
-                "SELECT count(*) FROM posts WHERE gone=0 AND (seconds,nanos,id)>(?,?,?)",
+                "SELECT count(*) FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0) AND (seconds,nanos,id)>(?,?,?)",
                 params![post.seconds, post.nanos, post.id],
                 |r| r.get(0),
             )
             .map_err(db_error)
     }
     pub fn place_at(&self, rank: u32) -> Result<Option<Cursor>, String> {
-        self.db.query_row("SELECT seconds,nanos,id FROM posts WHERE gone=0 ORDER BY seconds DESC,nanos DESC,id DESC LIMIT 1 OFFSET ?",[rank],|r|Ok(Cursor{seconds:r.get(0)?,nanos:r.get(1)?,id:r.get(2)?})).optional().map_err(db_error)
+        self.db.query_row("SELECT seconds,nanos,id FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0) ORDER BY seconds DESC,nanos DESC,id DESC LIMIT 1 OFFSET ?",[rank],|r|Ok(Cursor{seconds:r.get(0)?,nanos:r.get(1)?,id:r.get(2)?})).optional().map_err(db_error)
     }
     pub fn gone(&self, id: &str) -> Result<(), String> {
         self.db
@@ -432,6 +511,7 @@ mod tests {
             |_| ready(Err("offline".into())),
             || true,
             Some(now - 90 * 86400),
+            false,
         ));
         assert!(result.is_err());
         assert!(db.lock().unwrap().sync_due(now, false).unwrap());
@@ -448,6 +528,7 @@ mod tests {
             },
             || true,
             Some(now - 90 * 86400),
+            false,
         ))
         .unwrap();
         assert!(!db.lock().unwrap().sync_due(now, false).unwrap());
@@ -476,6 +557,7 @@ mod tests {
             |_| ready(replies.pop_front().unwrap()),
             || true,
             None,
+            false,
         ));
         assert!(result.is_err());
         drop(db);
@@ -501,6 +583,7 @@ mod tests {
             },
             || true,
             None,
+            false,
         ))
         .unwrap();
         assert_eq!(calls, vec![None, Some(cursor.clone())]);
@@ -514,6 +597,7 @@ mod tests {
             },
             || true,
             None,
+            false,
         ))
         .unwrap();
         assert_eq!(calls, 1);
@@ -526,6 +610,7 @@ mod tests {
             },
             || false,
             None,
+            false,
         ))
         .unwrap();
         assert_eq!(calls, 0);
@@ -561,9 +646,70 @@ mod tests {
             },
             || true,
             Some(15),
+            false,
         ))
         .unwrap();
         assert_eq!(calls, 3);
+    }
+    #[test]
+    fn somi_full_sync_reconciles_deleted_posts_older_than_window() {
+        use std::{collections::VecDeque, future::ready, sync::Mutex};
+        let db = Mutex::new(SomiIndex::open(Path::new(":memory:")).unwrap());
+        db.lock()
+            .unwrap()
+            .record(
+                &ListPage {
+                    items: vec![
+                        post("p30", 30, "최신", 1),
+                        post("p20", 20, "오래된 삭제 글", 1),
+                        post("p10", 10, "오래된 남은 글", 1),
+                    ],
+                    count: Some(3),
+                    has_more: false,
+                    next_cursor: None,
+                    previews: Vec::new(),
+                },
+                true,
+            )
+            .unwrap();
+        let mut replies = VecDeque::from([
+            ListPage {
+                items: vec![post("p30", 30, "최신", 1)],
+                count: Some(2),
+                has_more: true,
+                next_cursor: Some(Cursor {
+                    seconds: 30,
+                    nanos: 0,
+                    id: "p30".into(),
+                }),
+                previews: Vec::new(),
+            },
+            ListPage {
+                items: vec![post("p10", 10, "오래된 남은 글", 1)],
+                count: Some(2),
+                has_more: false,
+                next_cursor: None,
+                previews: Vec::new(),
+            },
+        ]);
+        tauri::async_runtime::block_on(SomiIndex::sync(
+            &db,
+            |_| ready(Ok(replies.pop_front().unwrap())),
+            || true,
+            Some(25),
+            true,
+        ))
+        .unwrap();
+        let ids: Vec<String> = db
+            .lock()
+            .unwrap()
+            .search("", "new", None, 0, 10, false)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(ids, vec!["p30", "p10"]);
     }
     #[test]
     fn somi_period_keeps_only_recent_posts() {
@@ -605,6 +751,7 @@ mod tests {
             pages: None,
             cover: None,
             bookmarked: false,
+            gone: false,
         }
     }
     #[test]
@@ -676,5 +823,83 @@ mod tests {
             plan_runs(vec![202, 2, 0, 2, 100, 101]),
             vec![(0, 3), (100, 2), (202, 1)]
         );
+    }
+    #[test]
+    fn somi_window_reconciles_deleted_and_zero_page_posts_and_marks_bookmarks_gone() {
+        let mut db = SomiIndex::open(Path::new(":memory:")).unwrap();
+        let a = "aaaaaaaaaaaaaaaaaaaaab";
+        let b = "aaaaaaaaaaaaaaaaaaaaac";
+        let c = "aaaaaaaaaaaaaaaaaaaaad";
+        let d = "aaaaaaaaaaaaaaaaaaaaae";
+        db.record(
+            &ListPage {
+                items: vec![
+                    post(a, 40, "남은 최신", 1),
+                    post(b, 30, "사라진 글", 2),
+                    post(c, 20, "기준 하단", 3),
+                    post(d, 10, "범위 밖 오래된 글", 4),
+                ],
+                count: Some(4),
+                has_more: false,
+                next_cursor: None,
+                previews: Vec::new(),
+            },
+            true,
+        )
+        .unwrap();
+        let b_post = db.posts_by_ids(&[b.into()]).unwrap().pop().unwrap();
+        db.toggle_bookmark(&b_post).unwrap();
+        // A refresh window covering [40..=20] omits `b`: `b` becomes gone, `d` (older than 20) stays live.
+        db.record_window(
+            None,
+            &ListPage {
+                items: vec![post(a, 40, "남은 최신", 1), post(c, 20, "기준 하단", 3)],
+                count: Some(3),
+                has_more: true,
+                next_cursor: Some(Cursor {
+                    seconds: 20,
+                    nanos: 0,
+                    id: c.into(),
+                }),
+                previews: Vec::new(),
+            },
+            false,
+        )
+        .unwrap();
+        let board = db.search("", "new", None, 0, 10, false).unwrap();
+        assert_eq!(
+            board.items.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec![a, c, d]
+        );
+        let bookmarks = db.search("", "added", None, 0, 10, true).unwrap();
+        assert_eq!(bookmarks.items.len(), 1);
+        assert_eq!(bookmarks.items[0].id, b);
+        assert!(bookmarks.items[0].gone);
+        // Zero-page posts disappear from the board too and report gone in bookmarks.
+        let c_post = db.posts_by_ids(&[c.into()]).unwrap().pop().unwrap();
+        db.toggle_bookmark(&c_post).unwrap();
+        db.set_pages(c, 0).unwrap();
+        let board = db.search("", "new", None, 0, 10, false).unwrap();
+        assert_eq!(
+            board.items.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec![a, d]
+        );
+        assert!(db.posts_by_ids(&[c.into()]).unwrap().is_empty());
+        let bookmarks = db.search("", "added", None, 0, 10, true).unwrap();
+        assert!(bookmarks.items.iter().all(|p| p.gone));
+        // Empty head page never wipes existing live posts.
+        db.record_window(
+            None,
+            &ListPage {
+                items: Vec::new(),
+                count: None,
+                has_more: false,
+                next_cursor: None,
+                previews: Vec::new(),
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(db.search("", "new", None, 0, 10, false).unwrap().total, 2);
     }
 }

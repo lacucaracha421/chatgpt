@@ -53,7 +53,7 @@ export function catalogCoversKnown(items:readonly Pick<CatalogItem,'provider'|'p
   return tabletCatalogMasked()||items.every(item=>!item.thumbnailUrl||coverUrls.has(coverSource(item,revision)));
 }
 /** A nearby cover stays subscribed through quick viewport exits; a far cover is canceled. */
-export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>;revision:string;active:boolean;onUrl?(url:string|null):void;arrival?:CardArrival}){
+export function CatalogCover({item,revision,active,onUrl,onBroken,arrival}:{item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>;revision:string;active:boolean;onUrl?(url:string|null):void;onBroken?():void;arrival?:CardArrival}){
   const privacy = useTabletCatalogMasked();
   const source=coverSource(item,revision);
   const [image,setImage]=useState<{source:string;url:string}|null>(null),[failed,setFailed]=useState<string|null>(null),[near,setNear]=useState(false),[decoded,setDecoded]=useState<string|null>(null),[retry,setRetry]=useState(0);
@@ -90,6 +90,8 @@ export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<Cat
   };
   return <span className="catalog-cover-image" ref={host} data-perf-image-pending={catalogPerfEnabled()&&!privacy&&!!item.thumbnailUrl&&failed!==source&&decoded!==source?"true":undefined} data-catalog-cover={item.thumbnailUrl?item.providerWorkId:undefined} data-catalog-decoded={shown&&decoded===source?'true':undefined}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:shown?<img key={source} ref={picture} src={shown} alt="" onLoad={event=>{const element=event.currentTarget;afterDecode(element,()=>settle(element));}} onError={()=>{
     // A remembered URL that no longer loads is forgotten and asked for again, once.
+    // Pre-resolved local media-cache URLs (e.g. Somi) cannot be re-fetched via catalogImageTicket; notify the owner.
+    if(item.thumbnailUrl?.startsWith('https://app.lakomics.local/media-cache/')){coverUrls.delete(source);arrival?.ready();loaded.current=null;setFailed(source);onBroken?.();return;}
     if(image?.source!==source&&coverUrls.get(source)===shown){coverUrls.delete(source);setRetry(value=>value+1);return;}
-    coverUrls.delete(source);arrival?.ready();loaded.current=null;setFailed(source);}}/>:null}</span>;
+    coverUrls.delete(source);arrival?.ready();loaded.current=null;setFailed(source);onBroken?.();}}/>:null}</span>;
 }

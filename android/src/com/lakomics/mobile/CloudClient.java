@@ -138,23 +138,36 @@ final class CloudClient {
  }
  static void prepare(HttpURLConnection c,CancellationSignal signal){c.setConnectTimeout(3000);c.setReadTimeout(20000);c.setInstanceFollowRedirects(false);if(signal!=null){signal.throwIfCanceled();signal.setOnCancelListener(c::disconnect);}}
  static void copy(InputStream in,OutputStream out,long max,CancellationSignal signal)throws IOException {byte[] b=new byte[32768];long deadline=System.currentTimeMillis()+90000;long count=0;int n;while((n=in.read(b))!=-1){if(signal!=null)signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new SocketTimeoutException("Transfer deadline exceeded");count+=n;if(count>max)throw new IOException("Media exceeds cache limit");out.write(b,0,n);}}
+ interface RedirectValidator { void check(String url) throws Exception; }
  void download(String url,File file,long max,CancellationSignal signal)throws Exception {
-  StartupPerf.Http timing=StartupPerf.http("download");try{startupDownload(url,file,max,signal);}finally{if(timing!=null)timing.finish(signal!=null&&signal.isCanceled());}
+  download(url,file,max,signal,null);
  }
- private void startupDownload(String url,File file,long max,CancellationSignal signal)throws Exception {
+ void download(String url,File file,long max,CancellationSignal signal,RedirectValidator redirectValidator)throws Exception {
+  StartupPerf.Http timing=StartupPerf.http("download");try{startupDownload(url,file,max,signal,redirectValidator);}finally{if(timing!=null)timing.finish(signal!=null&&signal.isCanceled());}
+ }
+ private void startupDownload(String url,File file,long max,CancellationSignal signal,RedirectValidator redirectValidator)throws Exception {
   PerfLog.Op perf=PerfLog.current.get();long downloadStarted=System.nanoTime();
-  try{URI u=new URI(url);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
-  HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;
-  HttpSessionPerf.Sample sample=HttpSessionPerf.begin("download");try{
-   prepare(c,signal);c.setRequestProperty("Accept-Encoding","identity");
-   int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
-   String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
-   long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
-   try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample);OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copyWhileProgressing(in,out,max,expected,MediaTransfer.IDLE_NANOS,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
-   // A fully read and closed body lets the platform pool keep the TLS connection for the
-   // next storage download; only failed or cancelled transfers tear the socket down.
-   reusable=true;
-  }finally{if(sample!=null)sample.finish(reusable,signal!=null&&signal.isCanceled());if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
+  try{
+   String current=url;
+   for(int hop=0;;hop++){
+    URI u=new URI(current);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
+    HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;
+    HttpSessionPerf.Sample sample=HttpSessionPerf.begin("download");try{
+     prepare(c,signal);c.setRequestProperty("Accept-Encoding","identity");
+     int status=c.getResponseCode();
+     if(redirectValidator!=null && hop<2 && (status==301 || status==302 || status==303 || status==307 || status==308)){
+      String location=c.getHeaderField("Location");if(location==null || location.isEmpty())throw new HttpFailure(status,null);
+      String next=u.resolve(location).toString();redirectValidator.check(next);current=next;continue;
+     }
+     if(status!=200)throw new HttpFailure(status,null);
+     String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
+     long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
+     try(InputStream in=HttpSessionPerf.input(c.getInputStream(),sample);OutputStream out=new FileOutputStream(file)){try{MediaTransfer.copyWhileProgressing(in,out,max,expected,MediaTransfer.IDLE_NANOS,signal==null?null:signal::throwIfCanceled);}finally{if(perf!=null)perf.bytes+=file.length();}}
+     // A fully read and closed body lets the platform pool keep the TLS connection for the
+     // next storage download; only failed or cancelled transfers tear the socket down.
+     reusable=true;return;
+    }finally{if(sample!=null)sample.finish(reusable,signal!=null&&signal.isCanceled());if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
+   }
   }finally{if(perf!=null)perf.download+=System.nanoTime()-downloadStarted;}
  }
 }

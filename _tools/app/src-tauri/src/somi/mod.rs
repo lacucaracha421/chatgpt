@@ -40,6 +40,7 @@ pub(crate) struct Post {
     pages: Option<u32>,
     cover: Option<String>,
     bookmarked: bool,
+    gone: bool,
 }
 pub(crate) struct ListPage {
     items: Vec<Post>,
@@ -286,7 +287,7 @@ impl SomiState {
         }
         let profile = locked(&self.profile)?.clone();
         if collect && profile.is_some() {
-            self.start_sync(app, false)?;
+            self.start_sync(app, false, false)?;
         }
         let (collected, total, complete, _) = locked(self.index(app)?)?.progress()?;
         Ok(Status {
@@ -350,7 +351,11 @@ impl SomiState {
                 }
                 return Err(LOGIN.into());
             }
-            if response.status == 404 {
+            if matches!(response.status, 404 | 410)
+                || ["not_found", "notfound", "deleted", "removed", "gone"]
+                    .iter()
+                    .any(|s| code.contains(s))
+            {
                 return Err("SOMI_POST_GONE".into());
             }
             return Err("코네 요청을 완료할 수 없습니다".into());
@@ -411,12 +416,12 @@ impl SomiState {
         }
         Ok(page)
     }
-    pub fn sync_now(&self, app: &AppHandle) -> Result<(), String> {
+    pub fn sync_now(&self, app: &AppHandle, full: bool) -> Result<(), String> {
         self.require_login()?;
-        self.start_sync(app, true)
+        self.start_sync(app, true, full)
     }
-    fn start_sync(&self, app: &AppHandle, forced: bool) -> Result<(), String> {
-        if !locked(self.index(app)?)?.sync_due(chrono::Utc::now().timestamp(), forced)? {
+    fn start_sync(&self, app: &AppHandle, forced: bool, full: bool) -> Result<(), String> {
+        if !locked(self.index(app)?)?.sync_due(chrono::Utc::now().timestamp(), forced || full)? {
             return Ok(());
         }
         if self
@@ -431,7 +436,7 @@ impl SomiState {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             let state = app.state::<SomiState>();
-            let result = state.sync(&app, epoch).await;
+            let result = state.sync(&app, epoch, full).await;
             if state.current(epoch) {
                 *state.error.lock().unwrap() = result.err();
             }
@@ -440,13 +445,14 @@ impl SomiState {
         Ok(())
     }
     /// Refresh the head until a known post, then resume the unfinished historical walk.
-    async fn sync(&self, app: &AppHandle, epoch: u64) -> Result<(), String> {
+    async fn sync(&self, app: &AppHandle, epoch: u64, full: bool) -> Result<(), String> {
         let refresh_since = Some(chrono::Utc::now().timestamp() - REFRESH_DAYS * 86400);
         SomiIndex::sync(
             self.index(app)?,
             |cursor| async move { self.list(app, cursor.as_ref(), 100, epoch).await },
             || self.current(epoch),
             refresh_since,
+            full,
         )
         .await
     }
@@ -530,7 +536,7 @@ impl SomiState {
             if !self.fill_is_current(generation) {
                 return Ok(Vec::new());
             }
-            locked(self.index(app)?)?.record(&page, false)?;
+            locked(self.index(app)?)?.record_window(cursor.as_ref(), &page, false)?;
         }
         let posts = locked(self.index(app)?)?.posts_by_ids(ids)?;
         let mut resolved = Vec::new();
@@ -699,6 +705,7 @@ fn read_post(v: &Value) -> Result<Post, String> {
         pages: None,
         cover: None,
         bookmarked: false,
+        gone: false,
     })
 }
 fn images(nodes: &Value, out: &mut Vec<String>) {

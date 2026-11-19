@@ -1,8 +1,12 @@
 use crate::somi::{FilledCover, OpenedPost, SearchPage, SomiState, Status};
 use tauri::{AppHandle, State};
 #[tauri::command]
-pub(crate) fn somi_sync_now(app: AppHandle, state: State<'_, SomiState>) -> Result<(), String> {
-    state.sync_now(&app)
+pub(crate) fn somi_sync_now(
+    app: AppHandle,
+    state: State<'_, SomiState>,
+    full: Option<bool>,
+) -> Result<(), String> {
+    state.sync_now(&app, full.unwrap_or(false))
 }
 #[tauri::command]
 pub(crate) async fn somi_status(

@@ -177,3 +177,28 @@ it('resumes the saved page and bookmarks in the reader without another article r
   fireEvent.click(within(reader).getByRole('button',{name:'다음 페이지'}));
   await waitFor(()=>expect(requests('somiPage').at(-1)?.[1]).toMatchObject({id:post.id,page:5}));
 });
+
+it('removes gone posts from the board in place and marks gone bookmarks without filling covers',async()=>{
+  const other:SomiPost={...post,id:'aaaaaaaaaaaaaaaaaaaaac',title:'남은 책'};
+  const base=mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation((op:string,p:Record<string,unknown>)=>{
+    if(op==='somiSearch')return Promise.resolve(p.bookmarked?{items:[{...post,bookmarked:true,gone:true,coverKey:'ab'.repeat(32)}],total:1}:{items:[post,other],total:2});
+    if(op==='somiOpen')return Promise.reject(new Error('SOMI_POST_GONE'));
+    return base(op,p);
+  });
+  const view=render(<Somi {...props}/>);
+  fireEvent.click(await screen.findByRole('button',{name:new RegExp(post.title)}));
+  await waitFor(()=>expect(screen.queryByText(post.title)).toBeNull());
+  expect(screen.getByText(other.title)).toBeTruthy();
+
+  view.rerender(<Somi {...props} bookmarked/>);
+  await screen.findByText('삭제됨');
+  expect(requests('somiFillCovers')).toHaveLength(0);
+});
+
+it('starts a full board recheck from the menu',async()=>{
+  render(<Somi {...props}/>);await screen.findByText(post.title);
+  fireEvent.click(screen.getByRole('button',{name:'더보기'}));
+  fireEvent.click(await screen.findByRole('button',{name:'전체 목차 다시 점검'}));
+  await waitFor(()=>expect(requests('somiRefresh').at(-1)?.[1]).toEqual({full:true}));
+});

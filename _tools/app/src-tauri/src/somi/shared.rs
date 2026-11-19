@@ -159,7 +159,7 @@ impl SomiIndex {
         Ok(bookmarked)
     }
     pub fn bookmark_post(&self, id: &str) -> Result<Post, String> {
-        self.db.query_row("SELECT id,post_seconds,0,title,writer_handle,writer_name,0,0,0,cover_key,NULL,bookmarked FROM bookmarks WHERE id=?", [id], SomiIndex::read_post).map_err(db_error)
+        self.db.query_row("SELECT id,post_seconds,0,title,writer_handle,writer_name,0,0,0,cover_key,NULL,bookmarked,COALESCE((SELECT complete FROM state WHERE id=1),0) FROM bookmarks WHERE id=?", [id], SomiIndex::read_post).map_err(db_error)
     }
     pub fn dirty_rows(&self) -> Result<Vec<Row>, String> {
         let mut rows = Vec::new();

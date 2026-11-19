@@ -32,35 +32,51 @@ final class SomiStore {
     synchronized Map<String,Object> state(){return db.query("SELECT * FROM state WHERE id=1").get(0);}
     synchronized void profile(String handle,String name){db.exec("UPDATE state SET handle=?,display_name=? WHERE id=1",handle,name);}
     synchronized boolean loggedIn(){return !s(state(),"handle").isEmpty();}
-    synchronized Map<String,Object> status(boolean syncing){Map<String,Object> r=state();return map("loggedIn",loggedIn(),"handle",r.get("handle"),"displayName",r.get("display_name"),"collected",n(db.query("SELECT count(*) AS n FROM posts WHERE gone=0").get(0),"n"),"total",r.get("total"),"complete",n(r,"complete")==1,"syncing",syncing);}
+    synchronized Map<String,Object> status(boolean syncing){Map<String,Object> r=state();return map("loggedIn",loggedIn(),"handle",r.get("handle"),"displayName",r.get("display_name"),"collected",n(db.query("SELECT count(*) AS n FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0)").get(0),"n"),"total",r.get("total"),"complete",n(r,"complete")==1,"syncing",syncing);}
     synchronized boolean due(long now,boolean forced){Map<String,Object> r=state();return forced||n(r,"complete")==0||r.get("synced_at")==null||now-n(r,"synced_at")>=3600;}
     synchronized void synced(long now){db.exec("UPDATE state SET synced_at=? WHERE id=1",now);}
     synchronized Cursor resume(){return Cursor.parse(s(state(),"resume"));}
     synchronized boolean complete(){return n(state(),"complete")==1;}
-    synchronized boolean record(List<Map<String,Object>> items,Long total,boolean more,Cursor next,boolean advance,long now){
+    synchronized boolean record(List<Map<String,Object>> items,Long total,boolean more,Cursor next,boolean advance,long now){return record(null,items,total,more,next,advance,now,false);}
+    synchronized boolean recordWindow(Cursor cursor,List<Map<String,Object>> items,Long total,boolean more,Cursor next,boolean advance,long now){return record(cursor,items,total,more,next,advance,now,true);}
+    private synchronized boolean record(Cursor cursor,List<Map<String,Object>> items,Long total,boolean more,Cursor next,boolean advance,long now,boolean reconcile){
         final boolean[] known={false};db.transaction(()->{
+            Map<String,Object> oldest=null;
             for(Map<String,Object> p:items){String id=s(p,"id");known[0]|=!db.query("SELECT id FROM posts WHERE id=?",id).isEmpty();
                 db.exec("INSERT INTO posts(id,seconds,nanos,title,writer_handle,writer_name,views,votes,comments,cover_key,seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET seconds=excluded.seconds,nanos=excluded.nanos,title=excluded.title,writer_handle=excluded.writer_handle,writer_name=excluded.writer_name,views=excluded.views,votes=excluded.votes,comments=excluded.comments,cover_key=coalesce(excluded.cover_key,posts.cover_key),gone=0,seen_at=excluded.seen_at",id,n(p,"seconds"),n(p,"nanos"),s(p,"title"),s(p,"writerHandle"),s(p,"writerName"),n(p,"views"),n(p,"votes"),n(p,"comments"),p.get("coverKey"),now);
+                if(oldest==null||comparePlace(p,oldest)<0)oldest=p;
+            }
+            if(reconcile&&(oldest!=null||(cursor!=null&&!more))){
+                StringBuilder sql=new StringBuilder("UPDATE posts SET gone=1 WHERE gone=0");List<Object> args=new ArrayList<>();
+                if(cursor!=null){sql.append(" AND (seconds<? OR (seconds=? AND nanos<?) OR (seconds=? AND nanos=? AND id<?))");args.add(cursor.seconds);args.add(cursor.seconds);args.add(cursor.nanos);args.add(cursor.seconds);args.add(cursor.nanos);args.add(cursor.id);}
+                if(more&&oldest!=null){long s=n(oldest,"seconds"),na=n(oldest,"nanos");String oid=s(oldest,"id");sql.append(" AND (seconds>? OR (seconds=? AND nanos>?) OR (seconds=? AND nanos=? AND id>=?))");args.add(s);args.add(s);args.add(na);args.add(s);args.add(na);args.add(oid);}
+                if(!items.isEmpty()){sql.append(" AND id NOT IN (");for(int i=0;i<items.size();i++){if(i>0)sql.append(',');sql.append('?');args.add(s(items.get(i),"id"));}sql.append(')');}
+                db.exec(sql.toString(),args.toArray());
             }
             if(total!=null)db.exec("UPDATE state SET total=? WHERE id=1",total);
             if(advance)db.exec("UPDATE state SET complete=?,resume=? WHERE id=1",more?0:1,more&&next!=null?next.json():null);
         });return known[0];
     }
-    private static final String SOURCE="(SELECT p.*,coalesce(b.bookmarked,0) AS bookmarked,coalesce(b.changed_at,0) AS bookmark_changed FROM posts p LEFT JOIN bookmarks b ON b.id=p.id UNION ALL SELECT b.id,b.post_seconds,0,b.title,b.writer_handle,b.writer_name,0,0,0,b.cover_key,NULL,1,0,b.bookmarked,b.changed_at FROM bookmarks b WHERE NOT EXISTS(SELECT 1 FROM posts p WHERE p.id=b.id))";
+    private static int comparePlace(Map<String,Object> a,Map<String,Object> b){
+        int c=Long.compare(n(a,"seconds"),n(b,"seconds"));if(c!=0)return c;
+        c=Long.compare(n(a,"nanos"),n(b,"nanos"));if(c!=0)return c;
+        return s(a,"id").compareTo(s(b,"id"));
+    }
+    private static final String SOURCE="(SELECT p.id,p.seconds,p.nanos,p.title,p.writer_handle,p.writer_name,p.views,p.votes,p.comments,p.cover_key,p.pages,CASE WHEN p.gone!=0 OR p.pages=0 THEN 1 ELSE 0 END AS gone,p.seen_at,coalesce(b.bookmarked,0) AS bookmarked,coalesce(b.changed_at,0) AS bookmark_changed,1 AS in_posts FROM posts p LEFT JOIN bookmarks b ON b.id=p.id UNION ALL SELECT b.id,b.post_seconds,0,b.title,b.writer_handle,b.writer_name,0,0,0,b.cover_key,NULL,coalesce((SELECT complete FROM state WHERE id=1),0),0,b.bookmarked,b.changed_at,0 AS in_posts FROM bookmarks b WHERE NOT EXISTS(SELECT 1 FROM posts p WHERE p.id=b.id))";
     synchronized Map<String,Object> search(String query,String sort,Integer days,int page,boolean bookmarked,long now){
         String order;
         switch(sort){case "added":if(!bookmarked)throw new IllegalArgumentException();order="bookmark_changed DESC,id DESC";break;case "new":order="seconds DESC,nanos DESC,id DESC";break;case "old":order="seconds,nanos,id";break;case "votes":case "views":case "comments":order=sort+" DESC,seconds DESC,nanos DESC,id DESC";break;default:throw new IllegalArgumentException();}
-        List<Object> args=new ArrayList<>();String where=bookmarked?"bookmarked=1":"gone=0";
+        List<Object> args=new ArrayList<>();String where=bookmarked?"bookmarked=1":"in_posts=1 AND gone=0 AND (pages IS NULL OR pages>0)";
         for(String word:query.toLowerCase(Locale.ROOT).trim().split("\\s+")){if(word.isEmpty())continue;where+=" AND (instr(lower(title),?)>0 OR instr(lower(writer_name),?)>0 OR instr(lower(writer_handle),?)>0)";for(int i=0;i<3;i++)args.add(word);}
         if(days!=null){where+=" AND seconds>=?";args.add(now-days*86400L);}
         long total=n(db.query("SELECT count(*) AS n FROM "+SOURCE+" WHERE "+where,args.toArray()).get(0),"n");args.add(60);args.add(Math.max(0,page-1)*60);
         List<Map<String,Object>> items=new ArrayList<>();for(Map<String,Object> r:db.query("SELECT * FROM "+SOURCE+" WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?",args.toArray()))items.add(post(r));
         return map("items",items,"total",total);
     }
-    private static Map<String,Object> post(Map<String,Object> r){return map("id",r.get("id"),"seconds",r.get("seconds"),"nanos",r.get("nanos"),"title",r.get("title"),"writerHandle",r.get("writer_handle"),"writerName",r.get("writer_name"),"views",r.get("views"),"votes",r.get("votes"),"comments",r.get("comments"),"coverKey",r.get("cover_key"),"pages",r.get("pages"),"cover",null,"bookmarked",n(r,"bookmarked")==1);}
+    private static Map<String,Object> post(Map<String,Object> r){return map("id",r.get("id"),"seconds",r.get("seconds"),"nanos",r.get("nanos"),"title",r.get("title"),"writerHandle",r.get("writer_handle"),"writerName",r.get("writer_name"),"views",r.get("views"),"votes",r.get("votes"),"comments",r.get("comments"),"coverKey",r.get("cover_key"),"pages",r.get("pages"),"cover",null,"bookmarked",n(r,"bookmarked")==1,"gone",n(r,"gone")!=0||(r.get("pages")!=null&&n(r,"pages")==0));}
     synchronized Map<String,Object> post(String id){List<Map<String,Object>> rows=db.query("SELECT * FROM "+SOURCE+" WHERE id=?",id);return rows.isEmpty()?null:post(rows.get(0));}
-    synchronized long rank(String id){Map<String,Object> p=post(id);if(p==null)return -1;return n(db.query("SELECT count(*) AS n FROM posts WHERE gone=0 AND (seconds>? OR (seconds=? AND nanos>?) OR (seconds=? AND nanos=? AND id>?))",n(p,"seconds"),n(p,"seconds"),n(p,"nanos"),n(p,"seconds"),n(p,"nanos"),id).get(0),"n");}
-    synchronized Cursor place(long rank){List<Map<String,Object>> rows=db.query("SELECT id,seconds,nanos FROM posts WHERE gone=0 ORDER BY seconds DESC,nanos DESC,id DESC LIMIT 1 OFFSET ?",rank);if(rows.isEmpty())return null;Map<String,Object> p=rows.get(0);return new Cursor(n(p,"seconds"),(int)n(p,"nanos"),s(p,"id"));}
+    synchronized long rank(String id){Map<String,Object> p=post(id);if(p==null||Boolean.TRUE.equals(p.get("gone")))return -1;return n(db.query("SELECT count(*) AS n FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0) AND (seconds>? OR (seconds=? AND nanos>?) OR (seconds=? AND nanos=? AND id>?))",n(p,"seconds"),n(p,"seconds"),n(p,"nanos"),n(p,"seconds"),n(p,"nanos"),id).get(0),"n");}
+    synchronized Cursor place(long rank){List<Map<String,Object>> rows=db.query("SELECT id,seconds,nanos FROM posts WHERE gone=0 AND (pages IS NULL OR pages>0) ORDER BY seconds DESC,nanos DESC,id DESC LIMIT 1 OFFSET ?",rank);if(rows.isEmpty())return null;Map<String,Object> p=rows.get(0);return new Cursor(n(p,"seconds"),(int)n(p,"nanos"),s(p,"id"));}
     static List<int[]> runs(List<Integer> ranks){List<int[]> runs=new ArrayList<>();for(int rank:new TreeSet<>(ranks)){if(runs.isEmpty()){runs.add(new int[]{rank,1});continue;}int[] last=runs.get(runs.size()-1);int end=last[0]+last[1]-1;if(rank-end<=31&&rank-last[0]<100)last[1]=rank-last[0]+1;else runs.add(new int[]{rank,1});}return runs;}
     synchronized void gone(String id){db.exec("UPDATE posts SET gone=1 WHERE id=?",id);}
     synchronized void pages(String id,int pages){db.exec("UPDATE posts SET pages=? WHERE id=?",pages,id);}

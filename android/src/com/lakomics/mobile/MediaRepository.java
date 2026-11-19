@@ -281,6 +281,9 @@ final class MediaRepository {
  }
  private void releaseLock(String key,LockEntry entry,boolean locked){if(locked)entry.lock.unlock();synchronized(locks){if(--entry.users==0)locks.remove(key);}}
  private void fillFrom(String variant,Scope scope,CancellationSignal signal,JSONObject first,TicketSource source)throws Exception{
+  fillFrom(variant,scope,signal,first,source,null);
+ }
+ private void fillFrom(String variant,Scope scope,CancellationSignal signal,JSONObject first,TicketSource source,CloudClient.RedirectValidator redirectValidator)throws Exception{
   PerfLog.Op perf=PerfLog.current.get();
   LockEntry entry=retainLock(scope.key);
   boolean locked=false,permit=false;active.add(signal);
@@ -306,7 +309,7 @@ final class MediaRepository {
      signal.throwIfCanceled();
      try{
       if(perf!=null&&(scope.cover||perf.operation.equals("collectionArtwork")))perf.downloads++;
-      client.download(current.getString("url"),file,reservation,signal);
+      client.download(current.getString("url"),file,reservation,signal,redirectValidator);
       if(perf!=null&&(scope.cover||perf.operation.equals("collectionArtwork")))perf.httpStatus=200;
       MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.isNull("sha256")?"":current.optString("sha256"));signal.throwIfCanceled();return;
      }catch(Exception failure){
@@ -365,7 +368,7 @@ final class MediaRepository {
   try{String mime=cachedImageMime(scope);if(imageMime(mime)){if(perf!=null)perf.cache="hit";return local(scope,mime);}cache().remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
   if(perf!=null)perf.cache="miss";
   JSONObject external=new JSONObject().put("url",url).put("size_bytes",0);
-  try{fillFrom("thumbnail",scope,signal,external,fresh->external);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
+  try{fillFrom("thumbnail",scope,signal,external,fresh->external,kind.equals("cover")?target->NetworkPolicy.catalogImage(workId,revision,kind,index,target):null);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache().remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);
  }
  JSONObject collectionArtwork(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{

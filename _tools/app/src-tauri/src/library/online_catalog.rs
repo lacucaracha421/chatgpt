@@ -575,14 +575,19 @@ impl Library {
             return Err(LibraryError::OnlineCatalogNotInstalled);
         }
         let url = {
-            let connection = self.connection()?;
-            connection.execute(
-                "ATTACH DATABASE ?1 AS catalog",
-                [catalog_path.to_string_lossy().as_ref()],
+            // Read `kdata.db` directly under the catalog file read-lock so thumbnail fetches
+            // never contend on the global `library.sqlite` lock or repeat `ATTACH DATABASE`.
+            let _file_guard = self
+                .catalog_file_lock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let connection = Connection::open_with_flags(
+                &catalog_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?;
             let thumb: Option<String> = connection
                 .query_row(
-                    "SELECT Thumb FROM catalog.Works WHERE Id = ?1 AND Expunged = 0",
+                    "SELECT Thumb FROM Works WHERE Id = ?1 AND Expunged = 0",
                     [work_id as i64],
                     |row| row.get(0),
                 )
@@ -1060,19 +1065,28 @@ mod tests {
         let library = Library::open(library_root.path()).unwrap();
         library.import_vck_catalog(vck_root.path()).unwrap();
         let identity = CatalogWorkIdentity::khentai(1);
-
-        let media = library
-            .online_catalog_thumbnail_with(&identity, |root, work, resolved_url| {
-                assert!(library.database_lock.try_lock().is_ok());
-                assert_eq!(root, library.root());
-                assert_eq!(work, &identity);
-                assert_eq!(resolved_url, url);
-                Ok(super::super::remote_media::RemoteMedia {
-                    bytes: vec![1, 2, 3],
-                    mime: "image/jpeg",
+        let expected_root = library.root().to_path_buf();
+        let guard = library.database_lock.lock().unwrap();
+        let reader = library.clone();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let media = reader
+                .online_catalog_thumbnail_with(&identity, |root, work, resolved_url| {
+                    assert_eq!(root, expected_root.as_path());
+                    assert_eq!(work, &identity);
+                    assert_eq!(resolved_url, url);
+                    Ok(super::super::remote_media::RemoteMedia {
+                        bytes: vec![1, 2, 3],
+                        mime: "image/jpeg",
+                    })
                 })
-            })
-            .unwrap();
+                .unwrap();
+            send.send(media).unwrap();
+        });
+        let result = receive.recv_timeout(std::time::Duration::from_secs(5));
+        drop(guard);
+        worker.join().unwrap();
+        let media = result.unwrap();
         assert_eq!(media.bytes, [1, 2, 3]);
         assert_eq!(media.mime, "image/jpeg");
     }

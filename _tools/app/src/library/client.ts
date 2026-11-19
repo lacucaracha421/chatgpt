@@ -223,7 +223,7 @@ type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
 
 export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   somiStatus: (collect = false) => invoke("somi_status", { collect }),
-  somiSyncNow: () => invoke("somi_sync_now"),
+  somiSyncNow: (full = false) => invoke("somi_sync_now", { full }),
   somiOpenLogin: () => invoke("somi_open_login"),
   somiLogout: () => invoke("somi_logout"),
   somiSearch: (query, sort, page, days, bookmarked = false) => invoke("somi_search", { query, sort, page, days, bookmarked }),

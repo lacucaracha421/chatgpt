@@ -3,3 +3,4 @@
 .catalog-card-container{position:relative;min-width:0}
 .catalog-card-container>.catalog-card{width:100%}
 .somi-card-bookmark{position:absolute;right:var(--space-1);top:var(--space-1)}
+.somi-card--gone .catalog-cover-image,.somi-card--gone strong{opacity:.52}

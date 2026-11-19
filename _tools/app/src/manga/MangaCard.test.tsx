@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
-import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
+import { MangaCard, MangaCover, MangaSkeletonGrid } from "./MangaCard";
 import { MangaSourceControl } from "./MangaToolbar";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -117,4 +117,30 @@ it("opens the detail on a single click at once, and only the reader on a double 
   expect(onRead).toHaveBeenCalledOnce();
   fireEvent.click(button, { detail: 0 });
   expect(onOpen).toHaveBeenCalledTimes(2);
+});
+
+it("retries a failed cover once and drops a stale cover when the next cover fails to preload", async () => {
+  vi.useFakeTimers();
+  try {
+    const { rerender } = render(<MangaCover src="https://example.com/a.jpg" title="작품 A" />);
+    const first = screen.getByAltText<HTMLImageElement>("작품 A 표지");
+    fireEvent.error(first);
+    expect(screen.queryByAltText("작품 A 표지")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    const retried = screen.getByAltText<HTMLImageElement>("작품 A 표지");
+    await act(async () => { fireEvent.load(retried); });
+    expect(retried).toHaveAttribute("src", "https://example.com/a.jpg");
+
+    rerender(<MangaCover src="https://example.com/b.jpg" title="작품 B" />);
+    const images = document.querySelectorAll("img");
+    const preload = Array.from(images).find(img => img.getAttribute("src") === "https://example.com/b.jpg")!;
+    fireEvent.error(preload);
+    expect(document.querySelector('img[src="https://example.com/a.jpg"]')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    const secondTry = screen.getByAltText<HTMLImageElement>("작품 B 표지");
+    fireEvent.error(secondTry);
+    expect(screen.queryByAltText("작품 B 표지")).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });

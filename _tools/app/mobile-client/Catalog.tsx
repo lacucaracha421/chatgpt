@@ -57,6 +57,8 @@ function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revis
 
 /** Covers readied before a replacing list commits: the portrait first screen. */
 const FIRST_SCREEN_COVERS=12;
+/** Hidden background prewarm per-cover timeout: long enough for an uncached CDN download. */
+const WARM_COVER_CAP_MS=10_000;
 /** The cover revision a page without a publication revision is shown under (see `revision` below). */
 const NO_REVISION='0'.repeat(64);
 const SOURCES=CATALOG_SOURCES;
@@ -289,7 +291,7 @@ function CatalogContent({active,visible=active,prefetch=false,paused,backRef,end
         if(!allowed())return;
         const ticket=new AbortController(),cancel=()=>ticket.abort();
         controller.signal.addEventListener('abort',cancel,{once:true});
-        try{await prepareCatalogCovers([item],page.publicationRevision??NO_REVISION,ticket.signal,IMAGE_READY_CAP_MS,false);}
+        try{await prepareCatalogCovers([item],page.publicationRevision??NO_REVISION,ticket.signal,WARM_COVER_CAP_MS,false);}
         finally{ticket.abort();controller.signal.removeEventListener('abort',cancel);}
       }
     };

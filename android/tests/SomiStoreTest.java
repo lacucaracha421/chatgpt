@@ -58,6 +58,14 @@ public final class SomiStoreTest {
                 check(items(store.search("공유","added",null,1,true,NOW)).size()==1,"shared-only bookmark retains metadata without board index");
                 remote.put("bookmarked",false);remote.put("changedAt",3001L);store.pull("https://one",Arrays.asList(remote),8);check(items(store.search("공유","added",null,1,true,NOW)).isEmpty(),"newer bookmark tombstone wins");
                 store.profile(null,null);check(!store.loggedIn()&&items(store.search("","added",null,1,true,NOW)).size()==2,"logout retains bookmarks for the next login");
+                // Window reconciliation marks deleted posts gone inside the walked range, while keeping older posts outside it.
+                store.recordWindow(null,Collections.singletonList(post(A,NOW,"소미 첫 글","작가",3)),2L,true,new SomiStore.Cursor(NOW-86400,0,B),false,NOW);
+                store.recordWindow(new SomiStore.Cursor(NOW,0,A),Collections.singletonList(post(C,NOW-100*86400,"오래된 글","작가",100)),2L,false,null,false,NOW);
+                check(items(store.search("","new",null,1,false,NOW)).size()==2,"deleted middle post removed from board");
+                check(Boolean.TRUE.equals(store.post(B).get("gone"))&&store.rank(B)==-1,"deleted bookmarked post reports gone and skips rank");
+                store.pages(C,0);check(items(store.search("","new",null,1,false,NOW)).size()==1,"zero-page post hidden from board");
+                store.recordWindow(null,Collections.emptyList(),null,false,null,false,NOW);
+                check(items(store.search("","new",null,1,false,NOW)).size()==1,"empty head window never wipes live posts");
             }
             try(Sqlite db=new Sqlite(file)){
                 SomiStore store=new SomiStore(db);check(!store.due(NOW+3599,false)&&store.due(NOW+3600,false),"hourly gate survives restart");check(store.due(NOW+1,true),"explicit refresh bypasses hourly gate");check(store.page(A)==12,"shared progress survives restart");

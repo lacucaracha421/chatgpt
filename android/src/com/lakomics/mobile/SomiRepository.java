@@ -61,7 +61,7 @@ final class SomiRepository {
         current(e);KoneClient.Reply r=kone.call(path,request);current(e);
         if(r.status==401||r.status==403){expire(e);throw new IOException("SOMI_LOGIN_REQUIRED");}
         Object value=null;try{value=SomiSef.decode(android.util.Base64.decode(r.value,android.util.Base64.DEFAULT));}catch(Exception failure){if(r.status>=200&&r.status<300)throw new IOException("소미 응답 형식 오류");}
-        if(r.status>=300){String code=SomiSef.text(SomiSef.field(value,1)).toLowerCase(Locale.ROOT);for(String auth:new String[]{"auth","login","sign","session","nsfw","adult"})if(code.contains(auth)){expire(e);throw new IOException("SOMI_LOGIN_REQUIRED");}if(r.status==404)throw new IOException("SOMI_POST_GONE");throw new IOException("코네 요청을 완료할 수 없습니다");}
+        if(r.status>=300){String code=SomiSef.text(SomiSef.field(value,1)).toLowerCase(Locale.ROOT);for(String auth:new String[]{"auth","login","sign","session","nsfw","adult"})if(code.contains(auth)){expire(e);throw new IOException("SOMI_LOGIN_REQUIRED");}if(r.status==404||r.status==410||code.contains("not_found")||code.contains("notfound")||code.contains("deleted")||code.contains("removed")||code.contains("gone"))throw new IOException("SOMI_POST_GONE");throw new IOException("코네 요청을 완료할 수 없습니다");}
         if(value==null)throw new IOException("코네에 연결할 수 없습니다");return value;
     }
     private static String key(String url){try{NetworkPolicy.somiImage(url);String p=new URI(url).getPath();if(p!=null&&p.length()>=65){String key=p.substring(1,65);if(key.matches("[a-f0-9]{64}"))return key;}}catch(Exception ignored){}return "";}
@@ -77,18 +77,20 @@ final class SomiRepository {
         if(p.more&&(p.next==null||p.items.isEmpty()||p.next.equals(cursor)))throw new IOException("소미 수집 위치 응답 오류");
         previews.entrySet().removeIf(entry->System.currentTimeMillis()-entry.getValue().at>=540000);return p;
     }
-    private boolean record(Page p,boolean advance,long e)throws IOException{synchronized(this){current(e);boolean known=store.record(p.items,p.total,p.more,p.next,advance,now());changed();return known;}}
-    synchronized void startCollection(boolean forced){
-        if(syncing||closed||!store.loggedIn()||!store.due(now(),forced))return;syncing=true;long e=epoch.get();changed();
+    private boolean recordWindow(SomiStore.Cursor cursor,Page p,boolean advance,long e)throws IOException{synchronized(this){current(e);boolean known=store.recordWindow(cursor,p.items,p.total,p.more,p.next,advance,now());changed();return known;}}
+    synchronized void startCollection(boolean forced){startCollection(forced,false);}
+    synchronized void startCollection(boolean forced,boolean full){
+        if(syncing||closed||!store.loggedIn()||!store.due(now(),forced||full))return;syncing=true;long e=epoch.get();changed();
         collector.execute(()->{try{
-            boolean first=!store.complete()&&store.resume()==null;Page p=list(null,100,e);boolean known=record(p,first,e);
-            if(!first){while((!known||recent(p))&&p.more){p=list(p.next,100,e);known=record(p,false,e);}}
-            while(!store.complete()){SomiStore.Cursor c=store.resume();if(c==null)break;p=list(c,100,e);record(p,true,e);}
+            boolean first=!store.complete()&&store.resume()==null;Page p=list(null,100,e);boolean known=recordWindow(null,p,first||(full&&!p.more),e);
+            if(!first||full){while((!known||full||recent(p))&&p.more){SomiStore.Cursor c=p.next;p=list(c,100,e);known=recordWindow(c,p,full&&!p.more,e);}}
+            while(!store.complete()){SomiStore.Cursor c=store.resume();if(c==null)break;p=list(c,100,e);recordWindow(c,p,true,e);}
             synchronized(this){current(e);store.synced(now());}
         }catch(Exception ignored){/* Resume point survives; a later entry retries. */}finally{synchronized(this){syncing=false;}changed();}});
     }
     private static boolean recent(Page p){long min=Long.MAX_VALUE;for(Map<String,Object> row:p.items)min=Math.min(min,SomiStore.n(row,"seconds"));return min!=Long.MAX_VALUE&&min>=now()-90*86400L;}
-    JSONObject refresh()throws Exception{require();startCollection(true);return new JSONObject(store.status(syncing));}
+    JSONObject refresh()throws Exception{return refresh(false);}
+    JSONObject refresh(boolean full)throws Exception{require();startCollection(true,full);return new JSONObject(store.status(syncing));}
     JSONObject search(JSONObject p)throws Exception{
         require();String query=p.optString("query","");if(query.length()>2048)throw new IllegalArgumentException();int page=p.optInt("page",1);if(page<1||page>100000)throw new IllegalArgumentException();Integer days=p.isNull("days")?null:p.has("days")?p.getInt("days"):null;if(days!=null&&!Arrays.asList(7,30,90,365).contains(days))throw new IllegalArgumentException();
         Map<String,Object> result=store.search(query,p.optString("sort","new"),days,page,p.optBoolean("bookmarked"),now());
@@ -98,9 +100,9 @@ final class SomiRepository {
     private static String validId(String id){SomiSef.idBytes(id);return id;}
     JSONArray fill(JSONArray ids,CancellationSignal signal)throws Exception{
         require();if(ids.length()>60)throw new IllegalArgumentException();long generation=fillGeneration.incrementAndGet(),e=epoch.get();List<String> requested=new ArrayList<>();List<Integer> ranks=new ArrayList<>();
-        for(int i=0;i<ids.length();i++){String id=validId(ids.getString(i));requested.add(id);Map<String,Object> p=store.post(id);Preview preview=previews.get(id);boolean fresh=preview!=null&&System.currentTimeMillis()-preview.at<540000;if(p!=null&&!SomiStore.s(p,"coverKey").isEmpty()&&!hasCover(p)&&!fresh){long rank=store.rank(id);if(rank>=0)ranks.add((int)rank);}}
-        for(int[] run:SomiStore.runs(ranks)){if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();Page p=list(run[0]==0?null:store.place(run[0]-1),run[1],e);current(e);if(generation!=fillGeneration.get())return new JSONArray();record(p,false,e);}
-        JSONArray result=new JSONArray();for(String id:requested){current(e);if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();Map<String,Object> p=store.post(id);if(p==null)continue;String k=SomiStore.s(p,"coverKey");if(k.isEmpty())continue;
+        for(int i=0;i<ids.length();i++){String id=validId(ids.getString(i));requested.add(id);Map<String,Object> p=store.post(id);Preview preview=previews.get(id);boolean fresh=preview!=null&&System.currentTimeMillis()-preview.at<540000;if(p!=null&&!Boolean.TRUE.equals(p.get("gone"))&&!SomiStore.s(p,"coverKey").isEmpty()&&!hasCover(p)&&!fresh){long rank=store.rank(id);if(rank>=0)ranks.add((int)rank);}}
+        for(int[] run:SomiStore.runs(ranks)){if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();SomiStore.Cursor cursor=run[0]==0?null:store.place(run[0]-1);Page p=list(cursor,run[1],e);current(e);if(generation!=fillGeneration.get())return new JSONArray();recordWindow(cursor,p,false,e);}
+        JSONArray result=new JSONArray();for(String id:requested){current(e);if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();Map<String,Object> p=store.post(id);if(p==null||Boolean.TRUE.equals(p.get("gone")))continue;String k=SomiStore.s(p,"coverKey");if(k.isEmpty())continue;
             try{JSONObject ticket;try{ticket=media.somiCached(id,k);}catch(Exception missing){Preview preview=previews.get(id);if(preview==null||System.currentTimeMillis()-preview.at>540000)continue;ticket=media.somiImage(id,k,true,preview.url,signal);}current(e);result.put(new JSONObject().put("id",id).put("cover",ticket.getString("url")));}catch(IOException ignored){}
         }return generation==fillGeneration.get()?result:new JSONArray();
     }
@@ -114,7 +116,7 @@ final class SomiRepository {
         synchronized(opened){result=opened.get(id);if(result!=null&&System.currentTimeMillis()-result.at>=480000){opened.remove(id);result=null;}}
         if(result==null){Object v;try{v=call("get",SomiSef.get(id),e);}catch(IOException error){if("SOMI_POST_GONE".equals(error.getMessage()))store.gone(id);throw error;}
             Map<String,Object> p=post(v);if(!id.equals(p.get("id")))throw SomiSef.invalid();List<String> urls=new ArrayList<>();images(SomiSef.field(SomiSef.field(v,128),0),urls);if(urls.isEmpty())imageNodes(SomiSef.field(v,128),urls);if(urls.size()>2000)throw SomiSef.invalid();
-            current(e);store.record(Collections.singletonList(p),null,false,null,false,now());store.pages(id,urls.size());result=new Opened(SomiStore.s(p,"title"),SomiStore.s(p,"writerName").isEmpty()?SomiStore.s(p,"writerHandle"):SomiStore.s(p,"writerName"),urls,urls.isEmpty()?"SOMI_NO_IMAGES":"");
+            current(e);if(!urls.isEmpty())store.record(Collections.singletonList(p),null,false,null,false,now());store.pages(id,urls.size());result=new Opened(SomiStore.s(p,"title"),SomiStore.s(p,"writerName").isEmpty()?SomiStore.s(p,"writerHandle"):SomiStore.s(p,"writerName"),urls,urls.isEmpty()?"SOMI_NO_IMAGES":"");
             synchronized(opened){opened.entrySet().removeIf(entry->System.currentTimeMillis()-entry.getValue().at>=480000);opened.put(id,result);while(opened.size()>24)opened.remove(opened.keySet().iterator().next());}
         }
         current(e);if(!result.error.isEmpty())throw new IOException(result.error);JSONArray pages=new JSONArray();for(int i=0;i<result.urls.size();i++)pages.put(new JSONObject().put("index",i).put("url","").put("name",JSONObject.NULL).put("width",JSONObject.NULL).put("height",JSONObject.NULL).put("expiresAt",JSONObject.NULL));

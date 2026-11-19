@@ -484,6 +484,7 @@ pub(crate) fn media_response_with_range(
             Ok(media) => Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, media.mime)
+                .header(CACHE_CONTROL, PREVIEW_CACHE_CONTROL)
                 .header(CONTENT_LENGTH, media.bytes.len().to_string())
                 .body(media.bytes)
                 .expect("catalog thumbnail response is valid"),

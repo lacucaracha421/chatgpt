@@ -104,10 +104,18 @@ it("checks new posts from the menu and disables it while syncing", async () => {
   await screen.findByRole("button", { name: "소미 작품 읽기" });
   await userEvent.click(screen.getByRole("button", { name: "소미 더보기" }));
   await userEvent.click(screen.getByRole("menuitem", { name: "새 글 확인" }));
-  expect(gateway.somiSyncNow).toHaveBeenCalledOnce();
+  expect(gateway.somiSyncNow).toHaveBeenCalledWith(false);
   await userEvent.click(screen.getByRole("button", { name: "소미 더보기" }));
   expect(screen.getByRole("menuitem", { name: "새 글 확인" })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "전체 목차 다시 점검" })).toBeDisabled();
   expect(screen.queryByText(/목차 모으는 중/)).not.toBeInTheDocument();
+});
+it("starts a full board recheck from the menu", async () => {
+  const { gateway } = setup(loggedIn);
+  await screen.findByRole("button", { name: "소미 작품 읽기" });
+  await userEvent.click(screen.getByRole("button", { name: "소미 더보기" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "전체 목차 다시 점검" }));
+  expect(gateway.somiSyncNow).toHaveBeenCalledWith(true);
 });
 it("forces a sync from the stopped collection retry", async () => {
   const { gateway } = setup({ ...loggedIn, syncError: "offline" });
@@ -267,4 +275,21 @@ it("patches resolved covers into the displayed page", async () => {
   gateway.somiFillCovers.mockResolvedValue([{ id: post.id, cover: "https://gimel.mittere.io/cover" }]);
   await screen.findByRole("button", { name: "소미 작품 읽기" });
   expect(await screen.findByAltText("소미 작품 표지")).toHaveAttribute("src", "https://gimel.mittere.io/cover");
+});
+
+it("removes gone posts from the board in place and marks gone bookmarks without filling their covers", async () => {
+  const other: SomiPost = { ...post, id: "kept", title: "남은 작품" };
+  const { gateway, rerender, onReady, onSourceChange } = setup(loggedIn);
+  gateway.somiSearch.mockResolvedValueOnce({ items: [post, other], total: 2 });
+  await screen.findByRole("button", { name: "소미 작품 읽기" });
+  gateway.somiOpenPost.mockRejectedValueOnce(new Error("SOMI_POST_GONE"));
+  await userEvent.click(screen.getByRole("button", { name: "소미 작품 읽기" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "소미 작품 읽기" })).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "남은 작품 읽기" })).toBeVisible();
+
+  gateway.somiSearch.mockResolvedValueOnce({ items: [{ ...post, bookmarked: true, gone: true, coverKey: "ab".repeat(32) }], total: 1 });
+  rerender(<LibraryProvider gateway={gateway as unknown as LibraryGateway}><SomiBrowser active requested bookmarked onReady={onReady} onSourceChange={onSourceChange} /></LibraryProvider>);
+  expect(await screen.findByRole("button", { name: "소미 작품 (삭제됨)" })).toBeVisible();
+  expect(screen.getByText("삭제됨")).toBeVisible();
+  expect(gateway.somiFillCovers).not.toHaveBeenCalled();
 });

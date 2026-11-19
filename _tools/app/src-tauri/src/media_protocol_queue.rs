@@ -53,6 +53,7 @@ fn route_class(path: &str) -> Option<Class> {
         | "collection-source-thumbnail"
         | "collection-cover-thumbnail"
         | "manga-cover"
+        | "somi-thumb"
         | "av-link-jacket" => Class::Cover,
         _ => Class::Original,
     })
@@ -418,6 +419,7 @@ mod tests {
         }
         assert_eq!(route_class("/thumbnail-extra/id"), Some(Class::Original));
         assert_eq!(route_class("/work-artwork/id"), Some(Class::Original));
+        assert_eq!(route_class("/somi-thumb/ab"), Some(Class::Cover));
         assert_eq!(
             route_class("/vault-thumbnail/id/v3"),
             Some(Class::AssetThumbnail)
