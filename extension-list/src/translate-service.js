@@ -38,6 +38,11 @@
     { id: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", reasoning: { enabled: false } },
     { id: "google/gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", reasoning: { effort: "minimal" } },
     { id: "google/gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B", reasoning: { enabled: false } },
+    // Gemini direct via Google AI Gemini API (generativelanguage.googleapis.com) with its own key.
+    { id: "gemini:gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "minimal" }, concurrency: 6 },
+    { id: "gemini:gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "minimal" }, concurrency: 6 },
+    { id: "gemini:gemini-2.5-flash", label: "Gemini 2.5 Flash (Google)", provider: "gemini", thinkingConfig: { thinkingBudget: 0 }, concurrency: 6 },
+    { id: "gemini:gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingBudget: 0 }, concurrency: 6 },
     // Claude goes to the Anthropic API directly with its own key. Haiku 5.5 turns thinking
     // off; Sonnet 5.5 cannot, so it only thinks between tool calls (never here) at low effort.
     // Neither accepts sampling values. Paid API limits allow more requests in flight.
@@ -46,6 +51,14 @@
     { id: "neuralwatt:deepseek-v4-flash", label: "DeepSeek V4 Flash (Neuralwatt)", provider: "neuralwatt" },
     { id: "neuralwatt:deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash (Neuralwatt)", provider: "neuralwatt" },
   ]);
+  const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+  const GEMINI_SAFETY = Object.freeze([
+    "HARM_CATEGORY_HARASSMENT",
+    "HARM_CATEGORY_HATE_SPEECH",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    "HARM_CATEGORY_DANGEROUS_CONTENT",
+    "HARM_CATEGORY_CIVIC_INTEGRITY",
+  ].map(category => ({ category, threshold: "BLOCK_NONE" })));
   const NEURALWATT_URL = "https://api.neuralwatt.com/v1/chat/completions";
   const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
   const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
@@ -128,6 +141,7 @@
       const current = stored[SETTINGS] || {};
       settings = {
         apiKey: typeof current.apiKey === "string" ? current.apiKey.trim() : String(legacy.openrouterApiKey || "").trim(),
+        geminiApiKey: typeof current.geminiApiKey === "string" ? current.geminiApiKey.trim() : "",
         anthropicApiKey: typeof current.anthropicApiKey === "string" ? current.anthropicApiKey.trim() : "",
         neuralwattApiKey: typeof current.neuralwattApiKey === "string" ? current.neuralwattApiKey.trim() : "",
         enabled: typeof current.enabled === "boolean" ? current.enabled : stored.xTranslateEnabled !== false && legacy.autoTranslate === true,
@@ -173,20 +187,21 @@
   function validContextModel(value) { return MODEL_BY_ID.has(value) ? value : ""; }
   // Image text translation needs a model that reads pictures: Claude (Anthropic), Gemini or DeepSeek V4.1 Flash.
   // Gemini 3.5 Flash Lite is left out: its image answers kept failing (user 2026-10-16).
-  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.id.startsWith("google/gemini-") || model.id === "neuralwatt:deepseek-v4.1-flash")); }
+  function isVisionModel(id) { const model = MODEL_BY_ID.get(id); return Boolean(model && model.id !== "google/gemini-3.5-flash-lite" && model.id !== "gemini:gemini-3.5-flash-lite" && (model.provider === "anthropic" || model.provider === "gemini" || model.id.startsWith("google/gemini-") || model.id === "neuralwatt:deepseek-v4.1-flash")); }
   function validImageCover(value) { return value === "card" ? "card" : "paper"; }
   function validImageModel(value) { return isVisionModel(value) ? value : DEFAULT_IMAGE_MODEL; }
   function concurrency() { return MODEL_BY_ID.get(settings?.model)?.concurrency || DEFAULT_CONCURRENCY; }
   function providerFor(model) { return MODEL_BY_ID.get(model)?.provider || "openrouter"; }
   function isAnthropic(model) { return providerFor(model) === "anthropic"; }
-  function keyFor(model) { return providerFor(model) === "neuralwatt" ? settings.neuralwattApiKey : isAnthropic(model) ? settings.anthropicApiKey : settings.apiKey; }
+  function isGemini(model) { return providerFor(model) === "gemini"; }
+  function keyFor(model) { const p = providerFor(model); return p === "gemini" ? settings.geminiApiKey : p === "neuralwatt" ? settings.neuralwattApiKey : p === "anthropic" ? settings.anthropicApiKey : settings.apiKey; }
   function publicSettings() {
     const model = MODEL_BY_ID.get(settings.model) || MODEL_BY_ID.get(DEFAULT_MODEL);
     return { enabled: settings.enabled === true, hasApiKey: Boolean(keyFor(model.id)), hasContextApiKey: Boolean(keyFor(settings.contextModel || model.id)), contextModel: settings.contextModel,
       imageModel: settings.imageModel, imageCover: settings.imageCover, hasImageApiKey: Boolean(keyFor(settings.imageModel)),
       imageModels: MODELS.filter(item => isVisionModel(item.id)).map(({ id, label }) => ({ id, label })), model: model.id, modelLabel: model.label,
       provider: providerFor(model.id), concurrency: concurrency(),
-      hasOpenRouterKey: Boolean(settings.apiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey), hasNeuralwattKey: Boolean(settings.neuralwattApiKey),
+      hasOpenRouterKey: Boolean(settings.apiKey), hasGeminiKey: Boolean(settings.geminiApiKey), hasAnthropicKey: Boolean(settings.anthropicApiKey), hasNeuralwattKey: Boolean(settings.neuralwattApiKey),
       userTerms: settings.userTerms, dictionaryRevision: settings.dictionaryRevision,
       fallbackModel: settings.fallbackModel, models: MODELS.map(({ id, label }) => ({ id, label })) };
   }
@@ -221,6 +236,59 @@
   function asChatCompletion(data) {
     const text = (Array.isArray(data?.content) ? data.content : []).filter(block => block?.type === "text").map(block => block.text).join("");
     return { choices: [{ message: { content: text }, finish_reason: data?.stop_reason === "max_tokens" ? "length" : data?.stop_reason }] };
+  }
+  function geminiUrl(model) {
+    return `${GEMINI_BASE_URL}${encodeURIComponent(model.slice("gemini:".length))}:generateContent`;
+  }
+  function geminiParts(content) {
+    if (!Array.isArray(content)) return [{ text: String(content ?? "") }];
+    return content.map(part => {
+      if (part?.type === "text") return { text: String(part.text ?? "") };
+      if (part?.type === "image_url") {
+        const url = String(part.image_url?.url || ""), marker = url.indexOf(";base64,");
+        return url.startsWith("data:") && marker > 5
+          ? { inlineData: { mimeType: url.slice(5, marker), data: url.slice(marker + 8) } }
+          : { text: "" };
+      }
+      return { text: "" };
+    });
+  }
+  function geminiBody(body, model) {
+    const meta = MODEL_BY_ID.get(model);
+    const system = body.messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
+    const schema = body.response_format?.json_schema?.schema;
+    const generationConfig = {
+      ...(Number.isFinite(body.temperature) ? { temperature: body.temperature } : {}),
+      ...(Number.isFinite(body.max_tokens) ? { maxOutputTokens: body.max_tokens } : {}),
+      ...(schema ? { responseMimeType: "application/json", responseJsonSchema: schema } : {}),
+      ...(meta?.thinkingConfig ? { thinkingConfig: meta.thinkingConfig } : {}),
+    };
+    return {
+      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      contents: body.messages.filter(item => item.role !== "system").map(item => ({
+        role: item.role === "assistant" ? "model" : "user",
+        parts: geminiParts(item.content),
+      })),
+      safetySettings: GEMINI_SAFETY,
+      generationConfig,
+    };
+  }
+  function geminiAsChatCompletion(data) {
+    const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    const text = parts.filter(part => typeof part?.text === "string" && !part.thought).map(part => part.text).join("");
+    const rawReason = candidate?.finishReason;
+    const finishReason = rawReason === "MAX_TOKENS" ? "length" : rawReason === "STOP" ? "stop" : rawReason;
+    return { choices: [{ message: { content: text }, finish_reason: finishReason }] };
+  }
+  function isGeminiAuthError(body) {
+    const detail = String(body?.error?.message || "");
+    const status = String(body?.error?.status || "");
+    const reason = Array.isArray(body?.error?.details)
+      ? body.error.details.find(item => typeof item?.reason === "string")?.reason || ""
+      : "";
+    return reason === "API_KEY_INVALID" || /API_KEY_INVALID/i.test(`${reason} ${detail}`) ||
+      (status === "INVALID_ARGUMENT" && /api[ _-]?key/i.test(detail));
   }
   function invalidate() {
     generation += 1;
@@ -284,7 +352,8 @@
   function account(meta, model, data) {
     const usage = globalThis.LakomicsUsage;
     if (!usage || !meta) return;
-    const measured = usage.measure(providerFor(model), model, data?.usage);
+    const provider = providerFor(model);
+    const measured = usage.measure(provider, model, provider === "gemini" ? data?.usageMetadata : data?.usage);
     usage.record(meta.feature, measured, meta.job);
     if (meta.tally) usage.tallyAdd(meta.tally, measured);
   }
@@ -314,29 +383,35 @@
         if (attempt === 0) last = { ok: false, code: "api_key_missing" };
         continue;
       }
-      const anthropic = isAnthropic(model), neuralwatt = providerFor(model) === "neuralwatt";
+      const anthropic = isAnthropic(model), gemini = isGemini(model), neuralwatt = providerFor(model) === "neuralwatt";
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
-        const { response, data } = await budget.run(async signal => {
-          const response = await fetch(anthropic ? ANTHROPIC_URL : neuralwatt ? NEURALWATT_URL : "https://openrouter.ai/api/v1/chat/completions", {
+        const { response, data, errorBody } = await budget.run(async signal => {
+          const response = await fetch(gemini ? geminiUrl(model) : anthropic ? ANTHROPIC_URL : neuralwatt ? NEURALWATT_URL : "https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", credentials: "omit", redirect: "error", signal,
-            headers: anthropic
-              ? { "content-type": "application/json", "x-api-key": settings.anthropicApiKey, "anthropic-version": "2023-06-01",
-                "anthropic-dangerous-direct-browser-access": "true" }
-              : { "content-type": "application/json", authorization: `Bearer ${keyFor(model)}` },
+            headers: gemini
+              ? { "content-type": "application/json", "x-goog-api-key": settings.geminiApiKey }
+              : anthropic
+                ? { "content-type": "application/json", "x-api-key": settings.anthropicApiKey, "anthropic-version": "2023-06-01",
+                  "anthropic-dangerous-direct-browser-access": "true" }
+                : { "content-type": "application/json", authorization: `Bearer ${keyFor(model)}` },
             // Only OpenRouter needs the usage flag to report cost.
-            body: JSON.stringify(anthropic ? anthropicBody(makeBody(model), model) : neuralwatt ? neuralwattBody(makeBody(model), model) : { ...makeBody(model), usage: { include: true } }),
+            body: JSON.stringify(gemini ? geminiBody(makeBody(model), model) : anthropic ? anthropicBody(makeBody(model), model) : neuralwatt ? neuralwattBody(makeBody(model), model) : { ...makeBody(model), usage: { include: true } }),
           });
-          return { response, data: response.ok ? await response.json() : undefined };
+          if (response.ok) return { response, data: await response.json() };
+          let errorBody;
+          if (gemini && response.status === 400) { try { errorBody = await response.json(); } catch {} }
+          return { response, errorBody };
         }, timeoutMs, controller);
         if (response.ok) { try { account(meta, model, data); } catch { /* the log never breaks a translation */ } }
         if (epoch !== generation || (!manual && !settings.enabled)) return { ok: false, code: "disabled" };
         if (response.ok) {
-          return { ok: true, data: anthropic ? asChatCompletion(data) : data, model };
+          return { ok: true, data: gemini ? geminiAsChatCompletion(data) : anthropic ? asChatCompletion(data) : data, model };
         }
-        const code = `http_${response.status}`;
-        if ([401, 402, 403].includes(response.status)) {
+        const geminiAuth = gemini && response.status === 400 && isGeminiAuthError(errorBody);
+        const code = geminiAuth ? "http_401" : `http_${response.status}`;
+        if (geminiAuth || [401, 402, 403].includes(response.status)) {
           // A rejected sub model key never hides the main model's answer or failure.
           if (model === settings.model || chain.every(item => item === model)) return { ok: false, code };
           if (attempt === 0) last = { ok: false, code };
@@ -893,6 +968,7 @@
       settings = {
         // An empty save is a no-op. Only the options page's confirmed clear removes a key.
         apiKey: message.clearApiKey === true ? "" : typeof message.apiKey === "string" && message.apiKey.trim() ? message.apiKey.trim() : settings.apiKey,
+        geminiApiKey: message.clearGeminiApiKey === true ? "" : typeof message.geminiApiKey === "string" && message.geminiApiKey.trim() ? message.geminiApiKey.trim() : settings.geminiApiKey,
         anthropicApiKey: message.clearAnthropicApiKey === true ? "" : typeof message.anthropicApiKey === "string" && message.anthropicApiKey.trim() ? message.anthropicApiKey.trim() : settings.anthropicApiKey,
         neuralwattApiKey: message.clearNeuralwattApiKey === true ? "" : typeof message.neuralwattApiKey === "string" && message.neuralwattApiKey.trim() ? message.neuralwattApiKey.trim() : settings.neuralwattApiKey,
         enabled: typeof message.enabled === "boolean" ? message.enabled : settings.enabled,

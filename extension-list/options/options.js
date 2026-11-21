@@ -231,10 +231,12 @@
     if (activeHelp && !activeHelp.panel.contains(event.target) && !activeHelp.button.contains(event.target)) closeHelp();
   });
 
-  const provider = id => String(id).startsWith("neuralwatt:") ? "neuralwatt" : String(id).startsWith("anthropic:") ? "anthropic" : "openrouter";
+  const provider = id => String(id).startsWith("gemini:") ? "gemini" : String(id).startsWith("neuralwatt:") ? "neuralwatt" : String(id).startsWith("anthropic:") ? "anthropic" : "openrouter";
+  const ytProvider = id => String(id || "").startsWith("gemini:") ? "gemini" : "anthropic";
   const keyId = p => p === "openrouter" ? "translation-key" : `translation-${p}-key`;
-  const hasKey = p => Boolean(p === "neuralwatt" ? translation.hasNeuralwattKey : p === "anthropic" ? translation.hasAnthropicKey : translation.hasOpenRouterKey);
-  const providerLabel = p => p === "neuralwatt" ? "Neuralwatt" : p === "anthropic" ? "Anthropic" : "OpenRouter";
+  const hasKey = p => Boolean(p === "gemini" ? translation.hasGeminiKey : p === "neuralwatt" ? translation.hasNeuralwattKey : p === "anthropic" ? translation.hasAnthropicKey : translation.hasOpenRouterKey);
+  const providerLabel = p => p === "gemini" ? "Google Gemini" : p === "neuralwatt" ? "Neuralwatt" : p === "anthropic" ? "Anthropic" : "OpenRouter";
+  const PROVIDERS = ["openrouter", "gemini", "anthropic", "neuralwatt"];
   function goKey(p) { const field = $(keyId(p)); scroll(field.closest(".key"), "center"); field.focus({ preventScroll: true }); }
   function keyMeta(id, p, visible = true, prefix = "") {
     const node = $(id); node.hidden = !visible; node.replaceChildren();
@@ -252,7 +254,7 @@
   function grouped(id, models, value, first = null) {
     const children = first ? [new Option(first, "")] : [];
     const selected = document.activeElement === $(id) ? $(id).value : value;
-    for (const p of ["openrouter", "anthropic", "neuralwatt"]) {
+    for (const p of PROVIDERS) {
       const group = document.createElement("optgroup"); group.label = providerLabel(p);
       for (const m of models.filter(m => provider(m.id) === p)) group.append(new Option(m.label + (hasKey(p) ? "" : " · 키 필요"), m.id));
       if (group.children.length) children.push(group);
@@ -261,20 +263,23 @@
   }
   function relationships() {
     const x = provider(translation.model), cm = provider(translation.contextModel || translation.model), image = provider(translation.imageModel);
+    const yt = ytProvider($("youtube-model")?.value || youtube.model);
     keyMeta("translation-model-key-meta", x);
     keyMeta("translation-fallback-key-meta", provider(translation.fallbackModel), Boolean(translation.fallbackModel));
     keyMeta("context-menu-model-key-meta", cm); keyMeta("context-menu-image-model-key-meta", image);
     keyMeta("translation-enabled-key-meta", x, $("translation-enabled").checked && !hasKey(x));
-    keyMeta("youtube-enabled-key-meta", "anthropic", $("youtube-enabled").checked && !hasKey("anthropic"), "Anthropic ");
-    keyMeta("youtube-model-key-meta", "anthropic");
+    keyMeta("youtube-enabled-key-meta", yt, $("youtube-enabled").checked && !hasKey(yt), `${providerLabel(yt)} `);
+    keyMeta("youtube-model-key-meta", yt);
+    const glossaryRow = $("youtube-glossarySonnet")?.closest(".row");
+    if (glossaryRow) glossaryRow.hidden = yt !== "anthropic";
     const uses = [
       ["X 번역", x, $("translation-enabled").checked],
       ["보조 모델", translation.fallbackModel ? provider(translation.fallbackModel) : null, $("translation-enabled").checked],
       ["우클릭 번역", cm, context.enabled], ["페이지 번역", cm, context.enabled],
-      ["이미지 글자 번역", image, context.enabled], ["YouTube 자막", "anthropic", $("youtube-enabled").checked],
+      ["이미지 글자 번역", image, context.enabled], ["YouTube 자막", yt, $("youtube-enabled").checked],
     ];
     let needed = false;
-    for (const p of ["openrouter", "anthropic", "neuralwatt"]) {
+    for (const p of PROVIDERS) {
       const id = keyId(p), present = hasKey(p), relevant = uses.filter(([,key]) => key === p);
       const missing = relevant.filter(([, ,enabled]) => enabled);
       const stateNode = $(id + "-state"); stateNode.textContent = present ? "✓ 저장됨" : "없음"; stateNode.classList.toggle("miss", !present);
@@ -328,7 +333,7 @@
     };
   }
   $("translation-enabled").onchange = () => { relationships(); return updateTranslation({ enabled: $("translation-enabled").checked }, "x-status"); };
-  for (const [p, field, clearFlag] of [["openrouter", "apiKey", "clearApiKey"], ["anthropic", "anthropicApiKey", "clearAnthropicApiKey"], ["neuralwatt", "neuralwattApiKey", "clearNeuralwattApiKey"]]) {
+  for (const [p, field, clearFlag] of [["openrouter", "apiKey", "clearApiKey"], ["gemini", "geminiApiKey", "clearGeminiApiKey"], ["anthropic", "anthropicApiKey", "clearAnthropicApiKey"], ["neuralwatt", "neuralwattApiKey", "clearNeuralwattApiKey"]]) {
     const id = keyId(p), input = $(id), button = $(id + "-save");
     input.oninput = () => { button.disabled = Boolean(input.dataset.saving) || !input.value.trim(); };
     $(id + "-form").onsubmit = async event => {
@@ -592,7 +597,9 @@
   void initialTranslation.then(() => {
     if (location.hash !== "#translation-section") return;
     scroll($("translation-section"));
-    if (!hasKey("openrouter")) goKey("openrouter"); else if (!hasKey("anthropic")) goKey("anthropic");
+    const neededProvider = PROVIDERS.find(p => $(keyId(p) + "-uses")?.classList.contains("need-key"));
+    if (neededProvider) goKey(neededProvider);
+    else if (!hasKey("openrouter")) goKey("openrouter"); else if (!hasKey("anthropic")) goKey("anthropic"); else if (!hasKey("gemini")) goKey("gemini");
     history.replaceState(null, "", location.pathname);
   });
   const initial = [load().catch(() => status($("pair-status"), "연결 설정을 불러오지 못했습니다", true)),

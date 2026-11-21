@@ -31,13 +31,19 @@ async function storageGet(keys) {
   return chrome.storage.local.get(keys);
 }
 
+function providerFor(model) {
+  return String(model || "").startsWith("gemini:") ? "gemini" : "anthropic";
+}
+
 async function readSettings() {
   const own = await globalThis.LakomicsYouTube.settings.read();
   const sharedKey = globalThis.LakomicsTranslation.SETTINGS;
   const shared = (await storageGet(sharedKey))[sharedKey] || {};
+  const provider = providerFor(own.model);
+  const rawKey = provider === "gemini" ? shared.geminiApiKey : shared.anthropicApiKey;
   return {
-    ...own, provider: "anthropic",
-    apiKey: typeof shared.anthropicApiKey === "string" ? shared.anthropicApiKey.trim() : "",
+    ...own, provider,
+    apiKey: typeof rawKey === "string" ? rawKey.trim() : "",
     registerSetting: own.register,
     userTerms: normalizeUserTerms(shared.userTerms),
     dictionaryRevision: Number.isSafeInteger(shared.dictionaryRevision) ? shared.dictionaryRevision : 0,
@@ -66,9 +72,11 @@ const isHumanTrack = (trackKey) => !String(trackKey).endsWith(":asr") && trackKe
 
 // The style rule applies to translations only; `ruleId` is the id of the matching rule (see styleRuleFor).
 function storedModeFor(trackKey, settings, ruleId = null) {
-  const base = storageMode(trackKey, settings.translate, settings.registerSetting, settings.speakers, settings.glossarySonnet);
+  const base = storageMode(trackKey, settings.translate, settings.registerSetting, settings.speakers, providerFor(settings.model) === "anthropic" && settings.glossarySonnet);
+  const modelTag = settings.model === "claude-sonnet-5-5" ? "+sonnet"
+    : String(settings.model || "").startsWith("gemini:") ? `+${settings.model.slice("gemini:".length)}` : "";
   return base +
-    (settings.model === "claude-sonnet-5-5" ? "+sonnet" : "") +
+    modelTag +
     (settings.dictionaryRevision ? `+d${settings.dictionaryRevision}` : "") +
     (ruleId && base.startsWith("translate-ko") ? `+${ruleId}` : "") + PROCESSING_VERSION;
 }
@@ -225,7 +233,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
     return { ok: true, cached: true, cues: splitDisplayCues(remote.cues) };
   }
 
-  if (!apiKey) return { ok: false, error: "Anthropic API 키를 AI 번역 설정에서 저장해 주세요" };
+  if (!apiKey) return { ok: false, error: `${provider === "gemini" ? "Google Gemini" : "Anthropic"} API 키를 AI 번역 설정에서 저장해 주세요` };
 
   let parsed;
   try {
@@ -283,7 +291,7 @@ async function processTrack({ videoId, trackKey, json3, positionMs, meta: pageMe
     const tokens = usage.byModel[usedModel] ||= { input_tokens: 0, output_tokens: 0 };
     tokens.input_tokens += result.usage.input_tokens;
     tokens.output_tokens += result.usage.output_tokens;
-    usageLog?.record("youtube", usageLog.measure("anthropic", usedModel, result.usage), usageJob);
+    usageLog?.record("youtube", usageLog.measure(provider, usedModel, result.usage), usageJob);
   };
 
   // Runs one chunk. A chunk that still fails after the provider's own retries falls back to the original

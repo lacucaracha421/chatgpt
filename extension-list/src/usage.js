@@ -24,11 +24,16 @@
     // Neuralwatt list prices, verified 2026-10-21 (USD per 1M tokens).
     "deepseek-v4-flash": Object.freeze({ input: 0.14, output: 0.28 }),
     "deepseek-v4.1-flash": Object.freeze({ input: 0.15, output: 0.60 }),
+    // Google Gemini API list prices, verified 2026-11-21 (USD per 1M tokens).
+    "gemini-3.1-flash-lite": Object.freeze({ input: 0.25, output: 1.50, cacheRead: 0.025 }),
+    "gemini-3.5-flash-lite": Object.freeze({ input: 0.30, output: 2.50 }),
+    "gemini-2.5-flash": Object.freeze({ input: 0.30, output: 2.50, cacheRead: 0.03 }),
+    "gemini-2.5-flash-lite": Object.freeze({ input: 0.10, output: 0.40, cacheRead: 0.01 }),
   });
 
   const count = value => Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
   const money = value => Math.round(value * 1e9) / 1e9;
-  const modelId = model => String(model || "").replace(/^(anthropic|neuralwatt):/, "");
+  const modelId = model => String(model || "").replace(/^(anthropic|neuralwatt|gemini):/, "");
   const pad = value => String(value).padStart(2, "0");
   // The user's local calendar day, e.g. 2026-10-13.
   function localDay(ms = Date.now()) {
@@ -50,15 +55,24 @@
   }
   // One response as {model, input, output, costUsd}; costUsd is null when unknown.
   // provider "anthropic": usage.input_tokens/output_tokens (+ cache tokens, counted as input).
+  // provider "gemini": usageMetadata (promptTokenCount/candidatesTokenCount/thoughtsTokenCount/cachedContentTokenCount) or normalized YouTube usage.
   // provider "neuralwatt": usage.prompt_tokens/completion_tokens, priced from the table.
   // provider "openrouter": usage.prompt_tokens/completion_tokens and usage.cost (USD credits).
   function measure(provider, model, usage) {
-    const id = (provider === "anthropic" || provider === "neuralwatt") ? modelId(model) : String(model || "");
+    const id = (provider === "anthropic" || provider === "neuralwatt" || provider === "gemini") ? modelId(model) : String(model || "");
     const body = usage && typeof usage === "object" ? usage : null;
     if (!body) return { model: id, input: 0, output: 0, costUsd: null };
     if (provider === "anthropic") {
       return { model: id, costUsd: anthropicCost(id, body), output: count(body.output_tokens),
         input: count(body.input_tokens) + count(body.cache_creation_input_tokens) + count(body.cache_read_input_tokens) };
+    }
+    if (provider === "gemini") {
+      const price = PRICES[id];
+      const input = count(body.promptTokenCount ?? body.input_tokens);
+      const cached = Math.min(input, count(body.cachedContentTokenCount ?? body.cached_tokens));
+      const output = count(body.candidatesTokenCount ?? body.output_tokens) + count(body.thoughtsTokenCount);
+      const costUsd = price ? money(((input - cached) * price.input + cached * (price.cacheRead ?? price.input) + output * price.output) / 1e6) : null;
+      return { model: id, input, output, costUsd };
     }
     if (provider === "neuralwatt") {
       const price = PRICES[id], input = count(body.prompt_tokens), output = count(body.completion_tokens);
