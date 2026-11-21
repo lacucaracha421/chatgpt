@@ -7,7 +7,18 @@ type Waiting = Map<string, { resolve(info: ShelfInfo): void; reject(error: unkno
 const NO_SHELF_INFO: ShelfInfo = { ownedPlatform: null, spineArtworkId: null };
 const waiting = new WeakMap<LibraryGateway, Waiting>();
 /** The last read per library and work: a case that mounts again (switching type, returning from a work) prints at once, then reads again. */
+const MAX_REMEMBERED = 2048;
 const remembered = new Map<string, ShelfInfo>();
+
+function rememberShelfInfo(key: string, info: ShelfInfo) {
+  remembered.delete(key);
+  remembered.set(key, info);
+  while (remembered.size > MAX_REMEMBERED) {
+    const oldest = remembered.keys().next().value;
+    if (oldest === undefined) break;
+    remembered.delete(oldest);
+  }
+}
 
 export const shelfInfoKey = (root: string, collectionId: string) => `${root}\n${collectionId}`;
 export const rememberedShelfInfo = (key: string) => remembered.get(key);
@@ -41,5 +52,5 @@ export function readShelfInfo(gateway: LibraryGateway, root: string, collectionI
   }
   const requests = batch;
   return new Promise<ShelfInfo>((resolve, reject) => { requests.set(collectionId, [...requests.get(collectionId) ?? [], { resolve, reject }]); })
-    .then(info => { remembered.set(shelfInfoKey(root, collectionId), info); return info; });
+    .then(info => { rememberShelfInfo(shelfInfoKey(root, collectionId), info); return info; });
 }

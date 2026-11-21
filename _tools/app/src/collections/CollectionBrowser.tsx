@@ -1,6 +1,6 @@
 import { ArrowDownTrayIcon, ArrowLeftIcon, MagnifyingGlassIcon, PlusIcon, SparklesIcon, CalendarDaysIcon, BellIcon, XMarkIcon, UserGroupIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
 import { SparklesIcon as SparklesSolidIcon, StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -52,6 +52,7 @@ import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
 import { KIND_LABEL } from "./collectionFormat";
+import { AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { FavoriteCharactersView, favoritePlaces } from "./favorites/FavoriteCharactersView";
 import { useFavoriteCharacters } from "./favorites/useFavoriteCharacters";
@@ -166,11 +167,15 @@ export function CollectionBrowser({
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
+  const areaVisible = useContext(AreaVisible);
+  const areaRequested = useContext(AreaRequested);
+  const areaActive = areaRequested || areaVisible;
   const kakaoReviewOpen = kakaoReview;
   const setKakaoReviewOpen = (open: boolean) => onViewChange({ kind: "collections", typeFilter, showcase, ...(open ? { kakaoReview: true } : {}) });
   const kakaoReviews = useKakaoReviews(collections, typeFilter === "manga");
   const unlinkedCount = (kakaoReviews.reviews ?? []).filter(review => kakaoReviewSegment(review) === "unlinked").length;
-  const avInbox = useAvLinkInbox({ api: avLinkApi, poll: typeFilter === "av" && !releaseProvider && !releaseCalendar && !showcase,
+  const avInboxActive = areaActive && typeFilter === "av" && !releaseProvider && !releaseCalendar && !showcase;
+  const avInbox = useAvLinkInbox({ enabled: avInboxActive, api: avLinkApi, poll: avInboxActive,
     refreshKey: `${typeFilter}:${releaseProvider ?? ""}:${releaseCalendar ? 1 : 0}:${showcase ? 1 : 0}` });
 
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
@@ -196,6 +201,17 @@ export function CollectionBrowser({
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
+  const savedScrollTopRef = useRef(0);
+  const rememberStageScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    if (areaVisible) savedScrollTopRef.current = event.currentTarget.scrollTop;
+  }, [areaVisible]);
+  useLayoutEffect(() => {
+    if (!areaVisible) return;
+    const stage = stageRef.current;
+    if (stage && savedScrollTopRef.current > 0 && stage.scrollTop === 0) {
+      stage.scrollTop = savedScrollTopRef.current;
+    }
+  }, [areaVisible]);
   const typeSwap = useRef({}).current;
   useEffect(() => () => cancelSegmentSwap(typeSwap), [typeSwap]);
   const [pageMemory] = useState<{ scope: string; page: number } | null>(null);
@@ -212,7 +228,9 @@ export function CollectionBrowser({
     const stage = stageRef.current;
     if (!stage) return;
     const remembered = navigationMemory?.get(scope);
-    stage.scrollTop = remembered?.scrollTop ?? 0;
+    const nextTop = remembered?.scrollTop ?? 0;
+    stage.scrollTop = nextTop;
+    savedScrollTopRef.current = nextTop;
     let restoreFrame = 0;
     let observer: MutationObserver | null = null;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -237,7 +255,7 @@ export function CollectionBrowser({
   // 배우 묶기 (AV, 선반 and 격자): one group per performer; a work with several performers stands under each.
   // Back from a work opened on a performer page shows that page again, as on the tablet.
   const [performer, setPerformer] = useState<string | null>(() => returnPick.current?.pick ? navigationMemory?.get(scope)?.performer ?? null : null);
-  useBackHandler(() => setPerformer(null), 20, Boolean(performer));
+  useBackHandler(() => setPerformer(null), 20, areaVisible && Boolean(performer));
   const gridData = usePerformerGridData(avApi, gateway, library?.root ?? "", collections, avLibrary && !performer);
   const gridEntries = useMemo(() => sortPerformerEntries((gridData.entries ?? []).filter(entry => performerName(entry.person).primary.toLocaleLowerCase().includes(libraryState.query.trim().toLocaleLowerCase())), performerView.sort, performerView.direction), [gridData.entries, libraryState.query, performerView.sort, performerView.direction]);
   const changePerformerView = (patch: Partial<PerformerView>) => {
@@ -526,12 +544,12 @@ export function CollectionBrowser({
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}
             onOpenSettings={() => onViewChange({ kind: "settings", section: "connection" })} />}
-          {!inbox && showcase && visible.length > 0 && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
+          {!inbox && showcase && visible.length > 0 && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" onScroll={rememberStageScroll} {...shelfPutDown}>
             {sectionDrop.inline}
             <CollectionList items={visible} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={{ ...viewSettings, layout: "shelf", grouping: "sort" }} render={renderCollection} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />
           </div>}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__showcase-scroll">{sectionDrop.inline}<div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션 없음">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div></div>}
-          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
+          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" onScroll={rememberStageScroll} {...shelfPutDown}>
             {sectionDrop.inline}
             {gridData.error && (performerGrid || pendingPerformers) && <p role="alert">{gridData.error}<Button variant="ghost" onClick={gridData.retry}>다시 시도</Button></p>}
             {!performerGrid && leading}

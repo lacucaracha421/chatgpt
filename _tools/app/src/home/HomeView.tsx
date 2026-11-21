@@ -203,13 +203,17 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   const [savedDaysSettled, setSavedDaysSettled] = useState<string | null>(null);
   const [savedDaysError, setSavedDaysError] = useState(false);
   const [savedDaysRetry, setSavedDaysRetry] = useState(0);
+  const savedDaysDone = useRef<{ gateway: typeof gateway; key: string } | null>(null);
   // One batched read per shown month (its six weeks). Counts already read stay on screen while the next month loads.
   useEffect(() => {
     if (!overviewActive || !gateway.listAssetDateBuckets) return;
+    const key = `${root}\n${month}\n${refreshVersion}\n${trashCount}\n${savedDaysRetry}`;
+    if (savedDaysDone.current?.gateway === gateway && savedDaysDone.current.key === key) return;
     let live = true;
     const list = gateway.listAssetDateBuckets;
     void pcStartupRead("home.savedDays", () => Promise.all(monthSavedQueries(month).map(query => list(query)))).then(parts => {
       if (!live) return;
+      savedDaysDone.current = { gateway, key };
       const read = new Map(parts.flat().map(bucket => [bucket.date, bucket.count]));
       setSavedCounts(previous => {
         const counts = new Map(previous?.root === root ? previous.counts : []);
@@ -259,19 +263,24 @@ export function HomeView({ collections, collectionsReady = true, overviewReady =
   // read starts once Home is shown, leaving the connection to the reads the first load needs.
   const confirmCache = useRef<{ root: string; total: number | null }>({ root: "", total: null });
   if (confirmCache.current.root !== root) confirmCache.current = { root, total: readConfirmTotalCache(root) };
+  const confirmQueueRead = useRef<{ sources: ConfirmSources; key: string; at: number } | null>(null);
   useEffect(() => {
     if (!active) return;
-    if (!sources || restricted) { setConfirmQueue(null); return; }
+    if (!sources || restricted) { setConfirmQueue(null); confirmQueueRead.current = null; return; }
     if (!startupSettled) return;
+    const key = `${root}\n${queueRead}\n${refreshVersion}`;
+    const last = confirmQueueRead.current;
+    if (last && last.sources === sources && last.key === key && Date.now() - last.at < 30_000) return;
     let live = true;
     void pcStartupRead("home.characterQueue", () => sources.counts()).then(confirmTotal).then((total) => {
       if (!live) return;
+      confirmQueueRead.current = { sources, key, at: Date.now() };
       writeConfirmTotalCache(root, total);
       setConfirmQueue({ total });
       setConfirmError(false);
     }).catch(() => { if (live) setConfirmError(true); });
     return () => { live = false; };
-  }, [sources, restricted, queueRead, active, startupSettled, root]);
+  }, [sources, restricted, queueRead, refreshVersion, active, startupSettled, root]);
   useEffect(() => {
     if (!active) return;
     onQueuesRequested?.();

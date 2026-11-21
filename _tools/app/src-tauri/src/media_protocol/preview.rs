@@ -129,15 +129,32 @@ impl Lru {
         self.order.push_back(key.clone());
     }
 
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.entries.shrink_to_fit();
+        self.order.clear();
+        self.order.shrink_to_fit();
+        self.bytes = 0;
+    }
+
     #[cfg(test)]
     fn len(&self) -> usize {
         self.entries.len()
     }
 }
 
+static CACHE: OnceLock<Mutex<Lru>> = OnceLock::new();
+
 fn shared_cache() -> &'static Mutex<Lru> {
-    static CACHE: OnceLock<Mutex<Lru>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Lru::new(CACHE_ENTRIES, CACHE_BYTES)))
+}
+
+pub(super) fn clear_memory_cache() {
+    if let Some(cache) = CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+        }
+    }
 }
 
 #[cfg(test)]

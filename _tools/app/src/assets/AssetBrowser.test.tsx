@@ -153,15 +153,15 @@ describe("AssetBrowser", () => {
     expect(container.querySelector(".asset-browser__results")).not.toHaveAttribute("inert");
   });
 
-  it("reuses global date buckets across folder navigation and refreshes after data changes", async () => {
+  it("does not run an extra global date-bucket scan across folder navigation or refresh", async () => {
     const gateway = createGateway();
     const { rerender } = renderBrowser(gateway);
-    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(1));
     rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "folder-b" } }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
-    expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(1);
     rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "folder-b" }, refreshVersion: 1 }));
-    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(3));
+    expect(gateway.listAssetDateBuckets).not.toHaveBeenCalled();
   });
 
   it.each([false, true])("offers video comparison only for a fully video selection (mixed=%s)", async (mixed) => {
@@ -1089,15 +1089,15 @@ describe("AssetBrowser", () => {
     expect(await screen.findByText("Updated Artist")).toBeVisible();
   });
 
-  it("reports the query-wide asset total instead of the loaded page size", async () => {
+  it("reports the query-wide asset total from the active page without an extra date-bucket scan", async () => {
     const status = vi.fn();
-    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
-    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-07-01", count: 1 }, { date: "2026-07-15", count: 3 }]);
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null, totalCount: 4 });
     renderBrowser(gateway, { status });
 
     await screen.findByRole("option", { name: "asset-0.png" });
 
     await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loadedCount: 1, totalCount: 4 })));
+    expect(gateway.listAssetDateBuckets).not.toHaveBeenCalled();
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {

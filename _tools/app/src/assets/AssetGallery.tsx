@@ -150,6 +150,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   useLayoutEffect(() => { rowVirtualizer.measure(); }, [rowVirtualizer, targetRowHeight, width, layout]);
   const lastScopeKeyRef = useRef<string | null>(navigationScopeKey ?? null);
   const scrollMemoryRef = useRef(new Map<string, number>());
+  const savedVisibleScrollRef = useRef(0);
   const pendingRestoreRef = useRef<{ scopeKey: string | null; offset: number } | null>(null);
   useLayoutEffect(() => {
     const currentScopeKey = navigationScopeKey ?? null;
@@ -161,6 +162,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     if (!element) return;
     const remembered = currentScopeKey !== null ? scrollMemoryRef.current.get(currentScopeKey) ?? 0 : 0;
     element.scrollTop = remembered;
+    savedVisibleScrollRef.current = remembered;
     setScrollTop(Math.max(0, remembered - introHeight));
     pendingRestoreRef.current = remembered > 0 ? { scopeKey: currentScopeKey, offset: remembered } : null;
     rowVirtualizer.measure();
@@ -403,6 +405,13 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const mountedTiles = positionedTiles.filter(tile => retainedIds.has(tile.asset.id) || inRangeIds.has(tile.asset.id));
   useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
   const areaVisible = useContext(AreaVisible);
+  useLayoutEffect(() => {
+    if (!areaVisible) return;
+    const element = scrollRef.current;
+    if (element && savedVisibleScrollRef.current > 0 && element.scrollTop === 0) {
+      element.scrollTop = savedVisibleScrollRef.current;
+    }
+  }, [areaVisible]);
   const folderScope = folderMoveScope(navigationScopeKey);
   useMediaViewChanged(scopeKey, areaVisible);
   const visitScope = useRef(folderScope);
@@ -425,8 +434,9 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       aria-multiselectable={intro ? undefined : true}
       onScroll={(event) => {
         cancelQuickPreview();
-        if (layoutUnits === 0) return;
         const element = event.currentTarget;
+        if (areaVisible) savedVisibleScrollRef.current = element.scrollTop;
+        if (layoutUnits === 0) return;
         setScrollTop(Math.max(0, element.scrollTop - introHeight));
         if (hasNextPage && onLoadNextPage && element.clientHeight > 0
           && measuredTotal + introHeight - (element.scrollTop + element.clientHeight)

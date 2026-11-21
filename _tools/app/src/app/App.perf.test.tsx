@@ -565,48 +565,42 @@ it("switches the index and header together with ready content and cancels pendin
   expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
 });
 
-it("commits the content, index and header inside each browser tab snapshot update", async () => {
+it("swaps rail tabs immediately with content, index and header together without snapshots or cross-fades", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
   const animationDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
   const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));
-  const entries: {update: () => void; skipTransition: ReturnType<typeof vi.fn>}[] = [];
-  const start = vi.fn((update: () => void) => {
-    const skipTransition = vi.fn();
-    entries.push({update, skipTransition});
-    return {ready: Promise.resolve(), finished: new Promise<void>(() => {}), skipTransition};
-  });
+  const start = vi.fn();
   Object.defineProperty(document, "startViewTransition", {configurable: true, value: start});
   Object.defineProperty(HTMLElement.prototype, "animate", {configurable: true, value: animate});
   try {
     renderApp(gw()); await advance(5_000);
     const header = document.querySelector<HTMLElement>('[data-chrome-slot="header"]')!;
     const slot = document.querySelector<HTMLElement>('.workspace-index-slot')!;
-    for (const [from, to, label, index] of [['home', 'assets', '에셋', 'open'], ['assets', 'collections', '컬렉션', 'closed'], ['collections', 'assets', '에셋', 'open']] as const) {
-      const oldHeader = header.textContent, oldIndex = slot.dataset.state;
-      const before = entries.length;
-      await act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name: label})); });
-      await advance(200, 16);
-      expect(entries).toHaveLength(before + 1);
-      if (before) expect(entries[before - 1].skipTransition).toHaveBeenCalledOnce();
-      expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', from);
-      expect(slot.dataset.state).toBe(oldIndex);
-      expect(header.textContent).toBe(oldHeader);
-      const incoming = document.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
-      expect(incoming).not.toBeVisible();
+    let assetsView: HTMLElement | null = null;
+    for (const [to, label, index] of [['assets', '에셋', 'open'], ['collections', '컬렉션', 'closed'], ['assets', '에셋', 'open']] as const) {
+      const oldHeader = header.textContent;
       animate.mockClear();
-      act(() => {
-        entries[before].update();
-        expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', to);
-        expect(slot).toHaveAttribute('data-state', index);
-        expect(header.textContent).not.toBe(oldHeader);
-        expect(header.querySelectorAll('.view-toolbar')).toHaveLength(1);
-        expect(header).not.toHaveAttribute('inert');
-        expect(incoming).toBeVisible();
-        expect(incoming.style.width).toBe('');
-        expect(incoming.style.opacity).toBe('');
-      });
+      await act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name: label})); });
+      if (to === 'assets' && assetsView) {
+        // Already visited retained tab swaps synchronously without waiting for frames or animations.
+        expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'assets');
+        expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')).toBe(assetsView);
+      } else {
+        await advance(200, 16);
+      }
+      const incoming = document.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
+      if (to === 'assets') assetsView = incoming;
+      expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', to);
+      expect(slot).toHaveAttribute('data-state', index);
+      expect(header.textContent).not.toBe(oldHeader);
+      expect(header.querySelectorAll('.view-toolbar')).toHaveLength(1);
+      expect(header).not.toHaveAttribute('inert');
+      expect(incoming).toBeVisible();
+      expect(incoming.style.width).toBe('');
+      expect(incoming.style.opacity).toBe('');
       expect(document.querySelectorAll('.motion-stage__view[style*="position: fixed"]')).toHaveLength(0);
-      expect(animate.mock.contexts.filter(host => (host as HTMLElement).matches('.motion-stage__view, .workspace-index-clip'))).toHaveLength(0);
+      expect(start).not.toHaveBeenCalled();
+      expect(animate.mock.contexts.filter(host => (host as HTMLElement).matches('.motion-stage__view, .workspace-index-clip, [data-asset-id]'))).toHaveLength(0);
     }
   } finally {
     cleanup();
@@ -617,56 +611,28 @@ it("commits the content, index and header inside each browser tab snapshot updat
   }
 });
 
-it("keeps the outgoing gallery geometry through both index-width cross-fades", async () => {
-  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
-  const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));
-  Object.defineProperty(HTMLElement.prototype, "animate", {configurable: true, value: animate});
-  const originalRect = HTMLElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    if (!this.matches('.motion-stage, .motion-stage__view')) return originalRect.call(this);
-    const slot = document.querySelector<HTMLElement>('.workspace-index-slot');
-    const indexWidth = slot?.dataset.state === 'open' ? Number.parseFloat(slot.style.getPropertyValue('--workspace-index-width')) : 0;
-    const fixed = this.style.position === 'fixed';
-    const delta = /calc\(100% ([+-]) (\d+)px\)/.exec(this.style.width);
-    const left = fixed ? Number.parseFloat(this.style.left) : 64 + indexWidth + (Number.parseFloat(this.style.left) || 0);
-    const width = fixed ? Number.parseFloat(this.style.width) : 1200 - indexWidth + (delta ? Number(delta[2]) * (delta[1] === '+' ? 1 : -1) : 0);
-    return {left, top: 44, width, height: 856, right: left + width, bottom: 900, x: left, y: 44, toJSON() {}};
+it("keeps visited main tabs mounted while visible and releases inactive tabs when hidden to tray", async () => {
+  renderApp(gw());
+  await advance(5_000);
+  const navigate = async (name: string) => act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name})); });
+  await navigate("에셋"); await advance(200, 16);
+  await navigate("컬렉션"); await advance(200, 16);
+  expect(document.querySelector('[data-motion-shown="collections"]')).not.toBeNull();
+  expect(document.querySelector('[data-motion-view="home"]')).not.toBeNull();
+  expect(document.querySelector('[data-motion-view="assets"]')).not.toBeNull();
+  expect(document.querySelector('[data-motion-view="collections"]')).not.toBeNull();
+
+  // Hiding to tray drops inactive retained views from DOM while keeping the active view intact.
+  await act(async () => {
+    nativeBus.emit("workload://changed", { lightweight: false, autoEnterMinutes: null, closeToTray: true, restricted: false, hidden: true, trayAvailable: true });
   });
-  try {
-    await startWorkspace(gw());
-    const navigate = async (name: string) => act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name})); });
-    for (const [from, to, label, indexWidth] of [['assets', 'collections', '컬렉션', 0], ['collections', 'assets', '에셋', 208]] as const) {
-      const outgoing = document.querySelector<HTMLElement>(`[data-motion-view="${from}"]`)!;
-      const {left, width} = outgoing.getBoundingClientRect();
-      animate.mockClear();
-      await navigate(label);
-      let started = false;
-      for (let elapsed = 0; elapsed < 500; elapsed += 16) {
-        await advance(16, 16);
-        const incoming = document.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
-        started = animate.mock.contexts.includes(incoming);
-        const slot = document.querySelector('.workspace-index-slot')!;
-        expect(slot).toHaveAttribute('data-state', (started ? indexWidth : from === 'assets' ? 208 : 0) ? 'open' : 'closed');
-        expect(outgoing.getBoundingClientRect()).toMatchObject({left, width});
-        if (!started) { expect(incoming.style.opacity).toBe('0'); continue; }
-        expect(outgoing.style.position).toBe('fixed');
-        expect(outgoing.style.width).toBe(`${width}px`);
-        expect(outgoing.style.contain).toBe('layout paint size');
-        expect(incoming.style.width).toBe('');
-        expect(incoming.getBoundingClientRect()).toMatchObject({left: 64 + indexWidth, width: 1200 - indexWidth});
-        break;
-      }
-      expect(started).toBe(true);
-      await advance(100, 16);
-      expect(outgoing.isConnected).toBe(true);
-      expect(outgoing.getBoundingClientRect()).toMatchObject({left, width});
-      await advance(100, 16);
-      expect(outgoing.isConnected).toBe(false);
-    }
-  } finally {
-    if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor);
-    else delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
-  }
+  expect(document.querySelector('[data-motion-view="home"]')).toBeNull();
+  expect(document.querySelector('[data-motion-view="assets"]')).toBeNull();
+  expect(document.querySelector('[data-motion-view="collections"]')).not.toBeNull();
+  // Reset shared workload store so subsequent tests start visible.
+  await act(async () => {
+    nativeBus.emit("workload://changed", { lightweight: false, autoEnterMinutes: null, closeToTray: true, restricted: false, hidden: false, trayAvailable: true });
+  });
 });
 
 // Tighten-only gate (PERF-ALL-001 item 4): every Library tile thumbnail mounted while scrolling

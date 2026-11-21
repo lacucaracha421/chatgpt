@@ -104,7 +104,8 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
   const previousClosed = useRef(indexClosed);
   const indexEntrance = useRef(false);
   useLayoutEffect(() => {
-    if (previousClosed.current && !indexClosed) indexEntrance.current = true;
+    // Only cross-fade an appearing index when paired with a settling content cross-fade; instant tab swaps show it at once.
+    if (previousClosed.current && !indexClosed && settling) indexEntrance.current = true;
     previousClosed.current = indexClosed;
     if (indexClosed) indexEntrance.current = false;
     const clip = indexClip.current;
@@ -281,12 +282,15 @@ function AssetIndexTopRow({ icon, label, count, selected, onClick }: {
 function useAssetTotalCount(enabled: boolean): number | null {
   const library = useOptionalLibrary();
   const gateway = library?.gateway;
-  const [count, setCount] = useState<number | null>(null);
+  const [state, setState] = useState<{ gateway: typeof gateway; count: number | null }>({ gateway: undefined, count: null });
+  const loadedGatewayRef = useRef<typeof gateway>(undefined);
   useEffect(() => {
-    if (!enabled || !gateway) {
-      setCount(null);
+    if (!gateway) {
+      loadedGatewayRef.current = undefined;
+      setState({ gateway: undefined, count: null });
       return;
     }
+    if (!enabled || loadedGatewayRef.current === gateway) return;
     let active = true;
     void gateway.listAssets({
       classificationId: null,
@@ -301,13 +305,16 @@ function useAssetTotalCount(enabled: boolean): number | null {
       after: null,
       limit: 1,
     }).then((page) => {
-      if (active) setCount(page.totalCount ?? null);
+      if (active) {
+        loadedGatewayRef.current = gateway;
+        setState({ gateway, count: page.totalCount ?? null });
+      }
     }).catch(() => {
-      if (active) setCount(null);
+      if (active) setState({ gateway, count: null });
     });
     return () => { active = false; };
   }, [enabled, gateway]);
-  return count;
+  return state.gateway === gateway ? state.count : null;
 }
 
 function formatIndexCount(count: number) {

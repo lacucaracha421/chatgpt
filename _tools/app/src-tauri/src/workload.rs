@@ -362,12 +362,23 @@ fn apply(app: &tauri::AppHandle, settings: Settings, automatic: bool) -> Result<
     if let Some(saved) = saved {
         crate::library::machine_settings::set_workload(path, saved).map_err(|e| e.to_string())?;
     }
+    let entered_lightweight = !state.settings.lightweight && settings.lightweight;
     state.set(settings, Instant::now());
     state.auto_entered = auto_entered;
     let profile = state.profile();
     drop(state);
+    if entered_lightweight {
+        trim_background_memory(app);
+    }
     broadcast(app);
     Ok(profile)
+}
+
+fn trim_background_memory(app: &tauri::AppHandle) {
+    crate::media_protocol::clear_memory_caches();
+    if let Some(library) = app.state::<crate::commands::AppState>().current_library() {
+        library.trim_memory_caches();
+    }
 }
 /// What to write to the machine settings for a change, and whether 절약 모드 is then an
 /// automatic one. The inactivity switch writes nothing; while an automatic 절약 모드 lasts,
@@ -485,6 +496,9 @@ pub(crate) fn activity(app: &tauri::AppHandle, hidden: bool, focused: bool) {
     }
     drop(state);
     if changed {
+        if hidden {
+            trim_background_memory(app);
+        }
         crate::webview_memory::set_hidden(app, hidden);
         broadcast(app);
     }

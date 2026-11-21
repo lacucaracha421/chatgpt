@@ -841,7 +841,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={(destination) => { setShownArea(destination); pcTabShown(destination); }} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && (area !== "assets" || !homeAsset || !requestedAsset || Boolean(host.querySelector(".asset-viewer"))) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} hidden={workload.hidden} collections={collections} sidebarWidth={sidebarWidth} onShown={(destination) => { setShownArea(destination); pcTabShown(destination); }} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && (area !== "assets" || !homeAsset || !requestedAsset || Boolean(host.querySelector(".asset-viewer"))) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
@@ -1002,18 +1002,21 @@ function DeferredViewFallback() {
 
 function workspaceSwitchKey(view: AssetView) { return view.kind === "collection" ? "collection-work" : workspaceArea(view); }
 
+const RETAINED_AREAS = ["home", "assets", "collections", "manga"] as const;
+const NO_RETAINED_AREAS: readonly string[] = [];
+
 /** Prepare chrome for the requested scope while the shell still paints the outgoing scope. */
-function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShown, onSettlingChange, ready, children}: {view: AssetView; shownView: AssetView; collections: CollectionSummary[]; sidebarWidth: number; onShown(area: string): void; onSettlingChange(settling: boolean): void; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
+function WorkspaceAreaSwitch({view, shownView, hidden, collections, sidebarWidth, onShown, onSettlingChange, ready, children}: {view: AssetView; shownView: AssetView; hidden: boolean; collections: CollectionSummary[]; sidebarWidth: number; onShown(area: string): void; onSettlingChange(settling: boolean): void; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
   const chrome = useWorkspaceChrome();
   const area = workspaceSwitchKey(view), scope = JSON.stringify(view);
   const indexWidth = (target: AssetView) => hasWorkspaceIndex(target, collections, chrome?.getMeta(JSON.stringify(target)) ?? null)
     && !(workspaceArea(target) === "manga" && chrome?.indexHidden.manga) ? sidebarWidth : 0;
-  // Prepare at the final width; tab snapshots include the final index and header together.
-  // Shelf ⇄ work screen is one object moving between two layouts: a browser snapshot with that
-  // object shared (`hero`), not a cross-fade of the two whole screens.
+  // Rail tabs swap immediately without flashing (image -> image); keep the four main tabs
+  // mounted while visible and release the inactive ones when hidden to the tray.
+  // Shelf ⇄ work screen keeps the browser snapshot with the shared hero object.
   const workSwap = new Set([area, workspaceSwitchKey(shownView)]).size === 2 && [area, workspaceSwitchKey(shownView)].every(key => key === "collections" || key === "collection-work");
   const heroId = view.kind === "collection" ? view.collectionId : shownView.kind === "collection" ? shownView.collectionId : null;
-  return <AreaSwitch activeKey={area} viewTransitions={workspaceArea(view) !== workspaceArea(shownView) || workSwap} hero={workSwap && heroId ? (key, host) => collectionHero(key, host, heroId) : undefined} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
+  return <AreaSwitch activeKey={area} crossFade={workSwap} viewTransitions={workSwap} hero={workSwap && heroId ? (key, host) => collectionHero(key, host, heroId) : undefined} retained={hidden ? NO_RETAINED_AREAS : RETAINED_AREAS} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
 }
 
 const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, settings: null, header: null, details: null };

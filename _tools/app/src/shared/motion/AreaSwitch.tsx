@@ -74,6 +74,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
   const onShownRef = useRef(onShown); onShownRef.current = onShown;
   const onSettlingRef = useRef(onSettlingChange); onSettlingRef.current = onSettlingChange;
   const visited = useRef(new Set([activeKey]));
+  const instantEntered = useRef<string | null>(null);
   const checkRef = useRef<(() => void) | null>(null);
   const entrance = useRef<string | null>(null);
   const transition = useRef<{key: string; swap?: ViewSwap | null} | null>(null);
@@ -83,8 +84,11 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
   for (const [key, node] of Object.entries(views)) {
     if ((key !== shown || activeKey === shown) && key !== outgoing) nodes.current.set(key, node);
   }
-  const keys = new Set([...(outgoing ? [outgoing] : []), shown, activeKey, ...retained.filter(key => nodes.current.has(key))]);
-  for (const key of nodes.current.keys()) if (!keys.has(key)) nodes.current.delete(key);
+  const keys = new Set([...(outgoing ? [outgoing] : []), shown, activeKey, ...retained.filter(key => nodes.current.has(key) && (visited.current.has(key) || Object.prototype.hasOwnProperty.call(views, key)))]);
+  for (const key of nodes.current.keys()) if (!keys.has(key)) {
+    nodes.current.delete(key);
+    visited.current.delete(key);
+  }
 
   useLayoutEffect(() => {
     transition.current?.swap?.cancel();
@@ -146,6 +150,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
       frozen.current = rect ? {position: 'fixed', inset: 'auto', left: rect.left, top: rect.top,
         width: rect.width, height: rect.height, boxSizing: 'border-box', contain: 'layout paint size'} : null;
       entrance.current = animate ? activeKey : null;
+      instantEntered.current = animate ? null : activeKey;
       setSettling(animate);
       onSettlingRef.current?.(animate);
       setOutgoing(animate ? shownRef.current : null);
@@ -153,10 +158,12 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
       visited.current.add(activeKey);
       if (!animate) onShownRef.current?.(activeKey);
     };
+    const retainedRevisit = retained.includes(activeKey) && visited.current.has(activeKey);
+    const waitImagesBeforeCommit = (browserTransition || !crossFade) && !retainedRevisit;
     const start = () => {
       frame = 0;
       if (finished || (!forced && !readyRef.current(incoming, activeKey))) return;
-      if (browserTransition && !forced) {
+      if (waitImagesBeforeCommit && !forced) {
         // Decode at the destination width while the old content and shell still paint.
         if (!stopImages) {
           window.clearTimeout(cap); // Image decoding has its own 250ms cap after readiness.
@@ -177,8 +184,8 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
       if (finished) return;
       if (!forced && !readyRef.current(incoming, activeKey)) { window.cancelAnimationFrame(frame); frame = 0; return; }
       // Effects, shared observer setup and layout from the content commit get a rendering
-      // opportunity before the atomic swap. The fallback's reduced-motion shortcut stays immediate.
-      if (forced || (!browserTransition && ((retained.includes(activeKey) && visited.current.has(activeKey)) || reducedMotion() || typeof incoming.animate !== 'function'))) { window.cancelAnimationFrame(frame); start(); return; }
+      // opportunity before the atomic swap. Retained revisits and the fallback's reduced-motion shortcut stay immediate.
+      if (forced || (!browserTransition && (retainedRevisit || reducedMotion() || typeof incoming.animate !== 'function'))) { window.cancelAnimationFrame(frame); start(); return; }
       if (!frame) frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(start);
       });
@@ -208,6 +215,8 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
 
   // Explicit readiness may change without a DOM mutation (e.g. an empty first page).
   useLayoutEffect(() => { checkRef.current?.(); });
+  // Clear after children's layout effects have merged the instant swap's first batch.
+  useLayoutEffect(() => { if (instantEntered.current === shown) instantEntered.current = null; }, [shown]);
 
   useLayoutEffect(() => {
     if (entrance.current !== shown) return;
@@ -294,7 +303,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
           display: !painted && !incoming ? 'none' : undefined, visibility: painted ? undefined : 'hidden', opacity: !painted || (visible && settling) ? 0 : undefined,
           zIndex: outgoing ? visible ? 1 : 0 : undefined}}>
         <AreaPainted.Provider value={visible && !settling || key === outgoing && settling}><AreaRequested.Provider value={incoming}>
-          <AreaEntering.Provider value={visible && (outgoing !== null || transition.current?.key === key)}><AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider></AreaEntering.Provider>
+          <AreaEntering.Provider value={visible && (outgoing !== null || transition.current?.key === key || instantEntered.current === key)}><AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider></AreaEntering.Provider>
         </AreaRequested.Provider></AreaPainted.Provider>
       </div>;
     })}

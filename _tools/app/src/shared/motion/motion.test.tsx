@@ -184,6 +184,56 @@ it('keeps instant tablet swaps even when the browser API is available', async ()
   expect(start).not.toHaveBeenCalled(); expect(animate).not.toHaveBeenCalled();
 });
 
+it('waits for cold viewport image decode on instant swaps, swaps retained revisits synchronously, and re-waits after eviction', async () => {
+  const {start} = mockViewTransitions();
+  const rect = () => ({top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {}});
+  const tree = (activeKey: string, retained: readonly string[] = ['home', 'assets']) => (
+    <AreaSwitch crossFade={false} retained={retained} activeKey={activeKey} views={{
+      home: <b>home</b>,
+      assets: <><img src="/cover" loading="lazy" alt="cover"/><Tiles count={2}/></>,
+    }}/>
+  );
+  const view = render(tree('home'));
+  view.rerender(tree('assets'));
+  const image = screen.getByAltText('cover') as HTMLImageElement;
+  const host = image.closest<HTMLElement>('[data-motion-view="assets"]')!;
+  image.getBoundingClientRect = rect; host.getBoundingClientRect = rect;
+  let decode!: () => void;
+  image.decode = () => new Promise<void>(resolve => { decode = resolve; });
+  await tick(32);
+  expect(screen.getByText('home')).toBeVisible();
+  expect(host.style.opacity).toBe('0');
+  await act(async () => decode());
+  expect(view.container.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'assets');
+  expect(image).toBeVisible();
+  expect(start).not.toHaveBeenCalled();
+  expect(animate).not.toHaveBeenCalled();
+
+  // Revisit swaps synchronously with zero animation and preserves the mounted DOM.
+  view.rerender(tree('home'));
+  expect(view.container.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'home');
+  view.rerender(tree('assets'));
+  expect(view.container.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'assets');
+  expect(screen.getByAltText('cover')).toBe(image);
+  expect(animate).not.toHaveBeenCalled();
+
+  // Evicting retained tabs (hidden to tray) clears visited state so the next open waits for decode again.
+  view.rerender(tree('home', ['home', 'assets']));
+  view.rerender(tree('home', []));
+  expect(screen.queryByAltText('cover')).toBeNull();
+  view.rerender(tree('assets', ['home', 'assets']));
+  const reloaded = screen.getByAltText('cover') as HTMLImageElement;
+  const reloadedHost = reloaded.closest<HTMLElement>('[data-motion-view="assets"]')!;
+  reloaded.getBoundingClientRect = rect; reloadedHost.getBoundingClientRect = rect;
+  let decodeAgain!: () => void;
+  reloaded.decode = () => new Promise<void>(resolve => { decodeAgain = resolve; });
+  await tick(32);
+  expect(screen.getByText('home')).toBeVisible();
+  await act(async () => decodeAgain());
+  expect(view.container.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'assets');
+  expect(animate).not.toHaveBeenCalled();
+});
+
 it('preserves both spring fallbacks', () => {
   vi.stubGlobal('CSS', {supports: () => false}); expect(springEasing()).toBe(SPRING_FALLBACK);
   expect(snappySpringEasing()).toBe(EASE_STANDARD);

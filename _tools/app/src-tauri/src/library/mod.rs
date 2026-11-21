@@ -1071,6 +1071,22 @@ impl Library {
             mime,
         })
     }
+
+    /// Release disposable in-memory caches and idle read-only SQLite connections when the
+    /// window is hidden to the tray or enters lightweight mode. Never acquires `database_lock`.
+    pub(crate) fn trim_memory_caches(&self) {
+        self.media_reads.drop_idle();
+        if let Ok(mut guard) = self.catalog_lookup_cache.lock() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.collection_artwork_scan_cache.lock() {
+            guard.clear();
+            guard.shrink_to_fit();
+        }
+        if let Ok(mut guard) = self.revisit_color_cache.lock() {
+            *guard = revisit_color::ColorCache::default();
+        }
+    }
 }
 
 pub(crate) fn validated_asset_ids<'a>(

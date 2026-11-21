@@ -301,9 +301,26 @@ impl PreviewCache {
         }
         self.lru.push_back(key.clone());
     }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.entries.shrink_to_fit();
+        self.lru.clear();
+        self.lru.shrink_to_fit();
+        self.total_bytes = 0;
+    }
 }
 
 static PREVIEW_CACHE: OnceLock<Mutex<PreviewCache>> = OnceLock::new();
+
+pub(crate) fn clear_memory_caches() {
+    if let Some(cache) = PREVIEW_CACHE.get() {
+        if let Ok(mut guard) = cache.lock() {
+            guard.clear();
+        }
+    }
+    preview::clear_memory_cache();
+}
 
 fn preview_cache() -> &'static Mutex<PreviewCache> {
     PREVIEW_CACHE.get_or_init(|| Mutex::new(PreviewCache::new(crate::performance::budgets().preview_cache_bytes)))
@@ -1071,7 +1088,9 @@ fn library_media_cache_control(
             }
         }
         (MediaVariant::Thumbnail, None) => Some("no-store"),
-        (MediaVariant::WorkArtworkSpine, _) => Some(PREVIEW_CACHE_CONTROL),
+        (MediaVariant::WorkArtworkSpine | MediaVariant::WorkArtworkThumbnail, _) => {
+            Some(PREVIEW_CACHE_CONTROL)
+        }
         _ => None,
     }
 }

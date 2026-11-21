@@ -9,7 +9,7 @@ import { FolderIcon, FunnelIcon } from "@heroicons/react/24/outline";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetDateBucket, AssetMediaFilter, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetMediaFilter, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary, LibraryGateway } from "../library/types";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
@@ -72,11 +72,6 @@ type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; hea
 export type AssetNavigationMemory = Map<string, PageState>;
 type QueryError = { queryKey: string; message: string };
 const EMPTY_ASSETS: AssetSummary[] = [];
-const ALL_DATE_BUCKETS = {
-  startUtc: "0001-01-01T00:00:00.000Z",
-  endUtc: "9999-12-31T23:59:59.999Z",
-  offsetMinutes: -new Date().getTimezoneOffset(),
-};
 
 function useStyleSuggestionAssetIds(enabled: boolean) {
   const gateway = useArtistGateway();
@@ -146,7 +141,6 @@ export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, c
   const [characterOpen, setCharacterOpen] = useState(false);
   const [characterCounts, setCharacterCounts] = useState<Record<string, number>>({});
   const [characterNotice, setCharacterNotice] = useState<CharacterAssignNoticeState | null>(null);
-  const [dateBuckets, setDateBuckets] = useState<AssetDateBucket[]>([]);
   const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
   useAutoDismiss(message, dismissMessage);
   const dismissCharacterNotice = useCallback((_value: null) => setCharacterNotice(null), []);
@@ -319,14 +313,7 @@ export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, c
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: descriptionQuery !== null ? descriptionSearchError(error) : commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { ++generationRef.current; };
   }, [gateway, queryKey, galleryRefreshVersion, retryVersion, view.kind, viewKey]);
-  useEffect(() => {
-    let cancelled = false;
-    void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
-      if (!cancelled) setDateBuckets(result);
-    }).catch(() => { if (!cancelled) setDateBuckets([]); });
-    return () => { cancelled = true; };
-  }, [gateway, refreshVersion]);
-  const totalAssets = useMemo(() => dateBuckets.reduce((sum, bucket) => sum + bucket.count, 0), [dateBuckets]);
+  const totalAssets = activePage?.totalCount ?? undefined;
   useEffect(() => onStatusChange({ loadedCount: items.length, totalCount: totalAssets, selectedAsset, loading: firstLoading || nextLoading || prevLoading }), [firstLoading, items.length, nextLoading, onStatusChange, prevLoading, selectedAsset, totalAssets]);
   useEffect(() => {
     setSelection((current) => reconcileSelection(current, itemIds));
@@ -690,7 +677,7 @@ export function AssetBrowser({ durationFilter = "all", onDurationFilterChange, c
         ? directOnlyEmpty
           ? <>{folderHead}<EmptyState title="이 폴더에 바로 들어 있는 이미지가 없습니다">하위 폴더와 캐릭터의 이미지는 전체에서 볼 수 있어요.<Button onClick={() => setDirectOnlyState({ folderId: plainFolderId, value: false })}>전체 보기</Button></EmptyState></>
           : <>{folderHead}<EmptyState title={view.kind === "album" ? "이 앨범에 자산 없음" : view.kind === "collection" ? "이 컬렉션에 자산 없음" : "자산 없음"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState></>
-      : <ContextMenu items={contextItems} onOpenChange={contextTarget.onOpenChange}><div onContextMenu={contextTarget.onContextMenu} onKeyDown={contextTarget.onKeyDown} onPointerDownCapture={contextTarget.onPointerDownCapture} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} contextTargetId={contextTarget.targetId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onBackgroundClick={() => { clearSelection(); setInspectorOpen(false); }} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+      : <ContextMenu items={contextItems} onOpenChange={contextTarget.onOpenChange}><div onContextMenu={contextTarget.onContextMenu} onKeyDown={contextTarget.onKeyDown} onPointerDownCapture={contextTarget.onPointerDownCapture} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading && !visiblePage} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} contextTargetId={contextTarget.targetId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onBackgroundClick={() => { clearSelection(); setInspectorOpen(false); }} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   // One step, no shift: while the artist intro is still the placeholder, the screen already painted stays as it was
   // (inert, same element, so nothing remounts); with nothing painted yet, the loading skeleton shows instead of
   // a gallery whose intro would grow when the detail arrives.

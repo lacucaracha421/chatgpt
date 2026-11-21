@@ -1915,8 +1915,11 @@ pub fn set_collection_volume_range(
 }
 
 #[tauri::command]
-pub fn list_kakao_reviews(state: State<'_, AppState>) -> Result<Vec<crate::library::kakao_review::KakaoReview>, CommandError> {
-    current_required(state)?.list_kakao_reviews().map_err(CommandError::from)
+pub async fn list_kakao_reviews(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::kakao_review::KakaoReview>, CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.list_kakao_reviews().map_err(CommandError::from)).await
 }
 
 #[tauri::command]

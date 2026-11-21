@@ -113,6 +113,16 @@ impl MediaReads {
         guard
     }
 
+    /// Drop idle read-only connections (and their SQLite page caches) while keeping active readers intact.
+    pub(crate) fn drop_idle(&self) {
+        let mut readers = self
+            .readers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        readers.idle.clear();
+        readers.idle.shrink_to_fit();
+    }
+
     #[cfg(test)]
     pub(crate) fn idle_count(&self) -> usize {
         self.readers
