@@ -43,6 +43,9 @@ mod manga_spine_protocol_tests {
         let jpeg = include_bytes!("library/fixtures/yes24-side.jpg");
         library.save_spine_bytes("9780000000001", "side", jpeg).unwrap();
         let path = "/manga-spine-scan/9780000000001/side";
+        let revised = media_response(Some(&library), &Method::GET, "/manga-spine-scan/9780000000001/side/v1700000000");
+        assert_eq!(revised.status(), StatusCode::OK);
+        assert_eq!(revised.body(), jpeg);
         let mut response = media_response(Some(&library), &Method::GET, path);
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "image/jpeg");
@@ -55,7 +58,7 @@ mod manga_spine_protocol_tests {
         assert!(!external.headers().contains_key("access-control-allow-origin"));
         assert_eq!(media_response(None, &Method::GET, path).status(), StatusCode::NOT_FOUND);
         assert_eq!(media_response(Some(&library), &Method::POST, path).status(), StatusCode::METHOD_NOT_ALLOWED);
-        for path in ["/manga-spine-scan/9780000000001/front", "/manga-spine-scan/9780000000001/side/extra", "/manga-spine-scan/../side"] {
+        for path in ["/manga-spine-scan/9780000000001/front", "/manga-spine-scan/9780000000001/side/extra", "/manga-spine-scan/9780000000001/side/v", "/manga-spine-scan/9780000000001/side/v1/x", "/manga-spine-scan/../side"] {
             assert_eq!(media_response(Some(&library), &Method::GET, path).status(), StatusCode::BAD_REQUEST);
         }
         assert_eq!(media_response(Some(&library), &Method::GET, "/manga-spine-scan/9780000000001/back").status(), StatusCode::NOT_FOUND);
@@ -391,6 +394,11 @@ pub(crate) fn media_response_with_range(
     }
     if let Some(rest) = path.strip_prefix("/manga-spine-scan/") {
         let Some((isbn, part)) = rest.split_once('/') else { return empty_response(StatusCode::BAD_REQUEST); };
+        // `v<checked_at>` is only a cache-busting revision; the file served is always the current one.
+        let part = match part.split_once('/') {
+            Some((part, revision)) if revision.strip_prefix('v').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) => part,
+            _ => part,
+        };
         if !crate::library::manga_spine_scans::valid_isbn(isbn) || !matches!(part, "side" | "back") {
             return empty_response(StatusCode::BAD_REQUEST);
         }

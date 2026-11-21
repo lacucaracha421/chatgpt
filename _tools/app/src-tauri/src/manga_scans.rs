@@ -2,7 +2,7 @@
 use crate::{
     commands::AppState,
     library::{
-        manga_spine_scans::{goods_id, real_jpeg},
+        manga_spine_scans::{aladin_item_id, aladin_spine_jpeg, goods_id, real_jpeg},
         Library,
     },
 };
@@ -118,7 +118,22 @@ impl RequestSchedule {
     }
 }
 
+/// Aladin answers HTTP 200 with an HTML page when a book has no spine, and an oversized body is
+/// not a spine either, so only a network failure or cancellation stops the volume.
+fn soft_get(
+    get: &mut impl FnMut(&str) -> Result<Vec<u8>, FetchError>,
+    url: &str,
+) -> Result<Vec<u8>, FetchError> {
+    match get(url) {
+        Err(FetchError::Invalid) => Ok(Vec::new()),
+        other => other,
+    }
+}
+
 /// HTTP is injected here so parsing, partial results and persistence run offline in tests.
+///
+/// Aladin is asked first and supplies the preferred side. YES24 then fills only what is still
+/// missing: the back, and the side when Aladin had none; it never replaces an Aladin side.
 fn fetch_volume(
     library: &Library,
     isbn: &str,
@@ -134,33 +149,75 @@ fn fetch_volume(
     let mut back = library
         .spine_scan_path(isbn, "back")
         .is_some_and(|p| p.is_file());
+    let mut side_source = None;
+    let mut aladin_checked_at = None;
+    let mut found = false;
     let result = (|| {
-        let html = get(&format!(
-            "https://www.yes24.com/product/search?domain=BOOK&query={isbn}"
-        ))?;
-        let html = String::from_utf8_lossy(&html);
-        let Some(goods) = goods_id(&html) else {
-            return Ok("not_found");
-        };
-        for (part, available) in [("side", &mut side), ("back", &mut back)] {
+        let html = soft_get(
+            &mut get,
+            &format!("https://www.aladin.co.kr/search/wsearchresult.aspx?SearchTarget=Book&SearchWord={isbn}"),
+        )?;
+        if !is_active() {
+            return Err(FetchError::Cancelled);
+        }
+        if let Some(item) = aladin_item_id(&String::from_utf8_lossy(&html)) {
+            found = true;
+            let bytes = soft_get(
+                &mut get,
+                &format!("https://www.aladin.co.kr/shop/book/wbookspine_down.aspx?itemid={item}"),
+            )?;
             if !is_active() {
                 return Err(FetchError::Cancelled);
             }
-            let bytes = get(&format!(
-                "https://image.yes24.com/goods/{goods}/{}/XL",
-                part.to_ascii_uppercase()
-            ))?;
-            if !is_active() {
-                return Err(FetchError::Cancelled);
-            }
-            if real_jpeg(&bytes).map_err(|_| FetchError::Invalid)? {
+            if aladin_spine_jpeg(&bytes) {
                 library
-                    .save_spine_bytes(isbn, part, &bytes)
+                    .save_spine_bytes(isbn, "side", &bytes)
                     .map_err(|_| FetchError::Invalid)?;
-                *available = true;
+                side = true;
+                side_source = Some("aladin");
             }
         }
-        Ok(if side || back { "real" } else { "missing" })
+        aladin_checked_at = Some(chrono::Utc::now().timestamp());
+        if !(side && back) {
+            let html = get(&format!(
+                "https://www.yes24.com/product/search?domain=BOOK&query={isbn}"
+            ))?;
+            let html = String::from_utf8_lossy(&html);
+            if let Some(goods) = goods_id(&html) {
+                found = true;
+                for (part, available) in [("side", &mut side), ("back", &mut back)] {
+                    if *available {
+                        continue;
+                    }
+                    if !is_active() {
+                        return Err(FetchError::Cancelled);
+                    }
+                    let bytes = get(&format!(
+                        "https://image.yes24.com/goods/{goods}/{}/XL",
+                        part.to_ascii_uppercase()
+                    ))?;
+                    if !is_active() {
+                        return Err(FetchError::Cancelled);
+                    }
+                    if real_jpeg(&bytes).map_err(|_| FetchError::Invalid)? {
+                        library
+                            .save_spine_bytes(isbn, part, &bytes)
+                            .map_err(|_| FetchError::Invalid)?;
+                        *available = true;
+                        if part == "side" {
+                            side_source = Some("yes24");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(if side || back {
+            "real"
+        } else if found {
+            "missing"
+        } else {
+            "not_found"
+        })
     })();
     if !is_active() || result == Err(FetchError::Cancelled) {
         return Err(FetchError::Cancelled);
@@ -168,6 +225,9 @@ fn fetch_volume(
     let status = result.as_ref().copied().unwrap_or("error");
     library
         .save_spine_status(isbn, status, side, back, chrono::Utc::now().timestamp())
+        .map_err(|_| FetchError::Invalid)?;
+    library
+        .save_spine_sources(isbn, side_source, aladin_checked_at)
         .map_err(|_| FetchError::Invalid)?;
     result
 }
@@ -428,6 +488,22 @@ mod manga_spine_fetch_tests {
         assert_eq!(schedule.failures, 0);
         assert!(!pause_until(now + Duration::from_secs(600), || false));
     }
+    /// Aladin search result page with a banner link ahead of the real result.
+    const ALADIN_SEARCH: &[u8] = b"<a href=\"wproduct.aspx?ItemId=406522102\" class=\"banner\">\
+        <a href=\"wproduct.aspx?ItemId=777\" class=\"bo3\">";
+    type Stored = (String, bool, bool, Option<String>, bool);
+    fn stored(library: &Library) -> Stored {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT status,side,back,side_source,aladin_checked_at IS NOT NULL
+                 FROM manga_spine_scans WHERE isbn13=?1",
+                [ISBN],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap()
+    }
     #[test]
     fn offline_fetch_persists_real_parts_and_status_without_placeholder_bytes() {
         let temp = tempfile::tempdir().unwrap();
@@ -438,7 +514,9 @@ mod manga_spine_fetch_tests {
             ISBN,
             |url| {
                 calls.push(url.to_owned());
-                Ok(if url.contains("search?") {
+                Ok(if url.contains("aladin.co.kr") {
+                    Vec::new()
+                } else if url.contains("search?") {
                     b"/goods/123".to_vec()
                 } else if url.contains("/SIDE/") {
                     SIDE.to_vec()
@@ -449,7 +527,7 @@ mod manga_spine_fetch_tests {
             || true,
         );
         assert_eq!(result, Ok("real"));
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         assert_eq!(
             std::fs::read(library.spine_scan_path(ISBN, "side").unwrap()).unwrap(),
             SIDE
@@ -460,16 +538,103 @@ mod manga_spine_fetch_tests {
             .due_spine_isbns(chrono::Utc::now().timestamp())
             .unwrap()
             .is_empty());
-        let stored: (String, bool, bool) = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT status,side,back FROM manga_spine_scans WHERE isbn13=?1",
-                [ISBN],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
+        assert_eq!(
+            stored(&library),
+            ("real".into(), true, false, Some("yes24".into()), true)
+        );
+    }
+    #[test]
+    fn aladin_side_replaces_yes24_side_and_yes24_only_fetches_the_missing_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .save_spine_bytes(ISBN, "side", b"older yes24 side")
             .unwrap();
-        assert_eq!(stored, ("real".into(), true, false));
+        library
+            .save_spine_status(ISBN, "real", true, false, 1)
+            .unwrap();
+        library
+            .save_spine_sources(ISBN, Some("yes24"), None)
+            .unwrap();
+        let mut calls = Vec::new();
+        let result = fetch_volume(
+            &library,
+            ISBN,
+            |url| {
+                calls.push(url.to_owned());
+                Ok(if url.contains("wsearchresult") {
+                    ALADIN_SEARCH.to_vec()
+                } else if url.contains("search?") {
+                    b"/goods/123".to_vec()
+                } else {
+                    SIDE.to_vec()
+                })
+            },
+            || true,
+        );
+        assert_eq!(result, Ok("real"));
+        assert!(calls[1].ends_with("wbookspine_down.aspx?itemid=777"));
+        assert!(calls.iter().any(|url| url.ends_with("/BACK/XL")));
+        assert!(!calls.iter().any(|url| url.contains("/SIDE/")));
+        assert_eq!(
+            std::fs::read(library.spine_scan_path(ISBN, "side").unwrap()).unwrap(),
+            SIDE
+        );
+        assert_eq!(
+            stored(&library),
+            ("real".into(), true, true, Some("aladin".into()), true)
+        );
+    }
+    #[test]
+    fn aladin_without_a_spine_falls_back_to_the_yes24_side() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let result = fetch_volume(
+            &library,
+            ISBN,
+            |url| {
+                Ok(if url.contains("wsearchresult") {
+                    ALADIN_SEARCH.to_vec()
+                } else if url.contains("wbookspine_down") {
+                    b"<html>no spine</html>".to_vec()
+                } else if url.contains("search?") {
+                    b"/goods/123".to_vec()
+                } else if url.contains("/SIDE/") {
+                    SIDE.to_vec()
+                } else {
+                    PLACEHOLDER.to_vec()
+                })
+            },
+            || true,
+        );
+        assert_eq!(result, Ok("real"));
+        assert_eq!(
+            stored(&library),
+            ("real".into(), true, false, Some("yes24".into()), true)
+        );
+    }
+    #[test]
+    fn yes24_is_not_contacted_when_nothing_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library.save_spine_bytes(ISBN, "back", SIDE).unwrap();
+        let mut calls = Vec::new();
+        let result = fetch_volume(
+            &library,
+            ISBN,
+            |url| {
+                calls.push(url.to_owned());
+                Ok(if url.contains("wsearchresult") {
+                    ALADIN_SEARCH.to_vec()
+                } else {
+                    SIDE.to_vec()
+                })
+            },
+            || true,
+        );
+        assert_eq!(result, Ok("real"));
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|url| url.contains("aladin.co.kr")));
     }
     #[test]
     fn not_found_errors_and_cancellation_are_distinct() {
@@ -487,16 +652,7 @@ mod manga_spine_fetch_tests {
             fetch_volume(&library, ISBN, |_| Err(FetchError::Cancelled), || false),
             Err(FetchError::Cancelled)
         );
-        let status: String = library
-            .connection()
-            .unwrap()
-            .query_row(
-                "SELECT status FROM manga_spine_scans WHERE isbn13=?1",
-                [ISBN],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(status, "error");
+        assert_eq!(stored(&library).0, "error");
     }
     #[test]
     fn a_failed_back_keeps_the_real_side_and_cancellation_prevents_writes() {
@@ -506,7 +662,9 @@ mod manga_spine_fetch_tests {
             &library,
             ISBN,
             |url| {
-                if url.contains("search?") {
+                if url.contains("aladin.co.kr") {
+                    Ok(Vec::new())
+                } else if url.contains("search?") {
                     Ok(b"goods/123".to_vec())
                 } else if url.contains("SIDE") {
                     Ok(SIDE.to_vec())
@@ -523,8 +681,8 @@ mod manga_spine_fetch_tests {
             &library,
             "9780000000002",
             |url| {
-                if url.contains("search?") {
-                    Ok(b"goods/456".to_vec())
+                if url.contains("wsearchresult") {
+                    Ok(ALADIN_SEARCH.to_vec())
                 } else {
                     active.store(false, Ordering::Release);
                     Ok(SIDE.to_vec())

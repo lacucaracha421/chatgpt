@@ -329,7 +329,7 @@ impl Library {
                     CASE WHEN source.list_price NOT GLOB '*[^0-9]*'
                                    AND CAST(source.list_price AS INTEGER) > 0
                          THEN CAST(source.list_price AS INTEGER) END,
-                    source.publisher_name, scan.side, scan.back
+                    source.publisher_name, scan.side, scan.back, scan.checked_at
              FROM collection_volumes AS volume
              LEFT JOIN source_fields AS source
                ON source.collection_id = volume.collection_id
@@ -364,9 +364,10 @@ impl Library {
                     let isbn13: Option<String> = row.get(5)?;
                     let side = row.get::<_, Option<bool>>(9)?.unwrap_or(false);
                     let back = row.get::<_, Option<bool>>(10)?.unwrap_or(false);
+                    let scan_revision = row.get::<_, Option<i64>>(11)?.unwrap_or(0);
                     let spine_scan = isbn13
                         .as_deref()
-                        .and_then(|isbn| self.spine_scan_parts(isbn, side, back));
+                        .and_then(|isbn| self.spine_scan_parts(isbn, side, back, scan_revision));
                     Ok(CollectionVolume {
                         id: row.get(0)?,
                         volume_number,
@@ -811,7 +812,8 @@ mod tests {
                 .unwrap();
             }
             db.execute(
-                "INSERT INTO manga_spine_scans SELECT * FROM audit.manga_spine_scans",
+                "INSERT INTO manga_spine_scans(isbn13,status,side,back,checked_at)
+                 SELECT isbn13,status,side,back,checked_at FROM audit.manga_spine_scans",
                 [],
             )
             .unwrap();
@@ -880,7 +882,7 @@ mod tests {
         let scan = volumes[0].spine_scan.as_ref().unwrap();
         assert_eq!(
             scan.side.as_deref(),
-            Some("manga-spine-scan/9780000000001/side")
+            Some("manga-spine-scan/9780000000001/side/v0")
         );
         assert!(scan.back.is_none());
         assert!(volumes[1].spine_scan.is_none());
