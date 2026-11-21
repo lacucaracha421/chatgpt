@@ -161,7 +161,7 @@ test('imageModel defaults to Sonnet 5.5, is validated, and changes only from ext
   const f = worker({stored: {imageModel: 'google/gemma-4-26b-a4b-it'}});
   const settings = await f.handle({type: 'translation:settings'});
   assert.equal(settings.imageModel, 'anthropic:claude-sonnet-5-5', 'a text-only stored model falls back to the default');
-  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'gemini:gemini-3.1-flash-lite', 'gemini:gemini-2.5-flash', 'gemini:gemini-2.5-flash-lite', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5', 'neuralwatt:deepseek-v4.1-flash']);
+  assert.deepEqual(plain(settings.imageModels.map(item => item.id)), ['google/gemini-3.1-flash-lite', 'gemini:gemini-3.1-flash-lite', 'gemini:gemini-4-hydrogen', 'gemini:gemini-4-carbon', 'anthropic:claude-haiku-5-5', 'anthropic:claude-sonnet-5-5', 'neuralwatt:deepseek-v4.1-flash']);
   assert.equal(settings.imageModels.some(item => item.id.includes('gemma')), false);
   assert.equal(settings.hasImageApiKey, true);
   assert.equal((await f.handle({type: 'translation:update', imageModel: 'google/gemma-4-26b-a4b-it'}, own)).code, 'invalid_model');

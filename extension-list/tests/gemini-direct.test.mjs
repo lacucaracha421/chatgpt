@@ -107,8 +107,8 @@ test('direct Google Gemini API handles X single, batch, context, page, image and
         geminiApiKey: 'AIza-test-key',
         model: 'gemini:gemini-3.1-flash-lite',
         fallbackModel: '',
-        contextModel: 'gemini:gemini-2.5-flash',
-        imageModel: 'gemini:gemini-2.5-flash-lite',
+        contextModel: 'gemini:gemini-4-hydrogen',
+        imageModel: 'gemini:gemini-4-carbon',
       },
     },
     fetchImpl: async (url, init) => {
@@ -184,31 +184,32 @@ test('direct Google Gemini API handles X single, batch, context, page, image and
   assert.equal(batch.ok, true);
   assert.equal(batch.items[0].text, '번역:Good morning');
 
-  // 4. Right-click context uses gemini-2.5-flash with thinkingBudget: 0
+  // 4. Right-click context uses gemini-4-hydrogen with thinkingLevel: low
   const ctx = await context.LakomicsTranslation.handle({ type: 'translation:context', kind: 'translate.ko.inline', text: 'Hi there' }, pageSender);
   assert.equal(ctx.ok, true);
-  assert.equal(requests[2].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
-  assert.deepEqual(requests[2].body.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+  assert.equal(requests[2].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent');
+  assert.deepEqual(requests[2].body.generationConfig.thinkingConfig, { thinkingLevel: 'low' });
 
-  // 5. Image translation sends inlineData and parses Gemini [ymin, xmin, ymax, xmax] box schema
+  // 5. Image translation sends inlineData and parses Gemini [ymin, xmin, ymax, xmax] box schema on gemini-4-carbon
   context.LakomicsTranslationCore.image.fromDataUrl = () => ({ mediaType: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
   context.LakomicsTranslationCore.image.prepare = async () => ({ width: 800, height: 600, mediaType: 'image/png', base64: 'AAAA', pixels: null });
   context.LakomicsTranslationCore.image.paperSample = () => ({});
   const img = await context.LakomicsTranslation.handle({ type: 'translation:image', dataUrl: 'data:image/png;base64,AAAA' }, pageSender);
   assert.equal(img.ok, true);
-  assert.equal(requests[3].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
+  assert.equal(requests[3].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-4-carbon:generateContent');
+  assert.deepEqual(requests[3].body.generationConfig.thinkingConfig, { thinkingLevel: 'low' });
   assert.deepEqual(requests[3].body.contents[0].parts[0], { inlineData: { mimeType: 'image/png', data: 'AAAA' } });
   assert.deepEqual({ ...img.lines[0].box }, { x0: 200, y0: 100, x1: 500, y1: 300 });
 
   // 6. Usage measurement accounts for Gemini pricing including thoughts & cached tokens
-  const measured = context.LakomicsUsage.measure('gemini', 'gemini:gemini-3.1-flash-lite', {
+  const measured = context.LakomicsUsage.measure('gemini', 'gemini:gemini-4-hydrogen', {
     promptTokenCount: 1_000_000, cachedContentTokenCount: 500_000, candidatesTokenCount: 500_000, thoughtsTokenCount: 500_000,
   });
-  assert.equal(measured.model, 'gemini-3.1-flash-lite');
+  assert.equal(measured.model, 'gemini-4-hydrogen');
   assert.equal(measured.input, 1_000_000);
   assert.equal(measured.output, 1_000_000);
-  // 0.5M * 0.25 + 0.5M * 0.025 + 1.0M * 1.50 = 0.125 + 0.0125 + 1.5 = 1.6375
-  assert.equal(measured.costUsd, 1.6375);
+  // 0.5M * 1.50 + 0.5M * 0.075 + 1.0M * 7.50 = 0.75 + 0.0375 + 7.50 = 8.2875
+  assert.equal(measured.costUsd, 8.2875);
 });
 
 test('direct Google Gemini API treats HTTP 400 API_KEY_INVALID as auth failure without retrying', async () => {

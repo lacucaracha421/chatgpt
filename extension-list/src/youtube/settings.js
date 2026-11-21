@@ -3,7 +3,7 @@
   const PREFIX = "lakomics:youtube:settings:";
   const DEFAULTS = Object.freeze({ enabled: true, model: "claude-haiku-5-5", translate: true,
     register: "auto", speakers: false, glossarySonnet: false, fontScale: 1, position: "default", showOriginal: false, rolling: false, localAsr: true, speakerColors: true });
-  const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "gemini:gemini-3.1-flash-lite", "gemini:gemini-3.5-flash-lite", "gemini:gemini-2.5-flash"];
+  const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "gemini:gemini-3.1-flash-lite", "gemini:gemini-3.5-flash-lite", "gemini:gemini-4-hydrogen", "gemini:gemini-4-carbon"];
   function normalize(value = {}) {
     const settings = { ...DEFAULTS };
     for (const key of ["enabled", "translate", "speakers", "glossarySonnet", "showOriginal", "rolling", "localAsr", "speakerColors"]) {

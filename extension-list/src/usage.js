@@ -27,8 +27,9 @@
     // Google Gemini API list prices, verified 2026-11-21 (USD per 1M tokens).
     "gemini-3.1-flash-lite": Object.freeze({ input: 0.25, output: 1.50, cacheRead: 0.025 }),
     "gemini-3.5-flash-lite": Object.freeze({ input: 0.30, output: 2.50 }),
-    "gemini-2.5-flash": Object.freeze({ input: 0.30, output: 2.50, cacheRead: 0.03 }),
-    "gemini-2.5-flash-lite": Object.freeze({ input: 0.10, output: 0.40, cacheRead: 0.01 }),
+    "gemini-4-hydrogen": Object.freeze({ input: 1.50, output: 7.50, cacheRead: 0.075 }),
+    // Introductory rate through 2026-11-30 ($4/$20 standard starting 2026-12-01).
+    "gemini-4-carbon": Object.freeze({ input: 2.00, output: 10.00, cacheRead: 0.10 }),
   });
 
   const count = value => Number.isFinite(value) && value > 0 ? Math.round(value) : 0;

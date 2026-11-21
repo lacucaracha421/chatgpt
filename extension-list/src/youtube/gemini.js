@@ -21,6 +21,7 @@ function apiModel(model) {
 
 function thinkingConfigFor(model) {
   const id = apiModel(model);
+  if (id.startsWith("gemini-4-")) return { thinkingLevel: "low" };
   return id.startsWith("gemini-2.5-") ? { thinkingBudget: 0 } : { thinkingLevel: "minimal" };
 }
 

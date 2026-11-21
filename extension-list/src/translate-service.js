@@ -41,8 +41,8 @@
     // Gemini direct via Google AI Gemini API (generativelanguage.googleapis.com) with its own key.
     { id: "gemini:gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "minimal" }, concurrency: 6 },
     { id: "gemini:gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "minimal" }, concurrency: 6 },
-    { id: "gemini:gemini-2.5-flash", label: "Gemini 2.5 Flash (Google)", provider: "gemini", thinkingConfig: { thinkingBudget: 0 }, concurrency: 6 },
-    { id: "gemini:gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite (Google)", provider: "gemini", thinkingConfig: { thinkingBudget: 0 }, concurrency: 6 },
+    { id: "gemini:gemini-4-hydrogen", label: "Gemini 4 Hydrogen (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "low" }, concurrency: 6 },
+    { id: "gemini:gemini-4-carbon", label: "Gemini 4 Carbon (Google)", provider: "gemini", thinkingConfig: { thinkingLevel: "low" }, concurrency: 6 },
     // Claude goes to the Anthropic API directly with its own key. Haiku 5.5 turns thinking
     // off; Sonnet 5.5 cannot, so it only thinks between tool calls (never here) at low effort.
     // Neither accepts sampling values. Paid API limits allow more requests in flight.
