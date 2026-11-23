@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::Path};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub(super) struct Policy {
     pub version: String,
     pub feature_id: String,
@@ -17,6 +17,46 @@ pub(super) struct Policy {
     automatic_max_knn3: f64,
     recommendation_max_knn3: f64,
     automatic_min_prior_manual_rejections: u64,
+    #[serde(default)]
+    margin_min_peers: Option<usize>,
+    #[serde(default)]
+    automatic_fallback_max_knn3: Option<f64>,
+    #[serde(default)]
+    recommendation_fallback_max_knn3: Option<f64>,
+    #[serde(default)]
+    automatic_min_peer_margin: Option<f64>,
+    #[serde(default)]
+    automatic_min_median_margin: Option<f64>,
+    #[serde(default)]
+    recommendation_min_median_margin: Option<f64>,
+}
+fn valid_unit_opt(value: Option<f64>) -> bool {
+    value.is_none_or(|v| v.is_finite() && (0.0..=1.0).contains(&v))
+}
+fn median_sorted(sorted: &[f64]) -> f64 {
+    let n = sorted.len();
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) * 0.5
+    }
+}
+fn peer_scores_for(
+    target: &str,
+    scores: &BTreeMap<String, Option<f64>>,
+    series_by_target: Option<&BTreeMap<String, Option<String>>>,
+) -> Vec<f64> {
+    let my_series = series_by_target.and_then(|map| map.get(target)).and_then(Option::as_deref);
+    scores
+        .iter()
+        .filter(|(other, _)| other.as_str() != target)
+        .filter(|(other, _)| match (series_by_target, my_series) {
+            (Some(map), Some(series)) => map.get(other.as_str()).and_then(Option::as_deref) == Some(series),
+            (Some(_), None) => false,
+            (None, _) => true,
+        })
+        .filter_map(|(_, score)| score.filter(|v| v.is_finite()))
+        .collect()
 }
 impl Policy {
     pub(super) fn load(path: &Path, identity: &str) -> Result<Self> {
@@ -30,6 +70,11 @@ impl Policy {
             || !policy.recommendation_max_knn3.is_finite()
             || !(0.0..=1.0).contains(&policy.automatic_max_knn3)
             || !(policy.automatic_max_knn3..=1.0).contains(&policy.recommendation_max_knn3)
+            || !valid_unit_opt(policy.automatic_fallback_max_knn3)
+            || !valid_unit_opt(policy.recommendation_fallback_max_knn3)
+            || !valid_unit_opt(policy.automatic_min_peer_margin)
+            || !valid_unit_opt(policy.automatic_min_median_margin)
+            || !valid_unit_opt(policy.recommendation_min_median_margin)
         {
             return Err(Error::Invalid(
                 "S36 shadow policy or feature identity is invalid",
@@ -38,16 +83,66 @@ impl Policy {
         Ok(policy)
     }
     pub(super) fn verdict(&self, score: Option<f64>, rejections: u64) -> &'static str {
-        match score.filter(|v| v.is_finite()) {
-            None => "abstain",
-            Some(v)
-                if v <= self.automatic_max_knn3
-                    && rejections >= self.automatic_min_prior_manual_rejections =>
+        self.verdict_with_peers(score, &[], rejections)
+    }
+    pub(super) fn verdict_with_peers(
+        &self,
+        score: Option<f64>,
+        peers: &[f64],
+        rejections: u64,
+    ) -> &'static str {
+        let Some(v) = score.filter(|v| v.is_finite()) else {
+            return "abstain";
+        };
+        let Some(min_peers) = self.margin_min_peers else {
+            return if v <= self.automatic_max_knn3
+                && rejections >= self.automatic_min_prior_manual_rejections
             {
                 "automatic"
-            }
-            Some(v) if v <= self.recommendation_max_knn3 => "recommended",
-            _ => "none",
+            } else if v <= self.recommendation_max_knn3 {
+                "recommended"
+            } else {
+                "none"
+            };
+        };
+        let mut finite_peers: Vec<f64> = peers.iter().copied().filter(|p| p.is_finite()).collect();
+        if finite_peers.len() < min_peers {
+            let auto_max = self
+                .automatic_fallback_max_knn3
+                .unwrap_or(self.automatic_max_knn3);
+            let rec_max = self
+                .recommendation_fallback_max_knn3
+                .unwrap_or(self.recommendation_max_knn3);
+            return if v <= auto_max && rejections >= self.automatic_min_prior_manual_rejections {
+                "automatic"
+            } else if v <= rec_max {
+                "recommended"
+            } else {
+                "none"
+            };
+        }
+        finite_peers.sort_by(f64::total_cmp);
+        const MARGIN_EPS: f64 = 1e-9;
+        let peer_margin = finite_peers[0] - v;
+        let median_margin = median_sorted(&finite_peers) - v;
+        if v <= self.automatic_max_knn3
+            && rejections >= self.automatic_min_prior_manual_rejections
+            && self
+                .automatic_min_peer_margin
+                .is_none_or(|min| peer_margin + MARGIN_EPS >= min)
+            && self
+                .automatic_min_median_margin
+                .is_none_or(|min| median_margin + MARGIN_EPS >= min)
+        {
+            "automatic"
+        } else if v <= self.recommendation_max_knn3
+            && self
+                .recommendation_min_median_margin
+                .is_none_or(|min| median_margin + MARGIN_EPS >= min)
+        {
+            "recommended"
+        } else {
+            "none"
         }
     }
 }
@@ -287,7 +382,7 @@ impl Cache {
         if scores.keys().collect::<Vec<_>>() != pending.outcomes.keys().collect::<Vec<_>>() {
             return Err(Error::Stale);
         }
-        let tx = self.0.transaction()?;
+        let mut parsed = BTreeMap::new();
         for (target, value) in scores {
             let score = if value.is_null() {
                 None
@@ -299,10 +394,16 @@ impl Cache {
                         .ok_or(Error::Stale)?,
                 )
             };
+            parsed.insert(target.clone(), score);
+        }
+        let tx = self.0.transaction()?;
+        for (target, &score) in &parsed {
+            let peers = peer_scores_for(target, &parsed, None);
+            let verdict = policy.verdict_with_peers(score, &peers, rejections);
             tx.execute("INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections,origin) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
             ON CONFLICT(asset_id,target_id,policy_version) DO UPDATE SET content_hash=excluded.content_hash,knn3=excluded.knn3,verdict=excluded.verdict,feature_id=excluded.feature_id,native_outcome=excluded.native_outcome,native_at=excluded.native_at,scored_at=excluded.scored_at,prior_manual_rejections=excluded.prior_manual_rejections,origin=excluded.origin
             WHERE NOT (excluded.origin='backfill' AND scores.origin='live' AND julianday(scores.scored_at)>=julianday(excluded.scored_at))",
-                params![pending.asset_id,pending.content_hash,target,score,policy.verdict(score,rejections),policy.version,policy.feature_id,pending.outcomes[target],pending.native_at,at,rejections as i64,origin])?;
+                params![pending.asset_id,pending.content_hash,target,score,verdict,policy.version,policy.feature_id,pending.outcomes[target],pending.native_at,at,rejections as i64,origin])?;
         }
         tx.commit()?;
         Ok(())
@@ -454,12 +555,22 @@ impl Library {
         // already-judged ones still take part, so they can block a look-alike, but only
         // open pairs of characters it places are written.
         let crops = response["crops"].as_object();
+        let autotag_targets = self.character_autotag_targets(&tx, &pending.asset_id)?;
+        let parsed_scores: BTreeMap<String, Option<f64>> = scores
+            .iter()
+            .map(|(id, val)| (id.clone(), val.as_f64().filter(|v| v.is_finite())))
+            .collect();
+        let series_by_target: BTreeMap<String, Option<String>> = autotag_targets
+            .iter()
+            .map(|t| (t.id.clone(), t.series_classification_id.clone()))
+            .collect();
         let mut candidates = Vec::new();
-        for target in self.character_autotag_targets(&tx, &pending.asset_id)? {
-            let Some(score) = scores.get(&target.id).and_then(Value::as_f64) else {
+        for target in autotag_targets {
+            let Some(score) = parsed_scores.get(&target.id).copied().flatten() else {
                 continue;
             };
-            if policy.verdict(Some(score), rejections) != "automatic" {
+            let peers = peer_scores_for(&target.id, &parsed_scores, Some(&series_by_target));
+            if policy.verdict_with_peers(Some(score), &peers, rejections) != "automatic" {
                 continue;
             }
             // Without crop information (older worker) all candidates share one person.
@@ -630,6 +741,7 @@ mod tests {
             automatic_max_knn3: 0.13,
             recommendation_max_knn3: 0.15,
             automatic_min_prior_manual_rejections: 100,
+            ..Default::default()
         };
         assert_eq!(p.verdict(Some(0.13), 100), "automatic");
         assert_eq!(p.verdict(Some(0.13), 99), "recommended");
@@ -790,6 +902,7 @@ mod tests {
             automatic_max_knn3: 0.1085,
             recommendation_max_knn3: 0.12,
             automatic_min_prior_manual_rejections: 100,
+            ..Default::default()
         };
         let hash: String = f
             .library
@@ -1174,5 +1287,40 @@ mod tests {
         let mut expected = vec![base.id.clone(), target.id.clone()];
         expected.sort();
         assert_eq!(related, expected);
+    }
+
+    #[test]
+    fn s36_v3_margin_policy_blocks_style_bias_and_recovers_distinct_matches() {
+        let policy_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../character-runtime/s36_policy.json");
+        let feature_id = "e4be203d4030b1e58ff6b4577476701d438bfe3902d712cd9b03655a717eba9f";
+        let policy = Policy::load(&policy_path, feature_id).unwrap();
+        assert_eq!(policy.version, "s36-knn3-v3");
+
+        // Style-bias false positive: close absolute distance, but peers are just as close.
+        assert_eq!(
+            policy.verdict_with_peers(Some(0.08), &[0.085, 0.09, 0.095], 100),
+            "none"
+        );
+        // Distinct match at relaxed distance: beats 2nd peer by >=0.02 and median by >=0.07.
+        assert_eq!(
+            policy.verdict_with_peers(Some(0.14), &[0.17, 0.22, 0.25], 100),
+            "automatic"
+        );
+        // Cold-start guard still demotes automatic to recommended when rejections < 100.
+        assert_eq!(
+            policy.verdict_with_peers(Some(0.14), &[0.17, 0.22, 0.25], 99),
+            "recommended"
+        );
+        // Two-character image: 2nd peer is also close (m_2nd < 0.02), but median margin >= 0.08 keeps recommendation.
+        assert_eq!(
+            policy.verdict_with_peers(Some(0.11), &[0.115, 0.22, 0.24, 0.25], 100),
+            "recommended"
+        );
+        // Small series (<2 peers): falls back to 0.10 / 0.12 thresholds.
+        assert_eq!(policy.verdict_with_peers(Some(0.095), &[0.20], 100), "automatic");
+        assert_eq!(policy.verdict_with_peers(Some(0.115), &[0.20], 100), "recommended");
+        assert_eq!(policy.verdict_with_peers(Some(0.14), &[0.20], 100), "none");
+        assert_eq!(policy.verdict_with_peers(None, &[0.20, 0.25], 100), "abstain");
     }
 }
