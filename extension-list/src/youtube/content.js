@@ -55,6 +55,8 @@
   let choiceKeys = false; // the Escape listener of the open choice is installed
   let lastTrackInfo = null; // { videoId, spoken, tracks } from the latest player track list
   let listenedPlayer = null;
+  let cachedVideo = null;
+  let cachedVideoPlayer = null;
   let resizeObserver = null;
   let lastCueIndex = -2;
   let rafId = 0;
@@ -473,6 +475,7 @@
   // Started a moment after a video opens so the button press can use the result right away.
   function startPrefetch(token, videoId) {
     if (token !== state.token || state.status !== "idle" || state.cues) return;
+    if (document.visibilityState === "hidden") return;
     const metaPromise = fetchMeta(videoId);
     state.prefetch = { videoId, metaPromise, promise: acquireSilently(videoId) };
     void metaPromise.then((meta) => recheckCached(token, videoId, meta));
@@ -672,7 +675,13 @@
 
   function getVideo() {
     const player = getPlayer();
-    return player ? player.querySelector("video") : null;
+    if (!player) return null;
+    if (cachedVideo && cachedVideoPlayer === player && cachedVideo.isConnected !== false) {
+      return cachedVideo;
+    }
+    cachedVideoPlayer = player;
+    cachedVideo = player.querySelector("video");
+    return cachedVideo;
   }
 
   function ensureOverlay() {
@@ -1497,6 +1506,7 @@
   function ensureUi() {
     if (!settingsReady) return;
     if (!available()) { if (button || overlay || toast) removeUi(); return; }
+    if (!state.videoId) return;
     if (!button || !button.isConnected) ensureButton();
     if (needsOverlay()) {
       if (!overlay || !overlay.isConnected || overlay.parentNode !== getPlayer()) applyMode();
@@ -1506,22 +1516,59 @@
 
   // ---------------------------------------------------------------- start
 
-  document.addEventListener("yt-navigate-finish", onNavigate);
-
   let uiCheckQueued = false;
-  new MutationObserver(() => {
+  let globalObserver = null;
+  let localObserver = null;
+
+  function syncObservers() {
+    if (globalObserver) { globalObserver.disconnect(); globalObserver = null; }
+    if (localObserver) { localObserver.disconnect(); localObserver = null; }
+    if (!settingsReady || !available() || !state.videoId) return;
+    if (!button || !button.isConnected) {
+      globalObserver = new MutationObserver(scheduleUiCheck);
+      globalObserver.observe(document.documentElement, { childList: true, subtree: true });
+      return;
+    }
+    localObserver = new MutationObserver(scheduleUiCheck);
+    if (button.parentNode) localObserver.observe(button.parentNode, { childList: true });
+    const player = getPlayer();
+    if (player) localObserver.observe(player, { childList: true });
+  }
+
+  function scheduleUiCheck() {
     if (uiCheckQueued) return;
     uiCheckQueued = true;
     requestAnimationFrame(() => {
       uiCheckQueued = false;
+      const wasConnected = Boolean(button && button.isConnected);
       ensureUi();
+      const isConnected = Boolean(button && button.isConnected);
+      if (wasConnected !== isConnected) syncObservers();
     });
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function onNavigateTracked() {
+    onNavigate();
+    syncObservers();
+  }
+
+  document.addEventListener("yt-navigate-finish", onNavigateTracked);
+  window.addEventListener("popstate", onNavigateTracked);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (settingsReady && available() && state.videoId && state.status === "idle" && !state.cues && !state.prefetch) {
+      const token = state.token;
+      const videoId = state.videoId;
+      clearTimeout(state.prefetchTimer);
+      state.prefetchTimer = setTimeout(() => startPrefetch(token, videoId), PREFETCH_DELAY_MS);
+    }
+  });
 
   void initialSettings.then(() => {
     settingsReady = true;
     if (!available()) return;
     resetForVideo(currentVideoId());
     ensureUi();
+    syncObservers();
   });
 })();

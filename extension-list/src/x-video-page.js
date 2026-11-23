@@ -54,6 +54,7 @@
     try { ingest(JSON.parse(text)); } catch {}
   }
   function isTweetEndpoint(value) {
+    if (typeof value !== "string" || !value.includes("/i/api/graphql/")) return false;
     try {
       const url = new URL(value, location.href);
       return url.origin === location.origin && /^\/i\/api\/graphql\//.test(url.pathname);

@@ -458,7 +458,6 @@
     let gestureTarget = null;
     let touchGuardRestore = [];
     const touchPointers = new Map();
-    let menuPress = null, menuPressTimer = null, menuTouchGuard = null;
 
     // Preload the local shadow stylesheet before taking ownership of a right click.
     // Failure leaves Chrome's native menu available.
@@ -484,11 +483,8 @@
           },
         });
         contextController = controller;
-        const selectionChip = globalThis.LakomicsSelectionChip?.create({ css, watchSession: createSessionWatcher,
-          canShow: event => !controller.current && controller.canTranslateTouch(event) });
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) controller.update(changes[globalThis.LakomicsContextModel.SETTINGS].newValue);
-          if (area === "local" && changes[globalThis.LakomicsContextModel.SETTINGS]) selectionChip?.refresh();
         });
       }).catch(() => {});
     }
@@ -497,8 +493,6 @@
     window.addEventListener("pointermove", onTouchMove, { capture: true, passive: true });
     window.addEventListener("pointerup", onTouchEnd, { capture: true, passive: true });
     window.addEventListener("pointercancel", onTouchEnd, { capture: true, passive: true });
-    window.addEventListener("click", swallowTranslation, true);
-    window.addEventListener("contextmenu", swallowTranslation, true);
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("pointermove", onMove, true);
     document.addEventListener("pointerup", onUp, true);
@@ -507,7 +501,7 @@
     document.addEventListener("selectstart", onSelectStart, true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("click", onClick, true);
-    const cancelPending = () => { cancelMenuPress(); if (gate.phase === "armed") reset(); };
+    const cancelPending = () => { if (gate.phase === "armed") reset(); };
     // A committed navigation invalidates the whole session: the pending opening,
     // the mounted list, its ownership, its timers and any transient UI. This runs
     // unconditionally so it works while the list is busy or input-locked, where
@@ -516,63 +510,28 @@
     document.addEventListener("scroll", cancelPending, true);
     document.addEventListener("wheel", cancelPending, { passive: true });
     window.addEventListener("blur", cancelPending);
-    const clearTranslationGesture = () => { cancelMenuPress(); menuTouchGuard = null; touchPointers.clear(); };
-    window.addEventListener("blur", clearTranslationGesture);
-    for (const name of ["pagehide", "popstate", "hashchange"]) window.addEventListener(name, clearTranslationGesture);
+    const clearTouchPointers = () => { touchPointers.clear(); };
+    window.addEventListener("blur", clearTouchPointers);
+    for (const name of ["pagehide", "popstate", "hashchange"]) window.addEventListener(name, clearTouchPointers);
     document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !picker) reset(); }, true);
 
     function insidePicker(event) { return Boolean(picker && event.composedPath?.().includes(picker.host)); }
-    function cancelMenuPress() {
-      if (menuPressTimer !== null) clearTimeout(menuPressTimer);
-      menuPressTimer = null; menuPress = null;
-    }
-    function armMenuPress(event) {
-      // Leave the initial native selection gesture and its handles untouched.
-      // Image candidates retain their existing collector picker gesture.
-      const target = event.target;
-      if (startsOnPlayerControl(event, { type: "video" }) || startsOnNativeMediaControls(event)) return;
-      if (findCandidate(target, point(event))?.type === "image" || target.closest?.("img, picture") || globalThis.LakomicsContextModel.editable?.(target)) return;
-      if (!target.closest?.("a[href]") && !window.getSelection?.().toString().trim()) return;
-      const session = { id: event.pointerId, origin: point(event), href: location.href, path: event.composedPath() };
-      menuPress = session;
-      menuPressTimer = setTimeout(() => {
-        menuPressTimer = null;
-        if (menuPress !== session || touchPointers.size !== 1 || session.href !== location.href) return;
-        const invocation = { isTrusted: event.isTrusted, target, pointerType: "touch", clientX: session.origin.x, clientY: session.origin.y, composedPath: () => session.path, preventDefault() {} };
-        if (contextController?.openTouch?.(invocation)) menuTouchGuard = { id: session.id, until: Infinity };
-        menuPress = null;
-      }, TOUCH_LONG_PRESS_MS);
-    }
     function onTouchDown(event) {
-      if (event.composedPath?.().some(node => node?.tagName === "LAKOMICS-SELECTION-CHIP")) return;
-      if (!touchPointers.size) menuTouchGuard = null;
       if (event.pointerType !== "touch") return;
       touchPointers.set(event.pointerId, { start: point(event), latest: point(event), at: event.timeStamp });
-      if (touchPointers.size === 1) {
-        if (!youtubeSubtitleUi(event) && contextController?.canTranslateTouch?.(event)) armMenuPress(event);
-        return;
-      }
+      if (touchPointers.size === 1) return;
       // A second finger always abandons the pending single-finger save, even
       // when the pair is too late or belongs to browser scrolling/zooming.
-      cancelMenuPress();
       if (active?.input === "touch" && gate.phase === "armed") reset();
     }
     function onTouchMove(event) {
       const pointer = event.pointerType === "touch" && touchPointers.get(event.pointerId);
       if (!pointer) return;
       pointer.latest = point(event);
-      if (menuPress?.id === event.pointerId && distance(menuPress.origin, pointer.latest) > 10) cancelMenuPress();
     }
     function onTouchEnd(event) {
-      if (event.pointerType !== "touch" || !touchPointers.delete(event.pointerId)) return;
-      if (menuPress?.id === event.pointerId) cancelMenuPress();
-      if (menuTouchGuard?.id === event.pointerId) menuTouchGuard.until = Date.now() + 500;
-    }
-    function swallowTranslation(event) {
-      if (event.type === "contextmenu" && event.shiftKey) return;
-      if (menuTouchGuard && Date.now() <= menuTouchGuard.until) {
-        event.preventDefault(); event.stopImmediatePropagation(); return;
-      }
+      if (event.pointerType !== "touch") return;
+      touchPointers.delete(event.pointerId);
     }
     function clearTimer() { if (longPressTimer !== null) clearTimeout(longPressTimer); longPressTimer = null; }
     function clearStatus() { statusSequence += 1; if (toastTimer !== null) clearTimeout(toastTimer); toastTimer = null; toast?.remove(); toast = null; }
@@ -660,7 +619,6 @@
       if (insidePicker(event) || gate.phase !== "idle") return;
       const input = inputKind(event); if (!input) return;
       if (input === "touch" && touchPointers.size > 1) return;
-      if (input === "touch" && menuPress) return;
       const candidate = findCandidate(event.target, input === "touch" ? point(event) : null); if (!candidate) return;
       if (startsOnPlayerControl(event, candidate)) return;
       if (input === "mouse" && startsOnNativeMediaControls(event)) return;

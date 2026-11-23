@@ -52,6 +52,7 @@
     { id: "neuralwatt:deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash (Neuralwatt)", provider: "neuralwatt" },
   ]);
   const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+  const GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/t?client=gtx&sl=auto&tl=ko";
   const GEMINI_SAFETY = Object.freeze([
     "HARM_CATEGORY_HARASSMENT",
     "HARM_CATEGORY_HATE_SPEECH",
@@ -899,6 +900,115 @@
     if (changed) persistCache();
     return withUsage(done());
   }
+  function escapeGoogleHtml(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function unescapeGoogleHtml(text) {
+    return String(text)
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex) => { const code = parseInt(hex, 16); return Number.isFinite(code) ? String.fromCodePoint(code) : ""; })
+      .replace(/&#(\d+);/g, (_, dec) => { const code = parseInt(dec, 10); return Number.isFinite(code) ? String.fromCodePoint(code) : ""; })
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  }
+  function encodeGoogleMarked(source) {
+    return source.replace(/⟦(\d+)⟧([\s\S]*?)⟦\/\1⟧/g, (_, id, body) => `<b i=${id}>${escapeGoogleHtml(body)}</b>`);
+  }
+  function decodeGoogleMarked(source, raw) {
+    const expected = source.match(/⟦\d+⟧/g)?.length || 0;
+    const tag = /<b\s+i=["']?(\d+)["']?\s*>([\s\S]*?)<\/b>/gi;
+    const pieces = [];
+    let match;
+    while ((match = tag.exec(raw))) {
+      const id = match[1], body = unescapeGoogleHtml(match[2]).trim();
+      if (id !== String(pieces.length + 1) || !body || /[⟦⟧]/.test(body)) return BAD_MARKERS;
+      pieces.push(`⟦${id}⟧${body}⟦/${id}⟧`);
+    }
+    if (pieces.length !== expected || raw.replace(tag, "").trim()) return BAD_MARKERS;
+    return pieces.join(" ");
+  }
+  async function translatePageGoogle(items, epoch) {
+    if (!Array.isArray(items) || items.length < 1 || items.length > MAX_PAGE_ITEMS) return { ok: false, code: "invalid_batch" };
+    const ids = new Set(); let chars = 0;
+    const prepared = [];
+    for (const item of items) {
+      if (!item || typeof item.id !== "string" || !item.id || ids.has(item.id) || typeof item.text !== "string" || !item.text.trim() || item.text.length > MAX_PAGE_ITEM_CHARS) return { ok: false, code: "invalid_batch" };
+      ids.add(item.id); chars += item.text.length;
+      const marked = /⟦\d+⟧/.test(item.text);
+      prepared.push({ id: item.id, text: item.text, marked, query: marked ? encodeGoogleMarked(item.text) : item.text });
+    }
+    if (chars > MAX_PAGE_CHARS) return { ok: false, code: "invalid_batch" };
+    const budget = core.requestBudget(2 * BATCH_TIMEOUT_MS + MAX_INLINE_COOLDOWN_MS + RETRY_DELAY_MS);
+    const body = prepared.map(item => "q=" + encodeURIComponent(item.query)).join("&");
+    let last = { ok: false, code: "network_error" };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (epoch !== generation) return { ok: false, code: "disabled" };
+      const coolingMs = (cooldownUntil.get("google-translate") || 0) - Date.now();
+      if (coolingMs > MAX_INLINE_COOLDOWN_MS) return { ok: false, code: "http_429", retryAfterMs: coolingMs };
+      try {
+        if (!await awaitCooldown("google-translate", epoch, budget)) return { ok: false, code: "disabled" };
+      } catch { return { ok: false, code: epoch !== generation ? "disabled" : "timeout" }; }
+      if (!budget.remaining()) return { ok: false, code: "timeout" };
+      const controller = new AbortController();
+      activeControllers.add(controller);
+      try {
+        const { response, data } = await budget.run(async signal => {
+          const response = await fetch(GOOGLE_TRANSLATE_URL, {
+            method: "POST", credentials: "omit", redirect: "error", signal,
+            headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8" },
+            body,
+          });
+          return response.ok ? { response, data: await response.json() } : { response };
+        }, BATCH_TIMEOUT_MS, controller);
+        if (epoch !== generation) return { ok: false, code: "disabled" };
+        if (response.ok) {
+          if (!Array.isArray(data) || data.length !== prepared.length) return { ok: false, code: "invalid_translation" };
+          return {
+            ok: true,
+            items: prepared.map((item, index) => {
+              const entry = data[index];
+              const raw = Array.isArray(entry) ? entry[0] : entry;
+              const lang = Array.isArray(entry) ? entry[1] : "";
+              if (typeof raw !== "string") return { id: item.id, ok: false, code: "invalid_translation" };
+              if (item.marked) {
+                const decoded = decodeGoogleMarked(item.text, raw);
+                if (decoded === BAD_MARKERS) return { id: item.id, ok: false, code: "invalid_markers" };
+                return lang === "ko" && decoded === item.text
+                  ? { id: item.id, ok: true, text: null, untranslated: true }
+                  : { id: item.id, ok: true, text: decoded };
+              }
+              const text = raw.trim();
+              if (!text) return { id: item.id, ok: false, code: "invalid_translation" };
+              return text === item.text.trim()
+                ? { id: item.id, ok: true, text: null, untranslated: true }
+                : { id: item.id, ok: true, text };
+            }),
+          };
+        }
+        const code = `http_${response.status}`;
+        if (response.status === 429) {
+          const retryMs = retryAfterMs(response);
+          cooldownUntil.set("google-translate", Math.max(cooldownUntil.get("google-translate") || 0, Date.now() + retryMs));
+          last = { ok: false, code, retryAfterMs: retryMs };
+          continue;
+        }
+        last = { ok: false, code };
+        if (response.status >= 500 && response.status <= 599 && attempt === 0) {
+          await wait(RETRY_DELAY_MS, budget);
+          continue;
+        }
+        return last;
+      } catch (error) {
+        if (epoch !== generation) return { ok: false, code: "disabled" };
+        last = { ok: false, code: error?.code === "timeout" ? "timeout" : "network_error" };
+        if (attempt === 0) {
+          try { await wait(RETRY_DELAY_MS, budget); }
+          catch { return { ok: false, code: epoch !== generation ? "disabled" : "timeout" }; }
+        }
+      } finally {
+        activeControllers.delete(controller);
+      }
+    }
+    return last;
+  }
   // Image text translation: the worker fetches (https, redirects, 8 MB, image/*) or accepts a
   // data URL from the page, shrinks it to 1568 px, and asks the image model for
   // {lines:[{original, korean}]}.
@@ -992,7 +1102,7 @@
     const epoch = generation;
     if (message.type === "translation:context") return enqueue(() => translateContext(message.kind, message.text, epoch));
     if (message.type === "translation:image") return enqueue(() => translateImage(message, epoch));
-    if (message.type === "translation:page") return enqueue(() => translatePage(message.items, epoch, pageJob(message.job)));
+    if (message.type === "translation:page") return enqueue(() => message.engine === "google" ? translatePageGoogle(message.items, epoch) : translatePage(message.items, epoch, pageJob(message.job)));
     if (message.type === "translation:quality") return enqueue(() => translateQuality(message.text, message.previous, epoch), 2);
     if (message.type === "translation:request") return enqueue(() => translateSingle(message.text, epoch, message.fallback === true), message.priority === 1 ? 1 : 0);
     if (message.type === "translation:request-batch") return enqueue(() => translateBatch(message.items, epoch), message.priority === 1 ? 1 : 0);

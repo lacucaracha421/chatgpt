@@ -29,10 +29,11 @@
       if (item.setup) { actionWatcher.stop(); actionWatchers.delete(actionWatcher); }
     }
     function open(event, keyboard = false, touch = false) {
+      if (touch || model.isMobile(win)) return false;
       const state = collector.state?.() || {};
       if (model.bypass(event, { ...config, hostname: model.topHostname(win), ...state }) || collector.controls?.(event)) return false;
-      if (!touch && model.pageOwnsMenu(event)) return false;
-      if (!keyboard && !touch && (event.button !== 2 || event.pointerType === "touch")) return false;
+      if (model.pageOwnsMenu(event)) return false;
+      if (!keyboard && (event.button !== 2 || event.pointerType === "touch")) return false;
       const target = keyboard ? doc.activeElement : event.composedPath?.().find(node => node?.nodeType === 1) || event.target;
       const context = model.snapshot(target, doc, win, collector.findCandidate);
       if (!model.items(context, { inFrame: win !== win.top, clipboard: Boolean(win.navigator.clipboard) }).length) return false;
@@ -54,7 +55,7 @@
         rows.replaceChildren(); session.nodes = []; session.items = [];
         context.imageModel = available.imageModel || "";
         context.imageCover = available.imageCover;
-        for (const item of model.items(context, { ...available, inFrame: win !== win.top, clipboard: Boolean(win.navigator.clipboard), pageState: actions.pageState?.(), href: win.location.href, canGoBack: win.navigation?.canGoBack ?? win.history.length > 1, canGoForward: win.navigation?.canGoForward === true })) {
+        for (const item of model.items(context, { ...available, inFrame: win !== win.top, clipboard: Boolean(win.navigator.clipboard), pageState: actions.pageState?.(), pageEngine: actions.pageEngine?.(), href: win.location.href, canGoBack: win.navigation?.canGoBack ?? win.history.length > 1, canGoForward: win.navigation?.canGoForward === true })) {
           if (item.separator) { const separator = doc.createElement("div"); separator.className = "sep"; separator.setAttribute("role", "separator"); rows.append(separator); continue; }
           const index = session.items.length; session.items.push(item);
           const node = doc.createElement("div"); node.className = "it"; node.id = "lkm-item-" + item.id; node.setAttribute("role", "menuitem");
@@ -124,7 +125,7 @@
     win.addEventListener("contextmenu", contextmenu); win.addEventListener("keydown", keydown);
     doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", dismiss, true); win.addEventListener("resize", dismiss); win.addEventListener("blur", dismiss); doc.addEventListener("visibilitychange", dismiss);
     win.visualViewport?.addEventListener("resize", dismiss); win.visualViewport?.addEventListener("scroll", dismiss);
-    return { open, openTouch: event => open(event, false, true), close, keydown, canTranslateTouch, translateImage, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
+    return { open, openTouch: () => false, close, keydown, canTranslateTouch, translateImage, get current() { return current; }, update(value) { config = model.settings(value); close(); }, destroy() {
       close({ immediate: true }); departing = true; for (const watcher of actionWatchers) watcher.stop(); actionWatchers.clear(); actions.destroy?.(); surfaces.destroy();
       win.removeEventListener("contextmenu", captureContextmenu, true);
       win.removeEventListener("contextmenu", contextmenu); win.removeEventListener("keydown", keydown); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", dismiss, true); win.removeEventListener("resize", dismiss); win.removeEventListener("blur", dismiss); doc.removeEventListener("visibilitychange", dismiss);

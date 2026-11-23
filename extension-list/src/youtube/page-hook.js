@@ -32,6 +32,10 @@
     return typeof url === "string" && isAllowedFetchUrl(url);
   }
 
+  function maybeTimedtext(raw) {
+    return typeof raw === "string" && raw.includes("timedtext");
+  }
+
   // Only plain timedtext URLs on the desktop or mobile YouTube host may be fetched on request of the content script.
   function isAllowedFetchUrl(url) {
     if (typeof url !== "string" || url.length > 8192) return false;
@@ -46,19 +50,22 @@
   // XMLHttpRequest
   XMLHttpRequest.prototype.open = function (method, url) {
     try {
-      const abs = absolute(url);
-      if (isTimedtext(abs)) {
-        this.addEventListener("load", () => {
-          try {
-            let text = "";
-            if (this.responseType === "" || this.responseType === "text") text = this.responseText;
-            else if (this.responseType === "json") text = JSON.stringify(this.response);
-            else if (this.responseType === "arraybuffer") text = new TextDecoder().decode(this.response);
-            if (text) postTimedtext(abs, text);
-          } catch {
-            // ignore: never break the page
-          }
-        });
+      const raw = typeof url === "string" ? url : url instanceof URL ? url.href : "";
+      if (maybeTimedtext(raw)) {
+        const abs = absolute(raw);
+        if (isTimedtext(abs)) {
+          this.addEventListener("load", () => {
+            try {
+              let text = "";
+              if (this.responseType === "" || this.responseType === "text") text = this.responseText;
+              else if (this.responseType === "json") text = JSON.stringify(this.response);
+              else if (this.responseType === "arraybuffer") text = new TextDecoder().decode(this.response);
+              if (text) postTimedtext(abs, text);
+            } catch {
+              // ignore: never break the page
+            }
+          });
+        }
       }
     } catch {
       // ignore
@@ -71,14 +78,16 @@
     const promise = origFetch.apply(this, arguments);
     try {
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
-      const url = raw ? absolute(raw) : "";
-      if (isTimedtext(url)) {
-        promise
-          .then((res) => res.clone().text())
-          .then((text) => {
-            if (text) postTimedtext(url, text);
-          })
-          .catch(() => {});
+      if (maybeTimedtext(raw)) {
+        const url = absolute(raw);
+        if (isTimedtext(url)) {
+          promise
+            .then((res) => res.clone().text())
+            .then((text) => {
+              if (text) postTimedtext(url, text);
+            })
+            .catch(() => {});
+        }
       }
     } catch {
       // ignore

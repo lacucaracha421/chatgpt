@@ -14,6 +14,12 @@
     const origins = win.location.ancestorOrigins;
     try { return new URL(origins?.[origins.length - 1]).hostname; } catch { return win.location.hostname; }
   }
+  function isMobile(win = window) {
+    const nav = win?.navigator;
+    if (nav?.userAgentData?.mobile === true) return true;
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(String(nav?.userAgent || ""))) return true;
+    return Boolean(win?.matchMedia?.("(hover: none) and (pointer: coarse)").matches);
+  }
   function mediaAt(target) {
     const direct = target?.closest?.("video, audio");
     if (direct) return direct;
@@ -174,8 +180,12 @@
     }
     if (!context.text && !context.field && !context.imageUrl && !context.linkUrl && !context.mediaType) {
       // While a page translation exists the item toggles it: hide, then show again.
-      const pageLabel = { on: "번역 숨기기", hidden: "번역 보기" }[availability.pageState] || "페이지 본문 번역";
-      add(page, "page.translate", pageLabel, "translate", { setup: !availability.pageState && !(availability.hasContextApiKey ?? availability.hasApiKey) });
+      const aiActive = Boolean(availability.pageState && availability.pageState !== "off" && availability.pageEngine !== "google");
+      const googleActive = Boolean(availability.pageState && availability.pageState !== "off" && availability.pageEngine === "google");
+      const pageLabel = (aiActive && { on: "번역 숨기기", hidden: "번역 보기" }[availability.pageState]) || "페이지 본문 번역";
+      const googleLabel = (googleActive && { on: "Google 번역 숨기기", hidden: "Google 번역 보기" }[availability.pageState]) || "Google 번역";
+      add(page, "page.translate", pageLabel, "translate", { setup: !aiActive && !(availability.hasContextApiKey ?? availability.hasApiKey) });
+      add(page, "page.googleTranslate", googleLabel, "translate");
       groups.push(page);
       const browser = [];
       if (!availability.inFrame) add(browser, "page.saveAs", "다른 이름으로 페이지 저장", "download");
@@ -222,5 +232,5 @@
     if (key === "ArrowUp") return current < 0 ? count - 1 : (current + count - 1) % count;
     return current;
   }
-  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, topHostname, mediaAt, mediaUrl, bypass, pageOwnsMenu, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
+  globalThis.LakomicsContextModel = { SETTINGS, ownSelector, hosts, settings, excluded, topHostname, isMobile, mediaAt, mediaUrl, bypass, pageOwnsMenu, sourceLanguage, quote, editable, snapshot, restore, items, placement, imagePlacement, nextIndex };
 })();

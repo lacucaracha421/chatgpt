@@ -87,7 +87,6 @@
         "src/context-menu/page.js",
         "src/context-menu/actions.js",
         "src/context-menu/menu.js",
-        "src/context-menu/selection-chip.js",
         "src/content.js"
       ],
       "css": [
@@ -125,7 +124,6 @@
         "src/context-menu/page.js",
         "src/context-menu/actions.js",
         "src/context-menu/menu.js",
-        "src/context-menu/selection-chip.js",
         "src/content.js"
       ],
       "css": [

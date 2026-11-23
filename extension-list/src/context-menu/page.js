@@ -48,12 +48,14 @@
   }
 
   function create({ doc = document, win = window, send, surfaces, collector = {}, settings = () => ({}), watchSession = () => ({ watch() {}, stop() {} }) } = {}) {
-    // Source text -> Korean (null: needs none). Survives toggling and re-visits within the page.
-    const memory = new Map();
+    // Source text -> Korean (null: needs none), kept separate per engine (AI vs Google).
+    const memories = { ai: new Map(), google: new Map() };
+    const memoryOf = j => memories[j.engine === "google" ? "google" : "ai"];
     let job = null, sequence = 0;
     const state = () => (job ? (job.hidden ? "hidden" : "on") : "off");
+    const engineOf = () => (job ? job.engine : null);
     const own = () => globalThis.LakomicsContextModel?.ownSelector || "";
-    const remember = (text, value) => { if (memory.size >= MEMORY_MAX) memory.delete(memory.keys().next().value); memory.set(text, value); };
+    const remember = (j, text, value) => { const memory = memoryOf(j); if (memory.size >= MEMORY_MAX) memory.delete(memory.keys().next().value); memory.set(text, value); };
 
     // ------------------------------------------------------------------ scanning
     function styleOf(el) { try { return win.getComputedStyle(el); } catch { return null; } }
@@ -254,6 +256,7 @@
       }
       const ordered = sorted.flatMap(list => list.sort((a, b) => a[0] - b[0] || a[1] - b[1])).map(entry => entry[2]);
       const need = [];
+      const memory = memoryOf(j);
       for (const unit of ordered) {
         if (!memory.has(unit.text)) { need.push(unit); continue; }
         j.idle.delete(unit); unit.status = "pending";
@@ -298,7 +301,7 @@
       const texts = [...groups.keys()];
       j.active += 1; j.requested += unique;
       // The whole page run (continuations and scrolled-in content included) is one entry of the usage list.
-      const request = () => send({ type: "translation:page", items: texts.map((text, index) => ({ id: String(index), text })), job: j.usageJob });
+      const request = () => send({ type: "translation:page", ...(j.engine === "google" ? { engine: "google" } : {}), items: texts.map((text, index) => ({ id: String(index), text })), job: j.usageJob });
       let pending;
       try {
         pending = j.mode === "below"
@@ -318,8 +321,8 @@
         const byId = new Map(result.items.map(item => [item?.id, item]));
         texts.forEach((text, index) => {
           const item = byId.get(String(index)), units = groups.get(text);
-          if (item?.ok === true && typeof item.text === "string" && item.text.trim()) { remember(text, item.text.trim()); for (const unit of units) accept(j, unit, item.text); }
-          else if (item?.ok === true && item.text === null) { remember(text, null); for (const unit of units) skip(j, unit); }
+          if (item?.ok === true && typeof item.text === "string" && item.text.trim()) { remember(j, text, item.text.trim()); for (const unit of units) accept(j, unit, item.text); }
+          else if (item?.ok === true && item.text === null) { remember(j, text, null); for (const unit of units) skip(j, unit); }
           else if (item?.code === "invalid_markers") for (const unit of units) flatten(j, unit);
           else for (const unit of units) fail(j, unit);
         });
@@ -351,7 +354,7 @@
       if (unit.mode === "card") { unit.status = "done"; j.done += 1; cardOf(unit).show(korean.trim()); return; }
       if (!nodesIntact(j, unit)) { j.units.delete(unit); unit.status = "stale"; return; }
       const values = valuesFor(unit, korean);
-      if (!values) { memory.delete(unit.text); flatten(j, unit); return; }
+      if (!values) { memoryOf(j).delete(unit.text); flatten(j, unit); return; }
       unit.korean = values; unit.status = "done"; j.done += 1;
       if (!j.hidden) writeUnit(j, unit, true);
     }
@@ -386,7 +389,7 @@
       if (j.halted) return { text: j.haltCode === "api_key_missing" ? "API 키가 필요해요" : "번역을 멈췄어요", count, actions, finished: true };
       if (j.hidden) return { text: "원문 표시 중", count, actions, finished: true };
       if (j.capped) return { text: "번역 한도에 도달했어요", count, actions: [{ label: "계속 번역", onClick: () => more(j) }, ...actions], finished: true };
-      if (busy) return { text: "페이지 번역 중…", count, actions, finished: false, pending: true };
+      if (busy) return { text: j.engine === "google" ? "Google 번역 중…" : "페이지 번역 중…", count, actions, finished: false, pending: true };
       return { text: j.idle.size ? "번역 완료 · 스크롤하면 이어서 번역해요" : "번역 완료", count, actions, finished: true };
     }
     function more(j) { j.limit += LIMIT_STEP; j.capped = false; refresh(j); pump(j); }
@@ -527,11 +530,11 @@
       const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
       return { id: `page:${random}`, label: [win.location.hostname, doc.title].filter(Boolean).join(" · ").slice(0, 120) };
     }
-    function start(context, origin) {
+    function start(context, origin, engine = "ai") {
       stop();
       const mode = settings()?.pageMode === "below" ? "below" : "replace";
       const j = job = {
-        id: ++sequence, mode, usageJob: usageJobOf(), spend: null, href: win.location.href, info: new WeakMap(), churn: new WeakMap(), elUnits: new WeakMap(), units: new Set(), idle: new Set(), ready: [],
+        id: ++sequence, engine: engine === "google" ? "google" : "ai", mode, usageJob: usageJobOf(), spend: null, href: win.location.href, info: new WeakMap(), churn: new WeakMap(), elUnits: new WeakMap(), units: new Set(), idle: new Set(), ready: [],
         active: 0, epoch: 0, requested: 0, limit: FIRST_LIMIT, capped: false, done: 0, failed: 0, seq: 0, hidden: false, halted: false, haltCode: "",
         status: null, statusShown: false, statusForced: false, statusTimer: 0, busySince: 0, busyTimer: 0, finishedShown: false,
         flushTimer: 0, refreshTimer: 0, fades: new Set(), fadeQueued: false, dirty: new Set(), observed: new Set(), mo: null, watcher: null, listeners: [], note: null, dismiss: null,
@@ -571,12 +574,13 @@
       for (const unit of j.units) { if (unit.mode === "card") unit.card?.close(); else restoreUnit(j, unit); }
       j.status?.close(0);
     }
-    // The menu item: start, then hide and show the translations.
-    function activate(context, origin) {
-      if (!job) start(context, origin);
+    // The menu item: start (or switch engine), then hide and show the translations.
+    function activate(context, origin, { engine = "ai" } = {}) {
+      const nextEngine = engine === "google" ? "google" : "ai";
+      if (!job || job.engine !== nextEngine) start(context, origin, nextEngine);
       else setHidden(!job.hidden, { forceStatus: true });
     }
-    return { activate, stop, state, destroy: stop, get job() { return job; } };
+    return { activate, stop, state, engine: engineOf, destroy: stop, get job() { return job; } };
   }
   globalThis.LakomicsContextPage = { create, translatable, blockText, parseMarked };
 })();

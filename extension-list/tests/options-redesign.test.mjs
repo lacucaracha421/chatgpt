@@ -81,7 +81,7 @@ test('eight section landmarks keep every mapped id, labels, status slots, fonts 
   for (const input of f.w.document.querySelectorAll('input[type=checkbox]')) assert.equal(input.getAttribute('role'),'switch');
   for (const control of f.w.document.querySelectorAll('input,select,textarea')) assert.ok(f.w.document.querySelector(`label[for="${control.id}"]`) || control.hasAttribute('aria-label'), control.id);
   assert.equal(f.$('context-menu-form').querySelector('button'), null); assert.equal(f.$('translation-dictionary-form').querySelector('button'), null);
-  assert.match(css, /@font-face[^}]*Pretendard Variable[^}]*PretendardVariable\.woff2[^}]*font-display: swap/s);
+  assert.doesNotMatch(css, /PretendardVariable\.woff2/);
   assert.doesNotMatch(css, /SUIT|Barlow|border-left/); assert.match(css, /@media \(min-width:760px\)/);
   assert.match(css, /prefers-color-scheme: dark/); assert.match(css, /pointer:coarse/); assert.match(css,/forced-colors:active/);
   assert.equal(f.$('version').textContent,'3.5.3'); assert.equal(f.$('collect-locked').hidden,false); assert.equal(f.$('youtube-clear-server-row').hidden,true);

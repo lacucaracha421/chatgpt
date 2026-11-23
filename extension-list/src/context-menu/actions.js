@@ -135,7 +135,8 @@
           case "image.copyUrl": await copy(context.imageUrl, context, origin); break;
           case "link.copy": await copy(context.linkUrl, context, origin); break;
           case "image.translate": await image?.translate(context, event); break;
-          case "page.translate": page?.activate(context, origin); break;
+          case "page.translate": page?.activate(context, origin, { engine: "ai" }); break;
+          case "page.googleTranslate": page?.activate(context, origin, { engine: "google" }); break;
           case "image.lakomics": await collector.open?.(context.candidate, origin); break;
           case "nav.back": win.history.back(); break;
           case "nav.forward": win.history.forward(); break;
@@ -156,7 +157,7 @@
         return { ok: true };
       } catch { if (alive(context)) notice("작업 실패 · 브라우저 권한을 확인해 주세요", context, origin, { error: true }); return { ok: false }; }
     }
-    return { activate, pageState: () => page?.state() ?? "off", destroy() { image?.destroy(); page?.destroy(); } };
+    return { activate, pageState: () => page?.state() ?? "off", pageEngine: () => page?.engine?.() ?? null, destroy() { image?.destroy(); page?.destroy(); } };
   }
   globalThis.LakomicsContextActions = { runtime, unchanged, replace, selectAll, captureFrame, createActions };
 })();
