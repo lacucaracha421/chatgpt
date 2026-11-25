@@ -398,14 +398,33 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
-    if let Some(key) = path.strip_prefix("/somi-thumb/") {
+    if let Some(rest) = path.strip_prefix("/somi-thumb/") {
+        let (key, session) = match rest.split_once("/v") {
+            Some((key, rev)) => match rev.parse::<u64>() {
+                Ok(epoch) => (key, Some(epoch)),
+                Err(_) => return empty_response(StatusCode::BAD_REQUEST),
+            },
+            None => (rest, None),
+        };
         if !crate::somi::thumbs::valid_key(key) {
             return empty_response(StatusCode::BAD_REQUEST);
         }
+        if session.is_some_and(|e| e != crate::somi::thumbs::session_epoch()) {
+            return empty_response(StatusCode::NOT_FOUND);
+        }
+        let cache = if session.is_some() {
+            "private, max-age=3600, immutable"
+        } else {
+            "no-store"
+        };
         return match crate::somi::thumbs::read(key) {
-            Some((bytes, mime)) => Response::builder().status(StatusCode::OK)
-                .header(CONTENT_TYPE, mime).header(CACHE_CONTROL, "no-store")
-                .body(bytes).expect("somi thumbnail response"),
+            Some((bytes, mime)) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime)
+                .header(CONTENT_LENGTH, bytes.len().to_string())
+                .header(CACHE_CONTROL, cache)
+                .body(bytes)
+                .expect("somi thumbnail response"),
             None => empty_response(StatusCode::NOT_FOUND),
         };
     }

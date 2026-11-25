@@ -30,6 +30,7 @@ import type {
   CatalogWork,
   CatalogWorkDetail,
   CatalogWorkIdentity,
+  ResolvedGallery,
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -53,11 +54,34 @@ import { matchedSpans } from "../shared/findModel";
 import { BOOKMARK_SORT_OPTIONS, readBookmarkSort, writeBookmarkSort, type BookmarkSort } from "./bookmarkSort";
 
 const CATALOG_PAGE_SIZE = 48;
+const VIEW_CACHE_LIMIT = 12;
+const READER_CACHE_LIMIT = 24;
+const DETAIL_READER_PREFETCH_MS = 250;
 
 type CatalogView = { indexQuery: string; text: string; sort: CatalogSort; scope: CatalogScope; revealBlocked: boolean; language: CatalogLanguage };
 /** Every page loaded so far for one view, in order, without repeating a group. */
 type CatalogList = { works: CatalogGroupedWork[]; pages: number; complete: boolean };
+type CachedCatalogView = { works: CatalogGroupedWork[]; complete: boolean };
+type ReaderPrefetch = { key: string; token: number; promise: Promise<ResolvedGallery> };
 type PageStream = { first: Promise<CatalogGroupedPage | null>; done: Promise<void> };
+
+function lruGet<K, V>(map: Map<K, V>, key: K): V | undefined {
+  const value = map.get(key);
+  if (value === undefined) return undefined;
+  map.delete(key);
+  map.set(key, value);
+  return value;
+}
+
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, limit: number) {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > limit) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
 
 function viewKey(view: CatalogView | null): string {
   return view ? JSON.stringify([view.text, view.indexQuery, view.sort, view.scope, view.revealBlocked, view.language]) : "";
@@ -157,6 +181,19 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const suggestionRequest = useRef(0);
   const detailRequest = useRef(0);
   const readRequest = useRef(0);
+  const viewCache = useRef(new Map<string, CachedCatalogView>());
+  const countCache = useRef(new Map<string, number>());
+  const readerCache = useRef(new Map<string, ResolvedGallery>());
+  const readerPrefetch = useRef<ReaderPrefetch | null>(null);
+  const readerPrefetchToken = useRef(0);
+  const clearViewCache = useCallback(() => {
+    viewCache.current.clear();
+    countCache.current.clear();
+  }, []);
+  const cancelReaderPrefetch = useCallback(() => {
+    readerPrefetchToken.current += 1;
+    readerPrefetch.current = null;
+  }, []);
   const bookmarkRequests = useRef(new Set<string>());
   const [blockedTags, setBlockedTags] = useState<ReadonlySet<string>>(() => new Set());
   const policyRequest = useRef(0);
@@ -188,9 +225,10 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       detailRequest.current += 1;
       editionRequest.current += 1;
       readRequest.current += 1;
+      cancelReaderPrefetch();
       policyRequest.current += 1;
     };
-  }, [gateway]);
+  }, [cancelReaderPrefetch, gateway]);
 
   const loadVisibilityPolicy = useCallback(async () => {
     const request = ++policyRequest.current;
@@ -216,6 +254,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       if (!mounted.current) return;
       policyRequest.current += 1;
       setBlockedTags(new Set(policy.blockedTags.map(tag => `${tag.namespace}:${tag.value}`)));
+      clearViewCache();
       void refreshSearch.current(true);
     } catch (error) {
       if (mounted.current) setMessage(commandErrorMessage(error, "태그 차단 설정을 저장하지 못했습니다."));
@@ -225,7 +264,9 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   }
 
   function applyCount(event: Extract<CatalogGroupedSearchEvent, { type: "count" | "countError" }>, view: CatalogView) {
-    if (event.type === "countError") { setTotalCount(null); setCountError(event.message); return; }
+    const key = viewKey(view);
+    if (event.type === "countError") { countCache.current.delete(key); setTotalCount(null); setCountError(event.message); return; }
+    lruSet(countCache.current, key, event.totalCount, VIEW_CACHE_LIMIT);
     setTotalCount(event.totalCount); setCountError(null);
     if (view.scope === "bookmarked" && !view.text && !view.revealBlocked) { setKnownBookmarkCount(event.totalCount); onBookmarkCount?.(event.totalCount); }
   }
@@ -271,17 +312,30 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     setSearchOpen(false);
     const request = ++searchRequest.current;
     const view: CatalogView = { indexQuery: mangaIndexQuery(indexFilter), text, sort: nextSort, scope: nextScope, revealBlocked: nextRevealBlocked, language: nextLanguage };
-    setLoading(!quiet);
+    const key = viewKey(view);
+    const cached = !quiet && pages === 1 && viewKey(displayedView.current) !== key ? lruGet(viewCache.current, key) : undefined;
+    if (cached) {
+      resetGridScroll.current = true;
+      displayedView.current = view;
+      loadedPages.current = 1;
+      setResults({ works: cached.works, pages: 1, complete: cached.complete });
+      setTotalCount(lruGet(countCache.current, key) ?? null);
+      setLoading(false);
+      setLoadError(false);
+      onReady?.(nextScope);
+    } else {
+      setLoading(!quiet);
+      if (!quiet) setTotalCount(null);
+    }
     setSearchPending(true);
     setLoadingMore(false);
     setLoadMoreFailed(false);
-    if (!quiet) setTotalCount(null);
     setCountError(null);
     refreshSearch.current = (quiet = false) => search(text, nextSort, nextScope, nextRevealBlocked, nextLanguage, quiet, Math.max(1, loadedPages.current));
     suggestionRequest.current += 1;
     setSuggestions([]);
     setActiveSuggestionIndex(-1);
-    let committed = false;
+    let committed = Boolean(cached);
     try {
       let works: CatalogGroupedWork[] = [];
       let loaded = 0;
@@ -293,6 +347,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
         const next = await stream.first;
         if (request !== searchRequest.current) return false;
         if (!next) break;
+        if (page === 0) lruSet(viewCache.current, key, { works: next.works, complete: next.works.length < next.pageSize }, VIEW_CACHE_LIMIT);
         works = appendWorks(works, next.works);
         loaded = page + 1;
         complete = next.works.length < next.pageSize;
@@ -300,19 +355,22 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       if (loaded > 0) {
         // The old cards stay (inert) until this moment, then the whole list swaps at once; a new view
         // or a shorter reload starts at the top, a refresh in place keeps the scroll position.
-        resetGridScroll.current = !quiet && (viewKey(displayedView.current) !== viewKey(view) || loaded < loadedPages.current);
+        resetGridScroll.current = !quiet && !cached && (viewKey(displayedView.current) !== key || loaded < loadedPages.current);
         displayedView.current = view;
         loadedPages.current = loaded;
         setResults({ works, pages: loaded, complete });
         setLoading(false); setSearchPending(false); setLoadError(false);
+        if (!committed) onReady?.(nextScope);
         committed = true;
-        onReady?.(nextScope);
       }
       await stream?.done;
       return committed;
     } catch (error) {
-      if (request === searchRequest.current) { setMessage(commandErrorMessage(error, "온라인 카탈로그 검색에 실패했습니다")); setCountError("결과 수를 불러오지 못했습니다"); setLoadError(true); onReady?.(nextScope); }
-      return false;
+      if (request === searchRequest.current) {
+        setMessage(commandErrorMessage(error, "온라인 카탈로그 검색에 실패했습니다"));
+        if (!committed) { setCountError("결과 수를 불러오지 못했습니다"); setLoadError(true); onReady?.(nextScope); }
+      }
+      return committed;
     } finally {
       if (request === searchRequest.current) { setLoading(false); setSearchPending(false); }
     }
@@ -373,6 +431,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
 
   useEffect(() => {
     const refreshBookmarks = () => {
+      clearViewCache();
       setKnownBookmarkCount(undefined); onBookmarkCount?.(undefined);
       void refreshSearch.current(true);
       // A pending card switch owns the next detail; never replace it with the old work.
@@ -414,6 +473,34 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   }, [active]);
 
   useEffect(() => {
+    if (privacyMode) cancelReaderPrefetch();
+  }, [cancelReaderPrefetch, privacyMode]);
+
+  const detailProvider = detail?.provider;
+  const detailWorkId = detail?.providerWorkId;
+  useEffect(() => {
+    if (!detailOpen || !detailProvider || !detailWorkId || !active || privacyMode || viewer || openingWorkKey || reading) return;
+    const identity: CatalogWorkIdentity = { provider: detailProvider, providerWorkId: detailWorkId };
+    const key = catalogIdentityKey(identity);
+    if (readerCache.current.has(key) || readerPrefetch.current?.key === key) return;
+    const timer = window.setTimeout(() => {
+      if (!mounted.current || readerCache.current.has(key) || readerPrefetch.current?.key === key) return;
+      const token = ++readerPrefetchToken.current;
+      const promise = gateway.resolveOnlineCatalogWork(identity);
+      readerPrefetch.current = { key, token, promise };
+      void promise.then((gallery) => {
+        if (!mounted.current || readerPrefetch.current?.token !== token) return;
+        lruSet(readerCache.current, key, gallery, READER_CACHE_LIMIT);
+      }).catch(() => {
+        // 읽기 실행 시 다시 요청한다.
+      }).finally(() => {
+        if (readerPrefetch.current?.token === token) readerPrefetch.current = null;
+      });
+    }, DETAIL_READER_PREFETCH_MS);
+    return () => window.clearTimeout(timer);
+  }, [active, detailOpen, detailProvider, detailWorkId, gateway, openingWorkKey, privacyMode, reading, viewer]);
+
+  useEffect(() => {
     const request = ++suggestionRequest.current;
     const text = query.trim();
     // `artist:asa` and the short `a:asa` are suggested too; the library matches the
@@ -449,6 +536,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     setLoading(true);
     try {
       const next = await gateway.importVckCatalog(selected);
+      clearViewCache();
       setStatus(next);
       await search("");
     } catch {
@@ -498,6 +586,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     const request = ++detailRequest.current;
     editionRequest.current += 1;
     readRequest.current += 1;
+    cancelReaderPrefetch();
     setReading(false);
     setEditionsLoading(false);
     const identity = catalogIdentityOf(work);
@@ -564,6 +653,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     const identityKey = catalogIdentityKey(identity);
     if (bookmarkRequests.current.has(identityKey)) return false;
     searchRequest.current += 1;
+    clearViewCache();
     setCountError(null);
     bookmarkRequests.current.add(identityKey);
     setBookmarkPendingKeys(new Set(bookmarkRequests.current));
@@ -602,13 +692,27 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     detailRequest.current += 1;
     editionRequest.current += 1;
     const request = ++readRequest.current;
+    const identity = catalogIdentityOf(work);
+    const key = catalogIdentityKey(identity);
     setEditionsLoading(false);
-    setOpeningWorkKey(opener ? catalogIdentityKey(work) : null);
     if (opener) detailReturnFocus.current = opener;
+    const cached = lruGet(readerCache.current, key);
+    if (cached) {
+      cancelReaderPrefetch();
+      setOpeningWorkKey(null);
+      setReading(false);
+      setDetailOpen(false);
+      setViewer({ title: work.title, ...cached, initialPage: 1, artist });
+      return;
+    }
+    const running = readerPrefetch.current?.key === key ? readerPrefetch.current : null;
+    if (!running) cancelReaderPrefetch();
+    setOpeningWorkKey(opener ? key : null);
     setReading(true);
     try {
-      const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(work));
+      const gallery = await (running ? running.promise : gateway.resolveOnlineCatalogWork(identity));
       if (!mounted.current || request !== readRequest.current) return;
+      lruSet(readerCache.current, key, gallery, READER_CACHE_LIMIT);
       setDetailOpen(false);
       setViewer({ title: work.title, ...gallery, initialPage: 1, artist });
     } catch (error) {
@@ -627,6 +731,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     detailRequest.current += 1;
     editionRequest.current += 1;
     readRequest.current += 1;
+    cancelReaderPrefetch();
     setOpeningWorkKey(null);
     setReading(false);
     setDetailOpen(false);
@@ -666,6 +771,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
         : await gateway.updateOnlineCatalog("japanese", currentStream?.initialComplete ? 40 : 1);
       const next = await gateway.getOnlineCatalogStatus();
       setStatus(next);
+      if (result.added > 0) clearViewCache();
       if (result.added > 0 && languageRef.current === updateLanguage) {
         await search(query.trim(), sort, scope, revealBlocked, updateLanguage);
       }
@@ -777,7 +883,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       if (!entries.some(entry => entry.isIntersecting)) return;
       observer.disconnect();
       void loadMoreRef.current();
-    }, { root: gridScroll.current, rootMargin: "0px 0px 600px 0px" });
+    }, { root: gridScroll.current, rootMargin: "0px 0px 1500px 0px" });
     observer.observe(target);
     return () => observer.disconnect();
   }, [canAutoLoad, results]);
@@ -812,7 +918,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       }}
     />}
     {status?.installed && <div className="online-catalog__sync-summary">
-      {reviewOpen && <CatalogReviewDialog onClose={() => setReviewOpen(false)} onChange={async () => { await refreshSearch.current(); }} />}
+      {reviewOpen && <CatalogReviewDialog onClose={() => setReviewOpen(false)} onChange={async () => { clearViewCache(); await refreshSearch.current(); }} />}
       {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
       {catalogStreamStatus(status, language).lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {catalogStreamStatus(status, language).lastError}</span>
         : !workspace && catalogStreamStatus(status, language).lastProgressAt ? <span className="online-catalog__sync-status">마지막 갱신 {displayDateTime(catalogStreamStatus(status, language).lastProgressAt!)}{catalogStreamStatus(status, language).lastAdded > 0 ? ` · 신규 ${catalogStreamStatus(status, language).lastAdded.toLocaleString()}개` : ""}</span>
@@ -880,7 +986,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     </div>
     {editions && <CatalogEditionsDialog work={editions} language={language} revealBlocked={revealBlocked}
       onClose={() => setEditions(null)} onOpen={(work) => { const group = editions; setEditions(null); void openDetail(work, group); }}
-      onRepresentativeChange={async () => { await refreshSearch.current(); }} />}
+      onRepresentativeChange={async () => { clearViewCache(); await refreshSearch.current(); }} />}
     {viewer && <PageViewer
       title={viewer.title}
       pageUrls={viewer.pageUrls}
@@ -889,7 +995,12 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       bookmark={viewerBookmark}
       onRetryPage={async () => {
         const owner = viewer;
-        const gallery = await gateway.resolveOnlineCatalogWork({ provider: owner.provider, providerWorkId: owner.providerWorkId });
+        const ownerIdentity = { provider: owner.provider, providerWorkId: owner.providerWorkId };
+        const ownerKey = catalogIdentityKey(ownerIdentity);
+        readerCache.current.delete(ownerKey);
+        if (readerPrefetch.current?.key === ownerKey) cancelReaderPrefetch();
+        const gallery = await gateway.resolveOnlineCatalogWork(ownerIdentity);
+        if (mounted.current) lruSet(readerCache.current, ownerKey, gallery, READER_CACHE_LIMIT);
         setViewer(current => current === owner ? { ...current, pageUrls: gallery.pageUrls } : current);
       }}
       onClose={closeViewer}

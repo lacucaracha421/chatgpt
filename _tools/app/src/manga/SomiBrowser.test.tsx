@@ -269,6 +269,20 @@ it("fills only the appended page and leaves failed covers silent", async () => {
   expect(screen.queryByText("소미를 불러오지 못했습니다")).not.toBeInTheDocument();
 });
 
+it("carries unfinished cover fills forward when appending the next page", async () => {
+  const { gateway } = setup(loggedIn);
+  gateway.somiSearch.mockResolvedValueOnce({ items: [{ ...post, id: "first", coverKey: "ab".repeat(32) }], total: 2 });
+  gateway.somiFillCovers.mockImplementationOnce(() => new Promise(() => {}));
+  await screen.findByRole("button", { name: "소미 작품 읽기" });
+  await waitFor(() => expect(gateway.somiFillCovers).toHaveBeenCalledWith(["first"]));
+  gateway.somiSearch.mockResolvedValueOnce({ items: [{ ...post, id: "second", title: "다음 작품", coverKey: "cd".repeat(32) }], total: 2 });
+  gateway.somiFillCovers.mockResolvedValueOnce([{ id: "first", cover: "https://gimel.mittere.io/first" }, { id: "second", cover: "https://gimel.mittere.io/second" }]);
+  await userEvent.click(screen.getByRole("button", { name: "더 불러오기" }));
+  await waitFor(() => expect(gateway.somiFillCovers).toHaveBeenLastCalledWith(["first", "second"]));
+  expect(await screen.findByAltText("소미 작품 표지")).toHaveAttribute("src", "https://gimel.mittere.io/first");
+  expect(await screen.findByAltText("다음 작품 표지")).toHaveAttribute("src", "https://gimel.mittere.io/second");
+});
+
 it("patches resolved covers into the displayed page", async () => {
   const { gateway } = setup(loggedIn);
   gateway.somiSearch.mockResolvedValue({ items: [{ ...post, coverKey: "ab".repeat(32) }], total: 1 });

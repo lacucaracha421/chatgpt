@@ -1741,3 +1741,38 @@ it("single clicks still open the detail and never resolve reader pages", async (
   expect(await screen.findByRole("complementary", { name: "망가 상세" })).toBeVisible();
   expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
 });
+
+it("prefetches reader pages after dwelling on an open detail panel and reuses them on 읽기", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+  expect(await screen.findByRole("complementary", { name: "망가 상세" })).toBeVisible();
+  expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
+  await waitFor(() => expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledTimes(1));
+  await userEvent.click(screen.getByRole("button", { name: "읽기" }));
+  expect(await findReaderPosition("1 / 3")).toBeVisible();
+  expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledTimes(1);
+});
+
+it("shows a previously visited view immediately while revalidating in the background", async () => {
+  const gateway = createGateway(true);
+  vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({
+    works: [{ ...work, title: query.language === "japanese" ? "일본어 결과" : "한국어 결과" }],
+    totalCount: 1,
+    page: query.page,
+    pageSize: 48,
+  }));
+  const { container } = renderBrowser(gateway);
+  expect(await screen.findByRole("button", { name: "한국어 결과 상세 보기" })).toBeVisible();
+  await chooseMenu("언어", "일본어");
+  expect(await screen.findByRole("button", { name: "일본어 결과 상세 보기" })).toBeVisible();
+
+  const revalidate = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
+  vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(revalidate.promise);
+  await chooseMenu("언어", "한국어");
+  expect(screen.getByRole("button", { name: "한국어 결과 상세 보기" })).toBeVisible();
+  expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
+
+  await act(async () => revalidate.resolve({ works: [{ ...work, title: "한국어 최신 결과" }], totalCount: 1, page: 0, pageSize: 48 }));
+  expect(await screen.findByRole("button", { name: "한국어 최신 결과 상세 보기" })).toBeVisible();
+});

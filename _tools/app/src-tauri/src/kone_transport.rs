@@ -1,7 +1,8 @@
 //! Isolated, cookie-owning kone browser transport. Remote pages have no IPC capability.
 use std::{
+    pin::pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex,
     },
     time::{Duration, Instant},
@@ -17,11 +18,23 @@ const UNAVAILABLE: &str = "코네에 연결할 수 없습니다";
 const TIMEOUT: &str = "코네 응답 시간이 초과되었습니다";
 /// The hidden browser costs about 430 MB and requests come hourly, so it leaves between them.
 const IDLE_CLOSE: Duration = Duration::from_secs(60);
+const POLL_STEP: Duration = Duration::from_millis(15);
 #[derive(Default)]
 pub(crate) struct KoneTransport {
     gate: tokio::sync::Mutex<()>,
+    urgent: AtomicUsize,
+    urgent_done: tokio::sync::Notify,
     last: Mutex<Option<Instant>>,
+    warmed: Mutex<Option<Instant>>,
     idle_watch: AtomicBool,
+}
+struct UrgentSlot<'a>(&'a KoneTransport);
+impl Drop for UrgentSlot<'_> {
+    fn drop(&mut self) {
+        if self.0.urgent.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.0.urgent_done.notify_waiters();
+        }
+    }
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +167,63 @@ fn unquote(s: String) -> String {
     serde_json::from_str::<String>(&s).unwrap_or(s)
 }
 impl KoneTransport {
+    async fn acquire(
+        &self,
+        priority: bool,
+    ) -> (tokio::sync::MutexGuard<'_, ()>, Option<UrgentSlot<'_>>) {
+        if priority {
+            self.urgent.fetch_add(1, Ordering::AcqRel);
+            let slot = UrgentSlot(self);
+            return (self.gate.lock().await, Some(slot));
+        }
+        loop {
+            while self.urgent.load(Ordering::Acquire) > 0 {
+                let notified = self.urgent_done.notified();
+                let mut notified = pin!(notified);
+                notified.as_mut().enable();
+                if self.urgent.load(Ordering::Acquire) == 0 {
+                    break;
+                }
+                notified.await;
+            }
+            let guard = self.gate.lock().await;
+            if self.urgent.load(Ordering::Acquire) == 0 {
+                return (guard, None);
+            }
+            drop(guard);
+        }
+    }
+    /// Reading pages keeps the hidden kone session alive so opening the next work skips cold start.
+    pub fn touch(&self) {
+        if let Ok(mut last) = self.last.lock() {
+            if last.is_some() {
+                *last = Some(Instant::now());
+            }
+        }
+    }
+    /// Prepare the hidden kone window in the background on Somi entry without sending an API call.
+    pub fn warm(&self, app: &AppHandle, epoch: u64) {
+        if let Ok(mut warmed) = self.warmed.lock() {
+            if warmed.is_some_and(|at| at.elapsed() < Duration::from_secs(25)) {
+                return;
+            }
+            *warmed = Some(Instant::now());
+        }
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let transport = app.state::<KoneTransport>();
+            let (_guard, _) = transport.acquire(false).await;
+            if !app.state::<crate::somi::SomiState>().current(epoch) {
+                return;
+            }
+            if let Ok(mut last) = transport.last.lock() {
+                *last = Some(Instant::now());
+            }
+            if window(&app, false).is_ok() {
+                transport.watch_idle(&app);
+            }
+        });
+    }
     /// One watcher per hidden window. Holding the gate proves no request is in flight.
     fn watch_idle(&self, app: &AppHandle) {
         if self.idle_watch.swap(true, Ordering::AcqRel) {
@@ -188,8 +258,9 @@ impl KoneTransport {
         app: &AppHandle,
         script: &str,
         epoch: Option<u64>,
+        priority: bool,
     ) -> Result<String, String> {
-        let _guard = self.gate.lock().await;
+        let (_guard, _urgent) = self.acquire(priority).await;
         let last = *self.last.lock().map_err(|_| UNAVAILABLE)?;
         if let Some(last) = last {
             pause(Duration::from_millis(300).saturating_sub(last.elapsed())).await?;
@@ -212,7 +283,7 @@ impl KoneTransport {
                 let _ = w.destroy();
                 return Err(TIMEOUT.into());
             }
-            pause(Duration::from_millis(50)).await?;
+            pause(POLL_STEP).await?;
         }
         if epoch.is_some_and(|epoch| !app.state::<crate::somi::SomiState>().current(epoch)) {
             return Err("SOMI_LOGIN_REQUIRED".into());
@@ -222,7 +293,7 @@ impl KoneTransport {
             loop {
                 let response=evaluate(&w,"(() => {const r=window.__lakomicsKoneResponse;if(r==null)return null;delete window.__lakomicsKoneResponse;return r;})()",deadline).await?;
                 if response!="null" {return Ok(unquote(response));}
-                pause(Duration::from_millis(50)).await?;
+                pause(POLL_STEP).await?;
             }
         }.await;
         *self.last.lock().map_err(|_| UNAVAILABLE)? = Some(Instant::now());
@@ -256,8 +327,9 @@ impl KoneTransport {
           }}catch{{window.__lakomicsKoneResponse=JSON.stringify({{status:0,body:''}});}}finally{{clearTimeout(timer);}}
         }})();"#
         );
+        let priority = path == "/v1/article/get";
         let response: Response =
-            serde_json::from_str(&self.exchange(app, &script, Some(epoch)).await?)
+            serde_json::from_str(&self.exchange(app, &script, Some(epoch), priority).await?)
                 .map_err(|_| UNAVAILABLE)?;
         if response.status == 0 {
             return Err(UNAVAILABLE.into());
@@ -276,12 +348,12 @@ impl KoneTransport {
           window.__lakomicsKoneResponse=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
           }catch{window.__lakomicsKoneResponse='error';}
         })();"#;
-        let response = self.exchange(app, script, None).await?;
+        let response = self.exchange(app, script, None, true).await?;
         let value = serde_json::from_str(&response).map_err(|_| UNAVAILABLE)?;
         Ok(parse_profile(&value))
     }
     pub async fn open_login(&self, app: &AppHandle) -> Result<(), String> {
-        let _guard = self.gate.lock().await;
+        let (_guard, _) = self.acquire(true).await;
         let w = window(app, true)?;
         w.show().map_err(|_| UNAVAILABLE)?;
         w.set_focus().map_err(|_| UNAVAILABLE)?;
@@ -310,7 +382,7 @@ impl KoneTransport {
     }
     pub async fn logout(&self, app: &AppHandle) -> Result<(), String> {
         {
-            let _guard = self.gate.lock().await;
+            let (_guard, _) = self.acquire(true).await;
             if let Some(w) = app.get_webview_window("kone-login") {
                 w.close().map_err(|_| UNAVAILABLE)?;
             }
@@ -422,5 +494,40 @@ mod tests {
         for b in [b"a".as_slice(), b"ab", b"abc", &[0, 255, 128, 64]] {
             assert_eq!(unbase64(&base64(b)).unwrap(), b);
         }
+    }
+    #[test]
+    fn kone_urgent_request_overtakes_queued_background_calls() {
+        use std::sync::Arc;
+        tauri::async_runtime::block_on(async {
+            let transport = Arc::new(KoneTransport::default());
+            let order = Arc::new(Mutex::new(Vec::new()));
+            let (first_guard, _) = transport.acquire(false).await;
+            let (bg_ready_tx, bg_ready_rx) = tokio::sync::oneshot::channel();
+            let bg_transport = Arc::clone(&transport);
+            let bg_order = Arc::clone(&order);
+            let bg = tauri::async_runtime::spawn(async move {
+                let _ = bg_ready_tx.send(());
+                let (_g, _) = bg_transport.acquire(false).await;
+                bg_order.lock().unwrap().push("list");
+            });
+            let _ = bg_ready_rx.await;
+            pause(Duration::from_millis(15)).await.unwrap();
+
+            let (urgent_ready_tx, urgent_ready_rx) = tokio::sync::oneshot::channel();
+            let urgent_transport = Arc::clone(&transport);
+            let urgent_order = Arc::clone(&order);
+            let open = tauri::async_runtime::spawn(async move {
+                let _ = urgent_ready_tx.send(());
+                let (_g, _u) = urgent_transport.acquire(true).await;
+                urgent_order.lock().unwrap().push("get");
+            });
+            let _ = urgent_ready_rx.await;
+            pause(Duration::from_millis(15)).await.unwrap();
+
+            drop(first_guard);
+            let _ = open.await;
+            let _ = bg.await;
+            assert_eq!(order.lock().unwrap().as_slice(), ["get", "list"]);
+        });
     }
 }

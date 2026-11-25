@@ -14,6 +14,7 @@ type ReaderPageProps = {
   alt: string;
   ratio: number;
   onRatio: (ratio: number) => void;
+  onSettled?: () => void;
   onError: () => void;
 };
 
@@ -21,12 +22,19 @@ type ReaderPageProps = {
  * One reader page. Until its image has loaded it shows a page-shaped placeholder instead of an
  * empty box; the image stays mounted (invisible) so the spread can wait for it to decode.
  */
-export function ReaderPage({ src, alt, ratio, onRatio, onError }: ReaderPageProps) {
+export function ReaderPage({ src, alt, ratio, onRatio, onSettled, onError }: ReaderPageProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [loaded, setLoaded] = useState(false);
+  const settledRef = useRef(false);
+  const notifySettled = () => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    onSettled?.();
+  };
   const markLoaded = (image: HTMLImageElement) => {
     if (image.naturalWidth > 0 && image.naturalHeight > 0) onRatio(image.naturalWidth / image.naturalHeight);
     setLoaded(true);
+    notifySettled();
   };
   useLayoutEffect(() => {
     const image = imageRef.current;
@@ -43,11 +51,12 @@ export function ReaderPage({ src, alt, ratio, onRatio, onError }: ReaderPageProp
       className="manga-reader__image"
       src={src}
       alt={alt}
+      fetchPriority="high"
       referrerPolicy="no-referrer"
       draggable={false}
       style={loaded ? undefined : { opacity: 0 }}
       onLoad={(event) => markLoaded(event.currentTarget)}
-      onError={onError}
+      onError={() => { notifySettled(); onError(); }}
     />
   </ReaderPageBox>;
 }

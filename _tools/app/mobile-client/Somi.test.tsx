@@ -1,6 +1,7 @@
 import {act,cleanup,fireEvent,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {render,openScreenSearch} from './screenSearchTest';
+import {forgetCatalogCovers} from './CatalogCover';
 import {Somi} from './Somi';
 import {Catalog} from './Catalog';
 import type {SomiPost,SomiStatus} from '../src/library/types';
@@ -22,7 +23,7 @@ beforeEach(()=>{
     return {};
   });
 });
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();forgetCatalogCovers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 const requests=(op:string)=>mocks.native.mock.calls.filter(([name])=>name===op);
 
 it('shows the login empty state and launches login without searching or opening a post',async()=>{
@@ -44,16 +45,22 @@ it('a period selects votes, then allows a different sort',async()=>{
   await waitFor(()=>expect(requests('somiSearch').at(-1)?.[1]).toMatchObject({days:30,sort:'views'}));
 });
 
-it('fills missing covers in batches, so early covers do not wait for the whole page',async()=>{
-  const posts=Array.from({length:7},(_,i)=>({...post,id:`aaaaaaaaaaaaaaaaaaaaa${i}`,title:`책 ${i}`,coverKey:'ab'.repeat(32)}));
-  const batches:((covers:{id:string;cover:string}[])=>void)[]=[];
-  mocks.native.mockImplementation(async(op:string)=>op==='somiStatus'?status:op==='somiSearch'?{items:posts,total:7}:op==='somiFillCovers'?new Promise(resolve=>batches.push(resolve)):{});
+it('loads visible covers in parallel through the shared six-slot cover queue',async()=>{
+  const posts=Array.from({length:8},(_,i)=>({...post,id:`aaaaaaaaaaaaaaaaaaaaa${i}`,title:`책 ${i}`,coverKey:'ab'.repeat(32)}));
+  const pending:((ticket:{url:string})=>void)[]=[];
+  vi.stubGlobal('IntersectionObserver',class{
+    cb:IntersectionObserverCallback;
+    constructor(cb:IntersectionObserverCallback){this.cb=cb;}
+    observe(target:Element){this.cb([{isIntersecting:true,target} as IntersectionObserverEntry],{} as IntersectionObserver);}
+    unobserve(){}
+    disconnect(){}
+  });
+  mocks.native.mockImplementation(async(op:string)=>op==='somiStatus'?status:op==='somiSearch'?{items:posts,total:8}:op==='somiImage'?new Promise(resolve=>pending.push(resolve)):{});
   render(<Somi {...props}/>);await screen.findByText('책 0');
-  await waitFor(()=>expect(requests('somiFillCovers')).toHaveLength(1));
-  expect((requests('somiFillCovers')[0][1] as {ids:string[]}).ids).toHaveLength(6);
-  await act(async()=>batches[0]([]));
-  await waitFor(()=>expect(requests('somiFillCovers')).toHaveLength(2));
-  expect((requests('somiFillCovers')[1][1] as {ids:string[]}).ids).toEqual([posts[6].id]);
+  await waitFor(()=>expect(requests('somiImage')).toHaveLength(6));
+  expect(requests('somiImage')[0][1]).toMatchObject({id:posts[0].id,kind:'cover',index:0});
+  await act(async()=>pending[0]({url:'https://app.lakomics.local/media-cache/somi-cover-0'}));
+  await waitFor(()=>expect(requests('somiImage')).toHaveLength(7));
 });
 
 it('bookmark view uses added order, and card bookmarking never opens the post',async()=>{
@@ -193,6 +200,7 @@ it('removes gone posts from the board in place and marks gone bookmarks without 
 
   view.rerender(<Somi {...props} bookmarked/>);
   await screen.findByText('삭제됨');
+  expect(requests('somiImage')).toHaveLength(0);
   expect(requests('somiFillCovers')).toHaveLength(0);
 });
 

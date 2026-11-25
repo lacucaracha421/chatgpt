@@ -1,18 +1,57 @@
 use std::{
+    collections::HashSet,
     io::Read,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Mutex, OnceLock,
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
+static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+static PERMITS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+static SAVED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static SESSION_EPOCH: OnceLock<AtomicU64> = OnceLock::new();
 pub(crate) static AUTHENTICATED: AtomicBool = AtomicBool::new(false);
 const LIMIT: usize = 2 * 1024 * 1024;
+const DOWNLOAD_CONCURRENCY: usize = 6;
 // manga.css uses a 148 px minimum card width and a 148 / 208 frame; save at 2x.
 const COVER_WIDTH: u32 = 296;
 const COVER_HEIGHT: u32 = 416;
+fn session_cell() -> &'static AtomicU64 {
+    SESSION_EPOCH.get_or_init(|| {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(1)
+            .max(1);
+        AtomicU64::new(seed)
+    })
+}
+pub(crate) fn session_epoch() -> u64 {
+    session_cell().load(Ordering::Acquire)
+}
+pub(crate) fn bump_session_epoch() {
+    session_cell().fetch_add(1, Ordering::AcqRel);
+}
+fn saved_set() -> &'static Mutex<HashSet<String>> {
+    SAVED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn agent() -> &'static ureq::Agent {
+    AGENT.get_or_init(|| {
+        crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(Duration::from_secs(30)))
+                .build(),
+        )
+    })
+}
+pub(crate) fn permits() -> &'static tokio::sync::Semaphore {
+    PERMITS.get_or_init(|| tokio::sync::Semaphore::new(DOWNLOAD_CONCURRENCY))
+}
 fn shrink(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let image = image::load_from_memory(bytes).map_err(|_| "소미 표지 형식 오류")?;
     crate::library::ingestion::encode_webp(&image.thumbnail(COVER_WIDTH, COVER_HEIGHT))
@@ -53,10 +92,21 @@ fn file(root: &Path, key: &str, ext: &str) -> PathBuf {
     root.join(&key[..2]).join(format!("{key}.{ext}"))
 }
 pub(crate) fn saved(key: &str) -> bool {
-    valid_key(key)
-        && ROOT
-            .get()
-            .is_some_and(|r| ["webp", "jpg"].iter().any(|e| file(r, key, e).is_file()))
+    if !valid_key(key) {
+        return false;
+    }
+    if saved_set().lock().is_ok_and(|set| set.contains(key)) {
+        return true;
+    }
+    let exists = ROOT
+        .get()
+        .is_some_and(|r| ["webp", "jpg"].iter().any(|e| file(r, key, e).is_file()));
+    if exists {
+        if let Ok(mut set) = saved_set().lock() {
+            set.insert(key.to_owned());
+        }
+    }
+    exists
 }
 fn format(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(&[255, 216, 255]) {
@@ -83,6 +133,9 @@ pub(crate) fn read(key: &str) -> Option<(Vec<u8>, &'static str)> {
             return Some((b, mime));
         }
     }
+    if let Ok(mut set) = saved_set().lock() {
+        set.remove(key);
+    }
     None
 }
 pub(crate) fn download(raw: &str) -> Result<(), String> {
@@ -91,13 +144,7 @@ pub(crate) fn download(raw: &str) -> Result<(), String> {
         return Ok(());
     }
     let root = ROOT.get().ok_or("소미 표지 저장소 오류")?;
-    let agent = crate::http_agent::agent(
-        ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(30)))
-            .build(),
-    );
+    let agent = agent();
     let mut url = url::Url::parse(raw).map_err(|_| "소미 표지 주소 오류")?;
     for _ in 0..4 {
         if !AUTHENTICATED.load(Ordering::Acquire) {
@@ -139,9 +186,14 @@ pub(crate) fn download(raw: &str) -> Result<(), String> {
         let mut temp =
             tempfile::NamedTempFile::new_in(folder).map_err(|_| "소미 표지 저장 실패")?;
         std::io::Write::write_all(&mut temp, &bytes).map_err(|_| "소미 표지 저장 실패")?;
-        temp.persist_noclobber(path)
-            .map_err(|_| "소미 표지 저장 실패")?;
-        return Ok(());
+        let _ = temp.persist_noclobber(&path);
+        if path.is_file() {
+            if let Ok(mut set) = saved_set().lock() {
+                set.insert(key);
+            }
+            return Ok(());
+        }
+        return Err("소미 표지 저장 실패".into());
     }
     Err("소미 표지 주소 오류".into())
 }

@@ -352,7 +352,7 @@ public final class MainActivity extends Activity {
    // Insert before reading the pause fence: stop sees the entry or this caller cancels it.
    if(optionalWork(operation)){nonEssential.put(id,signal);if(stopped)cancelOptional(id,signal);}
    boolean cover=false;
-   if("catalogImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
+   if("catalogImage".equals(operation)||"somiImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
    final boolean catalogCover=cover;
    boolean small=operation.equals("thumbnail")||operation.equals("homeCover")||operation.equals("providerImage");
    if(operation.equals("collectionArtwork"))try{String variant=new JSONObject(payload).optString("variant");small="thumbnail".equals(variant)||"medium".equals(variant);}catch(JSONException ignored){}
@@ -363,7 +363,7 @@ public final class MainActivity extends Activity {
    final MediaRepository.PreparedThumbnail[] prepared={null};
    final StartupPerf.Request startup=StartupPerf.submit(operation,payload,mediaWork?mediaLane:workers,mediaWork?(catalogCover?"catalogCover":small?"thumbnail":"media"):"bridge");
    final Runnable task=()->{if(startup!=null)startup.start();if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
-    if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
+    if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId",p.optString("id")));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
     switch(operation){
      case "somiStatus":data=somi().status(p.optBoolean("collect"));break;
      case "somiLogin":data=somi().login();break;
@@ -372,7 +372,7 @@ public final class MainActivity extends Activity {
      case "somiRefresh":data=somi().refresh(p.optBoolean("full"));break;
      case "somiFillCovers":data=somi().fill(p.getJSONArray("ids"),signal);break;
      case "somiOpen":data=somi().open(p.getString("id"));break;
-     case "somiImage":data=somi().image(p.getString("id"),p.getInt("index"),signal);break;
+     case "somiImage":data="cover".equals(p.optString("kind"))?somi().cover(p.getString("id"),p.optBoolean("refresh"),signal):somi().image(p.getString("id"),p.getInt("index"),signal);break;
      case "somiBookmark":data=somi().toggle(p.getString("id"));break;
      case "somiPage":data=somi().savePage(p.getString("id"),p.getInt("page"));break;
      case "somiFlush":somi().flush();data=new JSONObject();break;

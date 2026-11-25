@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Condvar, Mutex, OnceLock},
@@ -129,29 +129,78 @@ where
     publish_cached_image(&cache_path, bytes)
 }
 
+#[derive(Default)]
+struct CatalogThumbState {
+    active: usize,
+    next_seq: u64,
+    in_flight: HashSet<PathBuf>,
+    /// Uncached keys waiting for a network slot, mapped to `(latest_seq, waiter_count)`.
+    waiters: HashMap<PathBuf, (u64, usize)>,
+}
+
+impl CatalogThumbState {
+    fn drop_waiter(&mut self, cache_path: &Path) {
+        if let Some(entry) = self.waiters.get_mut(cache_path) {
+            if entry.1 <= 1 {
+                self.waiters.remove(cache_path);
+            } else {
+                entry.1 -= 1;
+            }
+        }
+    }
+
+    fn is_newest_waiter(&self, cache_path: &Path) -> bool {
+        let Some(&(target_seq, _)) = self.waiters.get(cache_path) else {
+            return false;
+        };
+        self.waiters.values().all(|&(seq, _)| seq <= target_seq)
+    }
+}
+
 struct CatalogThumbLimiter {
-    state: Mutex<(usize, HashSet<PathBuf>)>,
+    limit: usize,
+    state: Mutex<CatalogThumbState>,
     ready: Condvar,
 }
 
 impl CatalogThumbLimiter {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.max(1),
+            state: Mutex::new(CatalogThumbState::default()),
+            ready: Condvar::new(),
+        }
+    }
+
     fn global() -> &'static Self {
         static LIMITER: OnceLock<CatalogThumbLimiter> = OnceLock::new();
-        LIMITER.get_or_init(|| Self {
-            state: Mutex::new((0, HashSet::new())),
-            ready: Condvar::new(),
-        })
+        LIMITER.get_or_init(|| Self::new(MAX_CATALOG_THUMB_CONCURRENCY))
+    }
+
+    #[cfg(test)]
+    fn waiting_keys(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .waiters
+            .len()
     }
 
     /// Wait until either no other request is downloading `key`, then acquire a network slot
-    /// only if the file is still absent on disk.
+    /// only if the file is still absent on disk. Saturated queues wake the newest request first
+    /// so covers currently on screen do not wait behind cards already scrolled past.
     fn acquire_if_uncached(&self, cache_path: &Path) -> Option<CatalogThumbGuard<'_>> {
         let mut guard = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut registered = false;
         loop {
-            if guard.1.contains(cache_path) {
+            if guard.in_flight.contains(cache_path) {
+                if registered {
+                    guard.drop_waiter(cache_path);
+                    registered = false;
+                }
                 guard = self
                     .ready
                     .wait(guard)
@@ -159,11 +208,40 @@ impl CatalogThumbLimiter {
                 continue;
             }
             if cache_path.is_file() {
+                if registered {
+                    guard.drop_waiter(cache_path);
+                    if guard.active < self.limit && !guard.waiters.is_empty() {
+                        self.ready.notify_all();
+                    }
+                }
                 return None;
             }
-            if guard.0 < MAX_CATALOG_THUMB_CONCURRENCY {
-                guard.0 += 1;
-                guard.1.insert(cache_path.to_path_buf());
+            if !registered && guard.active < self.limit && guard.waiters.is_empty() {
+                guard.active += 1;
+                guard.in_flight.insert(cache_path.to_path_buf());
+                return Some(CatalogThumbGuard {
+                    limiter: self,
+                    key: cache_path.to_path_buf(),
+                });
+            }
+            if !registered {
+                guard.next_seq += 1;
+                let seq = guard.next_seq;
+                let entry = guard
+                    .waiters
+                    .entry(cache_path.to_path_buf())
+                    .or_insert((seq, 0));
+                entry.0 = seq;
+                entry.1 += 1;
+                registered = true;
+            }
+            if guard.active < self.limit && guard.is_newest_waiter(cache_path) {
+                guard.waiters.remove(cache_path);
+                guard.active += 1;
+                guard.in_flight.insert(cache_path.to_path_buf());
+                if guard.active < self.limit && !guard.waiters.is_empty() {
+                    self.ready.notify_all();
+                }
                 return Some(CatalogThumbGuard {
                     limiter: self,
                     key: cache_path.to_path_buf(),
@@ -189,8 +267,8 @@ impl Drop for CatalogThumbGuard<'_> {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.0 = guard.0.saturating_sub(1);
-        guard.1.remove(&self.key);
+        guard.active = guard.active.saturating_sub(1);
+        guard.in_flight.remove(&self.key);
         self.limiter.ready.notify_all();
     }
 }
@@ -209,6 +287,19 @@ fn load_catalog_thumbnail_with<F>(
     root: &Path,
     identity: &super::catalog_provider::CatalogWorkIdentity,
     url: &str,
+    fetch: F,
+) -> Result<RemoteMedia, LibraryError>
+where
+    F: FnMut(&str) -> Result<Vec<u8>, LibraryError>,
+{
+    load_catalog_thumbnail_with_limiter(CatalogThumbLimiter::global(), root, identity, url, fetch)
+}
+
+fn load_catalog_thumbnail_with_limiter<F>(
+    limiter: &CatalogThumbLimiter,
+    root: &Path,
+    identity: &super::catalog_provider::CatalogWorkIdentity,
+    url: &str,
     mut fetch: F,
 ) -> Result<RemoteMedia, LibraryError>
 where
@@ -224,7 +315,7 @@ where
         let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
         return Ok(RemoteMedia { bytes, mime });
     }
-    let _permit = CatalogThumbLimiter::global().acquire_if_uncached(&cache_path);
+    let _permit = limiter.acquire_if_uncached(&cache_path);
     if let Ok(bytes) = std::fs::read(&cache_path) {
         let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
         return Ok(RemoteMedia { bytes, mime });
@@ -404,7 +495,10 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat};
 
-    use super::{clear_remote_cache, load_catalog_thumbnail_with, load_remote_page_with};
+    use super::{
+        clear_remote_cache, load_catalog_thumbnail_with, load_catalog_thumbnail_with_limiter,
+        load_remote_page_with, CatalogThumbLimiter,
+    };
     use crate::library::catalog_provider::CatalogWorkIdentity;
     use crate::library::remote_gallery::{
         parse_khentai_gallery, write_manifest, RemoteGalleryManifest,
@@ -591,5 +685,62 @@ mod tests {
             }
         });
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prioritizes_most_recently_requested_catalog_thumbnails_when_saturated() {
+        use std::sync::{mpsc, Mutex};
+
+        let (root, png) = fixture();
+        let limiter = CatalogThumbLimiter::new(1);
+        let order = Mutex::new(Vec::new());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let first = {
+                let (limiter, root, png, order) = (&limiter, &root, &png, &order);
+                scope.spawn(move || {
+                    let id = CatalogWorkIdentity::khentai(1);
+                    load_catalog_thumbnail_with_limiter(
+                        limiter,
+                        root.path(),
+                        &id,
+                        "https://ehgt.org/w/00/001/cover.png",
+                        |_| {
+                            order.lock().unwrap().push(1_u64);
+                            started_tx.send(()).unwrap();
+                            release_rx.recv().unwrap();
+                            Ok(png.clone())
+                        },
+                    )
+                })
+            };
+            started_rx.recv().unwrap();
+
+            let mut queued = Vec::new();
+            for (expected_waiting, work_id) in [(1, 2_u64), (2, 3_u64), (3, 4_u64)] {
+                let (limiter, root, png, order) = (&limiter, &root, &png, &order);
+                queued.push(scope.spawn(move || {
+                    let id = CatalogWorkIdentity::khentai(work_id);
+                    let url = format!("https://ehgt.org/w/00/{work_id:03}/cover.png");
+                    load_catalog_thumbnail_with_limiter(limiter, root.path(), &id, &url, |_| {
+                        order.lock().unwrap().push(work_id);
+                        Ok(png.clone())
+                    })
+                }));
+                while limiter.waiting_keys() < expected_waiting {
+                    std::thread::yield_now();
+                }
+            }
+
+            release_tx.send(()).unwrap();
+            first.join().unwrap().unwrap();
+            for handle in queued {
+                handle.join().unwrap().unwrap();
+            }
+        });
+
+        assert_eq!(*order.lock().unwrap(), vec![1, 4, 3, 2]);
     }
 }

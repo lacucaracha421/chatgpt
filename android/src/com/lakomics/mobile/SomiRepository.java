@@ -17,11 +17,13 @@ final class SomiRepository {
     private final Activity activity;private final SomiDatabase database;private final SomiStore store;
     private final KoneClient kone;private final CloudClient cloud;private final SecureSettings settings;private final MediaRepository media;private final Events events;
     private final ExecutorService collector=Executors.newSingleThreadExecutor();
+    private final ExecutorService prefetcher=Executors.newFixedThreadPool(2);
     private final ScheduledExecutorService shared=Executors.newSingleThreadScheduledExecutor();
     private ScheduledFuture<?> pageTimer;private volatile boolean syncing,closed;private boolean profileTried,sharedRunning,sharedAgain;
-    private long sharedAt,sharedBackoff;private String sharedEndpoint="";
+    private long sharedAt,sharedBackoff,warmedAt;private String sharedEndpoint="";
     private final AtomicLong epoch=new AtomicLong(),fillGeneration=new AtomicLong();
     private final Map<String,Preview> previews=new ConcurrentHashMap<>();
+    private final Object previewGate=new Object();private final Set<String> previewWanted=new LinkedHashSet<>();private boolean previewFetching;
     private final Map<String,Opened> opened=new LinkedHashMap<>();
     private final Object openGate=new Object();
     private static final class Preview {final long at=System.currentTimeMillis();final String url;Preview(String u){url=u;}}
@@ -38,10 +40,15 @@ final class SomiRepository {
     private void changed(){try{events.emit("lakomics-somi",new JSONObject(store.status(syncing)));}catch(Exception ignored){}}
     private synchronized void clearProfile(){epoch.incrementAndGet();fillGeneration.incrementAndGet();activity.getPreferences(0).edit().putBoolean("somiLoggedOut",true).commit();store.profile(null,null);previews.clear();synchronized(opened){opened.clear();}profileTried=true;changed();}
     private synchronized void expire(long expected){if(epoch.get()==expected)clearProfile();}
+    private void warm(){
+        long now=System.currentTimeMillis(),e=epoch.get();
+        synchronized(this){if(closed||!store.loggedIn()||now-warmedAt<25000)return;warmedAt=now;}
+        prefetcher.execute(()->{try{if(!closed&&epoch.get()==e&&store.loggedIn())kone.call("warm",null);}catch(Exception ignored){}});
+    }
     JSONObject status(boolean collect)throws Exception{
         // No periodic profile checks. A remembered login is answered entirely from SQLite.
         boolean probe=false;synchronized(this){if(!store.loggedIn()&&!profileTried){profileTried=true;probe=true;}}
-        if(probe)try{readProfile();}catch(Exception ignored){/* No saved profile to clear; the login action remains available. */}if(collect&&store.loggedIn())startCollection(false);if(collect)syncState(false);
+        if(probe)try{readProfile();}catch(Exception ignored){/* No saved profile to clear; the login action remains available. */}if(collect&&store.loggedIn()){warm();startCollection(false);}if(collect)syncState(false);
         return new JSONObject(store.status(syncing));
     }
     private void readProfile()throws Exception{
@@ -98,12 +105,51 @@ final class SomiRepository {
         return new JSONObject(result);
     }
     private static String validId(String id){SomiSef.idBytes(id);return id;}
+    private Preview freshPreview(String id){Preview p=previews.get(id);return p!=null&&System.currentTimeMillis()-p.at<540000?p:null;}
+    private Preview ensurePreview(String id,long e,CancellationSignal signal)throws Exception{
+        Preview hit=freshPreview(id);if(hit!=null)return hit;
+        synchronized(previewGate){
+            previewWanted.add(id);
+            for(;;){
+                hit=freshPreview(id);if(hit!=null){previewWanted.remove(id);return hit;}
+                if(!previewFetching){
+                    if(!previewWanted.contains(id))return null;
+                    previewFetching=true;break;
+                }
+                signal.throwIfCanceled();current(e);previewGate.wait(100);
+            }
+        }
+        try{
+            // Let concurrent visible-card cover workers register in one batch instead of firing separate list calls.
+            Thread.sleep(20);
+            for(;;){
+                List<String> batch;
+                synchronized(previewGate){if(previewWanted.isEmpty()){previewFetching=false;previewGate.notifyAll();break;}batch=new ArrayList<>(previewWanted);previewWanted.clear();}
+                List<Integer> ranks=new ArrayList<>();
+                for(String wanted:batch){if(freshPreview(wanted)!=null)continue;Map<String,Object> p=store.post(wanted);if(p!=null&&!Boolean.TRUE.equals(p.get("gone"))&&!SomiStore.s(p,"coverKey").isEmpty()&&!hasCover(p)){long rank=store.rank(wanted);if(rank>=0)ranks.add((int)rank);}}
+                List<int[]> runs=SomiStore.runs(ranks);
+                for(int[] run:runs){current(e);SomiStore.Cursor cursor=run[0]==0?null:store.place(run[0]-1);int size=runs.size()==1?Math.min(100,Math.max(run[1],60)):run[1];Page p=list(cursor,size,e);current(e);recordWindow(cursor,p,false,e);synchronized(previewGate){previewGate.notifyAll();}}
+                synchronized(previewGate){if(previewWanted.isEmpty()){previewFetching=false;previewGate.notifyAll();break;}}
+            }
+        }finally{synchronized(previewGate){if(previewFetching){previewFetching=false;previewGate.notifyAll();}}}
+        return freshPreview(id);
+    }
+    JSONObject cover(String raw,boolean refresh,CancellationSignal signal)throws Exception{
+        String id=validId(raw);require();long e=epoch.get();Map<String,Object> p=store.post(id);
+        if(p==null||Boolean.TRUE.equals(p.get("gone")))throw new IOException("소미 표지를 찾을 수 없습니다");
+        String k=SomiStore.s(p,"coverKey");if(k.isEmpty())throw new IOException("소미 표지가 없습니다");
+        if(refresh)previews.remove(id);
+        else try{return media.somiCached(id,k);}catch(Exception missing){}
+        Preview preview=ensurePreview(id,e,signal);current(e);signal.throwIfCanceled();
+        if(preview==null)throw new IOException("소미 표지를 받을 수 없습니다");
+        JSONObject ticket=media.somiImage(id,k,true,preview.url,refresh,signal);current(e);return ticket;
+    }
     JSONArray fill(JSONArray ids,CancellationSignal signal)throws Exception{
         require();if(ids.length()>60)throw new IllegalArgumentException();long generation=fillGeneration.incrementAndGet(),e=epoch.get();List<String> requested=new ArrayList<>();List<Integer> ranks=new ArrayList<>();
-        for(int i=0;i<ids.length();i++){String id=validId(ids.getString(i));requested.add(id);Map<String,Object> p=store.post(id);Preview preview=previews.get(id);boolean fresh=preview!=null&&System.currentTimeMillis()-preview.at<540000;if(p!=null&&!Boolean.TRUE.equals(p.get("gone"))&&!SomiStore.s(p,"coverKey").isEmpty()&&!hasCover(p)&&!fresh){long rank=store.rank(id);if(rank>=0)ranks.add((int)rank);}}
+        for(int i=0;i<ids.length();i++){String id=validId(ids.getString(i));requested.add(id);Map<String,Object> p=store.post(id);Preview preview=freshPreview(id);if(p!=null&&!Boolean.TRUE.equals(p.get("gone"))&&!SomiStore.s(p,"coverKey").isEmpty()&&!hasCover(p)&&preview==null){long rank=store.rank(id);if(rank>=0)ranks.add((int)rank);}}
         for(int[] run:SomiStore.runs(ranks)){if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();SomiStore.Cursor cursor=run[0]==0?null:store.place(run[0]-1);Page p=list(cursor,run[1],e);current(e);if(generation!=fillGeneration.get())return new JSONArray();recordWindow(cursor,p,false,e);}
         JSONArray result=new JSONArray();for(String id:requested){current(e);if(generation!=fillGeneration.get())return new JSONArray();signal.throwIfCanceled();Map<String,Object> p=store.post(id);if(p==null||Boolean.TRUE.equals(p.get("gone")))continue;String k=SomiStore.s(p,"coverKey");if(k.isEmpty())continue;
-            try{JSONObject ticket;try{ticket=media.somiCached(id,k);}catch(Exception missing){Preview preview=previews.get(id);if(preview==null||System.currentTimeMillis()-preview.at>540000)continue;ticket=media.somiImage(id,k,true,preview.url,signal);}current(e);result.put(new JSONObject().put("id",id).put("cover",ticket.getString("url")));}catch(IOException ignored){}
+            try{JSONObject ticket;try{ticket=media.somiCached(id,k);}catch(Exception missing){Preview preview=freshPreview(id);if(preview==null)continue;ticket=media.somiImage(id,k,true,preview.url,false,signal);}current(e);result.put(new JSONObject().put("id",id).put("cover",ticket.getString("url")));}catch(IOException ignored){}
         }return generation==fillGeneration.get()?result:new JSONArray();
     }
     private boolean hasCover(Map<String,Object> p){try{media.somiCached(SomiStore.s(p,"id"),SomiStore.s(p,"coverKey"));return true;}catch(Exception ignored){return false;}}
@@ -119,14 +165,19 @@ final class SomiRepository {
             current(e);if(!urls.isEmpty())store.record(Collections.singletonList(p),null,false,null,false,now());store.pages(id,urls.size());result=new Opened(SomiStore.s(p,"title"),SomiStore.s(p,"writerName").isEmpty()?SomiStore.s(p,"writerHandle"):SomiStore.s(p,"writerName"),urls,urls.isEmpty()?"SOMI_NO_IMAGES":"");
             synchronized(opened){opened.entrySet().removeIf(entry->System.currentTimeMillis()-entry.getValue().at>=480000);opened.put(id,result);while(opened.size()>24)opened.remove(opened.keySet().iterator().next());}
         }
-        current(e);if(!result.error.isEmpty())throw new IOException(result.error);JSONArray pages=new JSONArray();for(int i=0;i<result.urls.size();i++)pages.put(new JSONObject().put("index",i).put("url","").put("name",JSONObject.NULL).put("width",JSONObject.NULL).put("height",JSONObject.NULL).put("expiresAt",JSONObject.NULL));
-        return new JSONObject().put("title",result.title).put("writer",result.writer).put("initialPage",Math.min(store.page(id),result.urls.size())).put("manifest",new JSONObject().put("provider","somi").put("providerWorkId",id).put("publicationRevision",Long.toString(result.at)).put("manifestExpiresAt",JSONObject.NULL).put("pages",pages));
+        current(e);if(!result.error.isEmpty())throw new IOException(result.error);
+        int initialPage=Math.min(store.page(id),result.urls.size());
+        int firstIndex=Math.max(0,initialPage-1);
+        String firstUrl=result.urls.get(firstIndex);
+        prefetcher.execute(()->{try{if(!closed&&epoch.get()==e)media.somiImage(id,ThumbnailCache.key(firstUrl),false,firstUrl,false,new CancellationSignal());}catch(Exception ignored){}});
+        JSONArray pages=new JSONArray();for(int i=0;i<result.urls.size();i++)pages.put(new JSONObject().put("index",i).put("url","").put("name",JSONObject.NULL).put("width",JSONObject.NULL).put("height",JSONObject.NULL).put("expiresAt",JSONObject.NULL));
+        return new JSONObject().put("title",result.title).put("writer",result.writer).put("initialPage",initialPage).put("manifest",new JSONObject().put("provider","somi").put("providerWorkId",id).put("publicationRevision",Long.toString(result.at)).put("manifestExpiresAt",JSONObject.NULL).put("pages",pages));
     }
     JSONObject image(String raw,int index,CancellationSignal signal)throws Exception{
-        String id=validId(raw);require();long e=epoch.get();Opened r;synchronized(opened){r=opened.get(id);}if(r==null||index<0||index>=r.urls.size())throw new IOException("소미 읽기 화면을 다시 열어 주세요");JSONObject ticket=media.somiImage(id,ThumbnailCache.key(r.urls.get(index)),false,r.urls.get(index),signal);current(e);return ticket;
+        String id=validId(raw);require();long e=epoch.get();Opened r;synchronized(opened){r=opened.get(id);}if(r==null||index<0||index>=r.urls.size())throw new IOException("소미 읽기 화면을 다시 열어 주세요");JSONObject ticket=media.somiImage(id,ThumbnailCache.key(r.urls.get(index)),false,r.urls.get(index),false,signal);current(e);return ticket;
     }
     JSONObject toggle(String raw)throws Exception{String id=validId(raw);require();boolean on=store.toggle(id,System.currentTimeMillis());syncState(true);changed();return new JSONObject().put("bookmarked",on);}
-    JSONObject savePage(String raw,int page)throws Exception{String id=validId(raw);require();if(page<1||page>1000000)throw new IllegalArgumentException();store.page(id,page,System.currentTimeMillis());synchronized(this){if(pageTimer!=null)pageTimer.cancel(false);pageTimer=shared.schedule(()->syncState(true),4,TimeUnit.SECONDS);}return new JSONObject();}
+    JSONObject savePage(String raw,int page)throws Exception{String id=validId(raw);require();if(page<1||page>1000000)throw new IllegalArgumentException();warm();store.page(id,page,System.currentTimeMillis());synchronized(this){if(pageTimer!=null)pageTimer.cancel(false);pageTimer=shared.schedule(()->syncState(true),4,TimeUnit.SECONDS);}return new JSONObject();}
     synchronized void syncState(boolean local){
         if(closed)return;if(sharedRunning){if(local)sharedAgain=true;return;}long now=System.currentTimeMillis();if(now<sharedBackoff||(!local&&now-sharedAt<60000))return;sharedRunning=true;sharedAt=now;
         shared.execute(()->{boolean success=false;try{reconcile();success=true;}catch(Exception failure){long delay=failure instanceof CloudClient.HttpFailure&&((CloudClient.HttpFailure)failure).status==404?3600000:60000;synchronized(this){sharedBackoff=System.currentTimeMillis()+delay;}}finally{boolean again;synchronized(this){sharedRunning=false;again=success&&sharedAgain;sharedAgain=false;}if(success)events.emit("lakomics-somi-state",new JSONObject());if(again)syncState(true);}});
@@ -143,5 +194,5 @@ final class SomiRepository {
     }
     void resume(){syncState(false);}
     void flush(){synchronized(this){if(pageTimer!=null)pageTimer.cancel(false);}syncState(true);}
-    void close(){synchronized(this){closed=true;epoch.incrementAndGet();fillGeneration.incrementAndGet();}collector.shutdownNow();shared.shutdownNow();kone.close();synchronized(store){database.close();}}
+    void close(){synchronized(this){closed=true;epoch.incrementAndGet();fillGeneration.incrementAndGet();}synchronized(previewGate){previewWanted.clear();previewGate.notifyAll();}collector.shutdownNow();prefetcher.shutdownNow();shared.shutdownNow();kone.close();synchronized(store){database.close();}}
 }

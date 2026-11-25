@@ -12,12 +12,13 @@ import {tabletCatalogMasked} from './catalogMask';
  * 카탈로그 ⇄ 북마크 switch, a list coming back) paints its known cover on its first frame instead
  * of an empty box that fills in after a new ticket round trip.
  */
+type CoverItem = {provider:CatalogItem['provider']|'somi';providerWorkId:string;thumbnailUrl:string|null};
 const coverUrls=new Map<string,string>();
 /** Tickets a list preparation asked for and that are still on their way; a mounting cover joins them. */
 const preparing=new Map<string,Promise<string|null>>();
 const COVER_URLS_MAX=400;
-const coverSource=(item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>,revision:string)=>JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);
-const validCoverUrl=(url:string)=>url.startsWith('https://app.lakomics.local/media-cache/')||(import.meta.env.DEV&&url.startsWith('data:image/'));
+const coverSource=(item:CoverItem,revision:string)=>JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);
+const validCoverUrl=(url?:string)=>typeof url==='string'&&(url.startsWith('https://app.lakomics.local/media-cache/')||(import.meta.env.DEV&&url.startsWith('data:image/')));
 function rememberCover(source:string,url:string){
   coverUrls.delete(source);coverUrls.set(source,url);
   while(coverUrls.size>COVER_URLS_MAX)coverUrls.delete(coverUrls.keys().next().value!);
@@ -28,14 +29,14 @@ function rememberCover(source:string,url:string){
  * cards appear with their pictures (no empty boxes filling in one by one). Bounded by `capMs`;
  * covers not ready by then load as usual. Never throws.
  */
-export async function prepareCatalogCovers(items:readonly Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>[],revision:string,signal:AbortSignal,capMs:number,foreground=true){
+export async function prepareCatalogCovers(items:readonly CoverItem[],revision:string,signal:AbortSignal,capMs:number,foreground=true){
   if(tabletCatalogMasked())return;
   const missing=items.filter(item=>item.thumbnailUrl&&!coverUrls.has(coverSource(item,revision)));
   if(!missing.length)return;
   let timer=0;
   const work=Promise.all(missing.map(async item=>{
     const source=coverSource(item,revision);
-    const url=catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl!},signal,()=>foreground)
+    const url=catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl!,...(item.provider==='somi'?{source:'somi' as const}:{})},signal,()=>foreground)
       .then(ticket=>{if(signal.aborted||!validCoverUrl(ticket.url))return null;rememberCover(source,ticket.url);return ticket.url;},()=>null)
       .finally(()=>{if(preparing.get(source)===url)preparing.delete(source);});
     preparing.set(source,url);
@@ -49,11 +50,11 @@ export async function prepareCatalogCovers(items:readonly Pick<CatalogItem,'prov
 /** Tests start from an empty session. */
 export function forgetCatalogCovers(){coverUrls.clear();preparing.clear();}
 /** Whether every cover of `items` is already known, so a list can commit without preparing. */
-export function catalogCoversKnown(items:readonly Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>[],revision:string){
+export function catalogCoversKnown(items:readonly CoverItem[],revision:string){
   return tabletCatalogMasked()||items.every(item=>!item.thumbnailUrl||coverUrls.has(coverSource(item,revision)));
 }
 /** A nearby cover stays subscribed through quick viewport exits; a far cover is canceled. */
-export function CatalogCover({item,revision,active,onUrl,onBroken,arrival}:{item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>;revision:string;active:boolean;onUrl?(url:string|null):void;onBroken?():void;arrival?:CardArrival}){
+export function CatalogCover({item,revision,active,onUrl,onBroken,arrival}:{item:CoverItem;revision:string;active:boolean;onUrl?(url:string|null):void;onBroken?():void;arrival?:CardArrival}){
   const privacy = useTabletCatalogMasked();
   const source=coverSource(item,revision);
   const [image,setImage]=useState<{source:string;url:string}|null>(null),[failed,setFailed]=useState<string|null>(null),[near,setNear]=useState(false),[decoded,setDecoded]=useState<string|null>(null),[retry,setRetry]=useState(0);
@@ -67,10 +68,11 @@ export function CatalogCover({item,revision,active,onUrl,onBroken,arrival}:{item
   useEffect(()=>{
     if(privacy||!active||!near||!item.thumbnailUrl||loaded.current===source||coverUrls.has(source))return;setFailed(null);
     const controller=new AbortController();
+    const request={workId:item.providerWorkId,revision,kind:'cover' as const,index:0,url:item.thumbnailUrl,...(item.provider==='somi'?{source:'somi' as const}:{})};
     // A list preparation already asked for this cover: wait for that answer instead of asking twice.
     const joined=preparing.get(source);
-    const ticketed=joined?joined.then(url=>url?{url}:catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl!},controller.signal,()=>visible.current))
-      :catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl},controller.signal,()=>visible.current);
+    const ticketed=joined?joined.then(url=>url?{url}:catalogImageTicket(request,controller.signal,()=>visible.current))
+      :catalogImageTicket(request,controller.signal,()=>visible.current);
     void ticketed.then(ticket=>{
       if(controller.signal.aborted)return;
       if(!validCoverUrl(ticket.url))throw new Error('Invalid catalog cover');

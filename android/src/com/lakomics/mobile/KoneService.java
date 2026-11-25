@@ -23,8 +23,10 @@ public final class KoneService extends Service {
     private void admit(Message incoming){
         if(incoming.what!=REQUEST||incoming.replyTo==null)return;
         Bundle b=incoming.getData();String op=b.getString("op",""),body=b.getString("body","");
-        if(!("profile".equals(op)||"logout".equals(op)||"list".equals(op)||"get".equals(op))||body.length()>4096||queue.size()>=16){send(incoming,RESULT,"","코네 요청을 완료할 수 없습니다",0);return;}
-        Message copy=Message.obtain();copy.copyFrom(incoming);copy.setData(new Bundle(b));queue.add(copy);handler.removeCallbacks(idle);next();
+        if(!("warm".equals(op)||"profile".equals(op)||"logout".equals(op)||"list".equals(op)||"get".equals(op))||body.length()>4096||queue.size()>=16){send(incoming,RESULT,"","코네 요청을 완료할 수 없습니다",0);return;}
+        Message copy=Message.obtain();copy.copyFrom(incoming);copy.setData(new Bundle(b));
+        if("get".equals(op)||"profile".equals(op)||"logout".equals(op))queue.addFirst(copy);else queue.addLast(copy);
+        handler.removeCallbacks(idle);next();
     }
     private void ensureWeb(){
         if(web!=null)return;KonePage.initialize();web=new WebView(this);KonePage.configure(web);
@@ -34,7 +36,7 @@ public final class KoneService extends Service {
             @Override public void onPageFinished(WebView v,String u){if(KonePage.kone(Uri.parse(u))){ready=true;run();}}
             @Override public void onReceivedSslError(WebView v,SslErrorHandler h,android.net.http.SslError e){h.cancel();}
             @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){finish("", "코네에 연결할 수 없습니다",0);destroyWeb();return true;}
-        });web.loadUrl("https://kone.gg/s/somisoft");
+        });web.loadUrl("https://kone.gg");
     }
     private void next(){
         if(current!=null||queue.isEmpty())return;current=queue.remove();long token=++sequence;
@@ -48,21 +50,23 @@ public final class KoneService extends Service {
     private boolean started;
     private void run(){
         if(current==null||!ready||started)return;
+        String op=current.getData().getString("op");
+        if("warm".equals(op)){started=true;finish("{}","",200);return;}
         long delay=300-(SystemClock.elapsedRealtime()-lastStart);if(delay>0){handler.postDelayed(this::run,delay);return;}
         if(web.getUrl()==null||!KonePage.kone(Uri.parse(web.getUrl())))return;
         started=true;lastStart=SystemClock.elapsedRealtime();long token=sequence;
-        String op=current.getData().getString("op"),body=current.getData().getString("body","");
+        String body=current.getData().getString("body","");
         String script="profile".equals(op)?profileScript():requestScript("list".equals(op)?"list":"get",body);
         String wrapper="(()=>{const token="+token+";window.__somiToken=token;window.__somi=null;const controller=new AbortController();window.__somiAbort=()=>controller.abort();const timer=setTimeout(()=>controller.abort(),60000);(async()=>{"+script+"})().then(v=>{if(window.__somiToken===token)window.__somi=v}).catch(()=>{if(window.__somiToken===token)window.__somi={status:0,error:'network'}}).finally(()=>clearTimeout(timer));})()";
-        web.evaluateJavascript(wrapper,v->poll(token));
+        web.evaluateJavascript(wrapper,v->poll(token,0));
     }
-    private void poll(long token){
+    private void poll(long token,int checks){
         if(current==null||sequence!=token||web==null)return;
         if(SystemClock.elapsedRealtime()>=deadline){finish("","코네 요청 시간이 초과되었습니다",0);return;}
         // Pull bounded pieces from the renderer too: never marshal a 7 MiB JSON string.
         web.evaluateJavascript("window.__somiToken==="+token+"&&window.__somi?JSON.stringify({status:window.__somi.status,error:window.__somi.error||'',handle:window.__somi.handle||'',displayName:window.__somi.displayName||'',length:(window.__somi.base64||'').length}):null",value->{
             if(current==null||sequence!=token)return;
-            try{Object parsed=new JSONTokener(value).nextValue();if(!(parsed instanceof String)){handler.postDelayed(()->poll(token),100);return;}JSONObject meta=new JSONObject((String)parsed);
+            try{Object parsed=new JSONTokener(value).nextValue();if(!(parsed instanceof String)){handler.postDelayed(()->poll(token,checks+1),checks<30?15:40);return;}JSONObject meta=new JSONObject((String)parsed);
                 int status=meta.optInt("status"),length=meta.optInt("length");
                 if(!meta.optString("error").isEmpty()||length>MAX_BASE64){finish("","코네 요청을 완료할 수 없습니다",status);return;}
                 if("profile".equals(current.getData().getString("op"))){finish(new JSONObject().put("handle",meta.optString("handle")).put("displayName",meta.optString("displayName")).toString(),"",status);return;}

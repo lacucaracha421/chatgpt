@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
 import type { SomiOpenedPost, SomiPost, SomiSearchPage, SomiSort, SomiStatus } from "../library/types";
@@ -90,12 +92,15 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
 
   const clearSession = useCallback(() => {
     sessionEpoch.current++;
+    attemptedCovers.current.clear();
     generation.current++; busy.current = false; setLoading(false); setPending(null);
     cachedSlots.current = [null, null]; setSlots([null, null, null, null]); setViewer(null); setStatus(previous => previous ? { ...previous, loggedIn: false } : { loggedIn: false, handle: null, displayName: null, collected: 0, total: null, complete: false, syncing: false });
     statusRef.current = null;
   }, []);
+  const attemptedCovers = useRef(new Set<string>());
   const load = useCallback(async (text: string, order: SomiSort, period: number | null, more = false, bookmarks = optionsRef.current.bookmarked) => {
     if (!gateway.somiSearch || !requestedRef.current || bookmarks !== optionsRef.current.bookmarked || (more && busy.current)) return;
+    if (!more) attemptedCovers.current.clear();
     const request = ++generation.current; busy.current = true; setLoading(true); setPending(null); setLoadError(false); setMoreFailed(false);
     const previous = currentRef.current;
     const page = more && previous ? previous.page + 1 : 1;
@@ -103,9 +108,11 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
       const result = await gateway.somiSearch(text, order, page, period, bookmarks);
       if (!alive.current || generation.current !== request) return;
       const items = more && previous ? [...previous.result.items, ...result.items.filter(p => !previous.result.items.some(old => old.id === p.id))] : result.items;
+      const fillPool = more ? items : result.items;
+      const fillIds = fillPool.filter(post => post.cover === null && Boolean(post.coverKey) && !post.gone && !attemptedCovers.current.has(post.id)).map(post => post.id);
       const base = bookmarks ? 2 : 0;
       const slot = shownRef.current === base ? base + 1 : base;
-      setSlots(old => { const next = [...old]; next[slot] = { request, fillIds: result.items.filter(post => post.cover === null && Boolean(post.coverKey) && !post.gone).map(post => post.id), result: { ...result, items }, query: text, sort: order, days: period, bookmarked: bookmarks, page }; return next; });
+      setSlots(old => { const next = [...old]; next[slot] = { request, fillIds, result: { ...result, items }, query: text, sort: order, days: period, bookmarked: bookmarks, page }; return next; });
       setPending(slot);
     } catch (error) {
       if (!alive.current || generation.current !== request) return;
@@ -135,6 +142,7 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
     const changed = previousMode.current !== bookmarked;
     previousMode.current = bookmarked;
     if (changed) {
+      attemptedCovers.current.clear();
       generation.current++; busy.current = false; setLoading(false); setPending(null); setSearchOpen(false); setViewer(null);
     }
     if (!requested) return;
@@ -152,6 +160,34 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
     if (restoreScroll.current !== null && gridScroll.current) { gridScroll.current.scrollTop = restoreScroll.current; restoreScroll.current = null; }
   }, [shown]);
 
+  const patchCovers = useCallback((slot: number, request: number, covers: { id: string; cover: string }[]) => {
+    if (!covers.length || !alive.current || !requestedRef.current || generation.current !== request) return;
+    const resolved = new Map(covers.map(cover => [cover.id, cover.cover]));
+    setSlots(old => {
+      const view = old[slot];
+      if (!view || view.request !== request) return old;
+      let changed = false;
+      const items = view.result.items.map(post => {
+        if (post.cover === null && resolved.has(post.id)) { changed = true; return { ...post, cover: resolved.get(post.id)! }; }
+        return post;
+      });
+      if (!changed) return old;
+      const next = [...old];
+      next[slot] = { ...view, result: { ...view.result, items } };
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    if (!requested || !isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{ id: string; cover: string }[]>("somi-covers", event => {
+      if (disposed || !alive.current || !requestedRef.current) return;
+      const view = currentRef.current;
+      if (view && view.request === generation.current) patchCovers(shownRef.current, view.request, event.payload);
+    }).then(stop => { if (disposed) stop(); else unlisten = stop; }).catch(() => {});
+    return () => { disposed = true; unlisten?.(); };
+  }, [requested, patchCovers]);
   const filledRequest = useRef<number | null>(null);
   useEffect(() => {
     if (!requested || loading || !current || current.request !== generation.current
@@ -160,19 +196,23 @@ export function SomiBrowser({ active, requested, onReady, onSourceChange, bookma
     if (!current.fillIds.length) return;
     const request = current.request;
     const slot = shown;
-    void gateway.somiFillCovers(current.fillIds).then(covers => {
-      if (!alive.current || !requestedRef.current || generation.current !== request) return;
-      const resolved = new Map(covers.map(cover => [cover.id, cover.cover]));
-      setSlots(old => {
-        const view = old[slot];
-        if (!view || view.request !== request) return old;
-        const next = [...old];
-        next[slot] = { ...view, result: { ...view.result, items: view.result.items.map(post =>
-          post.cover === null && resolved.has(post.id) ? { ...post, cover: resolved.get(post.id)! } : post) } };
-        return next;
-      });
-    }).catch(() => { /* A missing cover keeps its placeholder without disturbing the list. */ });
-  }, [current, gateway, loading, requested, shown]);
+    const ids = current.fillIds;
+    void (async () => {
+      for (let start = 0; start < ids.length; start += 60) {
+        if (!alive.current || !requestedRef.current || generation.current !== request) return;
+        const chunk = ids.slice(start, start + 60);
+        try {
+          const covers = await gateway.somiFillCovers!(chunk);
+          if (!alive.current || !requestedRef.current || generation.current !== request) return;
+          for (const id of chunk) attemptedCovers.current.add(id);
+          patchCovers(slot, request, covers);
+        } catch {
+          if (alive.current && generation.current === request) for (const id of chunk) attemptedCovers.current.add(id);
+          /* A missing cover keeps its placeholder without disturbing the list. */
+        }
+      }
+    })();
+  }, [current, gateway, loading, requested, shown, patchCovers]);
 
   useEffect(() => {
     if (!requested || !gateway.somiStatus) return;

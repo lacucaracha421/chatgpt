@@ -321,6 +321,22 @@ describe("PageViewer", () => {
       .toEqual(["page-2", "page-4", "page-5", "page-6", "page-7", "page-8"]);
   });
 
+  it("holds preload requests until the visible spread finishes loading", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    render(<PageViewer
+      title="Remote"
+      pageUrls={Array.from({ length: 6 }, (_, index) => `page-${index + 1}`)}
+      initialPage={2}
+      onPageChange={vi.fn()}
+      onClose={vi.fn()}
+    />);
+
+    expect(document.querySelectorAll(".manga-viewer__preload")).toHaveLength(0);
+    fireEvent.load(screen.getByRole("img", { name: "Remote 2페이지" }));
+    expect(Array.from(document.querySelectorAll(".manga-viewer__preload"), (image) => image.getAttribute("src")))
+      .toEqual(["page-1", "page-3", "page-4", "page-5", "page-6"]);
+  });
+
   it("keeps pointer-only page edge navigation out of keyboard focus", async () => {
     const user = userEvent.setup();
     render(<PageViewer

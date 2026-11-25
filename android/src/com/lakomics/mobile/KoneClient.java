@@ -11,6 +11,7 @@ final class KoneClient {
     static final class Reply {final int status;final String value;Reply(int s,String v){status=s;value=v;}}
     private final Context context;private final Handler handler=new Handler(Looper.getMainLooper());
     private final ReentrantLock lane=new ReentrantLock(true);
+    private final Object urgentMonitor=new Object();private int urgentWaiters;
     private Messenger remote;private boolean bound,closed;private long sequence;
     private CompletableFuture<Messenger> connecting;
     private CompletableFuture<Reply> pending;private long pendingId;private final StringBuilder chunks=new StringBuilder();
@@ -27,7 +28,22 @@ final class KoneClient {
         public void onNullBinding(ComponentName n){if(connecting!=null)connecting.completeExceptionally(new IOException("코네에 연결할 수 없습니다"));unbind();}
     };
     KoneClient(Context c){context=c.getApplicationContext();}
-    Reply call(String op,byte[] body)throws Exception{lane.lockInterruptibly();try{return exchange(op,body);}finally{lane.unlock();}}
+    private static boolean urgent(String op){return "get".equals(op)||"profile".equals(op)||"logout".equals(op);}
+    Reply call(String op,byte[] body)throws Exception{
+        boolean priority=urgent(op);
+        if(priority){
+            synchronized(urgentMonitor){urgentWaiters++;}
+            try{lane.lockInterruptibly();try{return exchange(op,body);}finally{lane.unlock();}}
+            finally{synchronized(urgentMonitor){if(--urgentWaiters==0)urgentMonitor.notifyAll();}}
+        }
+        for(;;){
+            synchronized(urgentMonitor){while(urgentWaiters>0)urgentMonitor.wait();}
+            lane.lockInterruptibly();
+            boolean yield;synchronized(urgentMonitor){yield=urgentWaiters>0;}
+            if(!yield)try{return exchange(op,body);}finally{lane.unlock();}
+            lane.unlock();
+        }
+    }
     private Reply exchange(String op,byte[] body)throws Exception{
         final long id=++sequence;final CompletableFuture<Reply> result=new CompletableFuture<>();
         handler.post(()->{

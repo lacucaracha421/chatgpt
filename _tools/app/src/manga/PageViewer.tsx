@@ -71,6 +71,10 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
   }
   const [failedPages, setFailedPages] = useState<Set<number>>(() => new Set());
   const markFailed = (value: number) => setFailedPages((current) => current.has(value) ? current : new Set(current).add(value));
+  const [settledKeys, setSettledKeys] = useState<Set<string>>(() => new Set());
+  const markSettled = useCallback((key: string) => {
+    setSettledKeys((current) => current.has(key) ? current : new Set(current).add(key));
+  }, []);
   const [ratios, setRatios] = useState<Record<number, number>>({});
   const recordRatio = useCallback((value: number, ratio: number) => {
     setRatios((current) => Math.abs((current[value] ?? 0) - ratio) < 0.001 ? current : { ...current, [value]: ratio });
@@ -265,8 +269,9 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
     if (privacyMode) {
       return <ReaderPageBox key={value} ratio={ratio}><Skeleton className="privacy-mask manga-reader__mask" label="비공개 모드" /></ReaderPageBox>;
     }
-    return <ReaderPage key={`${value}:${pageUrls[value - 1]}`} src={pageUrls[value - 1] ?? ""} alt={`${title} ${value}페이지`} ratio={ratio}
-      onRatio={(next) => recordRatio(value, next)} onError={() => markFailed(value)} />;
+    const pageKey = `${value}:${pageUrls[value - 1] ?? ""}`;
+    return <ReaderPage key={pageKey} src={pageUrls[value - 1] ?? ""} alt={`${title} ${value}페이지`} ratio={ratio}
+      onRatio={(next) => recordRatio(value, next)} onSettled={() => markSettled(pageKey)} onError={() => markFailed(value)} />;
   };
 
   const edge = (side: "left" | "right") => {
@@ -317,8 +322,13 @@ function PageViewerContent({ title, pageUrls, initialPage, artist, bookmark, onP
               {pages.map(renderPage)}
             </div>
           </ReaderSpread>
-          {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true"
-            onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />)}
+          {!privacyMode && pages.every(value => failedPages.has(value) || settledKeys.has(`${value}:${pageUrls[value - 1] ?? ""}`))
+            && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" fetchPriority="low" decoding="async" referrerPolicy="no-referrer" aria-hidden="true"
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight);
+                markSettled(`${value}:${pageUrls[value - 1] ?? ""}`);
+              }} />)}
         </div>
         <div ref={chrome.ref} className="asset-viewer__chrome">
           <div className="asset-viewer__topbar" data-tauri-drag-region="deep"

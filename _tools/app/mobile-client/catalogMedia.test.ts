@@ -78,6 +78,23 @@ it('measures the six-slot queue with twelve cold visible covers at fixed fixture
   }finally{vi.useRealTimers();}
 });
 
+it('holds reader page preloads until the target page finishes, then starts forward pages first',async()=>{
+  const page=(index:number,visible:()=>boolean)=>{
+    const controller=new AbortController();controllers.push(controller);
+    const result=catalogImageTicket({workId:'post',revision:'1',kind:'page',index,url:'',source:'somi'},controller.signal,visible);
+    void result.catch(()=>{});return result;
+  };
+  const prev2=page(22,()=>false),prev1=page(23,()=>false);
+  const target=page(24,()=>true);
+  const next1=page(25,()=>false),next2=page(26,()=>false);
+  await Promise.resolve();
+  expect(mocks.native.mock.calls.map(([,p])=>p.index)).toEqual([24]);
+  replies[0].resolve({url:'cached'});await target;
+  expect(mocks.native.mock.calls.map(([,p])=>p.index)).toEqual([24,25,26,22,23]);
+  for(let i=1;i<=4;i++)replies[i].resolve({url:'cached'});
+  await Promise.all([prev2,prev1,next1,next2]);
+});
+
 it.each(['cover','page'] as const)('blocks a %s request under only the NSFW filter',async kind=>{
   localStorage.setItem('lakomics.mobile.nsfwFilter','1');
   await expect(catalogImageTicket({...request,kind},new AbortController().signal)).rejects.toHaveProperty('name','AbortError');

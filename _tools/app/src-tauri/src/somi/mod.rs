@@ -7,14 +7,14 @@ use crate::{
 };
 use index::{plan_runs, SomiIndex};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex, OnceLock,
     },
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 const LOGIN: &str = "SOMI_LOGIN_REQUIRED";
 /// How far back counts are read again. Votes settle within weeks.
 const REFRESH_DAYS: i64 = 90;
@@ -54,7 +54,7 @@ pub(crate) struct SearchPage {
     items: Vec<Post>,
     total: i64,
 }
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct FilledCover {
     id: String,
     cover: String,
@@ -91,7 +91,6 @@ pub(crate) struct SomiState {
     opened: Mutex<HashMap<String, (Instant, Result<OpenedPost, String>)>>,
     previews: Mutex<HashMap<String, (Instant, String)>>,
     open_gate: tokio::sync::Mutex<()>,
-    thumb_gate: tokio::sync::Mutex<()>,
     fill_generation: AtomicU64,
     fill_gate: tokio::sync::Mutex<()>,
     auth_gate: tokio::sync::Mutex<()>,
@@ -237,6 +236,7 @@ impl SomiState {
     }
     fn clear_session(&self, app: &AppHandle) -> Result<(), String> {
         self.epoch.fetch_add(1, Ordering::AcqRel);
+        thumbs::bump_session_epoch();
         thumbs::AUTHENTICATED.store(false, Ordering::Release);
         *locked(&self.profile)? = None;
         *locked(&self.checked)? = Some(Instant::now());
@@ -287,6 +287,8 @@ impl SomiState {
         }
         let profile = locked(&self.profile)?.clone();
         if collect && profile.is_some() {
+            let epoch = self.epoch.load(Ordering::Acquire);
+            app.state::<KoneTransport>().warm(app, epoch);
             self.start_sync(app, false, false)?;
         }
         let (collected, total, complete, _) = locked(self.index(app)?)?.progress()?;
@@ -479,12 +481,59 @@ impl SomiState {
     }
     fn cached_cover(&self, post: &Post) -> Result<Option<String>, String> {
         if let Some(key) = post.cover_key.as_deref().filter(|key| thumbs::saved(key)) {
-            return Ok(Some(format!("http://lakomics.localhost/somi-thumb/{key}")));
+            let rev = thumbs::session_epoch();
+            return Ok(Some(format!(
+                "http://lakomics.localhost/somi-thumb/{key}/v{rev}"
+            )));
         }
         Ok(locked(&self.previews)?
             .get(&post.id)
             .filter(|(at, _)| at.elapsed() < Duration::from_secs(540))
             .map(|(_, url)| url.clone()))
+    }
+    fn spawn_thumb_downloads(&self, app: &AppHandle, urls: Vec<String>, epoch: u64) {
+        for url in urls {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let Ok(_permit) = thumbs::permits().acquire().await else {
+                    return;
+                };
+                if !app.state::<SomiState>().current(epoch) {
+                    return;
+                }
+                let _ = tauri::async_runtime::spawn_blocking(move || thumbs::download(&url)).await;
+            });
+        }
+    }
+    fn collect_resolved_covers(
+        &self,
+        app: &AppHandle,
+        ids: &[String],
+        seen: &mut HashSet<String>,
+        resolved: &mut Vec<FilledCover>,
+        epoch: u64,
+    ) -> Result<Vec<FilledCover>, String> {
+        let posts = locked(self.index(app)?)?.posts_by_ids(ids)?;
+        let mut batch = Vec::new();
+        let mut downloads = Vec::new();
+        for post in posts {
+            if seen.contains(&post.id) {
+                continue;
+            }
+            if let Some(cover) = self.cached_cover(&post)? {
+                seen.insert(post.id.clone());
+                if thumbs::key_of(&cover).is_some() {
+                    downloads.push(cover.clone());
+                }
+                let item = FilledCover { id: post.id, cover };
+                batch.push(item.clone());
+                resolved.push(item);
+            }
+        }
+        if !downloads.is_empty() && self.current(epoch) {
+            self.spawn_thumb_downloads(app, downloads, epoch);
+        }
+        Ok(batch)
     }
     fn begin_fill(&self) -> u64 {
         self.fill_generation.fetch_add(1, Ordering::AcqRel) + 1
@@ -508,16 +557,25 @@ impl SomiState {
         }
         // A fill only owns one visible page, even when the grid has appended older pages.
         let ids = &ids[..ids.len().min(60)];
+        let mut seen = HashSet::new();
+        let mut resolved = Vec::new();
+        let initial = self.collect_resolved_covers(app, ids, &mut seen, &mut resolved, epoch)?;
+        if !initial.is_empty() && self.fill_is_current(generation) {
+            let _ = app.emit("somi-covers", &initial);
+        }
         let posts = locked(self.index(app)?)?.posts_by_ids(ids)?;
         let mut need = Vec::new();
         for post in &posts {
-            if post.cover_key.as_deref().is_some_and(|key| !key.is_empty())
+            if !seen.contains(&post.id)
+                && post.cover_key.as_deref().is_some_and(|key| !key.is_empty())
                 && self.cached_cover(post)?.is_none()
             {
                 need.push(locked(self.index(app)?)?.rank_of(post)?);
             }
         }
-        for (from, size) in plan_runs(need) {
+        let runs = plan_runs(need);
+        let multi_run = runs.len() > 1;
+        for (from, size) in runs {
             if !self.current(epoch) {
                 return Err(LOGIN.into());
             }
@@ -533,36 +591,19 @@ impl SomiState {
             if !self.current(epoch) {
                 return Err(LOGIN.into());
             }
+            locked(self.index(app)?)?.record_window(cursor.as_ref(), &page, false)?;
+            // Persist covers of any completed run even if a newer scroll supersedes the remaining runs.
+            let batch = self.collect_resolved_covers(app, ids, &mut seen, &mut resolved, epoch)?;
             if !self.fill_is_current(generation) {
                 return Ok(Vec::new());
             }
-            locked(self.index(app)?)?.record_window(cursor.as_ref(), &page, false)?;
-        }
-        let posts = locked(self.index(app)?)?.posts_by_ids(ids)?;
-        let mut resolved = Vec::new();
-        let mut downloads = Vec::new();
-        for post in posts {
-            if let Some(cover) = self.cached_cover(&post)? {
-                if thumbs::key_of(&cover).is_some() {
-                    downloads.push(cover.clone());
-                }
-                resolved.push(FilledCover { id: post.id, cover });
+            if multi_run && !batch.is_empty() {
+                let _ = app.emit("somi-covers", &batch);
             }
         }
         if !self.current(epoch) {
             return Err(LOGIN.into());
         }
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let state = app.state::<SomiState>();
-            let _gate = state.thumb_gate.lock().await;
-            for url in downloads {
-                if !state.current(epoch) {
-                    break;
-                }
-                let _ = tauri::async_runtime::spawn_blocking(move || thumbs::download(&url)).await;
-            }
-        });
         Ok(resolved)
     }
     pub async fn open_post(&self, app: &AppHandle, id: &str) -> Result<OpenedPost, String> {
@@ -633,6 +674,7 @@ impl SomiState {
     }
     pub fn save_page(&self, app: &AppHandle, id: &str, page: u32) -> Result<(), String> {
         self.require_login()?;
+        app.state::<KoneTransport>().touch();
         locked(self.index(app)?)?.save_page(id, page)?;
         self.shared_generation.fetch_add(1, Ordering::AcqRel);
         self.debounce_state(app);

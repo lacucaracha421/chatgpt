@@ -23,10 +23,10 @@ import './Somi.css';
 const SORTS:readonly {value:SomiSort;label:string}[]=[{value:'new',label:'최신순'},{value:'old',label:'오래된순'},{value:'votes',label:'추천순'},{value:'views',label:'조회순'},{value:'comments',label:'댓글순'}];
 const PERIODS=[{value:'all',label:'전체'},{value:'7',label:'1주'},{value:'30',label:'1개월'},{value:'90',label:'3개월'},{value:'365',label:'1년'}];
 type Options={query:string;sort:SomiSort;days:number|null;bookmarked:boolean};
-type View={result:SomiSearchPage;options:Options;page:number;generation:number;fillIds:string[]};
+type View={result:SomiSearchPage;options:Options;page:number;generation:number};
 type OpenResponse={title:string;writer:string;initialPage:number;manifest:CatalogReaderManifest};
 type Opened=OpenResponse&{id:string;post:SomiPost};
-const FILL_BATCH=6;
+const somiCoverSource=(post:SomiPost)=>post.gone?null:post.cover??(post.coverKey?`somi://${post.coverKey}`:null);
 const sameOptions=(a:Options,b:Options)=>a.query===b.query&&a.sort===b.sort&&a.days===b.days&&a.bookmarked===b.bookmarked;
 const errorText=(error:unknown)=>String(error).includes('SOMI_POST_GONE')?'사라졌거나 열 수 없는 게시글입니다':String(error).includes('SOMI_NO_IMAGES')?'이미지가 없는 게시글입니다':'소미를 불러오지 못했습니다';
 
@@ -42,7 +42,7 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
   const statusRef=useRef(status);statusRef.current=status;const optionsRef=useRef(options);optionsRef.current=options;
   const current=views[shown],currentRef=useRef(current);currentRef.current=current;const shownRef=useRef(shown);shownRef.current=shown;
   const generation=useRef(0),session=useRef(0),loading=useRef(false),alive=useRef(true),requested=useRef(active&&!paused);requested.current=active&&!paused;
-  const filled=useRef<number|null>(null),refilledCovers=useRef(new Set<string>()),bookmarkBusy=useRef(new Set<string>()),readerRef=useRef(reader);readerRef.current=reader;
+  const refilledCovers=useRef(new Set<string>()),bookmarkBusy=useRef(new Set<string>()),readerRef=useRef(reader);readerRef.current=reader;
   const openingRef=useRef(false),loggingOut=useRef(false);
   const section=useRef<HTMLElement>(null),list=useRef<HTMLDivElement>(null),grids=[useRef<HTMLDivElement>(null),useRef<HTMLDivElement>(null),useRef<HTMLDivElement>(null),useRef<HTMLDivElement>(null)],release=useRef<(()=>void)|null>(null);
   const collecting=useDelayedBusy(!!status?.loggedIn&&status.syncing&&!status.complete);
@@ -68,11 +68,11 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
         incoming=batch.items;if(!incoming.length)break;
         result.items.push(...incoming.filter(p=>!result.items.some(old=>old.id===p.id)));
       }
-      await prepareCatalogCovers(result.items.slice(0,12).map(p=>({provider:'kHentai' as const,providerWorkId:p.id,thumbnailUrl:p.cover})),'somi',new AbortController().signal,250);
+      await prepareCatalogCovers(result.items.slice(0,12).map(p=>({provider:'somi' as const,providerWorkId:p.id,thumbnailUrl:p.cover})),'somi',new AbortController().signal,250);
       if(!alive.current||request!==generation.current)return;
       const items=more&&previous?[...previous.result.items,...result.items.filter(p=>!previous.result.items.some(old=>old.id===p.id))]:result.items;
       const base=next.bookmarked?2:0,slot=shownRef.current===base?base+1:base;
-      setViews(old=>{const value=[...old];value[slot]={result:{...result,items},options:next,page,generation:request,fillIds:incoming.filter(p=>!p.cover&&p.coverKey&&!p.gone).map(p=>p.id)};return value;});setPending(slot);
+      setViews(old=>{const value=[...old];value[slot]={result:{...result,items},options:next,page,generation:request};return value;});setPending(slot);
     }catch(error){if(alive.current&&request===generation.current){loading.current=false;setBusy(false);fail(error);}}
   },[fail]);
   useLayoutEffect(()=>{
@@ -88,19 +88,6 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
       setShown(pending);setPending(null);loading.current=false;setBusy(false);
     },250,late=>{release.current=revealTogether(late,1500);});
   },[pending,views]);
-  useEffect(()=>{
-    if(!requested.current||privacy||busy||!current||filled.current===current.generation||current.generation!==generation.current)return;filled.current=current.generation;
-    if(!current.fillIds.length)return;const request=current.generation,slot=shown,controller=new AbortController();
-    const ids=current.fillIds;
-    // The native side answers only after every cover of a call is downloaded, so ask in small
-    // batches: covers appear as they arrive instead of all at once after up to a minute.
-    void (async()=>{for(let start=0;start<ids.length;start+=FILL_BATCH){
-      const covers=await native<{id:string;cover:string}[]>('somiFillCovers',{ids:ids.slice(start,start+FILL_BATCH)},controller.signal,120_000);
-      if(controller.signal.aborted||!alive.current||!requested.current||request!==generation.current)return;const resolved=new Map(covers.map(c=>[c.id,c.cover]));
-      setViews(old=>{const view=old[slot];if(!view||view.generation!==request)return old;const next=[...old];next[slot]={...view,result:{...view.result,items:view.result.items.map(p=>resolved.has(p.id)?{...p,cover:resolved.get(p.id)!}:p)}};return next;});
-    }})().catch(()=>{});
-    return()=>{controller.abort();if(filled.current===request)filled.current=null;};
-  },[current?.generation,busy,shown,active,paused,privacy]);
   const check=useCallback(async(collect=false)=>{
     const epoch=session.current;
     try{const next=await native<SomiStatus>('somiStatus',{collect},undefined,70_000);if(!alive.current||epoch!==session.current)return;
@@ -123,7 +110,7 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
     if(cached!==null){
       if(list.current&&currentRef.current?.options.bookmarked!==bookmarked){scrollPositions.current[1-mode]=list.current.scrollTop;restoreScroll.current=scrollPositions.current[mode];}
       const request=++generation.current;
-      setViews(old=>old.map((view,slot)=>slot===cached&&view?{...view,generation:request,fillIds:view.result.items.filter(post=>!post.cover&&post.coverKey&&!post.gone).map(post=>post.id)}:view));
+      setViews(old=>old.map((view,slot)=>slot===cached&&view?{...view,generation:request}:view));
       setShown(cached);
     }else if(statusRef.current?.loggedIn&&!loading.current)void load(optionsRef.current);
   },[active,paused,bookmarked,load]);
@@ -142,11 +129,10 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
     if(post.gone||!post.coverKey||refilledCovers.current.has(post.id))return;
     refilledCovers.current.add(post.id);
     const epoch=session.current;
-    void native<{id:string;cover:string}[]>('somiFillCovers',{ids:[post.id]},undefined,70_000).then(covers=>{
-      if(!alive.current||epoch!==session.current)return;
-      const match=covers.find(c=>c.id===post.id);
-      if(!match)return;
-      setViews(old=>old.map(view=>view?{...view,result:{...view.result,items:view.result.items.map(p=>p.id===post.id?{...p,cover:match.cover}:p)}}:null));
+    void native<{url:string}>('somiImage',{id:post.id,kind:'cover',index:0,refresh:true},undefined,70_000).then(ticket=>{
+      if(!alive.current||epoch!==session.current||!ticket?.url)return;
+      const refreshed=ticket.url.includes('?')?`${ticket.url}&r=1`:`${ticket.url}?r=1`;
+      setViews(old=>old.map(view=>view?{...view,result:{...view.result,items:view.result.items.map(p=>p.id===post.id?{...p,cover:refreshed}:p)}}:null));
     }).catch(()=>{});
   },[]);
   const open=async(post:SomiPost)=>{if(openingRef.current||privacy)return;openingRef.current=true;setOpening(true);const epoch=session.current,readingBookmarks=bookmarked;try{const result=await native<OpenResponse>('somiOpen',{id:post.id},undefined,70_000);if(alive.current&&requested.current&&epoch===session.current&&optionsRef.current.bookmarked===readingBookmarks)setReader({...result,id:post.id,post});}catch(error){if(epoch===session.current){fail(error);const value=String(error);if(value.includes('SOMI_POST_GONE')||value.includes('SOMI_NO_IMAGES')){cachedSlots.current[1-mode]=null;setViews(old=>old.map(view=>{if(!view||!view.result.items.some(item=>item.id===post.id))return view;if(view.options.bookmarked)return {...view,result:{...view.result,items:view.result.items.map(item=>item.id===post.id?{...item,gone:true}:item)}};return {...view,result:{items:view.result.items.filter(item=>item.id!==post.id),total:Math.max(0,view.result.total-1)}};}));}}}finally{openingRef.current=false;if(alive.current)setOpening(false);}};
@@ -164,7 +150,7 @@ export function Somi({active,visible=active,paused,backRef,onSourceChange,onRead
       {collecting&&<p className="hint" role="status">목차 모으는 중 {status?.collected??0} / {status?.total??'…'}</p>}
       {status?.loggedIn===false?<EmptyState title="코네 로그인이 필요합니다" action={<Button onClick={()=>void native('somiLogin').catch(fail)}>코네 로그인</Button>}/>:!status?message?<EmptyState title="소미를 불러오지 못했습니다" action={<Button onClick={()=>{setMessage('');void check(true);}}>다시 시도</Button>}/>:<div role="status" aria-label="소미 준비 중"/>:<>
         <div className="somi-results">{views.map((view,slot)=>view&&<div key={slot} ref={grids[slot]} className="somi-list-slot" aria-hidden={slot!==shown} inert={!active||paused||slot!==shown||busy||current?.options.bookmarked!==bookmarked} style={{display:slot===shown||slot===pending?'block':'none',visibility:slot===shown?'visible':'hidden',position:slot===shown?'relative':'absolute',top:0,left:0}}>
-          {view.result.items.length?<div className="catalog-grid">{view.result.items.map(post=><CatalogCard key={post.id} className={post.gone?'somi-card--gone':undefined} arriving={false} onArrived={()=>{}} disabled={!active||paused||opening||busy||slot!==shown||current?.options.bookmarked!==bookmarked} onClick={()=>void open(post)} action={<BookmarkToggle form="corner" className="somi-card-bookmark" label={post.bookmarked?'북마크 해제':'북마크'} bookmarked={post.bookmarked} disabled={!active||paused||busy||slot!==shown||current?.options.bookmarked!==bookmarked||bookmarkPending.has(post.id)} onClick={()=>void toggle(post)}/>}>{arrival=><><div className="catalog-cover"><CatalogCover item={{provider:'kHentai',providerWorkId:post.id,thumbnailUrl:post.cover}} revision="somi" active={active&&!paused&&slot===shown&&!reader} onBroken={()=>refillCover(post)} arrival={arrival}/>{post.gone&&<Badge variant="scrim" className="catalog-cover-pages">삭제됨</Badge>}</div><strong>{post.title}</strong><span>{post.writerName||post.writerHandle}</span></>}</CatalogCard>)}</div>:<EmptyState title="검색 결과 없음"/>}
+          {view.result.items.length?<div className="catalog-grid">{view.result.items.map(post=><CatalogCard key={post.id} className={post.gone?'somi-card--gone':undefined} arriving={false} onArrived={()=>{}} disabled={!active||paused||opening||busy||slot!==shown||current?.options.bookmarked!==bookmarked} onClick={()=>void open(post)} action={<BookmarkToggle form="corner" className="somi-card-bookmark" label={post.bookmarked?'북마크 해제':'북마크'} bookmarked={post.bookmarked} disabled={!active||paused||busy||slot!==shown||current?.options.bookmarked!==bookmarked||bookmarkPending.has(post.id)} onClick={()=>void toggle(post)}/>}>{arrival=><><div className="catalog-cover"><CatalogCover item={{provider:'somi',providerWorkId:post.id,thumbnailUrl:somiCoverSource(post)}} revision="somi" active={active&&!paused&&slot===shown&&!reader} onBroken={()=>refillCover(post)} arrival={arrival}/>{post.gone&&<Badge variant="scrim" className="catalog-cover-pages">삭제됨</Badge>}</div><strong>{post.title}</strong><span>{post.writerName||post.writerHandle}</span></>}</CatalogCard>)}</div>:<EmptyState title="검색 결과 없음"/>}
         </div>)}</div>
         {current&&current.result.items.length<current.result.total&&<Button variant="ghost" disabled={busy} onClick={()=>void load(current.options,true)}>더 보기</Button>}
       </>}

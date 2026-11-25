@@ -18,11 +18,13 @@ import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 type Transform={scale:number;x:number;y:number};
 /** Share of the stage width on each side whose tap turns the page. */
 export const SIDE_TAP=0.3;
-function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,onReady,onDispose,attempt,source,refreshable}:{workId:string;manifestRevision:string;page:CatalogReaderPage;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number;source?:'kHentai'|'somi';refreshable:boolean}){
+function ReaderPage({workId,manifestRevision,page,isTarget,transform,onRefresh,onFailure,onReady,onDispose,attempt,source,refreshable}:{workId:string;manifestRevision:string;page:CatalogReaderPage;isTarget:boolean;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number;source?:'kHentai'|'somi';refreshable:boolean}){
   const [src,setSrc]=useState(''),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
+  const targetRef=useRef(isTarget);targetRef.current=isTarget;
+  useEffect(()=>{if(isTarget)catalogImageTicket.drain?.();},[isTarget]);
   useEffect(()=>{
     setFailed(false);const controller=new AbortController();
-    void catalogImageTicket({workId,revision:manifestRevision,kind:'page',index:page.index,url:page.url,...(source==='somi'?{source}:{})},controller.signal).then(async ticket=>{
+    void catalogImageTicket({workId,revision:manifestRevision,kind:'page',index:page.index,url:page.url,...(source==='somi'?{source}:{})},controller.signal,()=>targetRef.current).then(async ticket=>{
       if(controller.signal.aborted)return;
       if(!ticket.url.startsWith('https://app.lakomics.local/media-cache/')&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid catalog page');
       const decoded=await decodeImage(ticket.url,controller.signal);if(controller.signal.aborted)return;
@@ -117,7 +119,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing,bookm
         }
       }} onPointerCancel={()=>gesture.current.points.clear()}>
         <div className="catalog-reader-spread" style={{width:spreadWidth||'100%',height:spreadWidth?spreadWidth/spreadRatio:'100%',transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}>
-          {pool.map(page=><div key={`${manifest.providerWorkId}:${page.index}`} className="catalog-reader-leaf" style={{display:shown.some(p=>p.index===page.index)?undefined:'none',flex:`0 0 ${pageRatio(page)/spreadRatio*100}%`,order:page.index}}><ReaderPage refreshable={refreshable} source={manifest.provider} workId={manifest.providerWorkId} manifestRevision={manifest.publicationRevision} page={page} onRefresh={onRefresh} onReady={pageReady} onDispose={pageDisposed} attempt={attempt} onFailure={()=>{setFailedPages(old=>old.includes(page.index)?old:[...old,page.index]);if(targetPages.some(p=>p.index===page.index))refreshOnce();}}/></div>)}
+          {pool.map(page=><div key={`${manifest.providerWorkId}:${page.index}`} className="catalog-reader-leaf" style={{display:shown.some(p=>p.index===page.index)?undefined:'none',flex:`0 0 ${pageRatio(page)/spreadRatio*100}%`,order:page.index}}><ReaderPage refreshable={refreshable} source={manifest.provider} workId={manifest.providerWorkId} manifestRevision={manifest.publicationRevision} page={page} isTarget={targetPages.some(p=>p.index===page.index)} onRefresh={onRefresh} onReady={pageReady} onDispose={pageDisposed} attempt={attempt} onFailure={()=>{setFailedPages(old=>old.includes(page.index)?old:[...old,page.index]);if(targetPages.some(p=>p.index===page.index))refreshOnce();}}/></div>)}
           {blankCover&&<div className="catalog-reader-blank" aria-hidden="true" style={{flex:`0 0 ${pageRatio(shown[0])/spreadRatio*100}%`,order:1}}/>}
         </div>
         <BusyLabel busy={target!==current&&!targetPages.some(page=>failedPages.includes(page.index))} idle={target!==current&&targetPages.some(page=>failedPages.includes(page.index))&&<span className="reader-loading-next" role="status"><Button size="sm" onClick={()=>{setFailedPages([]);setAttempt(n=>n+1);}}>다시 시도</Button></span>}><span className="reader-loading-next" role="status">{`${target+1}페이지 준비 중…`}</span></BusyLabel>

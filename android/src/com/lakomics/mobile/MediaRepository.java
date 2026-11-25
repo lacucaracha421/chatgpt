@@ -336,14 +336,17 @@ final class MediaRepository {
   Scope scope=scopedIdentity("somi/"+(cover?"cover/":"page/")+key+(cover?"/"+Math.round(148*density):""));scope.cover=cover;scope.kind=cover?ThumbnailCache.Kind.KEEP:ThumbnailCache.Kind.VIEW;return scope;
  }
  JSONObject somiCached(String id,String key)throws Exception{Scope scope=somiScope(id,key,true);cache().file(scope.key,scope.generation,scope.kind);return local(scope,"image/webp");}
- JSONObject somiImage(String id,String key,boolean cover,String url,CancellationSignal signal)throws Exception{
+ JSONObject somiImage(String id,String key,boolean cover,String url,CancellationSignal signal)throws Exception{return somiImage(id,key,cover,url,false,signal);}
+ JSONObject somiImage(String id,String key,boolean cover,String url,boolean refresh,CancellationSignal signal)throws Exception{
   NetworkPolicy.somiImage(url);Scope scope=somiScope(id,key,cover);LockEntry entry=retainLock(scope.key);boolean locked=false;
+  long limit=cover?ThumbnailCache.MAX_FILE:MAX_VIEW_IMAGE;
   try{lock(entry,signal);locked=true;signal.throwIfCanceled();
-   try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache().remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
+   if(refresh)cache().remove(scope.key,scope.generation);
+   else try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache().remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
    active.add(signal);
-   try{cache().obtain(scope.key,scope.generation,scope.kind,MAX_VIEW_IMAGE,file->{
+   try{cache().obtain(scope.key,scope.generation,scope.kind,limit,file->{
     // This process has cookies disabled. The existing download path sends neither cookies nor cloud credentials.
-    client.download(url,file,MAX_VIEW_IMAGE,signal);signal.throwIfCanceled();
+    client.download(url,file,limit,signal);signal.throwIfCanceled();
     if(cover){
      int width=Math.max(1,Math.round(148*density)),height=Math.max(1,Math.round(208*density));
      android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();bounds.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeFile(file.getPath(),bounds);
