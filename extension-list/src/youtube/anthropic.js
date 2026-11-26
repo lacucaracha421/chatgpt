@@ -61,9 +61,9 @@ async function httpError(response) {
   }
   const status = response.status;
   let message;
-  if (status === 401 || status === 403) message = "API 키가 올바르지 않아요. 옵션에서 확인해 주세요.";
-  else if (status === 429) message = "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.";
-  else message = `API 오류가 났어요 (${status}). 잠시 후 다시 시도해 주세요.`;
+  if (status === 401 || status === 403) message = "API 키 오류 · 옵션에서 확인 필요";
+  else if (status === 429) message = "요청 한도 초과 · 잠시 후 재시도";
+  else message = `API 오류 (${status}) · 잠시 후 재시도`;
   console.warn("[Lakomics YouTube] Anthropic API error", status, detail);
   return apiError(message, { status });
 }

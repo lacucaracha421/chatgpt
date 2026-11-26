@@ -8,8 +8,11 @@ import { assetUrl, thumbnailUrl } from "../../assets/mediaUrl";
 import { commandErrorMessage } from "../../library/errorMessage";
 import { Button } from "../../shared/ui/Button";
 import { Badge } from "../../shared/ui/Badge";
+import { Checkbox } from "../../shared/ui/Checkbox";
 import { Dialog } from "../../shared/ui/Dialog";
-import { TextField } from "../../shared/ui/TextField";
+import { Select } from "../../shared/ui/Select";
+import { Skeleton } from "../../shared/ui/Skeleton";
+import { Field, TextInput } from "../../shared/ui/TextInput";
 import type { CharacterGroup } from "../hubApi";
 import { folderPath, suggestionName, type Suggestion, type SuggestionApi, type SuggestionContext, type SuggestionDetail, type SuggestionImage, type SuggestionResult } from "./client";
 
@@ -85,7 +88,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
         groupId: groupId || null, expectedGroupRevision: groups.find(group => group.id === groupId)?.revision ?? null,
       }) : target ? await api.merge({ tag: suggestion.tag, targetId: target.id, expectedFingerprint: target.fingerprint, previewToken: detail.previewToken, linkTag }) : null;
       if (result) onSaved(result);
-    } catch (reason) { setError(commandErrorMessage(reason, "저장하지 못했습니다. 목록을 새로 불러온 뒤 다시 확인해 주세요.")); }
+    } catch (reason) { setError(commandErrorMessage(reason, "저장 실패 · 목록 새로고침 후 재확인 필요")); }
     finally { saving.current = false; setBusy(false); }
   }
   const selectDisabled = busy || previewPending || !context;
@@ -99,18 +102,18 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
       <div className={mode === "register" ? "character-suggestion-dialog__columns" : "character-suggestion-dialog__merge"}>
         <div className="character-suggestion-dialog__settings">
           {mode === "register" ? <>
-            <TextField label="이름" value={name} disabled={busy || previewPending} onChange={event => setName(event.target.value)} />
-            <small>이름을 고쳐도 태그 연결은 그대로예요.</small>
-            <label className="character-suggestion-field">시리즈 폴더<select value={seriesId} disabled={selectDisabled} onChange={event => setSeriesId(event.target.value)}>
-              <option value="">폴더를 골라 주세요</option>
+            <Field label="이름"><TextInput value={name} disabled={busy || previewPending} onChange={event => setName(event.target.value)} /></Field>
+            <small>이름 변경 시 태그 연결 유지</small>
+            <Select label="시리즈 폴더" value={seriesId} disabled={selectDisabled} onChange={event => setSeriesId(event.target.value)}>
+              <option value="">폴더 선택</option>
               {context?.folders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(folder.id, context.folders)}</option>)}
-            </select></label>
-            <label className="character-suggestion-field">그룹<select value={groupId} disabled={busy || previewPending || !detail} onChange={event => setGroupId(event.target.value)}>
+            </Select>
+            <Select label="그룹" value={groupId} disabled={busy || previewPending || !detail} onChange={event => setGroupId(event.target.value)}>
               <option value="">없음</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select></label>
-            <label><input type="checkbox" checked={includeOutside} disabled={busy || previewPending} onChange={event => setIncludeOutside(event.target.checked)} /> 시리즈 폴더 밖 이미지도 후보로</label>
+            </Select>
+            <Checkbox checked={includeOutside} disabled={busy || previewPending} onChange={event => setIncludeOutside(event.target.checked)}>시리즈 폴더 밖 이미지도 후보로</Checkbox>
           </> : <>
-            <TextField label="캐릭터 찾기" value={query} disabled={busy || previewPending} onChange={event => setQuery(event.target.value)} />
+            <Field label="캐릭터 찾기"><TextInput value={query} disabled={busy || previewPending} onChange={event => setQuery(event.target.value)} /></Field>
             <div className="character-suggestion-targets" role="radiogroup" aria-label="합칠 캐릭터">
               {context?.targets.filter(item => item.seriesClassificationId && item.displayName.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
                 .sort((a, b) => Number(b.seriesClassificationId === suggestion.seriesId) - Number(a.seriesClassificationId === suggestion.seriesId))
@@ -119,13 +122,13 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
                 </label>)}
             </div>
           </>}
-          <label><input type="checkbox" checked={linkTag} disabled={busy || previewPending} onChange={event => setLinkTag(event.target.checked)} /> {mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</label>
-          {!linkTag && <small>연결하지 않으면 이 태그가 다시 제안될 수 있어요.</small>}
-          <p className="character-suggestion-note">{mode === "register" ? "시리즈 폴더 안의 단독 이미지를 먼저 골라 두었어요. 폴더 안 이미지가 5장보다 적으면 밖의 이미지로 채워요." : "후보는 확인에서 볼 수 있어요. 바로 확정하지 않아요."}</p>
+          <Checkbox checked={linkTag} disabled={busy || previewPending} onChange={event => setLinkTag(event.target.checked)}>{mode === "register" ? "태그를 이 캐릭터에 연결" : "이 태그를 선택한 캐릭터로 기억"}</Checkbox>
+          {!linkTag && <small>미연결 시 이 태그 재제안 가능</small>}
+          <p className="character-suggestion-note">{mode === "register" ? "시리즈 폴더 내 단독 이미지 우선 선택 · 5장 미만이면 외부 이미지로 보충" : "후보는 확인 목록에 추가 · 즉시 확정 안 함"}</p>
         </div>
         {mode === "register" && <div className="character-suggestion-dialog__images" inert={detailSeries !== chosenSeries || previewPending ? true : undefined}>
-          {!chosenSeries && <p>레퍼런스를 고를 시리즈 폴더를 선택해 주세요.</p>}
-          <BusyLabel busy={!!(chosenSeries && !detail && !error)}><p role="status">이미지 불러오는 중…</p></BusyLabel>
+          {!chosenSeries && <p>레퍼런스를 고를 시리즈 폴더 선택 필요</p>}
+          {chosenSeries && !detail && !error && <Skeleton className="character-suggestion-references-skeleton" label="이미지 불러오는 중" />}
           {detail && <>
             <h3>레퍼런스 {references.length}<small>단독 우선 · 최대 8장</small></h3>
             <div ref={stripWheel} className="character-suggestion-references" role="group" aria-label="레퍼런스">
@@ -136,21 +139,21 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
                   : <div key={`empty-${index}`} className="character-suggestion-reference-empty" aria-label={`빈 레퍼런스 슬롯 ${index + 1}`}><span>{index + 1}</span></div>;
               })}
             </div>
-            {references.length < 5 && <p className="character-suggestion-warning">레퍼런스 5장 미만: 수동으로 시작해요.</p>}
-            {movingIn > 0 && <p className="character-suggestion-note">밖 표시가 있는 레퍼런스 {movingIn}장은 만들 때 시리즈 폴더로 옮겨요.</p>}
+            {references.length < 5 && <p className="character-suggestion-warning">레퍼런스 5장 미만 · 수동 모드 시작</p>}
+            {movingIn > 0 && <p className="character-suggestion-note">외부 레퍼런스 {movingIn}장 · 등록 시 시리즈 폴더로 이동</p>}
             <h3>레퍼런스 바꾸기<small>눌러서 크게 보기 · 단독 우선</small></h3>
             <div className="character-suggestion-replacements" role="group" aria-label="레퍼런스 바꾸기">
               {replacements.map(image => <ImageChoice key={image.assetId} image={image} privacyMode={privacyMode} disabled={busy || previewPending} onClick={() => setPreviewId(image.assetId)} />)}
-              {!replacements.length && <p className="character-suggestion-tag">바꿀 레퍼런스가 없습니다.</p>}
+              {!replacements.length && <p className="character-suggestion-tag">교체 가능한 레퍼런스 없음</p>}
             </div>
-            <p className="character-suggestion-candidate-summary">확인할 이미지 {candidateCount}장 — 등록하면 자동 태그가 확실하고 인식도 같다고 본 그림은 자동으로 확정하고, 나머지는 확인으로 보내요.</p>
+            <p className="character-suggestion-candidate-summary">확인 대상 {candidateCount}장 · 태그·인식 모두 일치 시 자동 확정, 나머지 확인 목록 이동</p>
           </>}
         </div>}
       </div>
       {error && <p role="alert">{error} <Button size="sm" disabled={busy || previewPending} onClick={() => setRetry(value => value + 1)}>다시 시도</Button></p>}
       <RegistrationScope onPendingChange={setPreviewPending} loadPreview={api.previewRegistration} request={{ seriesId: chosenSeries ?? "", mode: mode === "register" ? "suggestion" : "manual", referenceIds: references }} entries={context?.folders ?? []} onSeriesSelected={entry => { setContext(current => current ? { ...current, folders: [...current.folders.filter(folder => folder.id !== entry.id), entry] } : current); setSeriesId(entry.id); }}>
       {(guard, pending) => <div className="character-suggestion-dialog__footer">
-        <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 레퍼런스 {references.length}장 · 확인할 이미지 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 확인할 이미지로 넣어요. 기존 레퍼런스·판단은 유지해요.</>}</p>
+        <p>{mode === "register" ? <>{name || "캐릭터"} 등록 · 레퍼런스 {references.length}장 · 확인 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장 확인 추가 · 기존 레퍼런스·판단 유지</>}</p>
         <Button variant="ghost" disabled={busy || previewPending} onClick={onClose}>취소</Button>
         <Button variant="primary" disabled={busy || previewPending || pending || !detail || detailSeries !== chosenSeries || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => mode === "register" ? guard(save) : void save()}><BusyLabel busy={!!(busy)} idle={mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}>저장 중…</BusyLabel></Button>
       </div>}

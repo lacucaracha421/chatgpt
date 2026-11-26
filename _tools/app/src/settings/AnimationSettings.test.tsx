@@ -18,17 +18,17 @@ it("saves both options and keeps the restart note across visits", async () => {
   await waitFor(() => expect(select).toBeEnabled());
   expect(select).toHaveValue("system");
   expect(screen.getByRole("option", { name: "Windows 설정 따르기" })).toBeInTheDocument();
-  expect(select).toHaveAccessibleDescription("Windows에서 애니메이션 효과를 꺼 두어도 Lakomics에서는 움직임을 보여 줍니다. 바꾸면 앱을 다시 시작해야 적용됩니다.");
-  expect(screen.queryByText("다시 시작하면 적용됩니다")).not.toBeInTheDocument();
+  expect(select).toHaveAccessibleDescription("Windows 애니메이션이 꺼져 있어도 앱 내 움직임 유지 · 재시작 후 적용");
+  expect(screen.queryByText("재시작 후 적용")).not.toBeInTheDocument();
   await userEvent.selectOptions(select, "always");
   expect(bridge.invoke).toHaveBeenLastCalledWith("motion_preference", { preference: "always" });
-  expect(await screen.findByText("다시 시작하면 적용됩니다")).toBeVisible();
+  expect(await screen.findByText("재시작 후 적용")).toBeVisible();
   expect(select).toHaveValue("always");
   view.unmount();
   render(<AnimationSettings />);
-  expect(await screen.findByText("다시 시작하면 적용됩니다")).toBeVisible();
+  expect(await screen.findByText("재시작 후 적용")).toBeVisible();
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "애니메이션" }), "system");
-  await waitFor(() => expect(screen.queryByText("다시 시작하면 적용됩니다")).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText("재시작 후 적용")).not.toBeInTheDocument());
   expect(bridge.invoke).toHaveBeenLastCalledWith("motion_preference", { preference: "system" });
 });
 

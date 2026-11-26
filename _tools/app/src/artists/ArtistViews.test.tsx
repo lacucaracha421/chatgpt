@@ -452,7 +452,7 @@ describe("ArtistHub", () => {
     expect(within(preview).getByText("새 작가")).toBeInTheDocument();
     await user.click(within(preview).getByRole("button", { name: "2장 채우기" }));
     expect(gateway.applySourceFill).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("2장을 작가와 이었어요 · 새 작가 1명")).toBeInTheDocument();
+    expect(await screen.findByText("2장 연결 완료 · 새 작가 1명")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "작가 미상에서 보기" }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: "creator", creatorKey: "unknown:source" });
   });

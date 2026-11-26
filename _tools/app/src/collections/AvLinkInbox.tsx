@@ -206,15 +206,15 @@ function statusLabel(item: AvLinkInboxItem) {
 }
 
 function targetCopy(item: AvLinkInboxItem) {
-  if (applying(item)) return <><b>컬렉션에 적용하는 중</b><small>서버에 반영되면 목록에서 사라져요</small></>;
-  if (stopped(item)) return <><b>적용이 멈췄어요</b><small>다른 기기의 변경과 충돌했어요 · 상태 창의 “서버가 거절해 멈춘 변경”을 확인해 주세요</small></>;
-  if (activeStatus(item)) return <><b>LibreDMM에서 찾는 중</b><small>정보와 재킷을 가져오고 있어요</small></>;
-  if (item.status === "not_found") return <><b>LibreDMM에 없는 품번</b><small>품번 표기가 다르거나 아직 등록 전일 수 있어요</small></>;
-  if (item.status === "error") return <><b>가져오지 못했습니다</b><small>{item.lastError || "잠시 뒤 다시 시도해 주세요"}</small></>;
-  if (item.applyState === "failed") return <><b>지난 적용이 거절됐어요</b><small>후보를 다시 열어 확인해 주세요</small></>;
+  if (applying(item)) return <><b>컬렉션 적용 중</b><small>서버 반영 후 목록에서 제거</small></>;
+  if (stopped(item)) return <><b>적용 중단</b><small>다른 기기 변경과 충돌 · 상태 창에서 “서버가 거절해 멈춘 변경” 확인</small></>;
+  if (activeStatus(item)) return <><b>LibreDMM 검색 중</b><small>정보·재킷 가져오는 중</small></>;
+  if (item.status === "not_found") return <><b>LibreDMM 미등록 품번</b><small>품번 표기 오류 또는 미등록</small></>;
+  if (item.status === "error") return <><b>가져오기 실패</b><small>{item.lastError || "잠시 후 재시도"}</small></>;
+  if (item.applyState === "failed") return <><b>이전 적용 거절됨</b><small>후보를 다시 열어 확인</small></>;
   if (item.collectionId) return <><b>기존 컬렉션에 후보 추가</b><small>→ {item.collectionName || "이름 없는 AV 컬렉션"}</small></>;
-  if (item.matches && item.matches.length > 1) return <><b>같은 품번의 컬렉션이 {item.matches.length}개 있어요</b><small>후보를 열어 어디에 넣을지 고르세요</small></>;
-  return <><b>새 AV 컬렉션 만들기</b><small>맞는 기존 컬렉션이 없습니다</small></>;
+  if (item.matches && item.matches.length > 1) return <><b>동일 품번 컬렉션 {item.matches.length}개</b><small>후보를 열어 대상 선택</small></>;
+  return <><b>새 AV 컬렉션 만들기</b><small>일치하는 기존 컬렉션 없음</small></>;
 }
 
 function receivedTime(value: string) {

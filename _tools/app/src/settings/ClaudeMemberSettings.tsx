@@ -30,8 +30,8 @@ const split = (status: MemberStatus, index: number) => {
 };
 const labels: Record<string, string> = {
   idle: "시작 전", draft: "시작 전", running: "진행", paused: "일시 정지", cancelled: "취소됨",
-  completed: "완료", capped: "분석 한도 도달", no_key: "API 키를 넣어 주세요", credential: "API 키를 확인하세요",
-  error: "요청 실패 · 다시 시작할 수 있습니다",
+  completed: "완료", capped: "분석 한도 도달", no_key: "API 키 필요", credential: "API 키 확인 필요",
+  error: "요청 실패 · 재시작 가능",
 };
 
 export function ClaudeMemberSettings({ disabled }: { disabled: boolean }) {
@@ -124,14 +124,14 @@ export function ClaudeMemberSettings({ disabled }: { disabled: boolean }) {
         {canResume && <Button disabled={blocked} onClick={() => void control("resume")}>다시 시작</Button>}
         {status && !["idle", "draft", "completed", "cancelled"].includes(status.state) && <Button disabled={blocked} onClick={() => void control("cancel")}>실행 취소</Button>}
       </>} />
-    <SettingsRow name="분석 한도 ($)" status={status && `사용 ${usd(status.spentUsd)} · 남음 ${usd(status.remainingUsd)}${status.reservedUsd ? ` · 응답 미확인 예약 ${usd(status.reservedUsd)}` : ""}`}
+    <SettingsRow name="분석 한도 ($)" status={status && `사용 ${usd(status.spentUsd)} · 남음 ${usd(status.remainingUsd)}${status.reservedUsd ? ` · 확인 대기 ${usd(status.reservedUsd)}` : ""}`}
       control={<>
         <TextInput aria-label="분석 한도 ($)" type="number" min={0} max={100_000} step="1" value={capValue} disabled={blocked} onChange={e => setCap(e.target.value)} />
         <Button aria-label="분석 한도 저장" disabled={blocked || cap === null || !validCap} onClick={() => void control("settings", { capUsd: Number(capValue) })}>저장</Button>
       </>} />
-    <SettingsRow name="신규 이미지 자동 분석" status={status?.ongoingUntilCutoff ? "2026.10.26까지 · 이후 자동 꺼짐" : "예비 · 월 한도 사용"}
+    <SettingsRow name="신규 이미지 자동 분석" status={status?.ongoingUntilCutoff ? "2026.10.26까지 · 이후 자동 해제" : "예비 · 월 한도 사용"}
       control={<Switch aria-label="신규 이미지 자동 분석" checked={status?.ongoingEnabled ?? false} disabled={blocked} onChange={e => void control("settings", { ongoingEnabled: e.target.checked })} />} />
-    <SettingsRow name="분석에서 제외할 폴더" status="이 폴더와 하위 폴더의 이미지는 캐릭터 분석에 보내지 않습니다."
+    <SettingsRow name="분석에서 제외할 폴더" status="선택 폴더 및 하위 폴더 분석 제외"
       control={<Button disabled={blocked || !excluded} onClick={() => setPickerOpen(open => !open)}>{pickerOpen ? "닫기" : "추가"}</Button>} />
     {excluded && excluded.length > 0 && <ul className="settings-view__chips" aria-label="분석에서 제외한 폴더">
       {excluded.map(folder => <li key={folder.id} className="settings-view__chip">
@@ -146,8 +146,8 @@ export function ClaudeMemberSettings({ disabled }: { disabled: boolean }) {
         <SettingsRow name="2–5명 시리즈" value={`${count(confirm.buckets[0])}장`} status={`${split(confirm, 0)} · Sonnet · 확신도 90% 이상 자동 지정`} />
         <SettingsRow name="6–15명 시리즈" value={`${count(confirm.buckets[1])}장`} status={`${split(confirm, 1)} · Haiku → 필요 시 Sonnet · 확인 목록에 추천`} />
         <SettingsRow name="16명 이상 시리즈" value={`${count(confirm.buckets[2])}장`} status={`${split(confirm, 2)} · Haiku → 필요 시 Sonnet · 확인 목록에 추천`} />
-        <SettingsRow name="예상 비용" value={`${usd(confirm.estimateLowUsd)}–${usd(confirm.estimateHighUsd)}`} status={`실험 단가 기준 · 분석 한도 ${usd(status?.capUsd ?? confirm.capUsd)}`} />
-        <p>일치하는 캐릭터가 없으면 그대로 둡니다. 한 명 지정 이미지는 이미 지정된 캐릭터를 건드리지 않고 추가로 있는 캐릭터만 찾습니다.</p>
+        <SettingsRow name="예상 비용" value={`${usd(confirm.estimateLowUsd)}–${usd(confirm.estimateHighUsd)}`} status={`예상 단가 기준 · 한도 ${usd(status?.capUsd ?? confirm.capUsd)}`} />
+        <p>일치 캐릭터 없으면 유지 · 기존 지정 캐릭터는 유지하고 추가 캐릭터만 탐색</p>
         {error && <p className="settings-view__row-message" role="alert">{error}</p>}
         <div className="settings-view__actions">
           <Button disabled={busy} onClick={() => setConfirm(null)}>닫기</Button>

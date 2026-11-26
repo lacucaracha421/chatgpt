@@ -36,7 +36,7 @@ it("shows only the key at first: without a key the switch and the cap stay off",
   expect(await screen.findByText("없음")).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: "자동 판정" })).toBeDisabled();
   expect(screen.getByRole("combobox", { name: "월 한도" })).toBeDisabled();
-  expect(await screen.findByText("API 키를 넣으면 시작할 수 있습니다")).toBeInTheDocument();
+  expect(await screen.findByText("API 키 필요")).toBeInTheDocument();
 });
 
 it("saves a trimmed key without showing it again, then lets the switch work", async () => {
@@ -137,7 +137,7 @@ it("says the month's cap is reached without calling it an error", async () => {
 it("shows a refused key in the danger colour", async () => {
   backend.status = status({ state: "credential" });
   render(<ClaudeSettings />);
-  const line = await screen.findByText("API 키를 확인하세요");
+  const line = await screen.findByText("API 키 확인 필요");
   expect(line).toHaveAttribute("data-tone", "danger");
 });
 

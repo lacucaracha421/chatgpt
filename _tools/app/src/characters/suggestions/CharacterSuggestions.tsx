@@ -1,4 +1,3 @@
-import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useOptionalLibrary } from "../../library/LibraryContext";
@@ -12,6 +11,7 @@ import { Button } from "../../shared/ui/Button";
 import { Checkbox } from "../../shared/ui/Checkbox";
 import { Menu } from "../../shared/ui/Menu";
 import { SectionLabel } from "../../shared/ui/SectionLabel";
+import { Skeleton } from "../../shared/ui/Skeleton";
 import { ChevronDownIcon, ChevronUpIcon, ClockIcon, EllipsisHorizontalIcon, EyeSlashIcon, InformationCircleIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { Dialog } from "../../shared/ui/Dialog";
 import { Toast } from "../../shared/ui/Toast";
@@ -78,7 +78,7 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   const ignore = async (tag: string, value: boolean) => {
     if (busy) return;
     setBusy(true); setError(null);
-    try { await api.ignore(tag, value); setMessage(value ? "제안을 무시했습니다. 무시 목록에서 되돌릴 수 있어요." : "제안을 되돌렸습니다."); refresh(); }
+    try { await api.ignore(tag, value); setMessage(value ? "제안 무시됨 · 무시 목록에서 되돌리기 가능" : "제안 되돌림"); refresh(); }
     catch (reason) { setError(commandErrorMessage(reason, "무시 설정을 저장하지 못했습니다.")); }
     finally { setBusy(false); }
   };
@@ -117,7 +117,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
     <header className="character-suggestions__bar">
       <h3><button type="button" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}><span>새 캐릭터 제안 <span className="numeric">{state.rows.length}</span>명</span>{collapsed ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}</button>
         <AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="새 캐릭터 제안" trigger={<Button size="icon" variant="ghost" aria-label="새 캐릭터 제안 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}>
-          <p>자동 태그가 읽었지만 아직 등록하지 않은 캐릭터예요. 자동으로 만들지 않고, 등록하면 그 이미지를 확인에 넣어요.</p>
+          <p>자동 태그에서 감지된 미등록 캐릭터 · 자동 등록 안 함 · 등록 시 해당 이미지를 확인 목록에 추가</p>
         </AnchoredPanel></h3>
       {!collapsed && <>
         <span className="character-suggestions__space" />
@@ -128,11 +128,11 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
       </>}
     </header>
     {!collapsed && <>
-      <BusyLabel busy={!!(state.firstLoad)} delay={400}><p role="status">제안 불러오는 중…</p></BusyLabel>
+      {state.firstLoad && <div className="character-suggestion-cards" aria-label="제안 불러오는 중">{[0, 1, 2].map(index => <Skeleton key={index} className="character-suggestion-card-skeleton" label={null} />)}</div>}
       {state.error && <p role="alert">{state.error} <Button size="sm" onClick={state.refresh}>다시 시도</Button></p>}
-      {!state.firstLoad && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안이 없습니다.</p>}
+      {!state.firstLoad && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안 없음</p>}
       {[...groups].map(([key, rows]) => <section key={key} className="character-suggestions__group" aria-label={rows[0].seriesName ?? "시리즈 폴더 없음"}>
-        <SectionLabel as="h3" title={rows[0].seriesName ?? "시리즈 폴더 없음"} count={rows.length} unit="명" actions={!key ? <small>등록할 때 폴더를 골라요</small> : undefined} />
+        <SectionLabel as="h3" title={rows[0].seriesName ?? "시리즈 폴더 없음"} count={rows.length} unit="명" actions={!key ? <small>등록 시 폴더 선택</small> : undefined} />
         <div className="character-suggestion-cards">
           {rows.map(row => <SuggestionCard key={row.tag} suggestion={row} privacyMode={privacyMode} disabled={busy}
             onRegister={() => setEditor({ suggestion: row, mode: "register" })} onMerge={() => setEditor({ suggestion: row, mode: "merge" })}
@@ -143,7 +143,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
     {state.message && <Toast onDismiss={() => state.dismissMessage()}>{state.message}</Toast>}
     {ignoredOpen && <Dialog open title="무시한 캐릭터 제안" onClose={() => setIgnoredOpen(false)}>
       <div className="character-suggestion-ignored">
-        {!state.ignored.length && <p>무시한 제안이 없습니다.</p>}
+        {!state.ignored.length && <p>무시한 제안 없음</p>}
         {state.ignored.map(row => <div key={row.tag}><span>{suggestionName(row.tag)}<small>{row.tag}</small></span><Button size="sm" disabled={state.busy} onClick={() => void state.ignore(row.tag, false)}>되돌리기</Button></div>)}
       </div>
       {state.error && <p role="alert">{state.error}</p>}

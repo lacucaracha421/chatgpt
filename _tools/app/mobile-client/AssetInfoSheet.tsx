@@ -11,7 +11,7 @@ import './AssetInfoSheet.css';
 export function AssetInfoSheet({asset,onClose,classifications,onArtist,onOpenAsset}:{asset:Asset;onClose():void;classifications?:readonly Classification[];onArtist?(artist:LibraryArtist):void;onOpenAsset?(items:Asset[],index:number):void}) {
   const start = useRef<{x:number;y:number}|null>(null);
   return <Dialog open title="미디어 정보" onClose={onClose}>
-    <DialogDescription className="sr-only">선택한 에셋의 출처와 파일 정보</DialogDescription>
+    <DialogDescription className="sr-only">선택한 파일의 출처와 정보</DialogDescription>
     <div className="asset-info-sheet">
       <header className="asset-info-sheet__header" onPointerDown={event=>{
         start.current={x:event.clientX,y:event.clientY};

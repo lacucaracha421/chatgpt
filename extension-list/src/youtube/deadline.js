@@ -6,7 +6,7 @@
       const localized = async work => {
         try { return await work(); }
         catch (error) {
-          if (error?.code === "timeout") error.message = "요청 시간이 초과됐어요. 잠시 후 다시 시도해 주세요.";
+          if (error?.code === "timeout") error.message = "요청 시간 초과 · 잠시 후 재시도";
           throw error;
         }
       };

@@ -22,7 +22,7 @@ type Navigate = (view: AssetView) => void;
 const formatCount = (value: number) => value.toLocaleString("ko-KR");
 const SITE_LABEL: Record<string, string> = { "x.com": "x", pixiv: "Pixiv", manual: "지정", "arca.live": "arca", dcinside: "dc" };
 const STYLE_PAGE_SIZE = 5;
-const REPOSTER_EXPLANATION = "공식 이미지·스크린샷·스틸컷을 다시 올리는 계정입니다. 켜면 '닮은 작가' 추천 대상에서 빠지고, 작가 목록에서는 '정리' › '퍼온 계정'으로 모입니다. 이미 붙은 이미지는 그대로 둡니다.";
+const REPOSTER_EXPLANATION = "공식 이미지·스크린샷 재업로드 계정 · '닮은 작가' 추천 제외 · '정리 › 퍼온 계정'으로 이동 (기존 이미지 유지)";
 
 export type ArtistScopeChrome = { title: string; accessory: ReactNode; intro: ReactNode; panel: ReactNode; /** False while the intro is the placeholder: the real one may add a 다시보기 section. */ ready: boolean };
 

@@ -182,11 +182,11 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
   return (
     <Dialog open={open} title={title} variant="wide" onClose={handleClose}>
       <div className="tmdb-movie-dialog">
-        {target.kind === "reconnect" && <p>정확한 작품을 검색해 선택한 뒤 저장하세요. 저장하기 전까지 기존 연결은 유지됩니다.</p>}
+        {target.kind === "reconnect" && <p>작품 검색·선택 후 저장 · 저장 전 기존 연결 유지</p>}
         {error && <div className="tmdb-movie-dialog__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>TMDB 설정 열기</Button>}</div>}
         {error === COLLECTION_NAME_IN_TRASH && target.kind === "new" && step.kind === "preview" && <RestoreCollectionAction onBusyChange={value => setBusy(value ? "apply" : null)} gateway={gateway} type="movie" name={step.kind === "preview" ? step.preview.proposedTitle : ""} onRestored={async work => { await onApplied(work); onClose(); }} />}
         {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label={`${formatLabel} 검색 중`} />}
-        <BusyLabel busy={busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv"}><p role="status">시즌별 에피소드와 포스터를 저장하고 있습니다. 시즌 수에 따라 시간이 걸릴 수 있습니다.</p></BusyLabel>
+        <BusyLabel busy={busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv"}><p role="status">시즌별 에피소드·포스터 저장 중… (시즌 수에 따라 소요)</p></BusyLabel>
         {busy === "artwork" && <Skeleton className="tmdb-movie-dialog__loading" label="아트워크 불러오는 중" />}
         {searchStep && target.kind !== "artwork" && <Select label="영상 형식" value={mediaType} disabled={busy !== null} onChange={(event) => {
           generation.current += 1;

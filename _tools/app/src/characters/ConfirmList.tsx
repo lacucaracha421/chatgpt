@@ -631,7 +631,7 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
                       {nextCharacter && <Button disabled={busy} onClick={close}>닫기 <kbd>Esc</kbd></Button>}
                     </div>
                   </> : <>
-                    <p className="confirm-list__empty-copy">새 이미지를 분석하면 여기에 나타납니다.</p>
+                    <p className="confirm-list__empty-copy">새 이미지 분석 시 여기에 표시</p>
                     <Button size="sm" disabled={loading} onClick={retry}>새로고침</Button>
                   </>}
                   {last && <Button size="sm" variant="ghost" disabled={busy || switchTo !== null} onClick={() => void undo()}>되돌리기: {last.item.targetName} {decisionText(last.decision)} <kbd>Z</kbd></Button>}
@@ -644,8 +644,8 @@ export function ConfirmList({ scope, targets, classifications, privacyMode = fal
         <p>{bulkAsk.reject.length === 0
           ? `${bulkAsk.accept.length.toLocaleString()}장을 모두 맞음으로 처리할까요?`
           : `맞음 ${bulkAsk.accept.length.toLocaleString()}장, 아님 ${bulkAsk.reject.length.toLocaleString()}장을 저장할까요?`}</p>
-        {bulkAsk.single > 0 && <p className="confirm-list__meta">한 장씩 보기 필요 {bulkAsk.single.toLocaleString()}장은 그대로 둡니다.</p>}
-        <p className="confirm-list__meta">한 번에 되돌릴 수는 없습니다.</p>
+        {bulkAsk.single > 0 && <p className="confirm-list__meta">한 장씩 보기 필요 {bulkAsk.single.toLocaleString()}장 제외</p>}
+        <p className="confirm-list__meta">일괄 되돌리기 불가</p>
         <div className="ui-dialog__actions">
           <Button disabled={bulkRunning} onClick={() => setBulkAsk(null)}>취소</Button>
           <Button variant="primary" disabled={bulkRunning} onClick={() => void applyBulk(bulkAsk)}>
@@ -673,10 +673,10 @@ function failedNames(failed: BulkResult["failed"]): string {
 function reasonNote(item: ConfirmItem): string | null {
   if (item.kind === "recheck") {
     return item.recognition?.doubtful
-      ? `이미 ${item.targetName}(으)로 자동으로 넣은 이미지인데, 학습 인식이 지지하지 않습니다. 틀렸으면 아님을 눌러 주세요.`
-      : `이미 ${item.targetName}(으)로 자동으로 넣은 이미지인데, 자동 태그가 이 이름을 읽지 않았습니다. 틀렸으면 아님을 눌러 주세요.`;
+      ? `${item.targetName} 자동 분류 · 학습 인식 불일치 (틀리면 '아님')`
+      : `${item.targetName} 자동 분류 · 자동 태그 미감지 (틀리면 '아님')`;
   }
-  if (item.recognition?.placed) return `인식이 이미 ${item.targetName}(으)로 넣은 이미지입니다. 다른 추천을 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.`;
+  if (item.recognition?.placed) return `${item.targetName} 자동 분류 완료 · 재확인용 (틀리면 '아님')`;
   return null;
 }
 
@@ -720,7 +720,7 @@ function ConfirmImage({ item, privacyMode, active, edge, showOriginal, onShowOri
         left: `${box[0] * 100}%`, top: `${box[1] * 100}%`, width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%`,
       }} />}
     </div>
-    {copy === "failed" && <figcaption className="confirm-list__image-note" role="status">원본을 불러오지 못해 축소 이미지를 표시합니다.</figcaption>}
-    {copy !== "failed" && showOriginal && full === "failed" && <figcaption className="confirm-list__image-note" role="status">원본을 불러오지 못해 낮춘 화질로 표시합니다.</figcaption>}
+    {copy === "failed" && <figcaption className="confirm-list__image-note" role="status">원본 로드 실패 · 축소 이미지 표시</figcaption>}
+    {copy !== "failed" && showOriginal && full === "failed" && <figcaption className="confirm-list__image-note" role="status">원본 로드 실패 · 저화질 표시</figcaption>}
   </figure>;
 }

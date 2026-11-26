@@ -28,11 +28,11 @@ export function CharacterConversion({ targetId, onClose, onConverted }: { target
   const showChecking = useDelayedBusy(!preview && !error);
   return <Dialog open title="일반 폴더로 전환" onClose={() => { if (!busy) onClose(); }}>
     {preview && !showChecking ? <>
-      <p><strong>{preview.name}</strong>의 확정 자산과 기준·추가 참조 {preview.assetCount}개를 같은 시리즈 아래 일반 폴더에 모읍니다.</p>
-      <p>{preview.destinationId ? "같은 이름의 기존 폴더에 합칩니다. 그 폴더의 기존 자산과 하위 폴더는 유지합니다." : "같은 이름의 일반 폴더를 만듭니다."}</p>
-      <p>원본은 복사하거나 삭제하지 않습니다. 다른 캐릭터와 공유하는 {preview.sharedCount}개의 연결은 유지하며 직접 분류만 이 폴더로 바뀝니다. 확인 대기 중인 후보는 포함하지 않습니다.</p>
-      {preview.unavailableCount > 0 && <p>휴지통·누락 상태 {preview.unavailableCount}개는 복원하지 않습니다. 남아 있는 자산의 폴더 연결을 보존합니다.</p>}
-      <p>이 캐릭터의 등록, 기준·추가 참조 설정과 판단 이력은 정리됩니다. 다른 캐릭터의 설정과 판단 이력은 유지합니다.</p>
+      <p><strong>{preview.name}</strong> 확정 이미지·레퍼런스 {preview.assetCount}개를 같은 시리즈 아래 일반 폴더로 이동</p>
+      <p>{preview.destinationId ? "같은 이름 폴더에 병합 · 기존 파일과 하위 폴더 유지" : "같은 이름의 일반 폴더 생성"}</p>
+      <p>원본 복사·삭제 없음 · 다른 캐릭터 공유 {preview.sharedCount}개 연결 유지 · 확인 대기 후보 제외</p>
+      {preview.unavailableCount > 0 && <p>휴지통·누락 {preview.unavailableCount}개 미복원 · 남은 파일 연결 유지</p>}
+      <p>이 캐릭터의 등록·레퍼런스·판단 이력 정리 · 다른 캐릭터 설정 유지</p>
       {confirming ? <><TextField label={`확인: ${preview.name} 입력`} value={confirmation} disabled={busy} onChange={event => setConfirmation(event.target.value)} /><Button disabled={busy || confirmation !== preview.name} onClick={() => void convert()}>확인한 내용으로 전환</Button></> : <Button onClick={() => setConfirming(true)}>내용 확인 · 계속</Button>}
     </> : showChecking && !error && <p role="status">전환 대상 확인 중…</p>}
     {error && <p role="alert">{error}<Button disabled={busy} onClick={() => setReload(value => value + 1)}>다시 시도</Button></p>}

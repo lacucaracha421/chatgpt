@@ -300,7 +300,7 @@ it("keeps the index column when another view contributes navigation", async () =
 });
 
 it("keeps status out of the rail and shows no search placeholder where search is unsupported", () => {
-  render(<WorkspaceNavigation {...baseProps} view={{ kind: "statistics" }} onNavigate={vi.fn()} reviewCount={4} />);
+  render(<WorkspaceNavigation {...baseProps} view={{ kind: "trash" }} onNavigate={vi.fn()} reviewCount={4} />);
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
   expect(within(rail).queryByRole("button", { name: /동기화 문제/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "검색 미지원" })).not.toBeInTheDocument();
@@ -324,10 +324,10 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 이미지 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["미분류", "링크 보관", "작가", "통계", "휴지통 3개", "설정"]);
+    .toEqual(["미분류", "링크 보관", "작가", "휴지통 3개", "설정"]);
 
   const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }],
-    ["작가", { kind: "artists" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 이미지 검토 2개", { kind: "similarity_review" }]];
+    ["작가", { kind: "artists" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 이미지 검토 2개", { kind: "similarity_review" }]];
   for (const [name, view] of expected) {
     if (!screen.queryByRole("dialog", { name: "더보기" })) await user.click(trigger);
     await user.click(within(screen.getByRole("dialog", { name: "더보기" })).getByRole("button", { name }));

@@ -143,7 +143,7 @@ it("filters the timeline to received files", async () => {
 
 it("shows the empty timeline and where a drop goes", async () => {
   const view = setup({ devices: [tablet] });
-  expect(await screen.findByRole("heading", { name: "Galaxy Tab S11과 주고받은 파일이 없습니다" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Galaxy Tab S11과 주고받은 파일 없음" })).toBeInTheDocument();
   view.drop({ type: "enter", paths: ["/a.jpg", "/b.jpg", "/c.pdf"], position: { x: 0, y: 0 } });
   expect(screen.getByText("놓으면 Galaxy Tab S11로 보냅니다")).toBeInTheDocument();
   view.drop({ type: "leave" });
@@ -153,12 +153,12 @@ it("shows the empty timeline and where a drop goes", async () => {
 it("keeps explanations behind separate help buttons and preserves the full save path", async () => {
   setup({ devices: [tablet], folder: "C:\\Downloads\\Lakomics" });
   await screen.findByRole("button", { name: "파일 보내기" });
-  const explanation = "파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로";
+  const explanation = "파일·폴더 드래그 앤 드롭 가능 · 파일당 최대 2GB · 폴더는 zip 압축";
   expect(screen.queryByText(explanation)).toBeNull();
   expect(screen.getByText("C:\\Downloads\\Lakomics")).toHaveAttribute("title", "C:\\Downloads\\Lakomics");
   await userEvent.click(screen.getByRole("button", { name: "보내기 도움말" }));
   expect(screen.getByText(explanation)).toBeInTheDocument();
-  expect(screen.queryByText(/보낸 파일과 받은 파일이 여기에 시간순으로/)).toBeNull();
+  expect(screen.queryByText(/주고받은 파일 시간순 기록/)).toBeNull();
 });
 
 it("names a direct route in the who line, and nothing for the server or a mixed batch", () => {

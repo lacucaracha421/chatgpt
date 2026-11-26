@@ -482,8 +482,6 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_internal_playback_url": return `/preview-media/playback/${encodeURIComponent(String(args.assetId ?? "preview"))}`;
     case "get_internal_vault_playback_url": return `/preview-media/vault-playback/${encodeURIComponent(String(args.itemId ?? "preview"))}`;
     case "get_auto_tag_inbox": return { folder: "/preview/inbox", applyTaggerReview: true, last: null };
-    case "get_library_statistics": return { assets: 300, collections: 48, favorites: 33, unclassified: 27, originalRecordedBytes: 2_840_000_000, mediaKinds: [{ label: "이미지", count: 283 }, { label: "비디오", count: 17 }], collectedMonths: [{ label: "2026-09", count: 240 }, { label: "2026-08", count: 60 }], creators: previewArtists.slice(0, 5).map(artist => ({ label: artist.label, count: artist.assetCount })), classifications: previewClassifications.slice(1).map(item => ({ label: item.name, count: item.totalAssetCount ?? 0 })), collectionAndDailyStartedAt: "2026-06-01T00:00:00.000Z", mostOpenedAssets: [], mostOpenedCollections: [], longUnseenAssets: [], daily: [] };
-    case "measure_library_derivative_storage": return { measuredBytes: 320_000_000, measuredFiles: 620, unavailableFiles: 0, scanLimitReached: false };
     case "list_metadata_backups": return [{ id: "backup-20260929", createdAt: "2026-09-29T02:00:00.000Z", byteSize: 1_240_000 }];
     default: return emptyCommand(command);
   }

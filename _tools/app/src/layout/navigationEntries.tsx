@@ -57,7 +57,6 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     { id: "exchange", group: queued(received) ? "queue" : "go", label: MORE_LABELS.exchange, keywords: [...MORE_KEYWORDS.exchange ?? [], "태블릿"], icon: <AREA_ICONS.exchange />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: MORE_LABELS.private_vault, keywords: MORE_KEYWORDS.private_vault, icon: <AREA_ICONS.private_vault />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
     { id: "artists", group: "go", label: MORE_LABELS.artists, keywords: MORE_KEYWORDS.artists, icon: <AREA_ICONS.artists />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
-    { id: "statistics", group: "go", label: "통계", icon: <ChartBarIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
     { id: "trash", group: "go", label: MORE_LABELS.trash, icon: <TrashIcon />, count: totalTrashCount > 0 ? totalTrashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
     { id: "settings", group: "go", label: MORE_LABELS.settings, icon: <AREA_ICONS.settings />, selected: view.kind === "settings", run: go({ kind: "settings" }) },
   ];

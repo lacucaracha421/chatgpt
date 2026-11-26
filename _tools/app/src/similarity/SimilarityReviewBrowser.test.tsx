@@ -19,7 +19,7 @@ it("does not publish a late image decision result after switching to video", asy
   const onCountChange = vi.fn();
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: "둘 다 보관" }));
-  fireEvent.click(screen.getByRole("button", { name: "영상" }));
+  fireEvent.click(screen.getByRole("tab", { name: "영상" }));
   await act(async () => complete());
   expect(gateway.listSimilarityReviews).toHaveBeenCalledOnce();
   expect(onCountChange).toHaveBeenCalledOnce();
@@ -101,7 +101,7 @@ it("hides the position counter after the last review is resolved", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "기존 이미지 유지" }));
 
-  expect(await screen.findByRole("heading", { name: "검토할 유사 이미지가 없습니다" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "검토할 유사 이미지 없음" })).toBeInTheDocument();
   expect(screen.queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
 });
 
@@ -110,7 +110,7 @@ it("closes with Escape without deciding and shows an empty queue", async () => {
   vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([], 0));
   const onClose = vi.fn();
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={onClose} />);
-  expect(await screen.findByRole("heading", { name: "검토할 유사 이미지가 없습니다" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "검토할 유사 이미지 없음" })).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(onClose).toHaveBeenCalledOnce();
   expect(gateway.decideSimilarityReview).not.toHaveBeenCalled();

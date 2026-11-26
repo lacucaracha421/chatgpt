@@ -11,12 +11,12 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("uses the original title after an empty initial query and preserves an edited query", async () => {
   const searchKakao = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce(candidates).mockResolvedValue([]);
   render(<LibraryProvider gateway={{searchKakao} as unknown as LibraryGateway}><KakaoConnectDialog open collectionId="work" initialQuery="한국어" originalTitle="日本語" autoSearch onClose={vi.fn()} onApplied={vi.fn()} /></LibraryProvider>);
-  expect(await screen.findByText("일본어 원제로 찾았어요")).toBeInTheDocument();
+  expect(await screen.findByText("일본어 원제로 검색됨")).toBeInTheDocument();
   expect(searchKakao.mock.calls).toEqual([["한국어"], ["日本語"]]);
   fireEvent.change(screen.getByRole("searchbox"), {target: {value: "Edited"}});
   fireEvent.click(screen.getByRole("button", {name: "검색"}));
   await waitFor(() => expect(searchKakao).toHaveBeenLastCalledWith("Edited"));
-  await waitFor(() => expect(screen.queryByText("일본어 원제로 찾았어요")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("일본어 원제로 검색됨")).toBeNull());
   expect(searchKakao).toHaveBeenCalledTimes(3);
 });
 
@@ -272,7 +272,7 @@ describe("KakaoConnectDialog", () => {
       title(1).focus();
       await user.keyboard("{Control>}a{/Control}");
       expect(screen.getAllByRole("checkbox").filter((item) => (item as HTMLInputElement).checked)).toHaveLength(MAX_KAKAO_GROUPS);
-      expect(screen.getByText(`한 번에 최대 ${MAX_KAKAO_GROUPS}개 시리즈까지 연결할 수 있습니다.`)).toBeInTheDocument();
+      expect(screen.getByText(`한 번에 최대 ${MAX_KAKAO_GROUPS}개 시리즈까지 연결 가능`)).toBeInTheDocument();
       await user.keyboard("{Control>}");
       await user.click(title(MAX_KAKAO_GROUPS + 1));
       await user.keyboard("{/Control}");
@@ -290,7 +290,7 @@ describe("KakaoConnectDialog", () => {
     expect(screen.getByRole("button", { name: "연결" })).toBeEnabled();
     await user.click(checkbox);
     expect(screen.getByRole("button", { name: "연결" })).toBeDisabled();
-    expect(screen.getByText("검색 결과에서 연결할 시리즈를 선택하세요.")).toBeInTheDocument();
+    expect(screen.getByText("연결할 시리즈 선택")).toBeInTheDocument();
   });
 
   it("keeps errors and pending requests inside the dialog", async () => {

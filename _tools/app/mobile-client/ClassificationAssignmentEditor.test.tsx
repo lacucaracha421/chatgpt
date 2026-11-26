@@ -232,7 +232,7 @@ describe('Classification assignment picker',()=>{
   it('reports an unadopted replica instead of offering any choice',async()=>{
     mocks.native.mockResolvedValue({adopted:false,classifications:[]});
     render(<ClassificationAssignmentEditor assetId="asset_1" open onClose={()=>{}}/>);
-    await screen.findByText('분류 동기화가 준비된 뒤 편집할 수 있습니다.');
+    await screen.findByText('분류 동기화 준비 후 편집 가능');
     expect(screen.queryByRole('radio')).toBeNull();
   });
 

@@ -61,16 +61,16 @@ it("shows recovery wording only after the workload profile is ready", () => {
   const view = render(<LightweightModeToggle />);
   expect(screen.queryByText("확인 중…")).not.toBeInTheDocument();
   expect(screen.queryByText("절약 모드 해제 중")).not.toBeInTheDocument();
-  expect(screen.queryByText("3분 안에 평소 속도로 돌아갑니다")).not.toBeInTheDocument();
+  expect(screen.queryByText("3분 내 일반 속도 복귀")).not.toBeInTheDocument();
   expect(screen.getByRole("switch")).toBeDisabled();
   mocks.profile.ready = true;
   view.rerender(<LightweightModeToggle />);
   expect(screen.getByText("절약 모드 해제 중")).toBeInTheDocument();
-  expect(screen.getByText("3분 안에 평소 속도로 돌아갑니다")).toBeInTheDocument();
+  expect(screen.getByText("3분 내 일반 속도 복귀")).toBeInTheDocument();
   mocks.profile.lightweight = true;
   view.rerender(<LightweightModeToggle />);
   expect(screen.getByText("절약 모드")).toBeInTheDocument();
-  expect(screen.queryByText("3분 안에 평소 속도로 돌아갑니다")).not.toBeInTheDocument();
+  expect(screen.queryByText("3분 내 일반 속도 복귀")).not.toBeInTheDocument();
 });
 it("keeps the settings mode status neutral before readiness", () => {
   mocks.profile.ready = false;

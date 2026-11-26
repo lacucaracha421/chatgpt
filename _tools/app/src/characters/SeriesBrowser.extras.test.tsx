@@ -210,7 +210,7 @@ it("selects the images of a name the automatic tags read and keeps an unsure Kor
   const dialog = await screen.findByRole("dialog", { name: "캐릭터로" });
   const name = within(dialog).getByRole("textbox", { name: "이름" }) as HTMLInputElement;
   expect(name).toHaveValue("애비");
-  expect(dialog).toHaveTextContent("한국어 이름이 확실하지 않아요");
+  expect(dialog).toHaveTextContent("한국어 이름 불확실");
   await waitFor(() => expect(name.selectionStart === 0 && name.selectionEnd === 2).toBe(true));
 });
 
@@ -268,7 +268,7 @@ it("explains where a series' characters go and unregisters it on confirm", async
   expect(await within(dialog).findByText(/캐릭터 2명 · 그룹 1개 · 기타 이미지 4장이 ‘게임’ 시리즈로 옮겨집니다/)).toBeVisible();
   await user.click(within(dialog).getByRole("button", { name: "등록 해제" }));
   await waitFor(() => expect(extrasApi.unregisterSeries).toHaveBeenCalledWith("series"));
-  expect(await within(dialog).findByText(/캐릭터 2명 · 그룹 1개을 ‘게임’로 옮겼어요/)).toBeVisible();
+  expect(await within(dialog).findByText(/캐릭터 2명 · 그룹 1개 → ‘게임’ 이동 완료/)).toBeVisible();
   expect(changed).not.toHaveBeenCalled();
   await user.click(within(dialog).getByRole("button", { name: "확인" }));
   expect(changed).toHaveBeenCalled();

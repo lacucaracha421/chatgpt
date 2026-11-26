@@ -9,7 +9,7 @@ import { Button } from "../shared/ui/Button";
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
-import { TextField } from "../shared/ui/TextField";
+import { Field, TextInput } from "../shared/ui/TextInput";
 import type { CharacterTarget } from "./api";
 import { characterExtrasApi, type PromoteExtrasResult } from "./extrasApi";
 import { extrasTagName } from "./extrasNames";
@@ -79,7 +79,7 @@ export function ExtrasPromotionDialog({ extras, seriesId, assetIds, tag, groups,
     if (busy) return;
     setError(null);
     if (referenceSet.has(assetId)) { setReferences(references.filter(id => id !== assetId)); return; }
-    if (references.length >= MAX_PROMOTION_REFERENCES) { setError("레퍼런스는 최대 25장입니다. 먼저 한 장을 해제해 주세요."); return; }
+    if (references.length >= MAX_PROMOTION_REFERENCES) { setError("레퍼런스 최대 25장 · 먼저 1장 해제 필요"); return; }
     setReferences([...references, assetId]);
   }
 
@@ -122,16 +122,16 @@ export function ExtrasPromotionDialog({ extras, seriesId, assetIds, tag, groups,
   return <Dialog open title="캐릭터로" variant="medium" onClose={() => { if (!busy) onClose(); }}>
     <div className="character-extras-dialog">
       <div className="character-extras-dialog__fields">
-        <TextField label="이름" value={name} maxLength={100} disabled={busy} autoComplete="off"
+        <Field label="이름"><TextInput value={name} maxLength={100} disabled={busy} autoComplete="off"
           // An uncertain Korean spelling stays selected so the person checks it; a certain one is ready to accept.
           autoFocus onFocus={event => { if (suggested && !suggested.sure) event.currentTarget.select(); }}
-          onChange={event => setName(event.target.value)} />
+          onChange={event => setName(event.target.value)} /></Field>
         <Select label="그룹" value={groupId} disabled={busy} onChange={event => setGroupId(event.target.value)}>
           <option value="">그룹 없음</option>
           {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
         </Select>
       </div>
-      {suggested && !suggested.sure && <p className="character-extras-dialog__note">한국어 이름이 확실하지 않아요. 확인해 주세요.</p>}
+      {suggested && !suggested.sure && <p className="character-extras-dialog__note">한국어 이름 불확실 · 확인 필요</p>}
       <section aria-label="레퍼런스" className="character-extras-dialog__references">
         <h3 className="character-registry__heading">레퍼런스 <small>{references.length}장 · {RECOGNITION_REFERENCES}장부터 자동 인식</small></h3>
         <div className="character-extras-refs" role="group" aria-label="레퍼런스로 쓸 이미지">

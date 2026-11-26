@@ -63,15 +63,15 @@ export function CharacterSeriesMove({ target, entries, onClose, onMoved }: {
         <option value="">시리즈 선택</option>
         {choices.map(item => <option key={item.classificationId} value={item.classificationId}>{path(item.classificationId)}</option>)}
       </Select>
-      {loaded && !choices.length && <p>다른 폴더를 시리즈로 등록한 뒤 이동할 수 있습니다.</p>}
-      {destination && !preview && !error && <p role="status">이동할 자료를 확인하고 있습니다.</p>}
+      {loaded && !choices.length && <p>이동 가능한 다른 시리즈 없음</p>}
+      {destination && !preview && !error && <p role="status">이동 대상 확인 중…</p>}
       {preview && <>
-        <p>연결된 이미지·영상 {preview.assetCount.toLocaleString()}개 중 {destinationCount.toLocaleString()}개를 선택한 시리즈로 이동합니다. 이미 대상 시리즈 아래에 있는 자료의 폴더는 유지합니다.</p>
-        {sharedLocations.length > 0 && <div><p>공유 자료는 각 캐릭터 화면에서 계속 볼 수 있도록 공통 상위 폴더에 보관합니다.</p><ul>{sharedLocations.map(location => <li key={location.classificationId}>{path(location.classificationId)} · {location.assetCount.toLocaleString()}개{location.relocationCount === 0 ? " · 현재 위치 유지" : ` · ${location.relocationCount.toLocaleString()}개 이동`}</li>)}</ul></div>}
-        <p>레퍼런스, 대표 이미지, 수동 지정·제외 이력과 원본 파일을 유지합니다.{preview.sharedCount > 0 && ` 다른 캐릭터와 공유하는 ${preview.sharedCount.toLocaleString()}개의 연결도 유지합니다.`}</p>
-        {preview.groupName && <p>기존 ‘{preview.groupName}’ 그룹에서는 빠집니다. 다른 캐릭터는 유지되며, 남은 캐릭터가 없으면 그룹도 자동으로 해제됩니다.</p>}
+        <p>연결 파일 {preview.assetCount.toLocaleString()}개 중 {destinationCount.toLocaleString()}개 이동 · 이미 대상 시리즈에 있는 파일 위치 유지</p>
+        {sharedLocations.length > 0 && <div><p>공유 파일은 공통 상위 폴더에 보관</p><ul>{sharedLocations.map(location => <li key={location.classificationId}>{path(location.classificationId)} · {location.assetCount.toLocaleString()}개{location.relocationCount === 0 ? " · 현재 위치 유지" : ` · ${location.relocationCount.toLocaleString()}개 이동`}</li>)}</ul></div>}
+        <p>레퍼런스·대표 이미지·지정 이력·원본 파일 유지{preview.sharedCount > 0 && ` · 공유 연결 ${preview.sharedCount.toLocaleString()}개 유지`}</p>
+        {preview.groupName && <p>기존 ‘{preview.groupName}’ 그룹에서 제외 · 빈 그룹은 자동 해제</p>}
       </>}
-      <p>이동으로 미분류 분석을 시작하지 않습니다. 이 캐릭터의 진행 중인 과거 갱신은 종료되며, 새 시리즈의 자동 분류 설정은 그대로 유지됩니다.</p>
+      <p>이동 시 미분류 분석 미실행 · 진행 중인 과거 갱신 종료 · 새 시리즈 자동 분류 설정 유지</p>
       {error && <p role="alert">{error}</p>}
       {error && <Button variant="ghost" disabled={busy} onClick={() => setRevision(value => value + 1)}>다시 시도</Button>}
       <div className="ui-dialog__actions"><Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button><Button disabled={busy || !preview || preview.destinationId !== destination} onClick={() => void move()}>이동</Button></div>

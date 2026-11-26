@@ -69,7 +69,6 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
-import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
 import { confirmLeaveVaultRecovery } from "../external-vault/vaultRecoveryGuard";
@@ -101,8 +100,6 @@ const notesTab = preloadableTab(() => import("../notes/NotesView").then((module)
 const NotesView = notesTab.View;
 const settingsTab = preloadableTab(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 const SettingsView = settingsTab.View;
-const statisticsTab = preloadableTab(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
-const StatisticsPanel = statisticsTab.View;
 const trashTab = preloadableTab(() => import("../safety/TrashBrowser").then((module) => ({ default: module.TrashBrowser })));
 const TrashBrowser = trashTab.View;
 const similarityTab = preloadableTab(() => import("../similarity/SimilarityReviewBrowser").then((module) => ({ default: module.SimilarityReviewBrowser })));
@@ -112,7 +109,7 @@ const MangaBrowser = mangaTab.View;
 const MangaViewer = lazy(() => import("../manga/MangaViewer").then((module) => ({ default: module.MangaViewer })));
 const ExternalVaultBrowser = lazy(() => import("../external-vault/ExternalVaultBrowser").then((module) => ({ default: module.ExternalVaultBrowser })));
 const tabPreloads = [notesTab.preload, exchangeTab.preload, settingsTab.preload, collectionTab.preload, mangaTab.preload,
-  statisticsTab.preload, trashTab.preload, similarityTab.preload];
+  trashTab.preload, similarityTab.preload];
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -208,7 +205,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const shownView = useRef(view);
   if (area === shownArea) shownView.current = view;
   const viewHistoryRef = useRef<AssetView[]>([]);
-  useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
   const collectionWorkOrderRef = useRef<string[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
@@ -405,7 +401,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
   // Home takes file drops only on its 전송 tile (HomeTransfer); no drop-anywhere import to 미분류 (user 2026-10-16).
-  const dropEnabled = maintenance === null && view.kind !== "home" && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "exchange" && view.kind !== "private_vault";
+  const dropEnabled = maintenance === null && view.kind !== "home" && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "exchange" && view.kind !== "private_vault";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
     const assetIds = activeNativeDragAssetIdsRef.current;
@@ -853,7 +849,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
                     onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} linksRequest={view.links ? view : undefined} />
-                ) : view.kind === "notes" ? <NotesView key={view.noteId ?? "notes"} noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                ) : view.kind === "notes" ? <NotesView key={view.noteId ?? "notes"} noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}

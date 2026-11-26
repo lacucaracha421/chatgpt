@@ -48,7 +48,7 @@ it("includes the animation setting in the display group and saves it", async () 
   vi.mocked(invoke).mockResolvedValueOnce({ selected: "always", active: "system" });
   await userEvent.selectOptions(select, "always");
   expect(invoke).toHaveBeenCalledWith("motion_preference", { preference: "always" });
-  expect(await screen.findByText("다시 시작하면 적용됩니다")).toBeVisible();
+  expect(await screen.findByText("재시작 후 적용")).toBeVisible();
 });
 
 it("asks for the TMDB read access token and preserves it after a save failure", async () => {
@@ -57,7 +57,7 @@ it("asks for the TMDB read access token and preserves it after a save failure", 
   await userEvent.click(await screen.findByRole("button", { name: "TMDB API 읽기 액세스 토큰 입력" }));
   const input = screen.getByLabelText("TMDB API 읽기 액세스 토큰 입력");
   expect(input).toHaveAttribute("placeholder", "API 읽기 액세스 토큰 (eyJ…)");
-  expect(screen.getByText("TMDB 설정의 API 읽기 액세스 토큰을 입력하세요. 32자리 API 키(v3)가 아닙니다.")).toBeVisible();
+  expect(screen.getByText("TMDB API 읽기 액세스 토큰 입력 (32자리 v3 API 키 아님)")).toBeVisible();
   await userEvent.type(input, "eyJ.test-token");
   await userEvent.click(screen.getByRole("button", { name: "저장" }));
   expect(await screen.findByText("TMDB API 읽기 액세스 토큰을 저장하지 못했습니다.")).toBeVisible();
@@ -235,7 +235,7 @@ it("keeps the local backup restore confirmation flow", async () => {
   renderSettings(gateway, { initialSection: "advanced", onRestore });
   const button = await screen.findByRole("button", { name: "이 시점으로 복구" });
   await userEvent.click(button);
-  expect(screen.getByText("현재 상태를 보존한 뒤 선택한 시점으로 복구합니다.")).toBeInTheDocument();
+  expect(screen.getByText("현재 상태 보존 후 선택한 시점으로 복구")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "복구 시작" }));
   await waitFor(() => expect(onRestore).toHaveBeenCalledWith("backup-1"));
 });

@@ -46,11 +46,11 @@ const capLabel = (value: number) => `$${Number.isInteger(value) ? value : value.
 function restingText(status: ClaudeStatus | null): { text: string; tone?: string } {
   if (!status) return { text: "" };
   switch (status.state) {
-    case "off": return { text: "자동 판정이 꺼져 있습니다" };
-    case "no_key": return { text: "API 키를 넣으면 시작할 수 있습니다" };
+    case "off": return { text: "자동 판정 꺼짐" };
+    case "no_key": return { text: "API 키 필요" };
     case "capped": return { text: "이번 달 한도 도달" };
-    case "credential": return { text: "API 키를 확인하세요", tone: "danger" };
-    case "error": return { text: "연결하지 못했습니다. 잠시 뒤 다시 시도합니다", tone: "off" };
+    case "credential": return { text: "API 키 확인 필요", tone: "danger" };
+    case "error": return { text: "연결 실패 · 잠시 후 재시도", tone: "off" };
     default: return { text: `이번 달 자동 처리 ${(status.autoAccepted + status.autoRejected).toLocaleString("ko-KR")}건 · 확인 필요 ${status.leftForUser.toLocaleString("ko-KR")}건` };
   }
 }

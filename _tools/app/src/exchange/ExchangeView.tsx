@@ -365,8 +365,8 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
 
   const peer = chosen?.name ?? "";
   const emptyText = chosen
-    ? { title: receivedOnly ? `${peer}에게서 받은 파일이 없습니다` : `${withParticle(peer, "과", "와")} 주고받은 파일이 없습니다`, text: "보낸 파일과 받은 파일이 여기에 시간순으로 쌓입니다. 받은 파일은 창을 닫아 트레이에 있어도 다운로드/Lakomics에 저장됩니다." }
-    : { title: "받을 기기가 없습니다", text: "태블릿에서 Lakomics의 전송 화면을 한 번 열면 여기에 나타납니다." };
+    ? { title: receivedOnly ? `${peer}에게서 받은 파일 없음` : `${withParticle(peer, "과", "와")} 주고받은 파일 없음`, text: "주고받은 파일 시간순 기록 · 트레이 상태에서도 다운로드/Lakomics에 자동 저장" }
+    : { title: "받을 기기 없음", text: "태블릿에서 전송 화면을 한 번 열면 여기에 표시" };
   return <div className={`exchange-workspace${dragging !== null ? " is-drop-target" : ""}`}>
     <ViewToolbar title={chosen?.name ?? "전송"} chrome={{ navigation, status: <span className="exchange-status" role="status">{statusText}</span> }} />
     {availability.state === "unavailable" && <div className="exchange-notice" role="alert">
@@ -387,7 +387,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
           </EmptyState>}
     </div>
     {chosen && <footer className="exchange-composer">
-      <div className="exchange-composer-to"><b>{withTowardParticle(peer)} 보내기</b><AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="보내기 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</p></AnchoredPanel></div>
+      <div className="exchange-composer-to"><b>{withTowardParticle(peer)} 보내기</b><AnchoredPanel open={helpOpen} onOpenChange={setHelpOpen} title="전송" trigger={<Button size="icon" variant="ghost" aria-label="보내기 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}><p>파일·폴더 드래그 앤 드롭 가능 · 파일당 최대 2GB · 폴더는 zip 압축</p></AnchoredPanel></div>
       <Button onClick={() => void choose(pickFolder)}><FolderIcon aria-hidden="true" />폴더 보내기</Button>
       <Button variant="primary" onClick={() => void choose(pickFiles)}><PaperClipIcon aria-hidden="true" />파일 보내기</Button>
     </footer>}

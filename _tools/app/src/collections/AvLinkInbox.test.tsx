@@ -129,7 +129,7 @@ describe("AvLinkInbox on the server inbox", () => {
     expect(within(stopped).queryByRole("button", { name: "후보 보기" })).not.toBeInTheDocument();
     // A refused earlier attempt can be looked at again.
     const refused = screen.getByText("CODE-c").closest(".av-link-row") as HTMLElement;
-    expect(within(refused).getByText("지난 적용이 거절됐어요")).toBeInTheDocument();
+    expect(within(refused).getByText("이전 적용 거절됨")).toBeInTheDocument();
     await userEvent.setup().click(within(refused).getByRole("button", { name: "후보 보기" }));
     expect(client.getCandidate).toHaveBeenCalledWith("c", undefined);
   });
@@ -138,7 +138,7 @@ describe("AvLinkInbox on the server inbox", () => {
     render(<AvLinkInbox items={[
       item("m", "found", { matches: [{ collectionId: "a", name: "A" }, { collectionId: "b", name: "B" }] }),
     ]} collections={[]} api={api()} onRefresh={vi.fn()} onCollectionsChanged={vi.fn()} />);
-    expect(screen.getByText("같은 품번의 컬렉션이 2개 있어요")).toBeInTheDocument();
+    expect(screen.getByText("동일 품번 컬렉션 2개")).toBeInTheDocument();
     expect(screen.queryByText("새 AV 컬렉션 만들기")).not.toBeInTheDocument();
   });
 

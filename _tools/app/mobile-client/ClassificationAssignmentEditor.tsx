@@ -219,12 +219,12 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     finally{setSaving(false);}
   };
   return <Dialog open={open} title="분류" onClose={onClose}>
-    <DialogDescription className="sr-only">현재 자산의 분류를 하나 선택하거나 미분류로 둡니다. 선택하면 즉시 적용되고, 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
+    <DialogDescription className="sr-only">분류 선택 또는 미분류 · 선택 즉시 적용 (오프라인 시 저장 대기)</DialogDescription>
     <div className="classification-index classification-assignment-editor">
       <div className="dialog-header"><span>분류 변경</span><IconButton label="분류 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
       <LoadingLine label={(!state&&!error)&&'분류 상태를 불러오는 중'}/>
       {error&&<p className="error-message" role="alert">{error}</p>}
-      {state&&!state.adopted&&<p className="hint">분류 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
+      {state&&!state.adopted&&<p className="hint">분류 동기화 준비 후 편집 가능</p>}
       {state?.adopted&&<ClassificationAssignmentChoices classifications={state.classifications} selectedId={state.classificationId??null} disabled={saving||!!doneId||state.blocked===true} onSelect={id=>void select(id)}
         top={!state.blocked&&<RecentDestinations chips={folderDestinationChips(recentIds,state.classifications)} label="최근 분류" doneId={doneId} disabledIds={new Set(state.classificationId?[state.classificationId]:[])}
           status={doneId?`분류 변경 · ${state.classifications.find(row=>row.id===doneId)?.name??''}`:''} onPick={chip=>void select(chip.id,true)}/>}/>}

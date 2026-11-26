@@ -140,11 +140,11 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
       {local && local.vanished.length > 0 && <div className="manga-index__gone"><span>없어진 폴더 {local.vanished.length}개 · 디스크에서 사라짐</span><Button size="sm" variant="quiet" onClick={() => { setSelected(new Set(local.vanished.map(f => f.relativePath))); setMessage(null); setReview(true); }}>목록 보기</Button></div>}
     </> : <>
       {pins.length > 0 && <section aria-label="고정"><SectionLabel title="고정" />{pins.map(pin => row(pin, [...frequent?.tags ?? [], ...frequent?.artists ?? []].find(entry => mangaIndexKey(entry) === mangaIndexKey(pin))?.count ?? 0, true))}</section>}
-      {frequent?.bookmarkCount === 0 ? <p className="manga-index__note">북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.</p> : frequent && <>{frequentSection("tag", frequent.tags, frequent.tagLimit, "자주 찾는 태그")}{frequentSection("artist", frequent.artists, frequent.artistLimit, "작가")}</>}
+      {frequent?.bookmarkCount === 0 ? <p className="manga-index__note">북마크 추가 시 자주 찾는 태그·작가 표시</p> : frequent && <>{frequentSection("tag", frequent.tags, frequent.tagLimit, "자주 찾는 태그")}{frequentSection("artist", frequent.artists, frequent.artistLimit, "작가")}</>}
     </>}
     {message && !review && <p role="status" className="manga-index__note">{message}</p>}
     {review && local && <Dialog open title={`없어진 폴더 ${local.vanished.length}개`} onClose={() => { if (!busy) setReview(false); }}>
-      <p>고른 폴더를 라이브러리를 백업한 뒤 망가 목록에서 지웁니다. 디스크의 파일은 건드리지 않습니다.</p>
+      <p>라이브러리 백업 후 망가 목록에서 제거 · 디스크 파일 유지</p>
       {local.vanished.map(entry => <label key={entry.relativePath} className="manga-index__vanished"><input type="checkbox" checked={selected.has(entry.relativePath)} disabled={busy} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(entry.relativePath); else next.delete(entry.relativePath); return next; })} /><span>{entry.name}<small>{entry.relativePath}</small></span><span className="manga-index__count">{entry.seriesCount}개 작품</span></label>)}
       {message && <p role="alert">{message}</p>}
       <div className="ui-dialog__actions"><Button disabled={busy} variant="ghost" onClick={() => setReview(false)}>취소</Button><Button disabled={busy || selected.size === 0} variant="primary" onClick={() => void purge()}><BusyLabel busy={!!(busy)} idle={`백업하고 ${selected.size}개 지우기`}>백업하고 정리 중…</BusyLabel></Button></div>

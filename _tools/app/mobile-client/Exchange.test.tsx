@@ -33,7 +33,7 @@ it('marks the screen visible while open and not after it closes', async () => {
 
 it('asks for a device token instead of failing silently when the shared token is refused', async () => {
   show(snapshot({tokenConfigured: false, code: 'tokenMissing'}));
-  expect(screen.getByText(/이 기기 전용 토큰이 필요합니다/)).toBeTruthy();
+  expect(screen.getByText(/이 기기 전용 토큰 필요/)).toBeTruthy();
   expect(screen.queryByRole('button', {name: /파일 보내기/})).toBeNull();
   mocks.native.mockImplementation(async (op: string) => {
     if (op === 'exchangeToken') throw Object.assign(new Error('인증 실패'), {status: 403, details: {detail: {code: 'exchangeDeviceTokenRequired'}}});
@@ -42,7 +42,7 @@ it('asks for a device token instead of failing silently when the shared token is
   fireEvent.change(screen.getByLabelText('이 기기 전용 토큰'), {target: {value: ' shared-token '}});
   fireEvent.click(screen.getByRole('button', {name: '확인하고 저장'}));
   expect(mocks.native).toHaveBeenCalledWith('exchangeToken', {token: 'shared-token'});
-  await screen.findByText('공용 토큰으로는 보내기/받기를 쓸 수 없습니다. 이 기기 전용 토큰을 입력해 주세요.');
+  await screen.findByText('공용 토큰 사용 불가 · 이 기기 전용 토큰 입력 필요');
 });
 
 it('sends to the PC through the system picker', () => {
@@ -112,7 +112,7 @@ it('maps codes and labels', () => {
   expect(errorCode({status: 403, details: {detail: {code: 'exchangeDeviceTokenRequired'}}})).toBe('exchangeDeviceTokenRequired');
   expect(errorCode({status: 401, details: {detail: 'Unauthorized'}})).toBe('tokenInvalid');
   expect(errorCode({status: 404, details: null})).toBe('unavailable');
-  expect(screenMessage('unavailable')).toBe('서버가 아직 파일 보내기/받기를 지원하지 않습니다.');
+  expect(screenMessage('unavailable')).toBe('서버가 파일 전송 미지원');
   expect(rowView(row({state: 'failed', code: 'fileTooLarge'}), false).label).toBe('파일이 너무 큼 (최대 2GB)');
   expect(rowView(row({state: 'failed', code: 'targetDeviceUnknown'}), false).label).toBe('받는 기기가 등록 해제됨');
   expect(rowView(row({state: 'saved'}), true).actions).toEqual(['open']);

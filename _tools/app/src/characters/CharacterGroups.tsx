@@ -4,11 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { ArrowUturnLeftIcon, PencilIcon, PhotoIcon, UserGroupIcon, UserPlusIcon } from "@heroicons/react/24/outline";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
+import { Checkbox } from "../shared/ui/Checkbox";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ShelfBridgeContext, type ShelfBridge } from "../shared/ui/ShelfScroller";
-import { TextField } from "../shared/ui/TextField";
+import { Field, TextInput } from "../shared/ui/TextInput";
 import { commandErrorMessage } from "../library/errorMessage";
 import { groupMemberImage, groupPreviewMembers } from "./shelfImages";
 import type { CharacterTarget } from "./api";
@@ -351,16 +352,17 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     /></ShelfBridgeContext.Provider>}
     <span className="shelf-order-live" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
     {notice && <Toast tone={notice.tone} actionLabel={notice.actionLabel} onAction={notice.run} onDismiss={() => setNotice(null)}>{notice.text}</Toast>}
-    {!labelParts.length && !cards.length && <p className="series-empty">캐릭터를 등록하고 레퍼런스를 선택하세요.</p>}
+    {!labelParts.length && !cards.length && <p className="series-empty">등록된 캐릭터 없음 · 캐릭터 등록 후 레퍼런스 선택</p>}
     {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setRevision(value => value + 1)}>다시 시도</Button></p>}
     {draft && <Dialog open title={draft.id ? "캐릭터 그룹 편집" : "캐릭터 그룹 만들기"} onClose={() => { if (!busy) setDraft(null); }}>
-      <TextField label="그룹 이름" value={draft.name} maxLength={100} disabled={busy} onChange={event => setDraft({ ...draft, name: event.target.value })} />
-      <p>탐색 목록만 묶습니다. 시리즈 소속, 이미지 분류와 분석 범위는 바뀌지 않습니다.</p>
-      <p>소속 캐릭터가 모두 빠져도 기타에 이미지가 있으면 그룹은 남습니다. 둘 다 비면 자동으로 해제됩니다.</p>
-      <div className="character-group-members">{members.filter(target => !grouped.has(target.id) || groups.find(group => group.id === draft.id)?.targetIds.includes(target.id)).map(target => <label key={target.id}>
-        <input type="checkbox" disabled={busy} checked={draft.targetIds.includes(target.id)} onChange={event => setDraft({ ...draft, targetIds: event.target.checked ? [...draft.targetIds, target.id] : draft.targetIds.filter(id => id !== target.id) })} />
+      <Field label="그룹 이름">
+        <TextInput value={draft.name} maxLength={100} disabled={busy} onChange={event => setDraft({ ...draft, name: event.target.value })} />
+      </Field>
+      <p>목록 표시만 묶음 · 시리즈 소속·분류·분석 범위 변경 없음</p>
+      <p>소속 캐릭터가 없어도 기타 이미지가 있으면 유지 · 둘 다 비면 자동 해제</p>
+      <div className="character-group-members">{members.filter(target => !grouped.has(target.id) || groups.find(group => group.id === draft.id)?.targetIds.includes(target.id)).map(target => <Checkbox key={target.id} disabled={busy} checked={draft.targetIds.includes(target.id)} onChange={event => setDraft({ ...draft, targetIds: event.target.checked ? [...draft.targetIds, target.id] : draft.targetIds.filter(id => id !== target.id) })}>
         {target.displayName}
-      </label>)}</div>
+      </Checkbox>)}</div>
       {error && <p role="alert">{error}</p>}
       <div className="character-actions"><Button disabled={busy || !draft.name.trim()} onClick={() => void save()}>{!draft.id && !draft.targetIds.length ? "기타만 있는 그룹 만들기" : draft.id && !draft.targetIds.length && !(draftGroup?.extrasTargetId && (memberCounts[draftGroup.extrasTargetId] ?? 0) > 0) ? "빈 그룹 해제" : "저장"}</Button>{draft.id && <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>그룹 해제 · 캐릭터 유지</Button>}</div>
     </Dialog>}

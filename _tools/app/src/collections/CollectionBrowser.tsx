@@ -447,8 +447,8 @@ export function CollectionBrowser({
   </div>;
   const leading = <>{typeFilter === "av" && <AvLinkInbox items={avInbox.items} collections={collections} api={avLinkApi} error={avInbox.error}
     onRefresh={avInbox.refresh} onCollectionsChanged={onChanged} />}{sectionRow}</>;
-  const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품 없음"><p>검색어나 내 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
-    : <EmptyState title="컬렉션 없음"><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
+  const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품 없음"><p>검색어 또는 별점 필터 변경 필요</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
+    : <EmptyState title="컬렉션 없음"><p>등록된 작품 없음</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 
   // 관리 (games, PC only): 책등 받기; while it runs, its progress and 취소 take the row's place.
   const manageSection = typeFilter === "game" && gateway.fetchLaunchBoxSpines ? <ViewOptionsSection title="관리">

@@ -96,7 +96,7 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
   };
   return <section className="manga-connections is-panel" aria-label="연결">
     <h2><LinkIcon aria-hidden="true" />작품 연결</h2>
-    <p>연결하면 권별 표지와 발매일을 가져오고, 새 권이 나오면 신간 알림을 받을 수 있습니다.</p>
+    <p>권별 표지·발매일 자동 수집 · 신간 알림 지원</p>
     <div className="manga-connections__choices">{choice("mangadex")}{choice("kakao")}</div>
   </section>;
 }

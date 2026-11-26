@@ -1,5 +1,6 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
+import { Square2StackIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { SimilarityClues } from "./SimilarityClues";
 import { assetClueSide, choiceLabel, EMPTY_CLUES, reasonSentence, sideNames, SIMILARITY_CHOICES } from "./clues";
@@ -11,6 +12,7 @@ import { useAssetMask, usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { Tabs } from "../shared/ui/Tabs";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { VideoSimilarityPanel } from "./video/VideoSimilarityPanel";
@@ -30,10 +32,9 @@ const NO_VIDEO_SELECTION: string[] = [];
 export function SimilarityReviewBrowser({ videoAssetIds = NO_VIDEO_SELECTION, ...props }: Props) {
   const [mode, setMode] = useState<"image" | "video">(videoAssetIds.length >= 2 ? "video" : "image");
   return <div className="similarity-review-workspace">
-    <nav className="similarity-review-workspace__tabs" aria-label="검토 미디어">
-      <Button variant={mode === "image" ? "secondary" : "ghost"} aria-pressed={mode === "image"} onClick={() => setMode("image")}>이미지</Button>
-      <Button variant={mode === "video" ? "secondary" : "ghost"} aria-pressed={mode === "video"} onClick={() => setMode("video")}>영상</Button>
-    </nav>
+    <div className="similarity-review-workspace__tabs">
+      <Tabs label="검토 미디어" tabs={[{ value: "image", label: "이미지" }, { value: "video", label: "영상" }]} value={mode} onChange={setMode} />
+    </div>
     {mode === "video" ? <VideoSimilarityPanel assetIds={videoAssetIds} onClose={props.onClose} /> : <ImageSimilarityReviewBrowser {...props} />}
   </div>;
 }
@@ -136,7 +137,7 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
       if (!mountedRef.current) return;
       await load();
     } catch (error) {
-      if (mountedRef.current) setMessage(commandErrorMessage(error, "선택을 저장하지 못했습니다. 다시 시도해 주세요."));
+      if (mountedRef.current) setMessage(commandErrorMessage(error, "선택을 저장하지 못했습니다."));
     } finally {
       if (mountedRef.current) setPending(false);
     }
@@ -187,7 +188,7 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
       onRun={() => void runHistoricalScan()}
     />}
     {loading && !review ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
-      <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
+      <EmptyState icon={Square2StackIcon} title="검토할 유사 이미지 없음">새 이미지 추가 시 여기에 표시</EmptyState>
     ) : <>
       <CompareTools className="similarity-review__compare-tools" state={compare} names={names} />
       <div className="similarity-review__pairs">
@@ -196,8 +197,8 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
       <footer className="similarity-review__actions">
         {review.clues !== undefined && sides && <p className="similarity-review__reason" data-none={!review.reason || undefined}>{reasonSentence(review.reason ?? null, review.clues ?? EMPTY_CLUES, names, [...sides])}</p>}
         <p className="similarity-review__action-hint">{review.historical
-          ? "유지하지 않은 이미지는 휴지통으로 이동합니다. 결정 전에는 원본을 변경하지 않습니다."
-          : "기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다."}</p>
+          ? "미선택 이미지 → 휴지통 이동 · 결정 전 원본 유지"
+          : "기존 유지 시 새 이미지 영구 삭제 · 교체 시 기존 이미지 휴지통 이동"}</p>
         <div className="similarity-review__buttons">{SIMILARITY_CHOICES.map(choice => {
           const primary = (choice.decision === "keep_existing" && recommended === "a") || (choice.decision === "replace_existing" && recommended === "b");
           return <Button key={choice.decision} variant={primary ? "primary" : "secondary"} aria-description={primary ? "권장" : undefined} disabled={pending || loading || !!staged} onClick={() => void decide(choice.decision)}>{choiceLabel(choice.decision, review.historical)}</Button>;
@@ -215,7 +216,7 @@ function HistoricalScanStatus({ scan, running, onRun }: {
   const detail = scan === undefined
     ? ""
     : scan === null
-      ? "저장된 이미지끼리 비교해 기존 유사 항목을 찾습니다."
+      ? "저장된 이미지끼리 비교해 유사 항목 검색"
       : scan.completed
         ? `검사 완료 · 검토 ${scan.reviewsCreated.toLocaleString()}건 발견`
         : `${running ? "검사 중" : "일시 중지"} · ${scan.comparedPairs.toLocaleString()} / ${scan.totalPairs.toLocaleString()}쌍`;
@@ -224,7 +225,11 @@ function HistoricalScanStatus({ scan, running, onRun }: {
     <div>
       <strong><BusyLabel busy={scan === undefined} idle={detail}>검사 상태 확인 중</BusyLabel></strong>
       {scan && <span>{scan.totalAssets.toLocaleString()}개 대상 · 해시 미준비 {scan.skippedAssets.toLocaleString()}개</span>}
-      {scan && scan.totalPairs > 0 && <progress value={scan.comparedPairs} max={scan.totalPairs} aria-label="기존 보관함 검사 진행률" />}
+      {scan && scan.totalPairs > 0 && (
+        <div className="similarity-review__progress" role="progressbar" aria-label="기존 보관함 검사 진행률" aria-valuemin={0} aria-valuemax={scan.totalPairs} aria-valuenow={scan.comparedPairs}>
+          <span className="similarity-review__progress-fill" style={{ width: `${Math.min(100, Math.round((scan.comparedPairs / scan.totalPairs) * 100))}%` }} />
+        </div>
+      )}
     </div>
     <Button variant="secondary" disabled={running || scan === undefined} onClick={onRun}><BusyLabel busy={!!(running)} idle={action}>검사 중</BusyLabel></Button>
   </section>;

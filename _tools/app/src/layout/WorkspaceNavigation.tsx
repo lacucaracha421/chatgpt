@@ -32,7 +32,7 @@ export function workspaceArea(view: AssetView): "home" | "assets" | "collections
   if (view.kind === "private_vault") return "private_vault";
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
-  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
+  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review") return "manage";
   return "assets";
 }
 

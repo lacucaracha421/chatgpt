@@ -44,7 +44,7 @@ it("requires backing up a newly generated key before unlocking",async()=>{
   const store=new NotesStore((async(op:string)=>{operations.push(op);if(op==="generateKey")return{key:"a".repeat(64)};return{unlocked:op==="unlock",notes:[],lastSyncedAt:null};}) as NotesRequest);
   surface(store);await userEvent.click(await screen.findByRole("button",{name:"처음 사용 · 키 만들기"}));
   const open=screen.getByRole("button",{name:"메모 열기"});expect(open).toBeDisabled();
-  await userEvent.click(screen.getByRole("checkbox",{name:"복구키를 안전한 곳에 보관했습니다"}));
+  await userEvent.click(screen.getByRole("checkbox",{name:"복구키를 안전한 곳에 보관함"}));
   await userEvent.click(open);expect(operations).toContain("unlock");
 });
 

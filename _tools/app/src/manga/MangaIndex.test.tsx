@@ -88,7 +88,7 @@ describe("PC Manga index", () => {
   });
   it("shows the accepted empty line", async () => {
     const gateway = gatewayFixture(); gateway.getMangaFrequentIndex.mockResolvedValue({ bookmarkCount: 0, tagLimit: 8, artistLimit: 5, tags: [], artists: [] });mount(gateway);
-    expect(await screen.findByText("북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.")).toBeVisible();
+    expect(await screen.findByText("북마크 추가 시 자주 찾는 태그·작가 표시")).toBeVisible();
     expect(screen.queryByText("자주 찾는 태그")).not.toBeInTheDocument();
   });
   it("selects local folders, reviews checkboxes, purges only selected folders and refreshes", async () => {

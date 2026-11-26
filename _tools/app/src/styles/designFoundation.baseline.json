@@ -7,10 +7,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/artists/artists.css": {
-      "offScaleSpacing": 17,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 20
+      "legacyToken": 0
     },
     "_tools/app/src/assets/SelectionBar.css": {
       "offScaleSpacing": 0,
@@ -49,10 +49,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/autotags/autoTags.css": {
-      "offScaleSpacing": 6,
-      "offRoleFontSize": 4,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 12
+      "legacyToken": 0
     },
     "_tools/app/src/cards/album.css": {
       "offScaleSpacing": 0,
@@ -94,7 +94,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 0
     },
     "_tools/app/src/characters/ConfirmList.css": {
       "offScaleSpacing": 0,
@@ -110,15 +110,15 @@
     },
     "_tools/app/src/characters/SeriesBrowser.css": {
       "offScaleSpacing": 0,
-      "offRoleFontSize": 1,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 19
+      "legacyToken": 0
     },
     "_tools/app/src/characters/suggestions/CharacterSuggestions.css": {
-      "offScaleSpacing": 5,
-      "offRoleFontSize": 10,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 1
+      "legacyToken": 0
     },
     "_tools/app/src/classification/ClassificationSidebar.css": {
       "offScaleSpacing": 0,
@@ -313,16 +313,16 @@
       "legacyToken": 0
     },
     "_tools/app/src/exchange/exchange.css": {
-      "offScaleSpacing": 16,
-      "offRoleFontSize": 3,
-      "pillRadius": 0,
-      "legacyToken": 10
-    },
-    "_tools/app/src/external-vault/externalVault.css": {
-      "offScaleSpacing": 4,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 10
+      "legacyToken": 0
+    },
+    "_tools/app/src/external-vault/externalVault.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/games/FaultGame.css": {
       "offScaleSpacing": 1,
@@ -331,8 +331,8 @@
       "legacyToken": 0
     },
     "_tools/app/src/home/characterReview.css": {
-      "offScaleSpacing": 11,
-      "offRoleFontSize": 10,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -445,10 +445,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/notes/notes.css": {
-      "offScaleSpacing": 12,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 0
     },
     "_tools/app/src/safety/safety.css": {
       "offScaleSpacing": 0,
@@ -532,19 +532,13 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 0
     },
     "_tools/app/src/similarity/video/VideoSimilarity.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 2
-    },
-    "_tools/app/src/statistics/statistics.css": {
-      "offScaleSpacing": 0,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 0
     },
     "_tools/app/src/styles/chrome.css": {
       "offScaleSpacing": 8,
@@ -693,8 +687,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/artists.css": {
-      "offScaleSpacing": 21,
-      "offRoleFontSize": 18,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -735,9 +729,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/characterReview.css": {
-      "offScaleSpacing": 21,
-      "offRoleFontSize": 9,
-      "pillRadius": 1,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/characters.css": {
@@ -771,8 +765,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/exchange.css": {
-      "offScaleSpacing": 26,
-      "offRoleFontSize": 16,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },

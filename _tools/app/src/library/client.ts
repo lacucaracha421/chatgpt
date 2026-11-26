@@ -241,11 +241,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   descriptionSearchStatus: () => invoke<import("./types").DescriptionSearchStatus>("description_search_status"),
   prewarmDescriptionSearch: () => invoke<void>("prewarm_description_search"),
   searchByDescription: (query, limit, force) => invoke<import("./types").DescriptionSearchResult>("search_by_description", { query, limit, force }),
-  getLibraryStatistics: () => invoke("get_library_statistics"),
   getHomeOverview: (todayStart, weekStart, localDate) => invoke("get_home_overview", { todayStart, weekStart, localDate }),
   getHomeMedia: (localDate) => invoke("get_home_media", { localDate }),
-  measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
-  recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   artists: {
     overview: () => invoke("get_artist_overview"),
     styleSuggestions: (offset, limit) => invoke("list_artist_style_suggestions", { offset, limit }),

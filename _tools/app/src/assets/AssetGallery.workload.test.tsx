@@ -44,7 +44,7 @@ it.each(["pending", "processing"] as const)("updates a %s video caption on workl
   expect(screen.getByRole("status")).toHaveTextContent("준비 중");
 
   act(() => bridge.handlers.get("workload://changed")!({ payload: { ...normal, lightweight: true, restricted: true } }));
-  expect(screen.getByRole("status")).toHaveTextContent("가벼운 모드로 대기 중");
+  expect(screen.getByRole("status")).toHaveTextContent("절약 모드 대기 중");
   expect(screen.getByRole("status")).toHaveClass("ui-badge");
   expect(screen.getByRole("img", { name: "ready.mp4" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "failed.mp4" })).toHaveTextContent("미리보기 준비 실패");
@@ -53,7 +53,7 @@ it.each(["pending", "processing"] as const)("updates a %s video caption on workl
   expect(retry).toHaveBeenCalledWith(expect.objectContaining({ id: "failed" }));
 
   act(() => bridge.handlers.get("workload://changed")!({ payload: { ...normal, restricted: true } }));
-  expect(screen.queryByText("가벼운 모드로 대기 중")).not.toBeInTheDocument();
+  expect(screen.queryByText("절약 모드 대기 중")).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("일반 모드로 전환 중");
   act(() => bridge.handlers.get("workload://changed")!({ payload: normal }));
   expect(screen.getByRole("status")).toHaveTextContent("준비 중");
@@ -71,7 +71,7 @@ it("reads lightweight mode on first load and removes the waiting badge when a vi
   const { AssetGallery } = await import("./AssetGallery");
   const waiting = video("pending");
   const { rerender } = render(<AssetGallery layout="justified" items={[waiting]} />);
-  expect(await screen.findByText("가벼운 모드로 대기 중")).toBeInTheDocument();
+  expect(await screen.findByText("절약 모드 대기 중")).toBeInTheDocument();
   rerender(<AssetGallery layout="justified" items={[{ ...waiting, media: video("ready").media }]} />);
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.getByRole("img", { name: "pending.mp4" })).toBeInTheDocument();

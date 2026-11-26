@@ -51,7 +51,7 @@ describe('tablet filter-sheet Manga index',()=>{
     expect(within(pinned).getByRole('button',{name:'태그 9'}).querySelector('svg')?.getAttribute('fill')).toBe('currentColor');
     expect(within(tags).getAllByRole('button')).toHaveLength(8);expect(within(artists).getAllByRole('button')).toHaveLength(5);
     expect(pinned.compareDocumentPosition(screen.getByRole('region',{name:'포함할 분류'}))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('region',{name:'회피할 태그'})).toBeTruthy();
+    expect(screen.getByRole('region',{name:'숨길 태그'})).toBeTruthy();
   });
   it('taps one tag, replaces it with an artist, then clears the list token',async()=>{
     fireEvent.click(await openSheet());
@@ -94,11 +94,11 @@ describe('tablet filter-sheet Manga index',()=>{
   it('shows the single-line empty state and quietly hides an unavailable index',async()=>{
     index={...index,bookmarkCount:0,tags:[],artists:[]};
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('검색 결과 없음');fireEvent.click(screen.getByRole('button',{name:'필터'}));
-    await screen.findByText('북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.');
+    await screen.findByText('북마크 추가 시 자주 찾는 태그·작가 표시');
     expect(screen.queryByRole('region',{name:'자주 찾는 태그'})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'필터 닫기'}));offline=true;fireEvent.click(screen.getByRole('button',{name:'필터'}));
     await waitFor(()=>expect(screen.queryByLabelText('망가 목차')).toBeNull());expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('region',{name:'회피할 태그'})).toBeTruthy();
+    expect(screen.getByRole('region',{name:'숨길 태그'})).toBeTruthy();
   });
   it('keeps an offline long-press durable and shows its existing inline error',async()=>{
     const chip=await openSheet();offline=true;await hold(chip);

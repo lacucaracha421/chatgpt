@@ -476,7 +476,6 @@ export type AssetView =
   | { kind: "creator"; creatorKey: string; edit?: boolean; styleSuggestionsOnly?: boolean }
   | { kind: "similarity_review" }
   | { kind: "trash" }
-  | { kind: "statistics" }
   /** PC Home (HOME-DASH-001): the information dashboard, first on the rail. */
   /** `links` opens the 링크 보관 screen (from 더보기 and 찾기). */
   | { kind: "home"; links?: boolean }
@@ -1556,12 +1555,9 @@ export interface LibraryGateway {
   artists?: import("../artists/types").ArtistGateway;
   /** 자동 태그 (desktop only; never published). */
   autoTags?: import("../autotags/types").AutoTagGateway;
-  getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   /** PC Home: asset totals since local midnight / this Monday and the server's last known state (desktop only). */
   getHomeOverview?(todayStart: string, weekStart: string, localDate: string): Promise<HomeOverview>;
   getHomeMedia?(localDate: string): Promise<HomeMedia>;
-  measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
-  recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;
   listCatalogReview(): Promise<CatalogReviewPage>;
   /** Narrow Home count; optional for injected clients that still expose only review pages. */

@@ -773,7 +773,7 @@
         } : null,
         onSave: async (classificationId) => {
           if (!sessions.holds(sessionState)) return null;
-          if (candidate.mediaUrl?.startsWith("http:")) return { ok: false, message: "Lakomics 저장은 HTTPS 원본만 지원해요 · 이미지 저장을 이용해 주세요" };
+          if (candidate.mediaUrl?.startsWith("http:")) return { ok: false, message: "Lakomics 저장은 HTTPS 원본만 지원 · '이미지 저장' 사용" };
           const resolvedCandidate = globalThis.LakomicsXVideo?.resolve ? await globalThis.LakomicsXVideo.resolve(candidate) : candidate;
           if (!sessions.holds(sessionState)) return null;
           const model = globalThis.LakomicsClassificationTree.createModel(state.classifications.entries, state.profile);

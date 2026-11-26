@@ -12,8 +12,8 @@ import type { AutoTagImportSummary } from "./types";
 function summaryText(summary: AutoTagImportSummary) {
   const parts = [
     `${summary.model} · ${localDateTime(summary.importedAt)}`,
-    `에셋 ${summary.taggedAssets.toLocaleString("ko-KR")}개 · 태그 ${summary.tagRows.toLocaleString("ko-KR")}개`,
-    summary.skippedAssets > 0 ? `라이브러리에 없는 에셋 ${summary.skippedAssets.toLocaleString("ko-KR")}개는 건너뜀` : null,
+    `이미지 ${summary.taggedAssets.toLocaleString("ko-KR")}개 · 태그 ${summary.tagRows.toLocaleString("ko-KR")}개`,
+    summary.skippedAssets > 0 ? `라이브러리 미등록 ${summary.skippedAssets.toLocaleString("ko-KR")}개 건너뜀` : null,
   ];
   return parts.filter(Boolean).join(" · ");
 }

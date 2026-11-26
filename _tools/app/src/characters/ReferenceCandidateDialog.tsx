@@ -76,10 +76,10 @@ export function ReferenceCandidateDialog({ target, privacyMode, onClose, onSaved
 
   return <Dialog open title="레퍼런스 선택" variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="character-reference-dialog">
-      <p>추천 이미지를 확인하고 잘못된 항목만 빼주세요. 과거 이미지는 자동으로 다시 분석하지 않습니다.</p>
-      <p className="series-description">자동 확정은 같은 캐릭터를 지지하는 레퍼런스가 6장 이상일 때만 가능합니다.</p>
-      <BusyLabel busy={!page && !error}><p>추천 이미지를 고르는 중…</p></BusyLabel>
-      {page && page.items.length === 0 ? <p>추천할 이미지가 없습니다. 캐릭터 소속에서 직접 확인한 이미지를 더 모은 뒤 다시 시도해 주세요.</p> : null}
+      <p>잘못된 추천 항목만 해제 · 과거 이미지 자동 재분석 안 함</p>
+      <p className="series-description">자동 확정 조건: 레퍼런스 6장 이상</p>
+      <BusyLabel busy={!page && !error}><p>추천 이미지 고르는 중…</p></BusyLabel>
+      {page && page.items.length === 0 ? <p>추천할 이미지 없음 · 확인된 이미지 추가 후 재시도</p> : null}
       {page && page.items.length > 0 ? <div className="character-reference-dialog__gallery">
         <AssetGallery
           layout="masonry"

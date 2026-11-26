@@ -100,7 +100,7 @@ describe("MangaBrowser", () => {
     gateway.somiStatus = vi.fn().mockResolvedValue({ loggedIn: false, handle: null, displayName: null, collected: 0, total: null, complete: false, syncing: false });
     gateway.somiOpenLogin = vi.fn().mockResolvedValue(undefined);
     renderBrowser(gateway);
-    await screen.findByText("온라인 카탈로그가 없습니다");
+    await screen.findByText("온라인 카탈로그 없음");
     await userEvent.click(screen.getByRole("radio", { name: "소미" }));
     expect(await screen.findByText("코네 로그인이 필요합니다")).toBeVisible();
     expect(gateway.searchCatalogGroups).not.toHaveBeenCalled();
@@ -337,7 +337,7 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: null, series: [] });
     renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("radio", { name: /^로컬/ }));
-    expect(await screen.findByText("망가 폴더가 설정되지 않았습니다")).toBeVisible();
+    expect(await screen.findByText("망가 폴더 미설정")).toBeVisible();
   });
 
   it("uses the shared view toolbar with window controls", async () => {
@@ -478,9 +478,9 @@ describe("MangaBrowser", () => {
     await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "카탈로그로 복구" }));
 
-    expect(await screen.findByText("과거 작품 계보 제안 (자동 등록 안 함)")).toBeVisible();
+    expect(await screen.findByText("과거 작품 연결 제안 (수동)")).toBeVisible();
     expect(screen.getByText("→ 현행판 C New (ID 12)")).toBeVisible();
-    expect(screen.getByText("검토 필요 (자동 등록 안 함)")).toBeVisible();
+    expect(screen.getByText("검토 필요 (수동)")).toBeVisible();
     expect(screen.getByText("D New · d · 23페이지 (ID 13)")).toBeVisible();
 
     const applyButtons = screen.getAllByRole("button", { name: "이 작품으로 등록" });
@@ -506,7 +506,7 @@ describe("MangaBrowser", () => {
     await screen.findByText("T1");
     await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "카탈로그로 복구" }));
-    expect((await screen.findAllByText(/카탈로그에 없는 로컬\/자체번역 작품일 수 있습니다/)).length).toBe(2);
+    expect((await screen.findAllByText(/카탈로그 미등록 로컬\/자체번역 작품 가능성/)).length).toBe(2);
     await userEvent.click(screen.getByRole("button", { name: "원격 ID 확인 1개" }));
     await waitFor(() => expect(gateway.refreshMangaCatalogRecoveryRemote).toHaveBeenCalledOnce());
     expect(await screen.findByText(/원격에서도 1개 ID를 찾지 못했습니다/)).toBeVisible();
@@ -516,14 +516,14 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     renderBrowser(gateway);
 
-    expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
+    expect(await screen.findByText("온라인 카탈로그 없음")).toBeVisible();
     const sourceButtons = screen.getByLabelText("망가 출처").querySelectorAll("button");
     expect([...sourceButtons].map((button) => button.getAttribute("aria-label"))).toEqual(["카탈로그", "북마크", "로컬", "소미"]);
 
     await userEvent.click(screen.getByRole("radio", { name: /^로컬/ }));
     expect(await screen.findByText("T1")).toBeVisible();
     await userEvent.click(screen.getByRole("radio", { name: /^북마크/ }));
-    expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
+    expect(await screen.findByText("온라인 카탈로그 없음")).toBeVisible();
     expect(screen.getByRole("radio", { name: /^북마크/ })).toHaveAttribute("aria-checked", "true");
     expect(within(screen.getByRole("radiogroup", { name: "망가 출처" })).getByRole("radio", { name: "카탈로그" })).toHaveAttribute("aria-checked", "false");
   });

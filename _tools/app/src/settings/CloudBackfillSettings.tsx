@@ -74,7 +74,7 @@ export function CloudBackfillSettings({ connectionReady = null, children, embedd
     if (report.retried > 0 && progress?.controlState === "idle") {
       await gateway.cloudBackfillSetControlState?.("running");
     }
-    setMessage(`실패 항목 ${report.retried.toLocaleString()}개를 다시 대기열에 넣었습니다.`);
+    setMessage(`실패 ${report.retried.toLocaleString()}개 재시도 대기 등록`);
     notifyCloudBackfillSupervisor();
   }, "실패 항목을 다시 시도하지 못했습니다.");
 
@@ -125,13 +125,13 @@ export function CloudBackfillMaintenance() {
     const seeded = await gateway.cloudBackfillSeed();
     await gateway.cloudBackfillSetControlState?.("running");
     setConfirmingStart(false);
-    setMessage(`새로 대기열에 추가 ${seeded.seeded.toLocaleString()}개 · 이미 복제됨 ${seeded.skippedReplicated.toLocaleString()}개`);
+    setMessage(`대기 추가 ${seeded.seeded.toLocaleString()}개 · 이미 동기화됨 ${seeded.skippedReplicated.toLocaleString()}개`);
     notifyCloudBackfillSupervisor();
   }, "전체 라이브러리 업로드를 시작하지 못했습니다.");
 
   const reconcile = () => act(async () => {
     const report = await gateway.cloudBackfillReconcile?.();
-    setMessage(`중단된 작업 ${report?.requeued ?? 0}개 · 누락 복제 ${report?.seededMissing ?? 0}개를 대기열로 복구했습니다.`);
+    setMessage(`중단 ${report?.requeued ?? 0}개 · 누락 ${report?.seededMissing ?? 0}개 재등록 완료`);
     notifyCloudBackfillSupervisor();
   }, "중단된 작업을 복구하지 못했습니다.");
 
@@ -146,7 +146,7 @@ export function CloudBackfillMaintenance() {
       {preflight && <div className="cloud-backfill__summary" aria-label="모바일 동기화 사전 점검 결과">
         <span>전체 {preflight.totalAssets.toLocaleString()}개</span>
         <span>준비됨 {preflight.readyAssets.toLocaleString()}개</span>
-        <span>이미 복제됨 {preflight.alreadyReplicated.toLocaleString()}개</span>
+        <span>동기화됨 {preflight.alreadyReplicated.toLocaleString()}개</span>
         <span>원본 문제 {preflight.missingOriginals.toLocaleString()}개</span>
         <span>썸네일 작업 {preflight.thumbnailWorkRequired.toLocaleString()}개</span>
         <span>문제 항목 {preflight.problemAssets.toLocaleString()}개</span>

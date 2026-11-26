@@ -8,8 +8,9 @@ import type { AssetCursor, AssetSummary, ClassificationEntry } from "../library/
 import { commandErrorMessage } from "../library/errorMessage";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
+import { Checkbox } from "../shared/ui/Checkbox";
 import { Select } from "../shared/ui/Select";
-import { TextField } from "../shared/ui/TextField";
+import { Field, TextInput } from "../shared/ui/TextInput";
 import { AssetGallery } from "../assets/AssetGallery";
 import type { CharacterTarget } from "./api";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
@@ -105,11 +106,11 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       <Select label="연결 대상" value={targetId} disabled={busy || previewPending} onChange={event => setTargetId(event.target.value)}>
         <option value="">새 캐릭터</option>{targets.filter(target => target.seriesClassificationId === seriesId && target.enabled).map(target => <option key={target.id} value={target.id}>{target.displayName}</option>)}
       </Select>
-      {!targetId && <TextField label="캐릭터 이름" value={name} disabled={busy || previewPending} onChange={event => setName(event.target.value)} />}
-      <label><input type="checkbox" checked={recursive} disabled={busy || previewPending || loading} onChange={event => setRecursive(event.target.checked)} />하위 폴더 포함</label>
-      <label><input type="checkbox" checked={cleanupFolder} disabled={busy || previewPending} onChange={event => setCleanupFolder(event.target.checked)} />전환 후 기존 폴더 정리</label>
-      <p>{relocates ? `선택한 자산을 ${seriesEntry?.name ?? "선택한 시리즈"} 폴더로 옮겨 연결합니다. 선택하지 않은 자산과 원본 파일을 유지합니다.` : cleanupFolder ? "이미지·GIF·영상을 연결하고, 직접 소속 자산은 시리즈로 옮깁니다. 하위 폴더와 남은 자산이 있으면 기존 폴더를 보존합니다." : "기존 분류 폴더를 유지합니다."}</p>
-      <p><BusyLabel busy={!!(snapshot === null)} idle={snapshot ? `${snapshot.count}개 자산 연결 예정` : null}>대상 확인 중…</BusyLabel> · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
+      {!targetId && <Field label="캐릭터 이름"><TextInput value={name} disabled={busy || previewPending} onChange={event => setName(event.target.value)} /></Field>}
+      <Checkbox checked={recursive} disabled={busy || previewPending || loading} onChange={event => setRecursive(event.target.checked)}>하위 폴더 포함</Checkbox>
+      <Checkbox checked={cleanupFolder} disabled={busy || previewPending} onChange={event => setCleanupFolder(event.target.checked)}>전환 후 기존 폴더 정리</Checkbox>
+      <p>{relocates ? `선택 파일 → ${seriesEntry?.name ?? "선택한 시리즈"} 폴더 이동 후 연결 · 미선택 파일·원본 유지` : cleanupFolder ? "이미지·GIF·영상 연결 및 직접 소속 파일 시리즈 이동 · 하위 폴더·잔여 파일 있으면 기존 폴더 유지" : "기존 분류 폴더 유지"}</p>
+      <p><BusyLabel busy={!!(snapshot === null)} idle={snapshot ? `연결 예정 ${snapshot.count}개` : null}>대상 확인 중…</BusyLabel> · 원본 파일·타 캐릭터 연결 유지</p>
       {!targetId && <><div className="character-actions"><strong>대표 이미지</strong><span>{thumbnail ? "선택됨" : "선택 사항"}</span></div>
         <div className="character-picker__gallery" inert={loading || previewPending ? true : undefined}><AssetGallery layout="masonry" items={items} privacyMode={privacyMode} targetRowHeight={140} selectedAssetIds={new Set(thumbnail ? [thumbnail] : [])} onSelectionGesture={asset => {
           if (!busy) setThumbnail(old => old === asset.id ? null : asset.id);

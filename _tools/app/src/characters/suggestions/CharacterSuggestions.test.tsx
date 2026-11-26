@@ -100,7 +100,7 @@ it("keeps an empty suggestion section stable across overlapping return refreshes
   vi.mocked(client.list).mockResolvedValue([]);
   const tree = (version: number) => <CharacterSuggestionsOverview version={version} privacyMode={false} api={client} onCount={onCount} />;
   const view = render(tree(0));
-  const empty = await screen.findByText("조건에 맞는 새 캐릭터 제안이 없습니다.");
+  const empty = await screen.findByText("조건에 맞는 새 캐릭터 제안 없음");
   vi.useFakeTimers();
   let finishOld!: (rows: Suggestion[]) => void, finishNew!: (rows: Suggestion[]) => void;
   vi.mocked(client.list)
@@ -150,7 +150,7 @@ it("keeps a registered suggestion retired after refreshing and remounting", asyn
   const create = await screen.findByRole("button", { name: "캐릭터 만들기" });
   await waitFor(() => expect(create).toBeEnabled());
   fireEvent.click(create);
-  await screen.findByText("조건에 맞는 새 캐릭터 제안이 없습니다.");
+  await screen.findByText("조건에 맞는 새 캐릭터 제안 없음");
   expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ tag: suggestion.tag, linkTag: true }));
   first.unmount();
   render(tree());
@@ -204,7 +204,7 @@ describe("character suggestions", () => {
     vi.mocked(client.list).mockResolvedValue([suggestion]); vi.mocked(client.ignored).mockResolvedValue([]);
     fireEvent.click(screen.getByRole("button", { name: "되돌리기" }));
     await waitFor(() => expect(client.ignore).toHaveBeenCalledWith(suggestion.tag, false));
-    expect(await screen.findByText("무시한 제안이 없습니다.")).toBeInTheDocument();
+    expect(await screen.findByText("무시한 제안 없음")).toBeInTheDocument();
   });
   it("opens the shared registration dialog from the overview", async () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={api()} />);
@@ -227,7 +227,7 @@ describe("character suggestions", () => {
     fireEvent.click(screen.getByRole("button", { name: "a0 크게 보기" }));
     fireEvent.click(screen.getByRole("button", { name: "레퍼런스에서 제거" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
-    expect(screen.getByText("레퍼런스 5장 미만: 수동으로 시작해요.")).toBeInTheDocument();
+    expect(screen.getByText("레퍼런스 5장 미만 · 수동 모드 시작")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "a5 크게 보기" }));
     fireEvent.click(screen.getByRole("button", { name: "레퍼런스로" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
@@ -242,7 +242,7 @@ describe("character suggestions", () => {
     fireEvent.click(await screen.findByRole("button", { name: "a7 크게 보기" }));
     fireEvent.click(screen.getByRole("button", { name: "레퍼런스로" }));
     fireEvent.click(screen.getByRole("button", { name: "미리보기 닫기" }));
-    expect(screen.getByText(/밖 표시가 있는 레퍼런스 1장/)).toBeInTheDocument();
+    expect(screen.getByText(/외부 레퍼런스 1장/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "캐릭터 만들기" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ referenceIds: ["a4", "a0", "a1", "a2", "a3", "a7"] })));
@@ -259,11 +259,11 @@ describe("character suggestions", () => {
   it("summarises candidates and can omit outside images without per-image exclusions", async () => {
     const client = api(); dialog(client);
     await screen.findByRole("button", { name: "a0 크게 보기" });
-    expect(screen.getByText(/^확인할 이미지 3장 —/)).toBeInTheDocument();
+    expect(screen.getByText(/^확인 대상 3장 ·/)).toBeInTheDocument();
     expect(screen.queryByLabelText("검토 후보 이미지")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "a6 빼기" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "시리즈 폴더 밖 이미지도 후보로" }));
-    expect(screen.getByText(/^확인할 이미지 2장 —/)).toBeInTheDocument();
+    expect(screen.getByText(/^확인 대상 2장 ·/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(client.register).toHaveBeenCalledWith(expect.objectContaining({ includeOutside: false, excludedAssetIds: [] })));
   });
@@ -355,9 +355,9 @@ describe("character suggestions", () => {
   it("puts the explanation behind a help button", async () => {
     render(<CharacterSuggestionsOverview version={0} privacyMode={false} api={api()} />);
     await screen.findByText("이졸데");
-    expect(screen.queryByText(/자동으로 만들지 않고/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/자동 등록 안 함/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "새 캐릭터 제안 도움말" }));
-    expect(await screen.findByText(/자동으로 만들지 않고/)).toBeInTheDocument();
+    expect(await screen.findByText(/자동 등록 안 함/)).toBeInTheDocument();
   });
   it("remembers the minimum and the inside-only filter across a remount and a restart", async () => {
     const client = api();

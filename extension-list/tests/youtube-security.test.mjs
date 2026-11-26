@@ -143,7 +143,7 @@ for (const [name, call] of [["Anthropic", callClaude]]) {
     globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({ error: { message: "SECRET_PROVIDER_DETAIL" } }) });
     await assert.rejects(call({ apiKey: "test", model: "test", chunk: [], sleep: async () => {} }), (err) => {
       assert.doesNotMatch(err.message, /SECRET_PROVIDER_DETAIL/);
-      assert.match(err.message, /API 오류가 났어요 \(500\)/);
+      assert.match(err.message, /API 오류 \(500\)/);
       return true;
     });
     assert.ok(warnings.some((text) => text.includes("SECRET_PROVIDER_DETAIL")));

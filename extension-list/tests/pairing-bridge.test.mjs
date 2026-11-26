@@ -32,9 +32,9 @@ test('callback response wins over an early undefined Promise from Chromium/Titan
 });
 
 test('the failure page names the cause without exposing server details', () => {
-  assert.match(bridge.failureReason({ code: 'pairing_expired' }), /만료됐거나 이미 사용/);
-  assert.match(bridge.failureReason({ code: 'offline' }), /서버에 연결하지 못했습니다/);
-  assert.match(bridge.failureReason({ code: 'worker_failed' }), /확장 프로그램이 응답하지 않습니다/);
+  assert.match(bridge.failureReason({ code: 'pairing_expired' }), /링크 만료 또는 사용됨/);
+  assert.match(bridge.failureReason({ code: 'offline' }), /서버 연결 실패/);
+  assert.match(bridge.failureReason({ code: 'worker_failed' }), /확장 프로그램 응답 없음/);
   assert.match(bridge.failureReason({ code: 'pairing_failed', httpStatus: 500 }), /\(HTTP 500\)/);
   assert.match(bridge.failureReason(undefined), /알 수 없는 오류/);
 });

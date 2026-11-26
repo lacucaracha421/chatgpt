@@ -21,7 +21,7 @@ test('frame download captures PNG; tainted, DRM and unloaded frames show Korean 
   await f.actions.activate('media.frame.save',context,origin,gesture);
   assert.equal(drawn,video);assert.equal(f.calls[0].url,'data:image/png;base64,AA==');
   await f.actions.activate('media.frame.lakomics',context,origin,gesture);
-  assert.match(f.toasts.at(-1).label,/업로드 지원/);assert.equal(f.calls.length,1);
+  assert.match(f.toasts.at(-1).label,/미지원/);assert.equal(f.calls.length,1);
   f.doc.createElement=()=>({getContext:()=>({drawImage(){}}),toDataURL(){throw new f.w.DOMException('tainted','SecurityError');}});
   await f.actions.activate('media.frame.save',context,origin,gesture);assert.match(f.toasts.at(-1).label,/보안 제한\(CORS\)/);
   context.media={...video,mediaKeys:{}};await f.actions.activate('media.frame.save',context,origin,gesture);assert.match(f.toasts.at(-1).label,/DRM/);

@@ -37,7 +37,7 @@ it.each([0, 4])("shows shared common-folder placement separately and enables mov
   await user.selectOptions(screen.getByRole("combobox"), "laplace");
   expect(await screen.findByText(/119개 중 115개/)).toBeVisible();
   expect(screen.getByText(`리버스 · 4개 · ${relocationCount ? "4개 이동" : "현재 위치 유지"}`)).toBeVisible();
-  expect(screen.getByText(/다른 캐릭터와 공유하는 4개의 연결도 유지/)).toBeVisible();
+  expect(screen.getByText(/공유 연결 4개 유지/)).toBeVisible();
   expect(screen.getByRole("button", { name: "이동" })).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "이동" }));
   expect(vi.mocked(invoke).mock.calls.map(call => call[0])).toEqual(["character_series", "character_series_move_preview", "move_character_to_series"]);
@@ -53,7 +53,7 @@ it("requires a current preview, preserves settings and never requests analysis",
   expect(screen.getByRole("button", { name: "이동" })).toBeDisabled();
   await user.selectOptions(select, "laplace");
   expect(await screen.findByText(/12개 중 8개/)).toBeVisible();
-  expect(screen.getByText(/기존 ‘라플라스’ 그룹에서는 빠집니다/)).toBeVisible();
+  expect(screen.getByText(/기존 ‘라플라스’ 그룹에서 제외/)).toBeVisible();
   await user.click(screen.getByRole("button", { name: "이동" }));
   expect(invoke).toHaveBeenCalledWith("move_character_to_series", { targetId: target.id, destinationId: "laplace", token: preview.token });
   expect(onMoved).toHaveBeenCalledWith(expect.objectContaining({ id: target.id, seriesClassificationId: "laplace" }));

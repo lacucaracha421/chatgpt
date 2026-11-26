@@ -14,8 +14,8 @@ const LINES: Record<Face, string> = {
   opened: "열림",
 };
 const HELP: Record<"blocked" | "public", string> = {
-  blocked: "같은 Wi-Fi나 Tailscale의 태블릿이 이 PC로 바로 보내려면 Windows 방화벽에서 한 번 허용해야 합니다. 개인 네트워크에서만 열리고 관리자 확인 창이 뜹니다. 열지 않아도 파일은 서버를 거쳐 그대로 받습니다.",
-  public: "이 Wi-Fi가 Windows에서 공용 네트워크로 되어 있어 직접 받을 수 없습니다. 설정 › 네트워크 및 인터넷에서 개인 네트워크로 바꾸면 직접 받습니다. 바꾸지 않아도 서버를 거쳐 받습니다.",
+  blocked: "같은 Wi-Fi·Tailscale 직접 수신: Windows 방화벽 허용 필요 (개인 네트워크 전용 · 미허용 시 서버 경유)",
+  public: "현재 공용 네트워크로 직접 수신 불가 · Windows 네트워크 설정에서 '개인'으로 변경 (미변경 시 서버 경유)",
 };
 
 /** After a successful open the confirmation stays this long, then the block folds away. */

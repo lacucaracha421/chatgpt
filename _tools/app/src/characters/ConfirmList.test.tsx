@@ -132,7 +132,7 @@ it("holds the thumbnail in the same frame until the review copy finishes decodin
   fireEvent.error(asset);
   expect(frame.querySelector('img[src*="/asset/"]')).toBeNull();
   expect(thumbnail).toBeInTheDocument();
-  expect(screen.getByRole("status")).toHaveTextContent("축소 이미지를 표시합니다");
+  expect(screen.getByRole("status")).toHaveTextContent("축소 이미지 표시");
 });
 
 it("asks for a review-size copy by stage size and loads the original only on a click or F", async () => {
@@ -443,7 +443,7 @@ it("leaves an image with a person box out of the bulk action and asks for a sing
   await user.click(applyButton("아님 1장 빼고 나머지 맞음"));
   const ask = await screen.findByRole("dialog", { name: "아님 1장 빼고 나머지 맞음" });
   expect(within(ask).getByText("맞음 1장, 아님 1장을 저장할까요?")).toBeInTheDocument();
-  expect(within(ask).getByText("한 장씩 보기 필요 1장은 그대로 둡니다.")).toBeInTheDocument();
+  expect(within(ask).getByText("한 장씩 보기 필요 1장 제외")).toBeInTheDocument();
   await user.click(within(ask).getByRole("button", { name: "적용" }));
   await waitFor(() => expect(decisions.decideBatch).toHaveBeenCalledTimes(1));
   expect(vi.mocked(decisions.decideBatch).mock.calls[0]![0]).toEqual(expect.arrayContaining([request("hina", "w2", "accepted"), request("hina", "w3", "rejected")]));

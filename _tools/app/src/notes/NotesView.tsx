@@ -7,10 +7,12 @@ import { ArrowLeftIcon, ArrowUturnLeftIcon, ChevronDownIcon, DocumentTextIcon, E
 import { useLibrary } from "../library/LibraryContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
+import { Checkbox } from "../shared/ui/Checkbox";
 import { IconButton } from "../shared/ui/IconButton";
 import { PinIcon, PinSolidIcon } from "../shared/ui/PinIcon";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { SegmentedControl, type SegmentedOption } from "../shared/ui/SegmentedControl";
+import { Skeleton } from "../shared/ui/Skeleton";
 import { useSectionDrop } from "../shared/ui/useSectionDrop";
 import { SecretEditor, SecretGate } from "./SecretNote";
 import { checklistMarkdown, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, type ChecklistItem, type NoteKind } from "./model";
@@ -37,12 +39,12 @@ export function RecoveryKeyReveal({store}:{store:NotesStore}){
   async function unlockAndReveal(){setError("");const failure=await store.openSecrets("secretUnlock",{pin});setPin("");if(failure)setError(failure);else await reveal();}
   function hide(){setKey(null);setQr("");}
   return <>{key===null
-    ?needPin?<form className="notes-recovery-pin" onSubmit={e=>{e.preventDefault();void unlockAndReveal();}}><label htmlFor="notes-recovery-pin">암호 메모 PIN</label><input id="notes-recovery-pin" className="ui-input notes-secret-gate__pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/><p>복구키를 보려면 이 PC의 암호 메모 PIN을 입력하세요.</p><Button type="submit" disabled={pin.length<4}>확인 후 복구키 보기</Button></form>
+    ?needPin?<form className="notes-recovery-pin" onSubmit={e=>{e.preventDefault();void unlockAndReveal();}}><label htmlFor="notes-recovery-pin">암호 메모 PIN</label><input id="notes-recovery-pin" className="ui-input notes-secret-gate__pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/><p>복구키 조회용 이 PC 암호 메모 PIN 입력</p><Button type="submit" disabled={pin.length<4}>확인 후 복구키 보기</Button></form>
     :<Button onClick={()=>void reveal()}>복구키 보기</Button>
     :<><label htmlFor="notes-recovery-key">복구키</label>
       {qr&&<img className="notes-recovery-qr" src={qr} alt="복구키 QR 코드" width={220} height={220}/>}
       <textarea id="notes-recovery-key" className="ui-input notes-key" value={key} readOnly spellCheck={false} autoComplete="off"/>
-      <p>휴대폰 카메라로 QR을 찍어 나온 값을 모바일 메모의 복구키 칸에 붙여넣으세요. 다른 사람이 보지 않는 곳에서 열고, 따로 보관해 주세요.</p>
+      <p>QR 스캔 값을 모바일 메모 복구키 칸에 입력 · 별도 보관 권장</p>
       <Button onClick={hide}>숨기기</Button></>}
     {error&&<p role="alert">{error}</p>}</>;
 }
@@ -50,10 +52,10 @@ export function RecoveryKeyReveal({store}:{store:NotesStore}){
 function KeySetup({store}:{store:NotesStore}){
   const [key,setKey]=useState("");const [generated,setGenerated]=useState(false);const [confirmed,setConfirmed]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState("");
   async function generate(){setBusy(true);try{const result=await store.request<{key:string}>("generateKey");setKey(result.key);setGenerated(true);setConfirmed(false);}catch{setError("복구키를 만들지 못했습니다.");}finally{setBusy(false);}}
-  return <div className="notes-setup"><h2>메모 암호화</h2><p>제목과 본문은 이 PC에서 암호화됩니다.<br/>다른 PC에서는 같은 복구키로 메모를 열 수 있습니다.</p>
+  return <div className="notes-setup"><h2>메모 암호화</h2><p>제목·본문은 이 PC에서 암호화됨<br/>다른 PC에서는 같은 복구키로 열람 가능</p>
     <label htmlFor="notes-key">{generated?"새 복구키":"복구키"}</label>
     <textarea id="notes-key" className="ui-input notes-key" value={key} readOnly={generated} spellCheck={false} autoComplete="off" onChange={e=>setKey(e.target.value)} placeholder="다른 PC에서 보관한 64자리 복구키" />
-    {generated && <><p className="notes-key-warning">이 키를 별도로 보관해 주세요. 키를 잃으면 서버에서도 복구할 수 없습니다.</p><label className="notes-confirm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>복구키를 안전한 곳에 보관했습니다</label></>}
+    {generated && <><p className="notes-key-warning">별도 보관 필수 · 분실 시 서버에서도 복구 불가</p><Checkbox checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}>복구키를 안전한 곳에 보관함</Checkbox></>}
     <div className="notes-setup-actions"><Button variant="primary" disabled={busy || key.trim().length!==64 || (generated&&!confirmed)} onClick={async()=>{setBusy(true);await store.unlock(key);setBusy(false);}}>메모 열기</Button><Button variant="ghost" disabled={busy} onClick={()=>void generate()}>처음 사용 · 키 만들기</Button></div>{error&&<p role="alert">{error}</p>}
   </div>;
 }
@@ -286,7 +288,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       {footer&&<footer className="notes-editor-footer"><span>{footer}</span></footer>}
     </article>;
   const secretCreation=creatingSecret?<article className="notes-editor notes-editor--gate"><div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ArrowLeftIcon aria-hidden="true"/>메모</Button></div></div><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={close}/></article>:null;
-  const main=!state.ready?<div className="notes-empty notes-loading" aria-busy="true"><DocumentTextIcon className="notes-empty__icon" aria-hidden="true"/></div>
+  const main=!state.ready?<div className="notes-board notes-loading" aria-busy="true" aria-label="메모를 불러오는 중"><div className="notes-masonry">{[0,1,2,3].map(index=><Skeleton key={index} className="notes-loading-card" label={null}/>)}</div></div>
     :state.keyringLocked?<KeyringLocked store={store} busy={keyringBusy}/>
     :!state.unlocked?<KeySetup store={store}/>
     :ledgerOpen&&note&&!creatingSecret?<LedgerView key={note.id} store={store} ledgerId={note.id} actions={<>

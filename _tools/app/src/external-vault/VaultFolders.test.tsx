@@ -72,7 +72,7 @@ it("fills the empty vault index with 전체, 미분류 and the folder tree that 
   await userEvent.click(screen.getByRole("button", { name: "미분류 1개" }));
   await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: null, offset: 0, limit: 80, unfiledOnly: true }));
   // The trash is not scoped by folders.
-  await userEvent.click(screen.getByRole("button", { name: "휴지통" }));
+  await userEvent.click(screen.getByRole("radio", { name: "휴지통" }));
   await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: null, offset: 0, limit: 80, trashed: true }));
 });
 

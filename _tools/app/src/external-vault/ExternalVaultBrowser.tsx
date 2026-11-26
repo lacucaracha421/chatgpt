@@ -10,16 +10,19 @@ import type {
   AssetSummary, EncryptedVaultFolder, EncryptedVaultImportReport, EncryptedVaultItem,
   EncryptedVaultItemKind, EncryptedVaultStatus, LibraryGateway,
 } from "../library/types";
-import { ArrowRightCircleIcon, ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowRightCircleIcon, ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FolderArrowDownIcon, LockClosedIcon, PencilIcon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
 import { ChromeContribution } from "../layout/WorkspaceChrome";
 import { pointerDragReducer, type InternalDragPayload, type PointerDragAction, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { VaultFolderPicker, VaultFolderSidebar, type VaultDropTarget, type VaultScope } from "./VaultFolderSidebar";
 import type { ComponentType, SVGProps } from "react";
 import { Button } from "../shared/ui/Button";
+import { Checkbox } from "../shared/ui/Checkbox";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
-import { TextField } from "../shared/ui/TextField";
+import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { Skeleton } from "../shared/ui/Skeleton";
+import { Field, TextInput } from "../shared/ui/TextInput";
 import { Toast } from "../shared/ui/Toast";
 import { vaultPlaybackUrl } from "../assets/mediaUrl";
 import { clearVaultThumbnailCache } from "../assets/vaultThumbnailCache";
@@ -73,7 +76,7 @@ function VaultUnlockPanel({ gateway, remembered, onStatusChange, onWarning }: { 
       const next = !remember ? await gateway.getEncryptedVaultStatus?.().catch(() => null) : null;
       if (next?.state === "unlocked") {
         setValue("");
-        onWarning(`보관함은 열렸지만 PC에 기억한 키를 지우지 못했습니다. ${vaultErrorMessage(cause, kind, "키 삭제에 실패했습니다.")} 설정에서 ‘이 PC에서 잊기’를 다시 시도하세요.`);
+        onWarning(`보관함은 열렸으나 PC 기억 키 삭제 실패 · ${vaultErrorMessage(cause, kind, "키 삭제 실패")} · 설정에서 ‘이 PC에서 기억 해제’ 재시도 필요`);
         onStatusChange(next);
         return;
       }
@@ -85,13 +88,13 @@ function VaultUnlockPanel({ gateway, remembered, onStatusChange, onWarning }: { 
   const recovery = kind === "recoveryKey";
   return <section className="external-vault-unlock" aria-label="비밀">
     <form className="external-vault-unlock__form" onSubmit={(event) => void unlock(event)}>
-      <h2>비밀 보관함이 잠겨 있습니다</h2>
-      <p>{recovery ? "보관함을 만들 때 받은 64자리 복구키를 입력하세요." : remembered ? "이 PC에 기억한 키로 열지 못했습니다. 비밀번호를 입력하세요." : "비밀번호를 입력하면 보관함을 엽니다."}</p>
-      <TextField key={kind} autoFocus type={recovery ? "text" : "password"} label={recovery ? "복구키" : "비밀번호"}
-        autoComplete="off" spellCheck={false} value={value} onChange={(event) => setValue(event.target.value)} />
-      <label className="external-vault-check">
-        <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />이 PC에서 기억
-      </label>
+      <LockClosedIcon className="external-vault-unlock__icon" aria-hidden="true" />
+      <h2>비밀 보관함 잠김</h2>
+      <p>{recovery ? "보관함 생성 시 발급된 64자리 복구키 입력" : remembered ? "이 PC에 기억한 키로 열기 실패 · 비밀번호 입력" : "비밀번호 입력 시 보관함 열림"}</p>
+      <Field label={recovery ? "복구키" : "비밀번호"}>
+        <TextInput key={kind} autoFocus type={recovery ? "text" : "password"} autoComplete="off" spellCheck={false} value={value} onChange={(event) => setValue(event.target.value)} />
+      </Field>
+      <Checkbox checked={remember} onChange={(event) => setRemember(event.target.checked)}>이 PC에서 기억</Checkbox>
       {error && <p className="external-vault-message external-vault-message--error" role="alert">{error}</p>}
       <div className="external-vault-actions">
         <Button type="submit" variant="primary" disabled={busy || !value}><BusyLabel busy={!!(busy)} idle={"열기"}>여는 중…</BusyLabel></Button>
@@ -619,33 +622,34 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
       totalCount={status.itemCount ?? null} readOnly={readOnly} dropTarget={dropTarget} onCreate={createFolder} onRename={renameFolder}
       onDelete={(folder) => void deleteFolder(folder)} onMove={(folder) => { setFolderError(null); setFolderDialog({ kind: "folder", folder }); }} /> }} />}
     <header className="external-vault-browser__toolbar">
-      <div className="external-vault-browser__filters" role="group" aria-label="미디어 필터">
-        {(["all", "image", "video"] as const).map((value) => {
-          const { label, Icon } = { all: { label: "전체", Icon: Squares2X2Icon }, image: { label: "이미지", Icon: PhotoIcon }, video: { label: "영상", Icon: FilmIcon } }[value];
-          return <Button key={value} size="icon" variant={filter === value ? "secondary" : "ghost"} aria-pressed={filter === value}
-            aria-label={label} title={label} onClick={() => changeFilter(value)}><Icon aria-hidden="true" /></Button>;
-        })}
-        <span className="external-vault-browser__divider" aria-hidden="true" />
-        <Button size="sm" className="external-vault-browser__icon-count" variant={trashView ? "secondary" : "ghost"} aria-pressed={trashView} onClick={() => changeFilter("trash")}
-          aria-label={trashedCount ? `휴지통 ${trashedCount.toLocaleString()}` : "휴지통"} title="휴지통">
-          <TrashIcon aria-hidden="true" />{trashedCount ? <span className="external-vault-browser__count" aria-hidden="true">{trashedCount.toLocaleString()}</span> : null}
-        </Button>
+      <div className="external-vault-browser__filters">
+        <SegmentedControl
+          label="미디어 필터"
+          value={filter}
+          onChange={changeFilter}
+          options={[
+            { value: "all", label: "전체" },
+            { value: "image", label: "이미지" },
+            { value: "video", label: "영상" },
+            { value: "trash", label: "휴지통", count: trashedCount ? trashedCount : undefined },
+          ]}
+        />
       </div>
       <div className="external-vault-browser__actions">
         {trashView ? <>
-          <ToolbarAction label={`복원${selectedLabel}`} title="복원" count={selectedIds.length} Icon={ArrowUturnLeftIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => restore(selectedIds)} />
-          <ToolbarAction label={`영구 삭제${selectedLabel}`} title="영구 삭제" count={selectedIds.length} Icon={XCircleIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => askDelete(selectedIds)} />
+          <ToolbarAction label={`복원${selectedLabel}`} count={selectedIds.length} Icon={ArrowUturnLeftIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => restore(selectedIds)} />
+          <ToolbarAction label={`영구 삭제${selectedLabel}`} count={selectedIds.length} Icon={XCircleIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => askDelete(selectedIds)} />
           <ToolbarAction label="휴지통 비우기" Icon={TrashIcon} disabled={busy || readOnly || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })} />
         </> : <>
           {selectedIds.length > 0 && <>
-            <ToolbarAction label={showExporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
-            {foldersSupported && <ToolbarAction label={`폴더로 이동${selectedLabel}`} title="폴더로 이동" Icon={ArrowRightCircleIcon} disabled={busy || readOnly} onClick={() => openMoveItems(selectedIds)} />}
+            <ToolbarAction label={showExporting ? "내보내는 중…" : `내보내기${selectedLabel}`} count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
+            {foldersSupported && <ToolbarAction label={`폴더로 이동${selectedLabel}`} Icon={ArrowRightCircleIcon} disabled={busy || readOnly} onClick={() => openMoveItems(selectedIds)} />}
             <ToolbarAction label="휴지통으로" Icon={TrashIcon} disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)} />
           </>}
           <ToolbarAction label="제목 변경" Icon={PencilIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
           <span className="external-vault-browser__divider" aria-hidden="true" />
           <ToolbarAction label="파일 추가" Icon={DocumentPlusIcon} disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()} />
-          <ToolbarAction label={showImporting ? "가져오는 중…" : "가져오기"} title="폴더 가져오기" Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />
+          <ToolbarAction label={showImporting ? "가져오는 중…" : "가져오기"} Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />
         </>}
         <span className="external-vault-browser__divider" aria-hidden="true" />
         <ToolbarAction label="잠그기" Icon={LockClosedIcon} disabled={importing || locking} onClick={() => void lock()} />
@@ -653,25 +657,27 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
     </header>
     {importJob?.running && <div className="external-vault-browser__progress" role="status">
       <span>{vaultImportProgressText(importJob)}</span>
-      <progress aria-label="가져오기 진행률" max={importJob.progress?.total || undefined} value={importJob.progress?.total ? importJob.progress.processed : undefined} />
+      <VaultProgressBar label="가져오기 진행률" value={importJob.progress?.processed} max={importJob.progress?.total} />
     </div>}
     {exportJob && <div className="external-vault-browser__progress" role={exportJob.error ? "alert" : "status"}>
       <span>{exportJob.running ? vaultExportProgressText(exportJob) : `내보내기 ${vaultExportResultText(exportJob)}`}</span>
       {exportJob.running
-        ? <progress aria-label="내보내기 진행률" max={exportJob.progress?.total || undefined} value={exportJob.progress?.total ? exportJob.progress.processed : undefined} />
+        ? <VaultProgressBar label="내보내기 진행률" value={exportJob.progress?.processed} max={exportJob.progress?.total} />
         : <Button size="sm" variant="ghost" onClick={dismissVaultExport}>닫기</Button>}
     </div>}
-    {readOnly && <p className="external-vault-browser__hint" role="status">보관함 목록이 손상되어 이전 백업본으로 읽기 전용으로 열었습니다. 최근에 넣거나 바꾼 항목은 보이지 않을 수 있고, 보기와 내보내기만 할 수 있습니다.</p>}
-    {trashView && !readOnly && totalCount > 0 && <p className="external-vault-browser__hint">휴지통의 항목은 직접 비울 때까지 USB에 암호화된 채로 남아 있습니다.</p>}
+    {readOnly && <p className="external-vault-browser__hint" role="status">보관함 목록 손상 · 이전 백업으로 읽기 전용 열림 (최근 변경 누락 가능 · 보기/내보내기만 가능)</p>}
+    {trashView && !readOnly && totalCount > 0 && <p className="external-vault-browser__hint">직접 비우기 전까지 USB에 암호화 상태로 유지</p>}
     {error && <p className="external-vault-browser__error" role="alert">{error}</p>}
     {importJob?.error && <p className="external-vault-browser__error" role="alert">
       {importJob.error} <Button size="sm" variant="ghost" onClick={dismissVaultImport}>닫기</Button>
     </p>}
-    {!loading && items.length === 0
-      ? trashView
-        ? <EmptyState title="휴지통이 비어 있습니다"><p>휴지통으로 옮긴 항목은 여기서 복원하거나 영구 삭제할 수 있습니다.</p></EmptyState>
-        : <EmptyState title="비밀 보관함이 비어 있습니다"><p>가져오기나 파일 추가로 PC의 이미지와 영상을 암호화해 넣을 수 있습니다.</p></EmptyState>
-      : <ContextMenu items={contextItems}><div className="external-vault-browser__results" onContextMenu={(event) => {
+    {loading && items.length === 0 && !error
+      ? <div className="external-vault-browser__skeleton" aria-label="비밀 보관함을 불러오는 중">{[0, 1, 2, 3, 4, 5].map((index) => <Skeleton key={index} className="external-vault-browser__skeleton-tile" label={null} />)}</div>
+      : !loading && items.length === 0
+        ? trashView
+          ? <EmptyState icon={TrashIcon} title="휴지통 비어 있음">휴지통 항목 복원 또는 영구 삭제</EmptyState>
+          : <EmptyState icon={LockClosedIcon} title="비밀 보관함 비어 있음">가져오기·파일 추가로 이미지·영상 암호화 보관</EmptyState>
+        : <ContextMenu items={contextItems}><div className="external-vault-browser__results" onContextMenu={(event) => {
           const id = (event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId;
           const target = items.find((item) => item.id === id);
           if (!target) { event.preventDefault(); return; }
@@ -710,7 +716,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         {confirm.kind === "empty"
           ? `휴지통의 ${(trashedCount ?? totalCount).toLocaleString()}개를 USB에서 영구 삭제합니다.`
           : `선택한 ${confirm.ids.length.toLocaleString()}개를 USB에서 영구 삭제합니다.`}
-        {" "}되돌릴 수 없습니다. 필요한 파일은 먼저 복원해 내보내세요.
+        {" "}되돌릴 수 없습니다. 필요한 파일은 먼저 복원·내보내기 권장.
       </p>
       {error && <p className="external-vault-editor__error" role="alert">{error}</p>}
       <div className="ui-dialog__actions">
@@ -758,8 +764,10 @@ function TitleEditor({ asset, gateway, onClose, onChanged }: { asset: AssetSumma
     finally { setBusy(false); }
   }
   return <Dialog open title="제목 변경" onClose={() => { if (!busy) onClose(); }}>
-    <TextField autoFocus label="제목" maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
-    <p className="external-vault-editor__hint">비워 두면 원본 파일명을 표시합니다.</p>
+    <Field label="제목">
+      <TextInput autoFocus maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
+    </Field>
+    <p className="external-vault-editor__hint">비워 두면 원본 파일명 표시</p>
     {error && <p className="external-vault-editor__error" role="alert">{error}</p>}
     <div className="ui-dialog__actions"><Button disabled={busy} onClick={onClose}>취소</Button><Button variant="primary" disabled={busy} onClick={() => void save()}>저장</Button></div>
   </Dialog>;
@@ -780,8 +788,8 @@ function ImportReportDialog({ report, onClose }: { report: EncryptedVaultImportR
     <dl className="external-vault-report">
       {rows.filter(([, value], index) => index < 3 || value > 0).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value.toLocaleString()}개</dd></div>)}
     </dl>
-    <p className="external-vault-editor__hint">원본 파일은 PC에 그대로 남아 있습니다. 원본을 지우기 전에 보관함에서 파일이 열리는지 확인하세요.</p>
-    {report.failed > 0 && <p className="external-vault-editor__hint">실패한 파일은 보관함에 없습니다. 이 파일의 원본은 지우지 마세요.</p>}
+    <p className="external-vault-editor__hint">PC 원본 파일 유지 · 삭제 전 보관함에서 열림 확인 권장</p>
+    {report.failed > 0 && <p className="external-vault-editor__hint">실패 파일은 미저장 · 원본 삭제 주의</p>}
     <div className="ui-dialog__actions"><Button variant="primary" onClick={onClose}>닫기</Button></div>
   </Dialog>;
 }
@@ -804,10 +812,18 @@ function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
   };
 }
 
-/** A toolbar icon button: the accessible name stays the full action (with its count), the tooltip names the action. */
-function ToolbarAction({ label, title, Icon, count = 0, disabled, onClick }: { label: string; title?: string; Icon: ComponentType<SVGProps<SVGSVGElement>>; count?: number; disabled?: boolean; onClick: () => void }) {
+function VaultProgressBar({ label, value, max }: { label: string; value?: number; max?: number }) {
+  const determinate = typeof max === "number" && max > 0 && typeof value === "number";
+  const pct = determinate ? Math.min(100, Math.max(0, Math.round((value / max) * 100))) : undefined;
+  return <div className="external-vault-browser__progress-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={determinate ? max : undefined} aria-valuenow={determinate ? value : undefined}>
+    <span className={`external-vault-browser__progress-fill${determinate ? "" : " is-indeterminate"}`} style={determinate ? { width: `${pct}%` } : undefined} />
+  </div>;
+}
+
+/** A toolbar icon button: the accessible name stays the full action (with its count). */
+function ToolbarAction({ label, Icon, count = 0, disabled, onClick }: { label: string; Icon: ComponentType<SVGProps<SVGSVGElement>>; count?: number; disabled?: boolean; onClick: () => void }) {
   return count > 0
-    ? <Button size="sm" variant="ghost" className="external-vault-browser__icon-count" aria-label={label} title={title ?? label} disabled={disabled} onClick={onClick}>
+    ? <Button size="sm" variant="ghost" className="external-vault-browser__icon-count" aria-label={label} disabled={disabled} onClick={onClick}>
       <Icon aria-hidden="true" /><span className="external-vault-browser__count" aria-hidden="true">{count.toLocaleString()}</span></Button>
-    : <Button size="icon" variant="ghost" aria-label={label} title={title ?? label} disabled={disabled} onClick={onClick}><Icon aria-hidden="true" /></Button>;
+    : <Button size="icon" variant="ghost" aria-label={label} disabled={disabled} onClick={onClick}><Icon aria-hidden="true" /></Button>;
 }

@@ -64,7 +64,7 @@ it("moves whole-job failures to the failure group and returns them after success
   render(<Harness gateway={gateway} />);
   const failed = await screen.findByRole("region", { name: "실패" });
   expect(within(failed).getByText("찜·신간 발매 확인")).toBeVisible();
-  expect(within(screen.getByRole("region", { name: "준비" })).getByText("클라우드 복제")).toBeVisible();
+  expect(within(screen.getByRole("region", { name: "준비" })).getByText("클라우드 동기화")).toBeVisible();
   await userEvent.click(within(failed).getByRole("button", { name: "다시 시도" }));
   await waitFor(() => expect(screen.queryByRole("region", { name: "실패" })).toBeNull());
   expect(within(screen.getByRole("region", { name: "새 정보" })).getByText("찜·신간 발매 확인")).toBeVisible();

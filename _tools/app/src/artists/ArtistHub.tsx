@@ -150,8 +150,8 @@ function ArtistExclusionSettings() {
       <h3 id="artist-exclusion-title">작가에서 제외할 폴더</h3>
       <Button size="sm" variant="ghost" disabled={pending} onClick={() => setAddOpen((open) => !open)}>{addOpen ? "닫기" : "폴더 추가"}</Button>
     </div>
-    <p className="artist-muted">이 폴더의 이미지는 작가 목록·작가 미상·추천에서 빠집니다. 이미지와 폴더는 그대로입니다.</p>
-    {excluded === null || showExcluded ? showExcluded && <p className="artist-muted">선택한 폴더를 불러오는 중…</p> : excluded.length === 0 ? <p className="artist-muted">선택한 폴더가 없습니다.</p> : <ul className="artist-exclusion__list">
+    <p className="artist-muted">작가 목록·작가 미상·추천에서 제외 · 이미지와 폴더는 유지</p>
+    {excluded === null || showExcluded ? showExcluded && <p className="artist-muted">선택한 폴더 불러오는 중…</p> : excluded.length === 0 ? <p className="artist-muted">제외된 폴더 없음</p> : <ul className="artist-exclusion__list">
       {excluded.map((folder: ArtistExcludedFolder) => <li key={folder.id} className="artist-exclusion__row">
         <span className="artist-exclusion__copy"><span>{folder.breadcrumb}</span><small>{formatCount(folder.imageCount)}장</small></span>
         <Button size="icon" variant="ghost" aria-label={`${folder.breadcrumb} 제외 해제`} disabled={pending} onClick={() => void remove(folder.id)}><XMarkIcon aria-hidden="true" /></Button>
@@ -225,7 +225,7 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
 function MainOrderHelp() {
   const [open, setOpen] = useState(false);
   return <AnchoredPanel open={open} onOpenChange={setOpen} title="전체" trigger={<Button size="icon" variant="ghost" aria-label="전체 도움말"><InformationCircleIcon aria-hidden="true" /></Button>}>
-    <p>최근 저장 순입니다. 고정한 작가는 여기서 빠지고 사이드바 고정에 있습니다.</p>
+    <p>최근 저장 순 · 고정한 작가는 사이드바 고정에 표시</p>
   </AnchoredPanel>;
 }
 
@@ -430,7 +430,7 @@ function SinglesMosaic({ onNavigate, privacyMode }: { onNavigate: Navigate; priv
   </>;
 }
 
-const SUGGESTION_LABEL: Record<ArtistMergeSuggestion["kind"], string> = { handle: "핸들이 같아요", name: "이름이 같아요", similar: "핸들이 비슷해요" };
+const SUGGESTION_LABEL: Record<ArtistMergeSuggestion["kind"], string> = { handle: "핸들 같음", name: "이름 같음", similar: "핸들 비슷함" };
 
 function suggestionReason(suggestion: ArtistMergeSuggestion) {
   if (suggestion.kind === "handle") return "대소문자만 다름";
@@ -446,7 +446,7 @@ function MergeReview({ privacyMode, onNavigate }: { privacyMode: boolean; onNavi
   const [filter, setFilter] = useState<SuggestionFilter>("all");
   const shown = useMemo(() => (suggestions ?? []).filter((suggestion) => filter === "all" || (filter === "uncertain" ? suggestion.uncertain : !suggestion.uncertain && suggestion.kind === filter)), [filter, suggestions]);
   if (!suggestions) return <Skeleton className="artist-hub__skeleton" label="합치기 제안을 불러오는 중" />;
-  if (suggestions.length === 0) return <EmptyState title="합칠 만한 작가가 없습니다">핸들이 같거나 다른 사이트에서 이름이 같은 작가가 생기면 여기에 모입니다.</EmptyState>;
+  if (suggestions.length === 0) return <EmptyState title="합칠 만한 작가 없음">핸들이나 이름이 겹치는 작가가 생기면 여기에 표시</EmptyState>;
   const count = (value: SuggestionFilter) => suggestions.filter((suggestion) => value === "all" || (value === "uncertain" ? suggestion.uncertain : !suggestion.uncertain && suggestion.kind === value)).length;
   const chip = (value: SuggestionFilter, label: string) => <button type="button" className="artist-filter" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label} <span>{count(value)}</span></button>;
   return <>
@@ -500,7 +500,7 @@ function MergeCard({ suggestion, privacyMode, onNavigate }: { suggestion: Artist
     <footer className="artist-merge__actions">
       <Button variant="primary" disabled={pending || (choice === "\u0000custom" && !custom.trim())} onClick={() => void merge()}><MergeIcon aria-hidden="true" />합치기</Button>
       <Button disabled={pending} onClick={() => gateway && void run(() => gateway.dismissSuggestion(suggestion.keyA, suggestion.keyB))}>따로 두기</Button>
-      <span className="artist-muted">합친 뒤에도 작가 편집에서 떼어낼 수 있어요</span>
+      <span className="artist-muted">병합 후 작가 편집에서 분리 가능</span>
     </footer>
     {error && <p role="alert" className="artist-error">{error}</p>}
   </article>;
@@ -508,7 +508,7 @@ function MergeCard({ suggestion, privacyMode, onNavigate }: { suggestion: Artist
 
 const SITE_NOTE: Record<string, string> = {
   "x.com": "주소에서 핸들 읽기",
-  pixiv: "작품 번호만 있어 조회가 필요해요 · 지금은 직접 지정",
+  pixiv: "작품 번호만 있음 · 직접 지정 필요",
   "arca.live": "글쓴이가 작가가 아닐 수 있음",
   dcinside: "글쓴이가 작가가 아닐 수 있음",
 };
@@ -522,7 +522,7 @@ function SourceFill({ onNavigate, privacyMode }: { onNavigate: Navigate; privacy
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
   if (!preview) return <Skeleton className="artist-hub__skeleton" label="출처를 살펴보는 중" />;
-  if (preview.total === 0) return <EmptyState title="채울 이미지가 없습니다">출처 주소가 있는 이미지는 모두 작가와 이어져 있어요.</EmptyState>;
+  if (preview.total === 0) return <EmptyState title="채울 이미지 없음">출처 주소가 있는 이미지 모두 연결됨</EmptyState>;
   const apply = async () => {
     if (!gateway) return;
     setPending(true);
@@ -530,7 +530,7 @@ function SourceFill({ onNavigate, privacyMode }: { onNavigate: Navigate; privacy
       const result = await gateway.applySourceFill();
       invalidateArtists();
       setOpen(false);
-      setMessage(`${formatCount(result.assigned)}장을 작가와 이었어요${result.createdArtists ? ` · 새 작가 ${formatCount(result.createdArtists)}명` : ""}`);
+      setMessage(`${formatCount(result.assigned)}장 연결 완료${result.createdArtists ? ` · 새 작가 ${formatCount(result.createdArtists)}명` : ""}`);
     } catch (cause) {
       setMessage(commandErrorMessage(cause, "작가를 채우지 못했습니다."));
     } finally { setPending(false); }
@@ -553,7 +553,7 @@ function SourceFill({ onNavigate, privacyMode }: { onNavigate: Navigate; privacy
   return <div className={`artist-fill${open ? " artist-fill--open" : ""}`}>
     <div className="artist-fill__main">
       {table}
-      <p className="artist-muted artist-fill__note">x.com은 주소 x.com/(핸들)/status/…에서 바로 읽어 오프라인으로 채웁니다. 작가 정보는 이미지에 쓰지 않고 연결 기록으로만 남아 언제든 떼어낼 수 있어요. pixiv는 작품 번호만 있어 조회가 필요하고, arca.live·dcinside는 게시글별로 묶어 작가 지정으로 직접 붙입니다.</p>
+      <p className="artist-muted artist-fill__note">x.com: URL에서 핸들 자동 추출 (원본 파일 변경 없음 · 언제든 해제 가능) · pixiv/arca.live/dcinside: 직접 지정</p>
     </div>
     {open && <aside className="artist-fill__preview" aria-label="x.com 채우기 미리보기">
       <header>

@@ -69,22 +69,22 @@ export function ContainerFolderDialog({ folder, targets, entries, onClose, onSav
   }
   return <><Dialog open title={`${folder.name}${particle} 분류함으로`} onClose={() => { if (!busy) onClose(); }}>
     <div className="classification-sidebar__form">
-      <p>분류함에는 캐릭터를 둘 수 없습니다. {folder.name}에 있는 캐릭터를 옮길 시리즈를 캐릭터마다 골라 주세요.</p>
+      <p>분류함에는 캐릭터 보관 불가 · {folder.name}의 캐릭터별 이동 시리즈 선택</p>
       {targets.map(target => <div className="character-assign-picker__row" key={target.id}>
         <span className="character-assign-picker__thumbnail" aria-hidden="true" />
         <span className="character-assign-picker__name">{target.displayName}</span>
         <Button disabled={busy} onClick={() => setPicking(target.id)}>{destinations[target.id]?.name ?? "시리즈 고르기"}</Button>
       </div>)}
       <p>다시 확인 0장 · 시리즈 등록만 해제</p>
-      <p>대표 이미지, 수동 지정·제외 이력과 원본 파일을 유지합니다.</p>
+      <p>대표 이미지·지정 이력·원본 파일 유지</p>
       {summary && (summary.sharedCount > 0
-        ? <p>여러 캐릭터가 함께 쓰는 이미지 {summary.sharedCount.toLocaleString()}장은 모든 캐릭터와의 연결을 그대로 두고{summary.keptInFolderCount > 0 ? `, 그중 ${summary.keptInFolderCount.toLocaleString()}장은 ${folder.name} 폴더 안에 그대로 둡니다.` : " 지금 위치에서 계속 볼 수 있게 합니다."}</p>
-        : <p>여러 캐릭터가 함께 쓰는 이미지는 없습니다.</p>)}
-      {summary && !summary.referenceLosses?.length && <p>레퍼런스도 모두 그대로 쓰입니다.</p>}
+        ? <p>공유 이미지 {summary.sharedCount.toLocaleString()}장 연결 유지{summary.keptInFolderCount > 0 ? ` · ${summary.keptInFolderCount.toLocaleString()}장은 ${folder.name}에 유지` : " · 현재 위치 유지"}</p>
+        : <p>공유 이미지 없음</p>)}
+      {summary && !summary.referenceLosses?.length && <p>레퍼런스 전부 유지</p>}
       {!!summary?.referenceLosses?.length && <div className="registration-scope__notice registration-scope__notice--warning" role="status">
-        <b>일부 캐릭터의 레퍼런스가 시리즈 밖에 남습니다</b>
-        {summary.referenceLosses.map(loss => <p key={loss.targetId}>{loss.name}: 레퍼런스 {loss.ineligibleCount.toLocaleString()}장이 시리즈 밖에 남아 {loss.losesReady ? "자동 인식이 멈춥니다" : "쓰이지 않습니다"} — 같은 시리즈로 보내거나 나중에 레퍼런스를 다시 고르세요</p>)}
-        <p>레퍼런스를 함께 쓰는 캐릭터는 같은 하위 시리즈로 보내면 이 문제가 생기지 않습니다.</p>
+        <b>일부 캐릭터의 레퍼런스가 시리즈 밖에 남음</b>
+        {summary.referenceLosses.map(loss => <p key={loss.targetId}>{loss.name}: 시리즈 밖 레퍼런스 {loss.ineligibleCount.toLocaleString()}장 ({loss.losesReady ? "자동 인식 중단" : "미사용"}) · 같은 시리즈로 이동하거나 레퍼런스 재선택 필요</p>)}
+        <p>레퍼런스 공유 캐릭터는 같은 하위 시리즈로 이동 권장</p>
       </div>}
       {previewError && <p role="alert">{previewError}</p>}
       {error && <p role="alert">{error}</p>}

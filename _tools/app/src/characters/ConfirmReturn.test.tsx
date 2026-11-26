@@ -34,7 +34,7 @@ it("keeps the suggestion section intact while returning from a completed review"
     </BackNavigationProvider>;
   }
   render(<ReviewScreen />);
-  const empty = await screen.findByText("조건에 맞는 새 캐릭터 제안이 없습니다.");
+  const empty = await screen.findByText("조건에 맞는 새 캐릭터 제안 없음");
   const section = screen.getByRole("region", { name: "새 캐릭터 제안" });
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "전체 확인" }));

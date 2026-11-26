@@ -229,11 +229,11 @@ export function KakaoConnectDialog({
           </Button>
         </div>
 
-        {usedOriginalTitle && <p role="status">일본어 원제로 찾았어요</p>}
+        {usedOriginalTitle && <p role="status">일본어 원제로 검색됨</p>}
         {error && <p className="book-connect__error" role="alert">{error}</p>}
         {pending && <p role="status">연결 대기 · 서버에서 처리 중</p>}
-        {(limitHit || selectedKeys.length >= MAX_KAKAO_GROUPS) && <p className="book-connect__note" role="status">한 번에 최대 {MAX_KAKAO_GROUPS}개 시리즈까지 연결할 수 있습니다.</p>}
-        <p className="book-connect__note">국내 출판 제목으로 검색하세요. 출판사별 권 목록과 발매 정보를 연결합니다.</p>
+        {(limitHit || selectedKeys.length >= MAX_KAKAO_GROUPS) && <p className="book-connect__note" role="status">한 번에 최대 {MAX_KAKAO_GROUPS}개 시리즈까지 연결 가능</p>}
+        <p className="book-connect__note">국내 출판 제목 검색 · 출판사별 권 목록 및 발매 정보 연결</p>
         {(results?.[0]?.unparsedCount ?? 0) > 0 && (
           <p className="book-connect__note">권 번호를 알 수 없거나 세트·가이드라서 제외된 상품 {results?.[0]?.unparsedCount}개</p>
         )}
@@ -279,7 +279,7 @@ export function KakaoConnectDialog({
                   <div className="book-connect__preview-header">
                     <strong>{candidate.title}</strong>
                     {previewed.length > 1 && <small>{[candidate.publisher, volumeRange(candidate)].filter(Boolean).join(" · ")}</small>}
-                    {!selectedKeys.includes(candidate.groupFingerprint) && <small>체크하지 않아 연결되지 않습니다</small>}
+                    {!selectedKeys.includes(candidate.groupFingerprint) && <small>미선택 · 연결 제외</small>}
                     {candidate.ignoredCount > 0 && <small>같은 권이 겹쳐 제외된 상품 {candidate.ignoredCount}개</small>}
                   </div>
                   <ul>
@@ -293,7 +293,7 @@ export function KakaoConnectDialog({
                 </section>
               ))
             ) : (
-              <p className="book-connect__empty">검색 결과에서 연결할 시리즈를 선택하세요.</p>
+              <p className="book-connect__empty">연결할 시리즈 선택</p>
             )}
           </div>
         </div>

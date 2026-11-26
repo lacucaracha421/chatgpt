@@ -58,7 +58,7 @@ it("advances only after a successful persisted decision", async () => {
   vi.mocked(client.list).mockResolvedValueOnce({ items: [pair()], totalCount: 1, nextCursor: null }).mockResolvedValue({ items: [], totalCount: 0, nextCursor: null });
   render(<VideoSimilarityPanel assetIds={[]} api={client} onClose={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: "둘 다 보관" }));
-  expect(await screen.findByRole("heading", { name: "검토할 유사 영상이 없습니다" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "검토할 유사 영상 없음" })).toBeInTheDocument();
 });
 
 it("unmounts both players when privacy is enabled", async () => {
@@ -122,7 +122,7 @@ it("does not restore a resolved pair from an older in-flight list", async () => 
   fireEvent.click(screen.getByRole("button", { name: "둘 다 보관" }));
   await act(async () => {});
   await act(async () => resolveOldList({ items: [pair()], totalCount: 1, nextCursor: null }));
-  expect(screen.getByRole("heading", { name: "검토할 유사 영상이 없습니다" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "검토할 유사 영상 없음" })).toBeInTheDocument();
 });
 
 it("closes once with Escape from a focused control", async () => {

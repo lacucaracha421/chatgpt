@@ -194,9 +194,9 @@ export function CharacterExclusionEditor({request,target,assetLabel,characterNam
   };
 
   return <Dialog open={!!request} title={`${characterName}에서 빼기`} onClose={onClose}>
-    <DialogDescription className="sr-only">{assetLabel}을(를) {characterName}에서 뺍니다. 파일과 폴더는 그대로 남고 다른 캐릭터에는 영향이 없습니다. 확인을 눌러야 서버에 적용됩니다.</DialogDescription>
+    <DialogDescription className="sr-only">{assetLabel} · {characterName}에서 제외 · 파일·폴더·다른 캐릭터 유지</DialogDescription>
     <div className="dialog-header"><span>{characterName}에서 빼기</span><IconButton label="닫기" icon={XMarkIcon} onClick={onClose}/></div>
-    <p className="hint">파일은 삭제되지 않고 폴더도 그대로 남습니다. 이 캐릭터에서만 제외되고 다른 캐릭터에는 영향이 없습니다.</p>
+    <p className="hint">파일·폴더 유지 · 이 캐릭터에서만 제외 (다른 캐릭터 영향 없음)</p>
     {error&&<p className="error-message" role="alert">{error}</p>}
     <div className="dialog-actions">
       <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>

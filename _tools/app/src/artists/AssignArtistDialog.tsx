@@ -63,7 +63,7 @@ export function AssignArtistDialog({ assetIds, privacyMode, onClose, onAssigned 
           </button>
         </li>}
       </ul>
-      <p className="artist-muted">원래 파일과 출처 정보는 바꾸지 않고, 고른 이미지를 이 작가에 붙이기만 합니다. 작가 편집의 원래 이름 목록에 "직접 지정"으로 보이고 언제든 떼어낼 수 있어요.</p>
+      <p className="artist-muted">원본 파일·출처 유지 · 작가 편집에서 언제든 해제 가능</p>
       {error && <p role="alert" className="artist-error">{error}</p>}
     </div>
     <div className="ui-dialog__actions">

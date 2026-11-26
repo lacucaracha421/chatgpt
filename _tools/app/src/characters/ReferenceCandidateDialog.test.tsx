@@ -34,7 +34,7 @@ it("preselects suggestions, lets the user remove a bad image, and confirms once"
   render(<ReferenceCandidateDialog target={{ ...fixtureTarget("manual", "마커스"), manualOnly: true, ready: false, references: [] }} privacyMode={false} onClose={vi.fn()} onSaved={saved} api={api} />);
   const user = userEvent.setup();
   expect(await screen.findByRole("dialog", { name: "레퍼런스 선택" })).toBeVisible();
-  expect(screen.getByText(/과거 이미지는 자동으로 다시 분석하지 않습니다/)).toBeVisible();
+  expect(screen.getByText(/과거 이미지 자동 재분석 안 함/)).toBeVisible();
   expect(screen.getByText(/6장 이상/)).toBeVisible();
   expect(screen.getByRole("button", { name: "6장 적용" })).toBeEnabled();
   await user.click(screen.getByRole("option", { name: "이미지 5.webp" }));

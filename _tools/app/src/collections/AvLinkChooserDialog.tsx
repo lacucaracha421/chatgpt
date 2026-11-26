@@ -347,7 +347,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
     </div>
     {rejecting && candidate && <Dialog open title="후보를 거절할까요?" onClose={() => setRejecting(false)}
       heading={<span className="av-reject__title"><span className="av-reject__thumb" aria-hidden="true">{!privacyMode && front && <Crop src={candidate.jacketUrl} sourceWidth={candidate.jacketWidth} x={front.x} width={front.width} height={candidate.jacketHeight} />}</span>후보를 거절할까요?</span>}>
-      <p className="av-reject__note">가져온 후보만 지워져요. 같은 품번을 다시 보내면 다시 찾아요.</p>
+      <p className="av-reject__note">가져온 후보만 삭제 · 같은 품번 재전송 시 다시 검색</p>
       <div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setRejecting(false)}>취소</Button><Button variant="danger" onClick={() => void dismiss()}>거절</Button></div>
     </Dialog>}
   </Dialog>;

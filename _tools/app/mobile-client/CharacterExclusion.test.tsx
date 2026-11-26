@@ -105,8 +105,8 @@ describe('character exclusion confirmation',()=>{
   it('says the file, folder and other characters are untouched, and sends nothing until confirmed',async()=>{
     renderViewer();open();
     const dialog=await screen.findByRole('dialog',{name:'Lumi에서 빼기'});
-    expect(dialog.textContent).toContain('파일은 삭제되지 않고 폴더도 그대로 남습니다.');
-    expect(dialog.textContent).toContain('다른 캐릭터에는 영향이 없습니다.');
+    expect(dialog.textContent).toContain('파일·폴더 유지');
+    expect(dialog.textContent).toContain('다른 캐릭터 영향 없음');
     expect(mocks.api).not.toHaveBeenCalled();
   });
   it('cancels without sending',()=>{

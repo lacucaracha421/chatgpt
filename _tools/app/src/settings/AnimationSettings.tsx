@@ -33,8 +33,8 @@ export function AnimationSettings() {
       <option value="system">Windows 설정 따르기</option>
       <option value="always">항상 켜기</option>
     </Select>} />
-    <p id={helpId} className="settings-view__status">Windows에서 애니메이션 효과를 꺼 두어도 Lakomics에서는 움직임을 보여 줍니다. 바꾸면 앱을 다시 시작해야 적용됩니다.</p>
-    {status && status.selected !== status.active && <p className="settings-view__row-message" role="status">다시 시작하면 적용됩니다</p>}
+    <p id={helpId} className="settings-view__status">Windows 애니메이션이 꺼져 있어도 앱 내 움직임 유지 · 재시작 후 적용</p>
+    {status && status.selected !== status.active && <p className="settings-view__row-message" role="status">재시작 후 적용</p>}
     {error && <p className="settings-view__row-message" role="alert">{error}</p>}
   </>;
 }

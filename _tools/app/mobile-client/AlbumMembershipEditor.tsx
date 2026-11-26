@@ -78,11 +78,11 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     finally{setSaving(current=>{const next=new Set(current);next.delete(album.id);return next;});}
   };
   return <Dialog open={open} title="앨범" onClose={onClose}>
-    <DialogDescription className="sr-only">현재 자산을 앨범에 추가하거나 앨범에서 뺍니다. 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
+    <DialogDescription className="sr-only">앨범 추가·제거 · 오프라인 변경은 저장 대기</DialogDescription>
     <div className="dialog-header"><span>앨범에 추가</span><IconButton label="앨범 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
     <LoadingLine label={(!state&&!error)&&'앨범 상태를 불러오는 중'}/>
     {error&&<p className="error-message" role="alert">{error}</p>}
-    {state&&!state.adopted&&<p className="hint">앨범 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
+    {state&&!state.adopted&&<p className="hint">앨범 동기화 준비 후 편집 가능</p>}
     {state?.adopted&&<div className="album-membership-list">{flattenMembershipAlbums(state.albums).map(({album,depth})=><div key={album.id} className={`album-membership-entry${album.blocked?' is-blocked':''}`}>
       <label className="album-membership-row" style={{paddingLeft:12+depth*20}}>
         <input type="checkbox" aria-label={album.name} checked={album.desiredState} disabled={album.blocked||saving.has(album.id)} onChange={()=>void toggle(album)}/>

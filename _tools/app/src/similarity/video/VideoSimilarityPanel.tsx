@@ -1,5 +1,5 @@
 import { AssetImage } from "../../privacy/AssetImage";
-import { XMarkIcon } from "@heroicons/react/24/outline";
+import { FilmIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes } from "../../assets/assetMetadata";
 import { thumbnailUrl } from "../../assets/mediaUrl";
@@ -7,6 +7,8 @@ import { commandErrorMessage } from "../../library/errorMessage";
 import type { AssetSummary } from "../../library/types";
 import { ViewToolbar } from "../../layout/ViewToolbar";
 import { usePrivacy } from "../../privacy/PrivacyContext";
+import { displayDuration } from "../../shared/displayDate";
+import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { Skeleton } from "../../shared/ui/Skeleton";
@@ -109,7 +111,7 @@ export function VideoSimilarityPanel({ assetIds, onClose, api = videoSimilarityA
     setMessage(null);
     try { await action(); }
     catch (error) {
-      if (epoch === generation.current) setMessage(commandErrorMessage(error, "요청을 처리하지 못했습니다. 다시 시도해 주세요."));
+      if (epoch === generation.current) setMessage(commandErrorMessage(error, "요청을 처리하지 못했습니다."));
     } finally {
       if (epoch === generation.current) {
         pendingRef.current = false;
@@ -133,14 +135,18 @@ export function VideoSimilarityPanel({ assetIds, onClose, api = videoSimilarityA
     void act(async () => {
       try { await api.decide(review.id, decision); }
       catch (error) {
-        const message = commandErrorMessage(error, "영상 검토를 저장하지 못했습니다. 다시 시도해 주세요.");
+        const message = commandErrorMessage(error, "영상 검토를 저장하지 못했습니다.");
         throw new Error(message === "영상 분석을 완료하지 못했습니다."
-          ? "원본 영상 확인이 중단되거나 시간이 초과되었습니다. 검토는 유지됩니다. 다시 시도해 주세요."
+          ? "원본 영상 확인 중단·시간 초과 · 검토 유지됨 · 다시 시도 필요"
           : message);
       }
       await load(epoch);
     });
   }
+
+  const processed = scan ? scan.completed + scan.failed + scan.skipped : 0;
+  const leftPixels = review ? review.left.width * review.left.height : 0;
+  const rightPixels = review ? review.right.width * review.right.height : 0;
 
   return <section className="similarity-review video-similarity" aria-label="유사 영상 검토" onKeyDown={(event) => {
     if (event.key === "Escape" && !event.defaultPrevented && !pendingRef.current) {
@@ -149,46 +155,87 @@ export function VideoSimilarityPanel({ assetIds, onClose, api = videoSimilarityA
     }
     event.stopPropagation();
   }}>
-    <ViewToolbar title="유사 영상 검토" actions={<Button size="icon" variant="ghost" aria-label="영상 검토 닫기" disabled={pending} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}>
-      <span>검토 대기 {total}쌍</span>
-    </ViewToolbar>
+    <ViewToolbar title="유사 영상 검토" chrome={{ status: total > 0 ? <span>검토 대기 {total.toLocaleString()}쌍</span> : undefined }} actions={<Button size="icon" variant="ghost" aria-label="영상 검토 닫기" disabled={pending} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>} />
     <div className="video-similarity__scan">
+      <div className="video-similarity__scan-status">
+        {scan ? <>
+          <strong role="status">{stateLabels[scan.state] ?? "상태 확인 필요"} · {processed.toLocaleString()} / {scan.total.toLocaleString()}개 · 후보 {scan.candidateCount.toLocaleString()}쌍{scan.failed > 0 && ` · 실패 ${scan.failed.toLocaleString()}개`}{scan.skipped > 0 && ` · 제외 ${scan.skipped.toLocaleString()}개`}{scan.reason && ` · ${reasonLabels[scan.reason] ?? "분석 중 오류"}`}</strong>
+          {scan.total > 0 && (
+            <div className="similarity-review__progress" role="progressbar" aria-label="영상 분석 진행률" aria-valuemin={0} aria-valuemax={scan.total} aria-valuenow={processed}>
+              <span className="similarity-review__progress-fill" style={{ width: `${Math.min(100, Math.round((processed / scan.total) * 100))}%` }} />
+            </div>
+          )}
+        </> : <p className="video-similarity__scan-hint">선택한 영상 간 프레임 비교 · 한쪽 보관 시 다른 영상 휴지통 이동</p>}
+      </div>
       <div className="video-similarity__scan-actions">
-        <Button disabled={pending || running(scan) || assetIds.length < 2 || assetIds.length > 100} onClick={() => control("start")}>선택한 영상 {assetIds.length}개 분석</Button>
+        <Button variant={assetIds.length >= 2 && assetIds.length <= 100 ? "primary" : "secondary"} disabled={pending || running(scan) || assetIds.length < 2 || assetIds.length > 100} onClick={() => control("start")}>선택한 영상 {assetIds.length}개 분석</Button>
         {running(scan) && <Button variant="secondary" disabled={pending} onClick={() => control("cancel")}>분석 중지</Button>}
         {resumable(scan) && <Button variant="secondary" disabled={pending} onClick={() => control("resume")}>이전 분석 이어서</Button>}
-        <Button variant="ghost" disabled={pending} onClick={() => void act(() => load(generation.current))}>목록 새로고침</Button>
+        <Button variant="quiet" disabled={pending} onClick={() => void act(() => load(generation.current))}>목록 새로고침</Button>
       </div>
-      <p>선택한 영상끼리 프레임을 비교합니다. 한쪽만 보관하면 다른 영상은 휴지통으로 이동합니다.</p>
-      {scan && <p role="status">{stateLabels[scan.state] ?? "상태 확인 필요"} · {scan.completed + scan.failed + scan.skipped} / {scan.total}개 · 후보 {scan.candidateCount}쌍{scan.failed > 0 && ` · 실패 ${scan.failed}개`}{scan.skipped > 0 && ` · 제외 ${scan.skipped}개`}{scan.reason && ` · ${reasonLabels[scan.reason] ?? "분석 중 문제가 발생했습니다"}`}</p>}
     </div>
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-    {loading ? <Skeleton className="similarity-review__skeleton" label="유사 영상을 불러오는 중" /> : !review ? <EmptyState title="검토할 유사 영상이 없습니다">보관함에서 영상 2–100개를 선택한 뒤 비교할 수 있습니다.</EmptyState> : <>
-      <div className="similarity-review__comparison">
-        <VideoAssetPanel side="왼쪽 영상" asset={review.left} />
-        <VideoAssetPanel side="오른쪽 영상" asset={review.right} />
-        <details className="video-similarity__evidence"><summary>비교 근거 · {review.evidence.matchedFrames} / {review.evidence.attemptedFrames}프레임 일치</summary>
-          <p>시간 구간 {Math.round(review.evidence.matchingSpanPermille / 10)}% · 유효 프레임 {review.evidence.validFrames}개</p>
-          <ul>{review.evidence.matches.map((match, index) => <li key={index}>{seconds(match.leftRequestedAtMs)} ↔ {seconds(match.rightRequestedAtMs)} · 거리 {match.distance}</li>)}</ul>
+    {loading ? <Skeleton className="similarity-review__skeleton" label="유사 영상을 불러오는 중" /> : !review ? <EmptyState icon={FilmIcon} title="검토할 유사 영상 없음">보관함에서 영상 2–100개 선택 후 비교</EmptyState> : <>
+      <div className="video-similarity__body">
+        <div className="video-similarity__comparison">
+          <VideoAssetPanel
+            side="왼쪽 영상"
+            asset={review.left}
+            betterResolution={leftPixels > rightPixels}
+            betterBytes={review.left.byteSize > review.right.byteSize}
+          />
+          <VideoAssetPanel
+            side="오른쪽 영상"
+            asset={review.right}
+            betterResolution={rightPixels > leftPixels}
+            betterBytes={review.right.byteSize > review.left.byteSize}
+          />
+        </div>
+        <details className="video-similarity__evidence">
+          <summary>
+            <span>비교 근거</span>
+            <span className="video-similarity__evidence-meta numeric">
+              {review.evidence.matchedFrames} / {review.evidence.attemptedFrames}프레임 일치 · 시간 구간 {Math.round(review.evidence.matchingSpanPermille / 10)}% · 유효 프레임 {review.evidence.validFrames}개
+            </span>
+          </summary>
+          <ul className="video-similarity__matches numeric">
+            {review.evidence.matches.map((match, index) => (
+              <li key={index}>
+                <span>{formatTimestamp(match.leftRequestedAtMs)} ↔ {formatTimestamp(match.rightRequestedAtMs)}</span>
+                <span className="video-similarity__match-distance">차이 {match.distance}</span>
+              </li>
+            ))}
+          </ul>
         </details>
       </div>
-      <footer className="similarity-review__actions">
-        <Button disabled={pending} onClick={() => decide("keep_left")}>왼쪽 보관 · 오른쪽 휴지통</Button>
-        <Button disabled={pending} onClick={() => decide("keep_right")}>오른쪽 보관 · 왼쪽 휴지통</Button>
-        <Button variant="secondary" disabled={pending} onClick={() => decide("keep_both")}>둘 다 보관</Button>
-        <Button variant="ghost" disabled={pending} onClick={() => decide("not_similar")}>다른 영상</Button>
+      <footer className="video-similarity__actions">
+        <p className="video-similarity__action-hint">한쪽 보관 시 다른 영상 휴지통 이동 · 결정 전 원본 유지</p>
+        <div className="video-similarity__buttons">
+          <Button variant="secondary" disabled={pending} onClick={() => decide("keep_left")}>왼쪽 보관 · 오른쪽 휴지통</Button>
+          <Button variant="secondary" disabled={pending} onClick={() => decide("keep_right")}>오른쪽 보관 · 왼쪽 휴지통</Button>
+          <Button variant="secondary" disabled={pending} onClick={() => decide("keep_both")}>둘 다 보관</Button>
+          <Button variant="ghost" disabled={pending} onClick={() => decide("not_similar")}>다른 영상</Button>
+        </div>
       </footer>
     </>}
   </section>;
 }
 
-function seconds(ms: number) { return `${(ms / 1000).toFixed(1)}초`; }
-function VideoAssetPanel({ side, asset }: { side: string; asset: AssetSummary }) {
+function formatTimestamp(ms: number) { return displayDuration(ms) || `${(ms / 1000).toFixed(1)}초`; }
+function VideoAssetPanel({ side, asset, betterResolution, betterBytes }: { side: string; asset: AssetSummary; betterResolution: boolean; betterBytes: boolean }) {
   const { privacyMode } = usePrivacy();
-  return <section className="similarity-review__asset" aria-label={side}>
-    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : asset.media.kind === "video" && asset.media.preparationState === "ready" ? <VideoPlayer key={asset.id} asset={{ ...asset, media: asset.media }} /> : <AssetImage src={thumbnailUrl(asset.id)} alt={side} />}</div>
-    <h3>{asset.title || asset.originalName}</h3>
-    <dl><div><dt>파일 크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div><div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>{asset.media.kind === "video" && <div><dt>재생 시간</dt><dd>{asset.media.durationMs == null ? "알 수 없음" : seconds(asset.media.durationMs)}</dd></div>}</dl>
-    {!privacyMode && asset.media.kind === "video" && asset.media.preparationState !== "ready" && <p>재생 준비가 끝나면 영상을 확인할 수 있습니다.</p>}
+  const duration = asset.media.kind === "video" ? displayDuration(asset.media.durationMs) : "";
+  return <section className="video-similarity__asset" aria-label={side}>
+    <div className="video-similarity__preview">
+      <Badge variant="scrim" className="video-similarity__side-badge">{side}</Badge>
+      {privacyMode ? <Skeleton className="privacy-mask video-similarity__preview-mask" label="비공개 모드" /> : asset.media.kind === "video" && asset.media.preparationState === "ready" ? <VideoPlayer key={asset.id} asset={{ ...asset, media: asset.media }} /> : <AssetImage src={thumbnailUrl(asset.id)} alt={side} />}
+    </div>
+    <h3 className="video-similarity__title">{asset.title || asset.originalName}</h3>
+    <dl className="video-similarity__meta numeric">
+      <div data-favoured={betterResolution || undefined}><dt>해상도</dt><dd>{asset.width.toLocaleString()} × {asset.height.toLocaleString()}</dd></div>
+      <div data-favoured={betterBytes || undefined}><dt>파일 크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div>
+      {asset.media.kind === "video" && <div><dt>재생 시간</dt><dd>{duration || "알 수 없음"}</dd></div>}
+    </dl>
+    {!privacyMode && asset.media.kind === "video" && asset.media.preparationState !== "ready" && <p className="video-similarity__preparing">재생 준비 완료 후 확인 가능</p>}
   </section>;
 }

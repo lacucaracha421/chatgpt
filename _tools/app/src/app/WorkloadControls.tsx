@@ -25,7 +25,7 @@ export function LightweightModeToggle() {
       <span className="lightweight-toggle__label">{recovering && <ArrowPathIcon className="lightweight-mode-indicator__spin" aria-hidden="true" />}{mode}</span>
       <Switch checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()} aria-label="절약 모드" />
     </div>
-    {recovering && <small className="chrome-settings-note">3분 안에 평소 속도로 돌아갑니다</small>}
+    {recovering && <small className="chrome-settings-note">3분 내 일반 속도 복귀</small>}
     {profile.error && <p role="alert" className="chrome-settings-note">{profile.error}</p>}
   </div>;
 }
@@ -67,7 +67,7 @@ export function WorkloadControls() {
         </Select>
       </dd>
     </dl>
-    <p className="settings-view__row-message">메인 PC는 CPU와 메모리를 더 사용합니다. 재시작 후 적용되며 절약 모드가 우선합니다.</p>
+    <p className="settings-view__row-message">메인 PC: CPU·메모리 추가 사용 · 재시작 후 적용 (절약 모드 우선)</p>
     {performance.ready && performance.selected !== performance.active && <p className="settings-view__row-message" role="status">재시작 후 적용 · 현재 {performance.active === "main" ? "메인 PC" : "노트북"}</p>}
     {performance.error && <p className="settings-view__row-message" role="alert">{performance.error}</p>}
     <dl className="settings-view__property">

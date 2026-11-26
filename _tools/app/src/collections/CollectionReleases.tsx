@@ -27,9 +27,9 @@ const SERVER_CHECK_POLLS = 10;
 const SERVER_CHECK_POLL_MS = 1500;
 
 const STOP_REASON: Record<string, string> = {
-  credential_not_configured: "카카오 연결 설정이 필요합니다.", invalid_credential: "카카오 인증 정보를 확인해 주세요.",
-  rate_limited: "요청 한도에 도달했습니다.", timed_out: "응답 시간이 초과됐습니다.",
-  unavailable: "서비스에 연결하지 못했습니다.", invalid_response: "응답을 읽지 못했습니다.",
+  credential_not_configured: "카카오 연결 설정 필요", invalid_credential: "카카오 인증 정보 확인 필요",
+  rate_limited: "요청 한도 도달", timed_out: "응답 시간 초과",
+  unavailable: "서비스 연결 실패", invalid_response: "응답 해석 실패",
 };
 function failureDescription(failure: CollectionUpdateFailure): string {
   const stage = ({ detail: "작품 정보 조회", covers: "표지 목록 조회", search: "검색", image: "표지 이미지 조회", refresh: "작품 갱신" } as Record<string, string>)[failure.endpoint] ?? "작품 갱신";
@@ -151,7 +151,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
         const answer = await api.requestServerCheck(provider);
         if (generation.current !== current) return;
         if (answer.outcome === "rateLimited") {
-          setMessage(answer.retryAfterSeconds ? `신간 확인 요청이 많아 잠시 쉬고 있어요. ${answer.retryAfterSeconds}초 뒤에 다시 눌러 주세요.` : "신간 확인 요청이 많아 잠시 쉬고 있어요. 잠시 후 다시 눌러 주세요.");
+          setMessage(answer.retryAfterSeconds ? `신간 확인 요청 한도 초과 · ${answer.retryAfterSeconds}초 후 재시도` : "신간 확인 요청 한도 초과 · 잠시 후 재시도");
           return;
         }
         if (answer.outcome === "started") {
@@ -171,7 +171,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
         // The cached gate still says the server checks Kakao, yet it declined (409/503): the
         // local loop would only poll the server's status. Stop with a message instead.
         if (answer.outcome === "local" && await api.serverChecks?.(provider)) {
-          setMessage("서버가 지금은 신간을 확인하지 못해요. 잠시 후 다시 눌러 주세요.");
+          setMessage("서버 신간 확인 불가 · 잠시 후 재시도");
           return;
         }
       }
@@ -195,14 +195,14 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     return <span className="collection-releases__cover">{url ? <StableImage src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true" />}</span>;
   };
   const showChecking = useDelayedBusy(working === "check");
-  const confirm = (name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(items); }}>확인</Button>;
+  const confirm = (name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); if (!loading) void acknowledge(items); }}>확인</Button>;
   const renderRow = (row: ReleaseLedgerRow) => {
     const chips = row.chips.slice(0, 2);
     const fresh = row.chips.find(chip => chip.kind === "new");
     if (fresh && !chips.includes(fresh)) chips[1] = fresh;
     return <tr key={row.work.id} aria-label={row.work.name} onClick={() => { if (!loading) onOpen(row.work.id); }}>
     <td>{cover(row.work)}</td>
-    <td className="collection-releases__name"><Button variant="quiet" size="sm" disabled={loading} data-collection-id={row.work.id} onClick={event => { event.stopPropagation(); onOpen(row.work.id); }}><strong className="collection-releases__work-title">{row.work.name}</strong></Button></td>
+    <td className="collection-releases__name"><Button variant="quiet" size="sm" data-collection-id={row.work.id} onClick={event => { event.stopPropagation(); if (!loading) onOpen(row.work.id); }}><strong className="collection-releases__work-title">{row.work.name}</strong></Button></td>
     <td className="collection-releases__owned">{row.owned === null ? "기록 없음" : row.owned === 0 ? "0권" : row.owned === 1 ? "1권" : `1–${displayCount(row.owned)} 권`}</td>
     <td><div className="collection-releases__chips" aria-label={`${row.work.name} ${provider === "mangadex" ? "일본" : "정발"} 권`}>
       {chips.map(chip => chip.kind === "upcoming"
@@ -254,7 +254,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
       {shownData && unmatched.length > 0 && <>
         <h3 className="collection-releases__others">{shown.size ? "그 밖의 새 알림" : "새 알림"}</h3>
         {unmatched.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName}>
-          <Button variant="quiet" size="sm" disabled={loading} onClick={() => onOpen(id)}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
+          <Button variant="quiet" size="sm" onClick={() => { if (!loading) onOpen(id); }}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
           <span>{items.map(releaseLine).join(" · ")}</span>
           <Badge variant="accent" aria-label={`새 알림 ${items.length}개`}>NEW</Badge>
           {confirm(items[0]!.collectionName, items)}
@@ -263,7 +263,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
       {shownData && others.length > 0 && <>
         <h3 className="collection-releases__others">다른 작품 신간</h3>
         {others.map(([id, items]) => <div key={id} className="collection-releases__other" role="region" aria-label={items[0]!.collectionName} onClick={() => { if (!loading) onOpen(id); }}>
-          <Button variant="quiet" size="sm" disabled={loading} onClick={event => { event.stopPropagation(); onOpen(id); }}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
+          <Button variant="quiet" size="sm" onClick={event => { event.stopPropagation(); if (!loading) onOpen(id); }}>{cover(byId.get(id))}{items[0]!.collectionName}</Button>
           <span>{[...new Set(items.map(item => item.event.volumeNumber))].map(volume => `${displayCount(volume)}권 새로 나옴`).join(" · ")}</span>
         </div>)}
       </>}

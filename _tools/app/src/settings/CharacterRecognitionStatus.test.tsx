@@ -51,16 +51,16 @@ it("shows the recognition in use, the judgment numbers and the overall accuracy,
 it("offers the preparation controls of 학습 인식 준비: start for existing images, and stop while it runs", async () => {
   const { start, cancel } = mount();
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "기존 이미지도 준비" }));
+  await user.click(await screen.findByRole("button", { name: "기존 이미지 분석" }));
   expect(start).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText(/기존 이미지도 준비 2 \/ 10/)).toBeInTheDocument();
+  expect(await screen.findByText(/기존 이미지 분석 2 \/ 10/)).toBeInTheDocument();
   await user.click(await screen.findByRole("button", { name: "그만두기" }));
   expect(cancel).toHaveBeenCalledTimes(1);
 });
 
 it("says when the preparation is off and offers to turn it on", async () => {
   mount({ scoring: false });
-  expect(await screen.findByText(/꺼져 있어/)).toBeInTheDocument();
+  expect(await screen.findByText(/꺼짐 · 학습 인식 후보 미생성/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "켜기" })).toBeInTheDocument();
 });
 

@@ -19,8 +19,8 @@ export function CatalogIndex({index,filter,onFilter}:{index:ReturnType<typeof us
   function section(title:string,entries:MangaFrequentIndex['tags'],limit:number){return <section className="catalog-index-section" aria-label={title}><SectionLabel title={title}/><div className="catalog-index-chips">{entries.filter(row=>!keys.has(mangaIndexKey(row))).slice(0,limit).map(row=>chip(row,row.count))}</div></section>;}
   return <div className="catalog-index" aria-label="망가 목차">
     {index.pins.length>0&&<section className="catalog-index-section" aria-label="고정"><SectionLabel title="고정"/><div className="catalog-index-chips">{index.pins.map(pin=>chip(pin,counts.find(row=>mangaIndexKey(row)===mangaIndexKey(pin))?.count??0,true,pin.pending))}</div></section>}
-    {index.frequent.bookmarkCount===0?<p className="hint">북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.</p>:<>{section('자주 찾는 태그',index.frequent.tags,8)}{section('작가',index.frequent.artists,5)}</>}
-    {index.frequent.bookmarkCount>0&&<p className="hint">태그를 누르면 거르고, 길게 누르면 고정하거나 해제합니다. 고정은 PC와 함께 씁니다.</p>}
+    {index.frequent.bookmarkCount===0?<p className="hint">북마크 추가 시 자주 찾는 태그·작가 표시</p>:<>{section('자주 찾는 태그',index.frequent.tags,8)}{section('작가',index.frequent.artists,5)}</>}
+    {index.frequent.bookmarkCount>0&&<p className="hint">탭: 필터 · 길게 누르기: 고정/해제 (PC와 공유)</p>}
     {(index.message||index.pending>0)&&<p role={index.message?'alert':'status'} className="catalog-bookmark-state">{index.message||'고정 저장 대기'}</p>}
   </div>;
 }

@@ -294,11 +294,11 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
     <div ref={gridScroll} tabIndex={0} data-search-results="" className="manga-browser__content" inert={source !== "local"}>
       {loadError && !series ? <EmptyState title="망가 목록을 불러오지 못했습니다" />
-        : root === null ? <EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState>
+        : root === null ? <EmptyState title="망가 폴더 미설정">설정에서 망가 폴더 선택 필요</EmptyState>
         : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (
-        <EmptyState title="망가가 없습니다">폴더 또는 ZIP·CBZ 파일을 여기에 놓아 가져오세요.</EmptyState>
+        <EmptyState title="망가 없음">폴더 또는 ZIP·CBZ 파일 드래그하여 추가</EmptyState>
       ) : visibleSeries.length === 0 ? (
-        <EmptyState title="검색 결과 없음" hint="다른 제목이나 작가 이름으로 검색하세요." />
+        <EmptyState title="검색 결과 없음" hint="다른 제목이나 작가 이름으로 검색" />
       ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount}
         coverUrl={`${mangaCoverUrl(entry.id)}${thumbnailRevisions[entry.id] ? `?revision=${encodeURIComponent(thumbnailRevisions[entry.id])}` : ""}`}
         onRefreshThumbnail={gateway.refreshLocalMangaThumbnails ? () => void refreshThumbnails([entry.id]) : undefined} refreshingThumbnail={thumbnailBusy}
@@ -321,29 +321,29 @@ function MangaRecoveryPanel({ preview, busy, onRemoteLookup, onApply, onApplySel
       <span>과거/삭제 작품 {preview.historicalCount}개</span>
       <span>검토 필요 {preview.fallbackCount}개</span>
     </div>
-    <p>정확한 ID로 현재 카탈로그에 존재하는 작품만 일괄 등록합니다. 나머지는 자동으로 변경하지 않습니다.</p>
+    <p>카탈로그에 있는 정확한 ID만 일괄 등록 · 나머지 유지</p>
     <div className="manga-browser__recovery-actions">
       <Button size="sm" disabled={busy || exactPending === 0} onClick={onApply}>확정 {exactPending}개 북마크 등록</Button>
       {onRemoteLookup && <Button size="sm" variant="ghost" disabled={busy || remoteIdCount === 0} onClick={onRemoteLookup}>원격 ID 확인 {remoteIdCount}개</Button>}
       <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>닫기</Button>
     </div>
-    {historicalItems.length > 0 && <div className="manga-browser__recovery-list" aria-label="과거 작품 계보 제안">
-      <strong>과거 작품 계보 제안 (자동 등록 안 함)</strong>
+    {historicalItems.length > 0 && <div className="manga-browser__recovery-list" aria-label="과거 작품 연결 제안">
+      <strong>과거 작품 연결 제안 (수동)</strong>
       {historicalItems.map((item) => <div key={item.mangaId} className="manga-browser__recovery-item">
         <span>{item.title} · {item.author} · {item.pageCount}페이지 · ID {item.galleryId ?? "없음"}</span>
         {item.suggestedWorkId != null
           ? <span>→ {item.suggestionReason} {item.suggestionTitle} (ID {item.suggestedWorkId})</span>
-          : <span>연결 가능한 현행 작품이 없어 검토 전용으로 남습니다</span>}
+          : <span>연결 가능한 현행 작품 없음</span>}
         {item.suggestedWorkId != null && <div className="manga-browser__recovery-actions">
           <Button size="sm" disabled={busy || item.bookmarked} onClick={() => onApplySelection(item.mangaId, item.suggestedWorkId!)}>이 작품으로 등록</Button>
         </div>}
       </div>)}
     </div>}
     {fallbackItems.length > 0 && <div className="manga-browser__recovery-list" aria-label="검토 필요 후보">
-      <strong>검토 필요 (자동 등록 안 함)</strong>
+      <strong>검토 필요 (수동)</strong>
       {fallbackItems.map((item) => <div key={item.mangaId} className="manga-browser__recovery-item">
         <span>{item.title} · {item.author} · {item.pageCount}페이지 · ID {item.galleryId ?? "없음"}</span>
-        {(item.candidates ?? []).length === 0 && <span>후보가 없습니다 · 카탈로그에 없는 로컬/자체번역 작품일 수 있습니다</span>}
+        {(item.candidates ?? []).length === 0 && <span>후보 없음 · 카탈로그 미등록 로컬/자체번역 작품 가능성</span>}
         {(item.candidates ?? []).map((candidate) => <div key={candidate.workId} className="manga-browser__recovery-candidate">
           <span>{candidate.title}{candidate.artist ? ` · ${candidate.artist}` : ""}{candidate.fileCount != null ? ` · ${candidate.fileCount}페이지` : ""} (ID {candidate.workId})</span>
           <span>{candidate.reasons.join(" · ")}{candidate.confidence === "suggested" ? " · 제안" : " · 검토용"}</span>

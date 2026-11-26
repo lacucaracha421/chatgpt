@@ -83,7 +83,7 @@ it("filters by kind and hides captions in privacy mode", async () => {
   const gateway = vaultGateway();
   render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} privacyMode />);
   expect(await screen.findByLabelText("vault gallery")).toHaveAttribute("data-metadata-visible", "false");
-  await userEvent.click(screen.getByRole("button", { name: "영상" }));
+  await userEvent.click(screen.getByRole("radio", { name: "영상" }));
   await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: "video", offset: 0, limit: 80 }));
 });
 
@@ -122,8 +122,8 @@ it("imports a folder with progress and shows the summary", async () => {
   expect(dialog).toHaveTextContent("이전 보관함 제목2개");
   expect(dialog).not.toHaveTextContent("이전 보관함 썸네일");
   expect(dialog).toHaveTextContent("이미 있음 (같은 내용 확인)1개");
-  expect(dialog).toHaveTextContent("원본을 지우기 전에 보관함에서 파일이 열리는지 확인하세요.");
-  expect(dialog).toHaveTextContent("실패한 파일은 보관함에 없습니다. 이 파일의 원본은 지우지 마세요.");
+  expect(dialog).toHaveTextContent("PC 원본 파일 유지 · 삭제 전 보관함에서 열림 확인 권장");
+  expect(dialog).toHaveTextContent("실패 파일은 미저장 · 원본 삭제 주의");
   expect(dialog).not.toHaveTextContent("필요 없으면 직접 지우세요");
   expect(dialog).toHaveTextContent("영상 썸네일 파일 건너뜀 (이미 썸네일 있음)2개");
   expect(onContentChanged).toHaveBeenCalled();
@@ -307,7 +307,7 @@ it("shows the trash with restore, and confirms permanent deletion inside the pag
   const confirmSpy = vi.spyOn(window, "confirm");
   const onContentChanged = vi.fn();
   render(<ExternalVaultBrowser gateway={gateway} status={withTrash} onStatusChange={vi.fn()} onContentChanged={onContentChanged} />);
-  await userEvent.click(await screen.findByRole("button", { name: "휴지통 2" }));
+  await userEvent.click(await screen.findByRole("radio", { name: "휴지통 2" }));
   await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: null, offset: 0, limit: 80, trashed: true }));
   expect(screen.queryByRole("button", { name: "파일 추가" })).not.toBeInTheDocument();
 
@@ -342,7 +342,7 @@ it("shows the trash with restore, and confirms permanent deletion inside the pag
 it("is read-only when the vault opened from its backup index", async () => {
   const gateway = vaultGateway();
   render(<ExternalVaultBrowser gateway={gateway} status={{ ...withTrash, backupIndex: true }} onStatusChange={vi.fn()} />);
-  expect(await screen.findByText(/읽기 전용으로 열었습니다/)).toBeInTheDocument();
+  expect(await screen.findByText(/읽기 전용 열림/)).toBeInTheDocument();
   await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
   expect(screen.getByRole("button", { name: "휴지통으로" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "제목 변경" })).toBeDisabled();
@@ -352,7 +352,7 @@ it("is read-only when the vault opened from its backup index", async () => {
   await userEvent.click(screen.getByRole("button", { name: "delete key" }));
   expect(gateway.trashEncryptedVaultItems).not.toHaveBeenCalled();
 
-  await userEvent.click(screen.getByRole("button", { name: "휴지통 2" }));
+  await userEvent.click(screen.getByRole("radio", { name: "휴지통 2" }));
   await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
   expect(screen.getByRole("button", { name: "영구 삭제 1개" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "휴지통 비우기" })).toBeDisabled();
@@ -483,11 +483,11 @@ it("loads the next page once however often the gallery asks, and drops a page fr
   expect(await screen.findAllByRole("button", { name: "second.png" })).toHaveLength(1);
 
   // A next page still on its way when the filter changes must not land in the new list.
-  await userEvent.click(screen.getByRole("button", { name: "이미지" }));
+  await userEvent.click(screen.getByRole("radio", { name: "이미지" }));
   await screen.findByRole("button", { name: "first.png" });
   await waitFor(() => expect(screen.queryByRole("button", { name: "second.png" })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: "scroll to end" }));
-  await userEvent.click(screen.getByRole("button", { name: "영상" }));
+  await userEvent.click(screen.getByRole("radio", { name: "영상" }));
   await screen.findByRole("button", { name: "clip.png" });
   await act(async () => { finishNext({ items: [item("stale")], totalCount: 2, nextOffset: null }); });
   expect(screen.queryByRole("button", { name: "stale.png" })).not.toBeInTheDocument();

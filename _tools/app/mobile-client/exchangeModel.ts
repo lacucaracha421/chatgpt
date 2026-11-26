@@ -68,14 +68,14 @@ export const TOKEN_CODES = new Set(['tokenMissing', 'exchangeDeviceTokenRequired
 export function screenMessage(code: string): string {
   switch (code) {
     case '': return '';
-    case 'notConfigured': return '먼저 서버를 연결해 주세요.';
-    case 'tokenMissing': return '보내기/받기에는 이 기기 전용 토큰이 필요합니다. 라이브러리 연결에 쓰는 공용 토큰과 별도로, 서버에서 이 기기용으로 발급한 토큰을 입력해 주세요.';
-    case 'exchangeDeviceTokenRequired': return '공용 토큰으로는 보내기/받기를 쓸 수 없습니다. 이 기기 전용 토큰을 입력해 주세요.';
-    case 'tokenInvalid': case 'tokenForbidden': return '이 기기의 보내기/받기 토큰이 거부되었습니다. 토큰을 확인해 주세요.';
-    case 'exchangeDeviceForbidden': return '이 기기는 다른 토큰으로 등록되어 있습니다. 처음 등록한 토큰을 입력하거나, 이전 토큰을 폐기한 뒤 새 토큰을 입력해 주세요.';
-    case 'exchangeDeviceLimit': return '서버에 등록할 수 있는 기기 수를 넘었습니다.';
-    case 'unavailable': return '서버가 아직 파일 보내기/받기를 지원하지 않습니다.';
-    default: return AUTOMATIC.has(code) ? RETRYING : '보내기/받기 상태를 확인하지 못했습니다. 잠시 후 다시 시도합니다.';
+    case 'notConfigured': return '서버 연결 필요';
+    case 'tokenMissing': return '이 기기 전용 토큰 필요 (공용 토큰 별도 · 서버에서 기기용 토큰 발급 후 입력)';
+    case 'exchangeDeviceTokenRequired': return '공용 토큰 사용 불가 · 이 기기 전용 토큰 입력 필요';
+    case 'tokenInvalid': case 'tokenForbidden': return '기기 전용 토큰 거부됨 · 토큰 확인 필요';
+    case 'exchangeDeviceForbidden': return '다른 토큰으로 등록된 기기 · 기존 토큰 입력 또는 이전 토큰 폐기 후 재등록';
+    case 'exchangeDeviceLimit': return '서버 등록 기기 수 한도 초과';
+    case 'unavailable': return '서버가 파일 전송 미지원';
+    default: return AUTOMATIC.has(code) ? RETRYING : '전송 상태 확인 실패 · 잠시 후 재시도';
   }
 }
 

@@ -70,7 +70,7 @@ it("starts only after explicit confirmation and reports seed counts", async () =
   await waitFor(() => expect(gateway.cloudBackfillSetControlState).toHaveBeenCalledWith("running"));
   expect(gateway.cloudBackfillPreflight).toHaveBeenCalledTimes(1);
   expect(gateway.cloudBackfillSeed).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText("새로 대기열에 추가 7개 · 이미 복제됨 2개")).toBeInTheDocument();
+  expect(await screen.findByText("대기 추가 7개 · 이미 동기화됨 2개")).toBeInTheDocument();
 });
 
 it("renders persistent progress counts and percentage", async () => {
@@ -121,7 +121,7 @@ it("reports both interrupted and missing-queue recovery", async () => {
   renderSection({ cloudBackfillReconcile: reconcile }, CloudBackfillMaintenance);
   await userEvent.click(await screen.findByRole("button", { name: "동기화 상태 복구" }));
   expect(reconcile).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText("중단된 작업 2개 · 누락 복제 1개를 대기열로 복구했습니다.")).toBeInTheDocument();
+  expect(await screen.findByText("중단 2개 · 누락 1개 재등록 완료")).toBeInTheDocument();
 });
 
 it("refreshes persistent counts immediately after an operator action", async () => {

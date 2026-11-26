@@ -267,7 +267,7 @@ it("shows a calm message when the server rate-limits 새로고침", async () => 
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  expect(screen.getByRole("alert")).toHaveTextContent("12초 뒤에 다시 눌러 주세요");
+  expect(screen.getByRole("alert")).toHaveTextContent("12초 후 재시도");
   expect(runUpdates).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
 });
@@ -310,7 +310,7 @@ it("stops with a message when the server declines although the gate is still cac
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
   await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-  expect(screen.getByRole("alert")).toHaveTextContent("서버가 지금은 신간을 확인하지 못해요");
+  expect(screen.getByRole("alert")).toHaveTextContent("서버 신간 확인 불가");
   expect(runUpdates).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
 });

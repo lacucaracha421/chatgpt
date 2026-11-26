@@ -1768,13 +1768,13 @@
             <option value="recommend">🎨 추천</option>
             <option value="artist">👤 관심 작가</option>
           </select>
-          <button class="lakomics-x-gallery-auto" type="button" aria-description="추천 피드를 자동으로 내려 새 이미지 100장을 모은 뒤 시작 위치로 돌아갑니다">▶ 자동 수집</button>
-          <button class="lakomics-x-gallery-clear" type="button" aria-description="이번 세션에 모은 목록만 비웁니다">목록 비우기</button>
-          <button class="lakomics-x-gallery-reset" type="button" aria-description="관심 작가, 관심없음, 숨긴 이미지 기록을 지웁니다">학습 초기화</button>
+          <button class="lakomics-x-gallery-auto" type="button" aria-description="추천 피드 자동 스크롤 · 새 이미지 최대 100장 수집 후 원위치 복귀">▶ 자동 수집</button>
+          <button class="lakomics-x-gallery-clear" type="button" aria-description="이번 세션 수집 목록 비우기">목록 비우기</button>
+          <button class="lakomics-x-gallery-reset" type="button" aria-description="관심 작가·관심없음·숨긴 이미지 기록 초기화">학습 초기화</button>
           <button class="lakomics-x-gallery-close" type="button" aria-label="갤러리 닫기">✕</button>
         </header>
         <div class="lakomics-x-gallery-scroll">
-          <div class="lakomics-x-gallery-empty">추천 탭에서 <b>자동 수집</b>을 누르면 뒤의 피드가 알아서 내려가며 새 이미지 최대 100장을 모읍니다. 평소처럼 직접 스크롤해도 계속 수집됩니다.</div>
+          <div class="lakomics-x-gallery-empty">추천 탭에서 <b>자동 수집</b> 클릭 시 새 이미지 최대 100장 자동 수집 · 직접 스크롤 시에도 계속 수집</div>
           <div class="lakomics-x-gallery-grid"></div>
         </div>
         <div class="lakomics-x-gallery-toast" role="status" hidden><span class="lakomics-x-gallery-toast-text">숨김</span><button class="lakomics-x-gallery-undo" type="button">되돌리기</button></div>

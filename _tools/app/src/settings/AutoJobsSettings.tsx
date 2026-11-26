@@ -36,7 +36,7 @@ const JOBS: Record<AutoJobId, JobDefinition> = {
   videos: { name: "영상 미리보기 준비", group: "준비", cadence: "새 영상이 들어오면", action: "지금 실행", busy: "준비 중…", result: n => `영상 ${count(n)}개` },
   mangaSpines: { name: "만화 책등 스캔 받기", group: "준비", cadence: "새 권이 들어오면", action: "지금 받기", busy: "받는 중…", result: n => `${count(n)}권 받음` },
   cardCutouts: { name: "카드 누끼 만들기", group: "준비", cadence: "새 카드가 들어오면", action: "지금 만들기", busy: "만드는 중…", result: n => `카드 ${count(n)}장` },
-  cloudBackfill: { name: "클라우드 복제", group: "준비", cadence: "바뀌면 바로", action: "지금 동기화", busy: "동기화 중…", result: n => `올림 ${count(n)}개` },
+  cloudBackfill: { name: "클라우드 동기화", group: "준비", cadence: "바뀌면 바로", action: "지금 동기화", busy: "동기화 중…", result: n => `올림 ${count(n)}개` },
   backup: { name: "관리 정보 백업", group: "정리", cadence: "매일", action: "지금 백업", busy: "백업 중…", result: formatBytes },
   characterEvidenceRetention: { name: "지난 캐릭터 분석 정리", group: "정리", cadence: "한 번 자동 정리", action: "이어서 정리", busy: "정리 중…", result: n => `이미지 ${count(n)}장 정리` },
   databaseOptimize: { name: "DB 최적화", group: "정리", cadence: "수동 · 30초쯤 앱 느려짐", action: "최적화", busy: "최적화 중…", result: n => `DB ${formatBytes(n)}` },
@@ -134,7 +134,7 @@ export function AutoJobsSettings({ gateway, model, onConfigure, privacyMode = fa
     {!model.jobs && !model.error && <Skeleton className="auto-jobs__skeleton" label="자동 작업 상태" />}
     {model.jobs && <div className="auto-jobs__groups">
       {attention.length > 0 && <section className="settings-view__group auto-jobs__failures" aria-label={attentionLabel}><SectionLabel as="h3" title={attentionLabel} count={attention.length} />{attention.map(renderJob)}</section>}
-      {GROUPS.map(group => <SettingsGroup key={group} title={group} help={group === "준비" ? "영상 미리보기, 만화 책등, 카드 누끼와 클라우드 복제는 새 자료가 들어오면 자동으로 준비합니다. 지금 실행하면 대기 중인 자료를 바로 처리합니다." : undefined}>{model.jobs!.filter(job => JOBS[job.id].group === group && !needsAttention(job)).map(renderJob)}</SettingsGroup>)}
+      {GROUPS.map(group => <SettingsGroup key={group} title={group} help={group === "준비" ? "새 파일 추가 시 자동 처리 · '지금 실행'으로 대기분 즉시 처리" : undefined}>{model.jobs!.filter(job => JOBS[job.id].group === group && !needsAttention(job)).map(renderJob)}</SettingsGroup>)}
     </div>}
     <Dialog open={confirmCount !== null} title={`기간이 지난 ${count(confirmCount ?? 0)}개를 영구 삭제할까요?`} onClose={() => setConfirmation(null)} heading={<span className="auto-job-confirm">{!privacyMode && expired.length > 0 && <span className="auto-job-confirm__thumbs" aria-hidden="true">{expired.map(item => <span key={item.asset.id}><AssetImage asset={item.asset} src={trashThumbnailUrl(item.asset.id)} alt="" /></span>)}</span>}<span>기간이 지난 {count(confirmCount ?? 0)}개를 영구 삭제할까요?</span></span>}>
       <p className="auto-job-confirm__scope">{retention}만{trash && confirmCount !== null && trash.totalCount >= confirmCount && ` · 휴지통의 나머지 ${count(trash.totalCount - confirmCount)}개는 그대로`}</p>

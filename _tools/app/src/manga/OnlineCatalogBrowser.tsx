@@ -930,12 +930,12 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local" || requestedSource === "somi"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />
-        : !status.installed ? <EmptyState title="온라인 카탈로그가 없습니다">
-          <p>기존 VCK 폴더의 데이터를 한 번 가져오면 Lakomics에서 독립적으로 사용할 수 있습니다.</p>
+        : !status.installed ? <EmptyState title="온라인 카탈로그 없음">
+          <p>기존 VCK 폴더 데이터를 가져오면 Lakomics에서 단독 사용 가능</p>
           <Button onClick={() => void importCatalog()} disabled={loading}>VCK 데이터 가져오기</Button>
         </EmptyState>
         : loading && !results ? <MangaSkeletonGrid />
-        : results?.works.length === 0 ? <EmptyState title="검색 결과 없음" hint="다른 제목이나 태그로 검색하세요." />
+        : results?.works.length === 0 ? <EmptyState title="검색 결과 없음" hint="다른 제목이나 태그로 검색" />
         : results && <>
           <div className="manga-grid">
             {results.works.map((work) => <OnlineCatalogCard

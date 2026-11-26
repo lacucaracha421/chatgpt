@@ -86,7 +86,7 @@ describe('detail tag device exclusions',()=>{
     await hold(tag);
     act(()=>{backRef.current?.();});
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));
-    expect(await screen.findByRole('button',{name:'artist:작가 회피 해제'})).toBeTruthy();
+    expect(await screen.findByRole('button',{name:'artist:작가 숨김 해제'})).toBeTruthy();
   });
   it('swallows the click after a hold and keeps ordinary tag search working',async()=>{
     await openDetail();
@@ -266,7 +266,7 @@ describe('mobile catalog reads',()=>{
   it('delivers a usable page while count is pending and keeps it on count failure',async()=>{
     let reject!:(e:Error)=>void;mocks.api.mockImplementation(path=>path.includes('/count?')?new Promise((_,r)=>{reject=r;}):Promise.resolve(page));
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect(screen.queryByText('개수 확인 중')).toBeNull();
-    await waitFor(()=>expect(typeof reject).toBe('function'));await act(async()=>reject(new Error('count unavailable')));expect(screen.getByText('밤의 도서관')).toBeTruthy();expect(screen.queryByText('0개')).toBeNull();await screen.findByText('개수를 확인하지 못했습니다.');
+    await waitFor(()=>expect(typeof reject).toBe('function'));await act(async()=>reject(new Error('count unavailable')));expect(screen.getByText('밤의 도서관')).toBeTruthy();expect(screen.queryByText('0개')).toBeNull();await screen.findByText('개수 확인 실패');
   });
   it('ignores an old query and never sends a bookmark write',async()=>{
     let resolve!:(p:CatalogPage)=>void;
@@ -402,7 +402,7 @@ describe('mobile catalog reads',()=>{
     row=controls();
     fireEvent.click(within(row).getByRole('button',{name:'필터, 기본 회피 태그 1개'}));
     panel=await screen.findByRole('dialog',{name:'필터'});
-    fireEvent.click(within(panel).getByRole('switch',{name:/차단 항목 보기/}));
+    fireEvent.click(within(panel).getByRole('switch',{name:/차단 항목 표시/}));
     fireEvent.click(within(panel).getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('revealBlocked')).toBe('true'));
     row=controls();
@@ -440,8 +440,8 @@ describe('mobile catalog reads',()=>{
   it('distinguishes unpublished from a published empty search',async()=>{
     let published=false;
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:published?{...page,items:[],countToken:null,totalCount:0,countStatus:'ready'}:{...page,ready:false,items:[],countToken:null});
-    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('카탈로그가 아직 공유되지 않았습니다');published=true;
-    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:/^새로고침/}));await screen.findByText('검색 결과 없음');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('공유된 카탈로그 없음');published=true;
+    fireEvent.click(screen.getByRole('button',{name:'더보기'}));fireEvent.click(screen.getByRole('button',{name:/^새로고침/}));await screen.findByText('검색 결과 없음');expect(screen.queryByText('공유된 카탈로그 없음')).toBeNull();
   });
   it('resumes an aborted count without fetching the retained page again',async()=>{
     let countCalls=0;mocks.api.mockImplementation(async(path:string)=>{
@@ -492,19 +492,19 @@ describe('mobile catalog reads',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     // The user enters one string, not a namespace and value in separate fields.
-    fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});
+    fireEvent.change(screen.getByLabelText('숨긴 태그'),{target:{value:'female:scat'}});
     fireEvent.click(screen.getByRole('button',{name:'추가'}));
     expect(screen.getByText('female:scat')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});
+    fireEvent.change(screen.getByLabelText('숨긴 태그'),{target:{value:'female:scat'}});
     fireEvent.click(screen.getByRole('button',{name:'추가'}));
-    expect(screen.getByText('이미 회피한 태그입니다.')).toBeTruthy();
+    expect(screen.getByText('이미 숨긴 태그')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(JSON.parse(searchParams(lastSearch()).get('excludedTags')!)).toEqual([{namespace:'female',value:'scat'}]));
     // A tag value is never sent as the search text.
     expect(searchParams(lastSearch()).get('text')).toBe('');
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     expect(screen.getByText('female:scat')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'female:scat 회피 해제'}));
+    fireEvent.click(screen.getByRole('button',{name:'female:scat 숨김 해제'}));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     // Removing the only tag returns to the unfiltered identity.
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).at(-1)![0]).not.toContain('excludedTags='));
@@ -512,14 +512,14 @@ describe('mobile catalog reads',()=>{
   it('refuses a tag set that would exceed the combined encoded filter budget',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
-    const entry=screen.getByLabelText('회피 태그');
+    const entry=screen.getByLabelText('숨긴 태그');
     const value='x'.repeat(60);
     for(let index=0;index<40;index++){
       fireEvent.change(entry,{target:{value:`artist:${value}${index}`}});
       fireEvent.click(screen.getByRole('button',{name:'추가'}));
     }
     // The over-budget add is refused, so the stored set stays inside the budget.
-    await waitFor(()=>expect(screen.getAllByText(/회피 태그가 너무 많습니다/).length).toBeGreaterThan(0));
+    await waitFor(()=>expect(screen.getAllByText(/숨긴 태그 저장 한도 초과/).length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).has('excludedTags')).toBe(true));
     const encoded=searchParams(lastSearch()).get('excludedTags')!;
@@ -610,16 +610,16 @@ describe('mobile catalog reads',()=>{
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:peachbitch'));
     expect(searchParams(lastSearch()).get('sort')).toBe('latest');
     expect(shownSort()).toBe(CHOICES['latest']);
-    expect(screen.getByText('검색 중에는 최신순으로 표시합니다')).toBeTruthy();
+    expect(screen.getByText('검색 중 최신순 표시')).toBeTruthy();
     // A sort picked during the search applies to it, and the note no longer claims otherwise.
     choose('카탈로그 정렬','views');
     await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('views'));
-    expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
+    expect(screen.queryByText('검색 중 최신순 표시')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'검색어 지우기'}));
     // The unfiltered hotDay page is already cached, so the restored sort is read from the sheet.
     await waitFor(()=>expect(shownSort()).toBe(CHOICES['hotDay']));
     expect((catalogSearch('textbox') as HTMLInputElement).value).toBe('');
-    expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
+    expect(screen.queryByText('검색 중 최신순 표시')).toBeNull();
   });
   it('preserves the unsent draft when the settings panel is applied',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
@@ -691,10 +691,10 @@ describe('mobile catalog reads',()=>{
       return capableStatus;
     });
     render(<Catalog active paused={false} backRef={{current:null}}/>);
-    await screen.findByText('서버 상태를 확인하지 못했습니다');
+    await screen.findByText('서버 상태 확인 실패');
     // A failed check must not launch a search with an unverified contract.
     expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?'))).toHaveLength(0);
-    expect(screen.queryByText('이 기기의 설정을 쓸 수 없습니다')).toBeNull();
+    expect(screen.queryByText('기기 설정 사용 불가')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));
     await screen.findByText('밤의 도서관');
     expect(searchParams(lastSearch()).get('searchMode')).toBe('mobile');
@@ -706,16 +706,16 @@ describe('mobile catalog reads',()=>{
     const pending=Promise.withResolvers<unknown>();
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?pending.promise:page);
     render(<Catalog active paused={false} backRef={{current:null}} endpoint="https://a.invalid"/>);
-    await screen.findByText('카탈로그를 준비하는 중입니다');
+    await screen.findByText('카탈로그 준비 중…');
     expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?'))).toHaveLength(0);
     await act(async()=>pending.resolve(legacyStatus));
-    await screen.findByText('이 기기의 설정을 쓸 수 없습니다');
+    await screen.findByText('기기 설정 사용 불가');
   });
   it('clears stored settings only when the user asks, and then browses unfiltered',async()=>{
     localStorage.setItem('lakomics.catalog.preferences.https://a.invalid',JSON.stringify({categories:[1],excludedTags:[]}));
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?legacyStatus:path.includes('/count?')?{publicationRevision:'p1',totalCount:1}:page);
     render(<Catalog active paused={false} backRef={{current:null}} endpoint="https://a.invalid"/>);
-    await screen.findByText('이 기기의 설정을 쓸 수 없습니다');
+    await screen.findByText('기기 설정 사용 불가');
     // The stored setting is neither discarded nor bypassed before the user decides.
     expect(screen.queryByText('밤의 도서관')).toBeNull();
     expect(localStorage.getItem('lakomics.catalog.preferences.https://a.invalid')).toBeTruthy();
@@ -755,13 +755,13 @@ describe('mobile catalog layout',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getByRole('button',{name:'필터'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'필터'}));await screen.findByRole('dialog',{name:'필터'});
-    const blocked=screen.getByRole('switch',{name:/차단 항목 보기/});expect(blocked.getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(blocked);fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});fireEvent.click(screen.getByRole('button',{name:'추가'}));
+    const blocked=screen.getByRole('switch',{name:/차단 항목 표시/});expect(blocked.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(blocked);fireEvent.change(screen.getByLabelText('숨긴 태그'),{target:{value:'female:scat'}});fireEvent.click(screen.getByRole('button',{name:'추가'}));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('revealBlocked')).toBe('true'));
-    // The saved 회피 태그 are the default; only the blocked switch differs from it.
+    // The saved 숨긴 태그 are the default; only the blocked switch differs from it.
     expect(screen.getByRole('button',{name:'필터 1개 적용'})).toBeTruthy();
-    expect(screen.queryByText('PC 공통 정책의 차단 항목 보기')).toBeNull();
+    expect(screen.queryByText('PC 공통 차단 항목 표시')).toBeNull();
   });
   it('shows how long ago the catalog was published and offers the server refresh in the title bar',async()=>{
     const publishedAt=new Date(Date.now()-23*60_000).toISOString();

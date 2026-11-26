@@ -37,6 +37,27 @@ it("loads trash, shows its purge date, and restores an asset", async () => {
   expect(gateway.restoreAsset).toHaveBeenCalledWith("asset-1");
 });
 
+it("selects multiple trashed assets and restores them in one batch", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const second = { ...asset(), id: "asset-2", originalName: "asset-2.png" };
+  vi.mocked(gateway.listTrash).mockResolvedValue({
+    items: [
+      { asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: null },
+      { asset: second, trashedAt: "2026-07-21T00:00:00Z", purgeAt: null },
+    ],
+    nextCursor: null,
+    totalCount: 2,
+    totalBytes: 2_048,
+  });
+
+  renderTrash(<TrashBrowser />, gateway);
+  await screen.findByText("asset-1.png");
+  await user.click(screen.getByRole("button", { name: "전체 선택" }));
+  await user.click(screen.getByRole("button", { name: "선택 복원" }));
+  expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-1", "asset-2"]);
+});
+
 it("reports the trash total count after each load", async () => {
   const onCountChange = vi.fn();
   const gateway = createGateway();

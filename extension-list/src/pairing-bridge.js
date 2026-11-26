@@ -36,12 +36,12 @@
   // secret or URL is shown.
   function failureReason(result) {
     const code = result?.code;
-    if (code === "pairing_expired") return "링크가 만료됐거나 이미 사용됐습니다 · PC에서 새로 발급한 QR로 다시 연결하세요";
-    if (code === "invalid_pairing") return "연결 링크 형식이 올바르지 않습니다 · QR을 다시 스캔하세요";
-    if (code === "timeout" || code === "offline") return "서버에 연결하지 못했습니다 · 태블릿의 네트워크와 서버 상태를 확인하세요";
-    if (code === "worker_failed" || code === "worker_timeout") return "확장 프로그램이 응답하지 않습니다 · 확장 프로그램을 새로고침한 뒤 새 QR로 연결하세요";
-    if (code === "pairing_failed") return `서버가 연결을 거절했습니다${Number.isInteger(result?.httpStatus) && result.httpStatus > 0 ? ` (HTTP ${result.httpStatus})` : ""} · 새 QR로 다시 시도하세요`;
-    return "알 수 없는 오류 · 새 QR로 다시 시도하세요";
+    if (code === "pairing_expired") return "링크 만료 또는 사용됨 · PC에서 새 QR 발급 후 재연결";
+    if (code === "invalid_pairing") return "연결 링크 형식 오류 · QR 재스캔 필요";
+    if (code === "timeout" || code === "offline") return "서버 연결 실패 · 네트워크 및 서버 상태 확인";
+    if (code === "worker_failed" || code === "worker_timeout") return "확장 프로그램 응답 없음 · 확장 새로고침 후 새 QR로 연결";
+    if (code === "pairing_failed") return `서버 연결 거절${Number.isInteger(result?.httpStatus) && result.httpStatus > 0 ? ` (HTTP ${result.httpStatus})` : ""} · 새 QR로 재시도`;
+    return "알 수 없는 오류 · 새 QR로 재시도";
   }
 
   function escapeHtml(value) {

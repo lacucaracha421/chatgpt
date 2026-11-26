@@ -117,8 +117,8 @@ it("converts the folder in one command after every character has a destination",
   expect(screen.getByRole("button", { name: "분류함으로 바꾸기" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "시리즈 고르기" }));
   await user.click(await screen.findByRole("button", { name: /이환.*12장/ }));
-  expect(await screen.findByText("여러 캐릭터가 함께 쓰는 이미지는 없습니다.")).toBeVisible();
-  expect(screen.getByText("레퍼런스도 모두 그대로 쓰입니다.")).toBeVisible();
+  expect(await screen.findByText("공유 이미지 없음")).toBeVisible();
+  expect(screen.getByText("레퍼런스 전부 유지")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "분류함으로 바꾸기" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
   expect(invoke).toHaveBeenCalledWith("convert_to_container", { folderId: "games", moves: [{ targetId: "character", destinationId: "small" }] });
@@ -137,7 +137,7 @@ it("says what happens to images shared by several characters", async () => {
     await user.click(screen.getAllByRole("button", { name: "시리즈 고르기" })[0]!);
     await user.click(await screen.findByRole("button", { name }));
   }
-  expect(await screen.findByText(/함께 쓰는 이미지 5장.*그중 3장은 게임 폴더 안에 그대로 둡니다/)).toBeVisible();
+  expect(await screen.findByText(/공유 이미지 5장.*3장은 게임에 유지/)).toBeVisible();
 });
 
 it("warns per character when references end up outside the series, and still allows converting", async () => {
@@ -150,10 +150,10 @@ it("warns per character when references end up outside the series, and still all
     await user.click(await screen.findByRole("button", { name }));
   }
   const warning = await screen.findByRole("status");
-  expect(within(warning).getByText(/블로니: 레퍼런스 5장이 시리즈 밖에 남아 자동 인식이 멈춥니다/)).toBeVisible();
-  expect(within(warning).getByText(/같은 하위 시리즈로 보내면/)).toBeVisible();
+  expect(within(warning).getByText(/블로니: 시리즈 밖 레퍼런스 5장 \(자동 인식 중단\)/)).toBeVisible();
+  expect(within(warning).getByText(/같은 하위 시리즈로 이동 권장/)).toBeVisible();
   expect(warning).toHaveClass("registration-scope__notice--warning");
-  expect(screen.queryByText("레퍼런스도 모두 그대로 쓰입니다.")).not.toBeInTheDocument();
+  expect(screen.queryByText("레퍼런스 전부 유지")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "분류함으로 바꾸기" })).toBeEnabled();
 });
 
